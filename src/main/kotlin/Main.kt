@@ -1,0 +1,300 @@
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPosition
+import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
+import com.emusync.config.ConfigManager
+import com.emusync.model.GameEntry
+import com.emusync.ui.AppViewModel
+import com.emusync.ui.GameItem
+import com.emusync.ui.components.GameGrid
+import com.emusync.ui.components.Sidebar
+import com.emusync.ui.dialogs.AddEntryDialog
+import com.emusync.ui.dialogs.EditGameDialog
+import com.emusync.ui.dialogs.StatusOverlay
+import com.emusync.ui.theme.EmuSyncColors
+import com.emusync.ui.theme.EmuSyncDarkScheme
+import kotlinx.coroutines.launch
+import javax.swing.UIManager
+
+fun main() {
+    try {
+        UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName())
+    } catch (_: Exception) {
+        // Fallback to default if system L&F fails
+    }
+    
+    application {
+        val windowState = rememberWindowState(
+            width = 1280.dp,
+            height = 800.dp,
+            position = WindowPosition(Alignment.Center),
+        )
+
+        Window(
+            onCloseRequest = ::exitApplication,
+            title = "EmuSync",
+            state = windowState,
+        ) {
+            // Force 1:1 dp-to-pixel mapping so gamescope's inflated DPI
+            // doesn't cause the UI to render at 2× on the Steam Deck.
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+                val viewModel = remember { AppViewModel(ConfigManager("config.json")) }
+
+                // Load config on first composition
+                LaunchedEffect(Unit) {
+                    viewModel.loadConfig()
+                }
+
+                EmuSyncApp(viewModel, onExit = ::exitApplication)
+            }
+        }
+    }
+}
+
+@Composable
+fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
+    val uiState by viewModel.uiState.collectAsState()
+    val scope = rememberCoroutineScope()
+    var showAddDialog by remember { mutableStateOf(false) }
+    var entryToEdit by remember { mutableStateOf<GameEntry?>(null) }
+    var gameToEdit by remember { mutableStateOf<GameItem?>(null) }
+    var steamMessage by remember { mutableStateOf<String?>(null) }
+
+    MaterialTheme(colorScheme = EmuSyncDarkScheme) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = EmuSyncColors.Background,
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // ── Header ──────────────────────────────────────────
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                ) {
+                    Text(
+                        text = "EmuSync",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = EmuSyncColors.Primary,
+                        letterSpacing = 0.5.sp,
+                        modifier = Modifier.align(Alignment.CenterStart),
+                    )
+                    Row(
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Google Drive status indicator / Connect action
+                        val googleDrive = uiState.config?.googleDrive
+                        if (googleDrive != null) {
+                            val isLinked = !googleDrive.refreshToken.isNullOrBlank()
+                            if (isLinked) {
+                                Surface(
+                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                                    color = EmuSyncColors.SurfaceVariant,
+                                    modifier = Modifier.padding(end = 12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Cloud,
+                                            contentDescription = "Drive Connected",
+                                            tint = EmuSyncColors.Success,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = "Drive Linked",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = EmuSyncColors.OnSurface
+                                        )
+                                    }
+                                }
+                            } else {
+                                OutlinedButton(
+                                    onClick = {
+                                        scope.launch {
+                                            val result = viewModel.loginGoogleDrive()
+                                            steamMessage = result
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier.padding(end = 12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CloudSync,
+                                        contentDescription = "Connect Google Drive",
+                                        tint = EmuSyncColors.Primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Connect Drive", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = "v1.0",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = EmuSyncColors.OnSurfaceDim,
+                            modifier = Modifier.padding(end = 16.dp),
+                        )
+                        Button(
+                            onClick = onExit,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text("Safe Close")
+                        }
+                    }
+                }
+
+                HorizontalDivider(
+                    color = EmuSyncColors.Divider,
+                    thickness = 1.dp,
+                )
+
+                // ── Main Content: Sidebar + Game Grid ───────────────
+                Row(modifier = Modifier.fillMaxSize()) {
+                    // Left sidebar (categories)
+                    Sidebar(
+                        entries = uiState.config?.entries ?: emptyList(),
+                        selectedEntry = uiState.selectedEntry,
+                        onEntrySelected = { entry ->
+                            scope.launch { viewModel.selectEntry(entry) }
+                        },
+                        onAddClicked = { showAddDialog = true },
+                        steamAvailable = viewModel.isSteamAvailable(),
+                        isSteamRegistered = { entry -> viewModel.isSteamRegistered(entry) },
+                        onSteamToggle = { entry ->
+                            scope.launch {
+                                val isRegistered = viewModel.isSteamRegistered(entry)
+                                if (isRegistered) {
+                                    viewModel.unregisterFromSteam(entry)
+                                    steamMessage = "\"${entry.name}\" removed from Steam."
+                                } else {
+                                    val result = viewModel.registerInSteam(entry)
+                                    steamMessage = result
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .width(240.dp)
+                            .fillMaxHeight(),
+                    )
+
+                    VerticalDivider(
+                        color = EmuSyncColors.Divider,
+                        modifier = Modifier.fillMaxHeight(),
+                    )
+
+                    // Right content area (game grid)
+                    GameGrid(
+                        items = uiState.gameItems,
+                        selectedEntry = uiState.selectedEntry,
+                        isLoading = uiState.isLoading,
+                        onGameClicked = { gameItem ->
+                            scope.launch { viewModel.launchGame(gameItem) }
+                        },
+                        onEditGame = { gameItem ->
+                            gameToEdit = gameItem
+                        },
+                        onEditCategory = {
+                            entryToEdit = uiState.selectedEntry
+                            showAddDialog = true
+                        },
+                        onDeleteCategory = {
+                            uiState.selectedEntry?.let { entry ->
+                                scope.launch { viewModel.deleteEntry(entry) }
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(20.dp),
+                    )
+                }
+            }
+
+            // ── Status Overlays (on top of everything) ──────────────
+            StatusOverlay(uiState.status)
+
+            // ── Add Entry Dialog ────────────────────────────────────
+            if (showAddDialog) {
+                AddEntryDialog(
+                    initialEntry = entryToEdit,
+                    onDismiss = { 
+                        showAddDialog = false
+                        entryToEdit = null
+                    },
+                    onSave = { newEntry ->
+                        showAddDialog = false
+                        scope.launch {
+                            if (entryToEdit == null) {
+                                viewModel.addEntry(newEntry)
+                            } else {
+                                viewModel.editEntry(entryToEdit!!, newEntry)
+                            }
+                            entryToEdit = null
+                        }
+                    }
+                )
+            }
+
+            // ── Edit Game Save Dialog (Manual Edit) ─────────────────
+            gameToEdit?.let { gameItem ->
+                EditGameDialog(
+                    game = gameItem,
+                    onDismiss = { gameToEdit = null },
+                    onSave = { newPaths ->
+                        scope.launch {
+                            viewModel.editGameOverride(gameItem, newPaths)
+                            gameToEdit = null
+                        }
+                    }
+                )
+            }
+
+            // ── Post-Game Save Setup Dialog ─────────────────────────
+            uiState.saveSetupRequest?.let { gameItem ->
+                EditGameDialog(
+                    game = gameItem,
+                    onDismiss = { viewModel.completeSaveSetup(emptyList()) },
+                    onSave = { newPaths -> viewModel.completeSaveSetup(newPaths) }
+                )
+            }
+
+            // ── Steam Registration Snackbar ─────────────────────────
+            steamMessage?.let { message ->
+                val snackbarHostState = remember { SnackbarHostState() }
+                LaunchedEffect(message) {
+                    snackbarHostState.showSnackbar(
+                        message = message,
+                        duration = SnackbarDuration.Long,
+                    )
+                    steamMessage = null
+                }
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    SnackbarHost(hostState = snackbarHostState)
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,32 @@
+# ── Personal & Sensitive Configuration ────────────────
+config.json
+*.env
+
+# ── Build & Cache Artifacts ───────────────────────────
+build/
+.gradle/
+.kotlin/
+
+# ── Executables & Binaries ────────────────────────────
+*.AppImage
+appimagetool
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# ── IDE & Editor Files ────────────────────────────────
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+
+# ── Operating System Files ────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Logs & Runtime Backups ────────────────────────────
+*.log
+*.bak
+shortcuts.vdf.bak
+hs_err_pid*
+replay_pid*

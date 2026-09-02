@@ -1,0 +1,66 @@
+{
+    "googleDrive": {
+        "clientId": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+        "clientSecret": "YOUR_CLIENT_SECRET",
+        "refreshToken": "OPTIONAL_AUTOMATICALLY_SAVED_AFTER_OAUTH_LOGIN"
+    },
+    "entries": [
+        {
+            "type": "emulator",
+            "name": "PlayStation 1",
+            "executablePath": "/path/to/duckstation.AppImage",
+            "romsDirectory": "/path/to/games/ps1",
+            "extensions": [
+                "bin",
+                "iso",
+                "chd"
+            ],
+            "savePathsByRom": {
+                "Crash Team Racing.bin": [
+                    "/path/to/saves/PS1/CTR_1.mcd",
+                    "/path/to/saves/PS1/CTR_2.mcd"
+                ]
+            }
+        },
+        {
+            "type": "emulator",
+            "name": "PlayStation 2",
+            "executablePath": "/path/to/pcsx2.AppImage",
+            "romsDirectory": "/path/to/games/ps2",
+            "extensions": [
+                "iso",
+                "chd"
+            ],
+            "savePaths": [
+                "/path/to/saves/PS2"
+            ]
+        },
+        {
+            "type": "emulator",
+            "name": "Game Boy Advance",
+            "executablePath": "/usr/bin/mgba-qt",
+            "arguments": [
+                "{ROM}"
+            ],
+            "romsDirectory": "/path/to/games/gba",
+            "extensions": [
+                "gba",
+                "gbc"
+            ],
+            "savePaths": [
+                "/path/to/games/gba/saves"
+            ]
+        },
+        {
+            "type": "native",
+            "name": "Spelunky Classic",
+            "executablePath": "/opt/games/spelunky/spelunky",
+            "arguments": [
+                "--fullscreen"
+            ],
+            "savePaths": [
+                "/home/user/.local/share/spelunky/save.dat"
+            ]
+        }
+    ]
+}

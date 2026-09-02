@@ -1,0 +1,8 @@
+.gradle
+.kotlin
+build
+*.AppImage
+appimagetool
+config.json
+.git
+.idea

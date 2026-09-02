@@ -1,0 +1,17 @@
+services:
+  # Builds and generates the EmuSync-1.0.0-x86_64.AppImage binary directly in the project root
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: emu-sync-builder:latest
+    volumes:
+      # Mount root directory to /out to deposit final AppImage executables
+      - .:/out
+      # Mount ./build to persist build reports and local cache
+      - ./build:/app/build
+      # Persistent Gradle cache for faster incremental builds
+      - gradle-cache:/root/.gradle
+
+volumes:
+  gradle-cache:
