@@ -115,4 +115,34 @@ class AppViewModelTest {
         viewModel.setStatus(AppStatus.Playing)
         assertEquals(AppStatus.Playing, viewModel.uiState.value.status)
     }
+
+    @Test
+    fun `reorderEntries should change entry positions and persist to config`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+
+        val entry1 = NativePCGame(name = "Play 1", executablePath = "p1")
+        val entry2 = NativePCGame(name = "Play 2", executablePath = "p2")
+        val entry3 = NativePCGame(name = "Spelunky", executablePath = "spelunky")
+
+        configManager.save(AppConfig(entries = listOf(entry1, entry2, entry3)))
+
+        val viewModel = AppViewModel(
+            configManager = configManager,
+            httpClient = createMockHttpClient(),
+        )
+        viewModel.loadConfig()
+
+        // Initially: Play 1 (0), Play 2 (1), Spelunky (2)
+        assertEquals(listOf("Play 1", "Play 2", "Spelunky"), viewModel.uiState.value.config!!.entries.map { it.name })
+
+        // Move Spelunky from index 2 to index 0 -> Spelunky, Play 1, Play 2
+        viewModel.reorderEntries(fromIndex = 2, toIndex = 0)
+
+        assertEquals(listOf("Spelunky", "Play 1", "Play 2"), viewModel.uiState.value.config!!.entries.map { it.name })
+
+        // Verify persisted to config.json file
+        val reloaded = configManager.load()
+        assertEquals(listOf("Spelunky", "Play 1", "Play 2"), reloaded.entries.map { it.name })
+    }
 }

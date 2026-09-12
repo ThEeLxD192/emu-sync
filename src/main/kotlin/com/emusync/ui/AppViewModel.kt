@@ -24,6 +24,7 @@ class AppViewModel(
     private val configManager: ConfigManager,
     private val steamManager: SteamShortcutManager = SteamShortcutManager(),
     private val httpClient: HttpClient = DriveClientFactory.create(),
+    private val updateManager: com.emusync.update.UpdateManager = com.emusync.update.UpdateManager(httpClient),
 ) {
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
@@ -104,6 +105,72 @@ class AppViewModel(
             }
         }
         _uiState.update { it.copy(isLoading = false, gameItems = items) }
+
+        // Trigger background sync check if Google Drive is linked
+        if (_uiState.value.config?.googleDrive?.refreshToken?.isNotBlank() == true) {
+            checkSyncForEntry(entry)
+        }
+    }
+
+    /**
+     * Checks the cloud sync status of a specific entry without launching any game.
+     */
+    suspend fun checkSyncForEntry(entry: GameEntry) {
+        val cfg = _uiState.value.config ?: return
+        if (cfg.googleDrive == null || cfg.googleDrive.refreshToken.isNullOrBlank()) {
+            _uiState.update { it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to CloudSyncStatus.NOT_CONFIGURED)) }
+            return
+        }
+
+        _uiState.update { it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to CloudSyncStatus.CHECKING)) }
+        val orchestrator = SyncOrchestrator(
+            client = httpClient,
+            config = cfg,
+            configManager = configManager,
+            onStatus = { /* silent during check */ },
+        )
+        val status = orchestrator.checkEntrySyncStatus(entry)
+        _uiState.update { it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to status)) }
+    }
+
+    /**
+     * Triggers manual synchronization for an entry without launching any game.
+     */
+    suspend fun syncEntryNow(entry: GameEntry) {
+        val cfg = _uiState.value.config ?: return
+        _uiState.update { it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to CloudSyncStatus.SYNCING)) }
+
+        val orchestrator = SyncOrchestrator(
+            client = httpClient,
+            config = cfg,
+            configManager = configManager,
+            onStatus = { setStatus(it) },
+        )
+
+        val success = orchestrator.syncEntry(entry)
+        if (success) {
+            _uiState.update { it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to CloudSyncStatus.IN_SYNC)) }
+        } else {
+            checkSyncForEntry(entry)
+        }
+    }
+
+    /**
+     * Reorders entries in the list and persists the new order to config.json.
+     */
+    suspend fun reorderEntries(fromIndex: Int, toIndex: Int) {
+        val cfg = _uiState.value.config ?: return
+        val currentEntries = cfg.entries.toMutableList()
+        if (fromIndex !in currentEntries.indices || toIndex !in currentEntries.indices || fromIndex == toIndex) {
+            return
+        }
+
+        val movedItem = currentEntries.removeAt(fromIndex)
+        currentEntries.add(toIndex, movedItem)
+
+        val updatedConfig = cfg.copy(entries = currentEntries)
+        configManager.save(updatedConfig)
+        _uiState.update { it.copy(config = updatedConfig) }
     }
 
     /**
@@ -145,6 +212,7 @@ class AppViewModel(
             }
             paths
         })
+        checkSyncForEntry(item.entry)
     }
 
     /**
@@ -282,5 +350,42 @@ class AppViewModel(
         } catch (e: Exception) {
             "Google Drive login failed: ${e.message}"
         }
+    }
+
+    // ── In-App Updates ───────────────────────────────────────────
+
+    suspend fun checkForUpdates(manual: Boolean = false) {
+        _uiState.update { it.copy(updateState = UpdateUiState.Checking) }
+        val info = updateManager.checkForUpdates()
+        if (info != null) {
+            _uiState.update { it.copy(updateState = UpdateUiState.Available(info), showUpdateDialog = manual) }
+        } else {
+            _uiState.update { it.copy(updateState = UpdateUiState.Idle) }
+        }
+    }
+
+    fun dismissUpdateDialog() {
+        _uiState.update { it.copy(showUpdateDialog = false) }
+    }
+
+    fun showUpdateDialog() {
+        _uiState.update { it.copy(showUpdateDialog = true) }
+    }
+
+    suspend fun downloadAndApplyUpdate(info: com.emusync.update.UpdateInfo) {
+        _uiState.update { it.copy(updateState = UpdateUiState.Downloading(0f, info)) }
+        val tempFile = java.io.File(System.getProperty("java.io.tmpdir"), "EmuSync-update.AppImage")
+        val success = updateManager.downloadUpdate(info.downloadUrl, tempFile) { progress ->
+            _uiState.update { it.copy(updateState = UpdateUiState.Downloading(progress, info)) }
+        }
+        if (success) {
+            _uiState.update { it.copy(updateState = UpdateUiState.ReadyToRestart(tempFile)) }
+        } else {
+            _uiState.update { it.copy(updateState = UpdateUiState.Error("Failed to download update")) }
+        }
+    }
+
+    fun restartApp(file: java.io.File): Boolean {
+        return updateManager.applyUpdateAndRestart(file)
     }
 }

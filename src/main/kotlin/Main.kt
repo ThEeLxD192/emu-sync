@@ -14,15 +14,18 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.emusync.AppInfo
 import com.emusync.config.ConfigManager
 import com.emusync.model.GameEntry
 import com.emusync.ui.AppViewModel
 import com.emusync.ui.GameItem
+import com.emusync.ui.UpdateUiState
 import com.emusync.ui.components.GameGrid
 import com.emusync.ui.components.Sidebar
 import com.emusync.ui.dialogs.AddEntryDialog
 import com.emusync.ui.dialogs.EditGameDialog
 import com.emusync.ui.dialogs.StatusOverlay
+import com.emusync.ui.dialogs.UpdateDialog
 import com.emusync.ui.theme.EmuSyncColors
 import com.emusync.ui.theme.EmuSyncDarkScheme
 import kotlinx.coroutines.launch
@@ -45,6 +48,7 @@ fun main() {
         Window(
             onCloseRequest = ::exitApplication,
             title = "EmuSync",
+            icon = androidx.compose.ui.res.painterResource("icon.png"),
             state = windowState,
         ) {
             // Force 1:1 dp-to-pixel mapping so gamescope's inflated DPI
@@ -71,6 +75,10 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
     var entryToEdit by remember { mutableStateOf<GameEntry?>(null) }
     var gameToEdit by remember { mutableStateOf<GameItem?>(null) }
     var steamMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        viewModel.checkForUpdates(manual = false)
+    }
 
     MaterialTheme(colorScheme = EmuSyncDarkScheme) {
         Surface(
@@ -147,8 +155,64 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                             }
                         }
 
+                        // Update notification chip
+                        val updateState = uiState.updateState
+                        if (updateState is UpdateUiState.Available) {
+                            Surface(
+                                onClick = { viewModel.showUpdateDialog() },
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                                color = EmuSyncColors.Primary,
+                                modifier = Modifier.padding(end = 12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.SystemUpdate,
+                                        contentDescription = null,
+                                        tint = androidx.compose.ui.graphics.Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = "Actualizar v${updateState.info.version}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = androidx.compose.ui.graphics.Color.White,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        } else if (updateState is UpdateUiState.ReadyToRestart) {
+                            Surface(
+                                onClick = { viewModel.showUpdateDialog() },
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                                color = EmuSyncColors.Success,
+                                modifier = Modifier.padding(end = 12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.RestartAlt,
+                                        contentDescription = null,
+                                        tint = androidx.compose.ui.graphics.Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = "Reiniciar EmuSync",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = androidx.compose.ui.graphics.Color.White,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+
                         Text(
-                            text = "v1.0",
+                            text = "v${AppInfo.VERSION}",
                             style = MaterialTheme.typography.labelSmall,
                             color = EmuSyncColors.OnSurfaceDim,
                             modifier = Modifier.padding(end = 16.dp),
@@ -178,6 +242,9 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                             scope.launch { viewModel.selectEntry(entry) }
                         },
                         onAddClicked = { showAddDialog = true },
+                        onReorder = { fromIndex, toIndex ->
+                            scope.launch { viewModel.reorderEntries(fromIndex, toIndex) }
+                        },
                         steamAvailable = viewModel.isSteamAvailable(),
                         isSteamRegistered = { entry -> viewModel.isSteamRegistered(entry) },
                         onSteamToggle = { entry ->
@@ -207,8 +274,19 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                         items = uiState.gameItems,
                         selectedEntry = uiState.selectedEntry,
                         isLoading = uiState.isLoading,
+                        syncStatus = uiState.entrySyncStatus[uiState.selectedEntry?.name] ?: com.emusync.ui.CloudSyncStatus.IDLE,
                         onGameClicked = { gameItem ->
                             scope.launch { viewModel.launchGame(gameItem) }
+                        },
+                        onSyncCategory = {
+                            uiState.selectedEntry?.let { entry ->
+                                scope.launch { viewModel.syncEntryNow(entry) }
+                            }
+                        },
+                        onCheckSync = {
+                            uiState.selectedEntry?.let { entry ->
+                                scope.launch { viewModel.checkSyncForEntry(entry) }
+                            }
                         },
                         onEditGame = { gameItem ->
                             gameToEdit = gameItem
@@ -275,6 +353,20 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                     game = gameItem,
                     onDismiss = { viewModel.completeSaveSetup(emptyList()) },
                     onSave = { newPaths -> viewModel.completeSaveSetup(newPaths) }
+                )
+            }
+
+            // ── Update Dialog ──────────────────────────────────────
+            if (uiState.showUpdateDialog) {
+                UpdateDialog(
+                    state = uiState.updateState,
+                    onDismiss = { viewModel.dismissUpdateDialog() },
+                    onStartDownload = { info ->
+                        scope.launch { viewModel.downloadAndApplyUpdate(info) }
+                    },
+                    onRestart = { file ->
+                        viewModel.restartApp(file)
+                    }
                 )
             }
 

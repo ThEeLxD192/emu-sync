@@ -40,12 +40,14 @@ EOF
 chmod +x "$APP_DIR/EmuSync.desktop"
 
 # Package AppImage with appimagetool into /out (mapped to root directory)
-ARCH=x86_64 appimagetool "$APP_DIR" "/out/EmuSync-1.0.0-x86_64.AppImage"
+TARGET_APPIMAGE="/out/EmuSync-x86_64.AppImage"
+rm -f "$TARGET_APPIMAGE" "/out/EmuSync-1.0.0-x86_64.AppImage" 2>/dev/null || true
+ARCH=x86_64 appimagetool "$APP_DIR" "$TARGET_APPIMAGE"
 
 # Ensure executable permissions
-chmod 755 /out/EmuSync-1.0.0-x86_64.AppImage 2>/dev/null || true
+chmod 755 "$TARGET_APPIMAGE" 2>/dev/null || true
 
 echo "=========================================="
 echo "  Done! AppImage generated in project root:"
-echo "  - EmuSync-1.0.0-x86_64.AppImage         "
+echo "  - EmuSync-x86_64.AppImage               "
 echo "=========================================="

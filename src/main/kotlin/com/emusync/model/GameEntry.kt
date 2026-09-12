@@ -58,6 +58,8 @@ data class EmulatorSystem(
      *  When null, auto-detected from the executable name.
      *  Set to an empty string to disable. */
     val fullscreenArgs: String? = null,
+    /** Optional custom directory for game cover art / boxart images. */
+    val coversDirectory: String? = null,
 ) : GameEntry
 
 /**
@@ -76,4 +78,6 @@ data class NativePCGame(
     val waitForProcess: String? = null,
     override val driveFileId: String? = null,
     override val steamAppId: Int? = null,
+    /** Optional custom path to a cover art image for this game. */
+    val coverPath: String? = null,
 ) : GameEntry

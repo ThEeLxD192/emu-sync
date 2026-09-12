@@ -8,6 +8,8 @@ services:
     volumes:
       # Mount root directory to /out to deposit final AppImage executables
       - .:/out
+      - ./src:/app/src
+      - ./scripts:/app/scripts
       # Mount ./build to persist build reports and local cache
       - ./build:/app/build
       # Persistent Gradle cache for faster incremental builds

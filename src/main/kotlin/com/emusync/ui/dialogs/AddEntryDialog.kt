@@ -82,6 +82,12 @@ fun AddEntryDialog(
     var fullscreenArgs by remember {
         mutableStateOf((initialEntry as? EmulatorSystem)?.fullscreenArgs ?: "")
     }
+    var coversDirectory by remember {
+        mutableStateOf((initialEntry as? EmulatorSystem)?.coversDirectory ?: "")
+    }
+    var coverPath by remember {
+        mutableStateOf((initialEntry as? NativePCGame)?.coverPath ?: "")
+    }
 
     // When switching types, set reasonable defaults for arguments
     LaunchedEffect(entryType) {
@@ -224,6 +230,15 @@ fun AddEntryDialog(
                         modifier = Modifier.padding(top = 4.dp, start = 4.dp)
                     )
                     Spacer(Modifier.height(12.dp))
+
+                    PathField(
+                        label = "Covers Directory (Optional)",
+                        value = coversDirectory,
+                        onValueChange = { coversDirectory = it },
+                        placeholder = "/path/to/covers (empty to use ROMs folder)",
+                        pickerType = PickerType.DIRECTORY,
+                    )
+                    Spacer(Modifier.height(12.dp))
                 }
 
                 if (entryType == EntryType.NATIVE) {
@@ -238,6 +253,15 @@ fun AddEntryDialog(
                         style = MaterialTheme.typography.bodySmall,
                         color = EmuSyncColors.OnSurfaceDim,
                         modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                    Spacer(Modifier.height(12.dp))
+
+                    PathField(
+                        label = "Cover Image (Optional)",
+                        value = coverPath,
+                        onValueChange = { coverPath = it },
+                        placeholder = "/path/to/game_cover.png",
+                        pickerType = PickerType.FILE,
                     )
                     Spacer(Modifier.height(12.dp))
                 }
@@ -324,6 +348,8 @@ fun AddEntryDialog(
                                 savePaths = validSavePaths,
                                 waitForProcess = waitForProcess.trim(),
                                 fullscreenArgs = fullscreenArgs.trim(),
+                                coversDirectory = coversDirectory.trim(),
+                                coverPath = coverPath.trim(),
                             )
                             if (entry != null) {
                                 // Preserve driveFileId and steamAppId if editing
@@ -486,6 +512,8 @@ private fun validateAndBuild(
     savePaths: List<String>,
     waitForProcess: String,
     fullscreenArgs: String,
+    coversDirectory: String = "",
+    coverPath: String = "",
 ): GameEntry? {
     if (name.isBlank() || executablePath.isBlank()) return null
     
@@ -508,6 +536,7 @@ private fun validateAndBuild(
                 extensions = extList,
                 savePaths = validSavePaths,
                 fullscreenArgs = fullscreenArgs.trim().takeIf { it.isNotBlank() },
+                coversDirectory = coversDirectory.trim().takeIf { it.isNotBlank() },
             )
         }
         EntryType.NATIVE -> {
@@ -517,6 +546,7 @@ private fun validateAndBuild(
                 arguments = argList,
                 savePaths = validSavePaths,
                 waitForProcess = waitForProcess.takeIf { it.isNotBlank() },
+                coverPath = coverPath.trim().takeIf { it.isNotBlank() },
             )
         }
     }
