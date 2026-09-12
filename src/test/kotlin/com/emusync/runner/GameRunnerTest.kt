@@ -69,10 +69,15 @@ class GameRunnerTest {
 
     @Test
     fun `isProcessRunning should detect active process and handle lifecycle`() {
-        val process = ProcessBuilder("sleep", "5").start()
+        val isWindows = System.getProperty("os.name", "").lowercase().contains("windows")
+        val (process, procName) = if (isWindows) {
+            ProcessBuilder("ping", "127.0.0.1", "-n", "6").start() to "ping"
+        } else {
+            ProcessBuilder("sleep", "5").start() to "sleep"
+        }
         try {
-            assertTrue(runner.isProcessRunning("sleep"), "Should detect running sleep process")
-            assertTrue(runner.isProcessRunning("\"sleep\""), "Should handle quoted process name")
+            assertTrue(runner.isProcessRunning(procName), "Should detect running $procName process")
+            assertTrue(runner.isProcessRunning("\"$procName\""), "Should handle quoted process name")
         } finally {
             process.destroyForcibly()
             process.waitFor()
@@ -81,38 +86,65 @@ class GameRunnerTest {
 
     @Test
     fun `should wait for external process when launcher exits early`(@TempDir tempDir: File) = runTest {
-        val gameScript = File(tempDir, "real_game.sh").apply {
-            writeText("#!/bin/sh\nsleep 2\n")
-            setExecutable(true)
-        }
-        val launcherScript = File(tempDir, "launcher.sh").apply {
-            writeText("#!/bin/sh\n\"${gameScript.absolutePath}\" &\nexit 0\n")
-            setExecutable(true)
-        }
+        val isWindows = System.getProperty("os.name", "").lowercase().contains("windows")
+        val nativeGame = if (isWindows) {
+            val pingExe = File(System.getenv("SystemRoot") ?: "C:\\Windows", "System32\\ping.exe")
+            val gameExe = File(tempDir, "real_game.exe")
+            pingExe.copyTo(gameExe, overwrite = true)
 
-        val nativeGame = NativePCGame(
-            name = "Async Game",
-            executablePath = launcherScript.absolutePath,
-            waitForProcess = "real_game.sh"
-        )
+            val launcherBat = File(tempDir, "launcher.bat").apply {
+                writeText("@echo off\r\nstart \"\" \"${gameExe.absolutePath}\" 127.0.0.1 -n 3\r\nexit 0\r\n")
+            }
+
+            NativePCGame(
+                name = "Async Game",
+                executablePath = "cmd.exe",
+                arguments = listOf("/c", launcherBat.absolutePath),
+                waitForProcess = "real_game"
+            )
+        } else {
+            val gameScript = File(tempDir, "real_game.sh").apply {
+                writeText("#!/bin/sh\nsleep 2\n")
+                setExecutable(true)
+            }
+            val launcherScript = File(tempDir, "launcher.sh").apply {
+                writeText("#!/bin/sh\n\"${gameScript.absolutePath}\" &\nexit 0\n")
+                setExecutable(true)
+            }
+
+            NativePCGame(
+                name = "Async Game",
+                executablePath = launcherScript.absolutePath,
+                waitForProcess = "real_game.sh"
+            )
+        }
 
         val start = System.currentTimeMillis()
         val result = runner.launch(nativeGame)
         val elapsed = System.currentTimeMillis() - start
 
         assertEquals(0, result.exitCode)
-        assertTrue(elapsed >= 1800, "Runner should have waited for real_game.sh to complete (elapsed: ${elapsed}ms)")
+        assertTrue(elapsed >= 1800, "Runner should have waited for external process to complete (elapsed: ${elapsed}ms)")
     }
 
     @Test
     fun `isSteamShaderCompiling should detect fossilize_replay active state`(@TempDir tempDir: File) {
         assertEquals(false, runner.isSteamShaderCompiling())
 
-        val fossilizeScript = File(tempDir, "fossilize_replay").apply {
-            writeText("#!/bin/sh\nsleep 5\n")
-            setExecutable(true)
+        val isWindows = System.getProperty("os.name", "").lowercase().contains("windows")
+        val process = if (isWindows) {
+            val pingExe = File(System.getenv("SystemRoot") ?: "C:\\Windows", "System32\\ping.exe")
+            val dummyExe = File(tempDir, "fossilize_replay.exe")
+            pingExe.copyTo(dummyExe, overwrite = true)
+            ProcessBuilder(dummyExe.absolutePath, "127.0.0.1", "-n", "6").start()
+        } else {
+            val fossilizeScript = File(tempDir, "fossilize_replay").apply {
+                writeText("#!/bin/sh\nsleep 5\n")
+                setExecutable(true)
+            }
+            ProcessBuilder(fossilizeScript.absolutePath).start()
         }
-        val process = ProcessBuilder(fossilizeScript.absolutePath).start()
+
         try {
             assertTrue(runner.isSteamShaderCompiling(), "Should detect active fossilize_replay process")
         } finally {
