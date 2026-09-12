@@ -5,6 +5,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
@@ -28,6 +31,7 @@ import com.emusync.ui.dialogs.StatusOverlay
 import com.emusync.ui.dialogs.UpdateDialog
 import com.emusync.ui.theme.EmuSyncColors
 import com.emusync.ui.theme.EmuSyncDarkScheme
+import org.jetbrains.skia.Image
 import kotlinx.coroutines.launch
 import javax.swing.UIManager
 
@@ -45,10 +49,12 @@ fun main() {
             position = WindowPosition(Alignment.Center),
         )
 
+        val appIcon = remember { loadAppIcon() }
+
         Window(
             onCloseRequest = ::exitApplication,
             title = "EmuSync",
-            icon = androidx.compose.ui.res.painterResource("icon.png"),
+            icon = appIcon,
             state = windowState,
         ) {
             // Force 1:1 dp-to-pixel mapping so gamescope's inflated DPI
@@ -391,5 +397,17 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+private fun loadAppIcon(): Painter? {
+    return try {
+        val stream = Thread.currentThread().contextClassLoader.getResourceAsStream("icon.png")
+            ?: object {}.javaClass.getResourceAsStream("/icon.png")
+        val bytes = stream?.readAllBytes() ?: return null
+        val imageBitmap = Image.makeFromEncoded(bytes).toComposeImageBitmap()
+        BitmapPainter(imageBitmap)
+    } catch (_: Throwable) {
+        null
     }
 }
