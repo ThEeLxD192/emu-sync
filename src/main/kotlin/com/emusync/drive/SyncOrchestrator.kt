@@ -406,7 +406,7 @@ class SyncOrchestrator(
             }
 
             // ── Step 3: Post-Sync (upload local save if modified) ───
-            if (hasDriveConfig && cachedToken != null) {
+            if (hasDriveConfig && cachedToken != null && result.exitCode == 0) {
                 try {
                     onStatus(AppStatus.Syncing("Uploading save for ${item.name}..."))
                     for (pathStr in currentSyncPaths) {

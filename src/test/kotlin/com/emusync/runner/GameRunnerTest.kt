@@ -103,4 +103,21 @@ class GameRunnerTest {
         assertEquals(0, result.exitCode)
         assertTrue(elapsed >= 1800, "Runner should have waited for real_game.sh to complete (elapsed: ${elapsed}ms)")
     }
+
+    @Test
+    fun `isSteamShaderCompiling should detect fossilize_replay active state`(@TempDir tempDir: File) {
+        assertEquals(false, runner.isSteamShaderCompiling())
+
+        val fossilizeScript = File(tempDir, "fossilize_replay").apply {
+            writeText("#!/bin/sh\nsleep 5\n")
+            setExecutable(true)
+        }
+        val process = ProcessBuilder(fossilizeScript.absolutePath).start()
+        try {
+            assertTrue(runner.isSteamShaderCompiling(), "Should detect active fossilize_replay process")
+        } finally {
+            process.destroyForcibly()
+            process.waitFor()
+        }
+    }
 }

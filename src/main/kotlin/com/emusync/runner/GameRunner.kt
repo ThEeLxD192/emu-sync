@@ -56,20 +56,20 @@ class GameRunner {
     ): GameResult = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
 
-        if (steamAppId != null) {
+        val success = if (steamAppId != null) {
             launchViaSteam(entry, romFile, steamAppId)
         } else {
             launchDirect(entry, romFile)
         }
 
         val durationMs = System.currentTimeMillis() - startTime
-        GameResult(exitCode = 0, durationMs = durationMs)
+        GameResult(exitCode = if (success) 0 else 1, durationMs = durationMs)
     }
 
     /**
      * Launches a game directly via [ProcessBuilder] (original behavior).
      */
-    private suspend fun launchDirect(entry: GameEntry, romFile: File?) {
+    private suspend fun launchDirect(entry: GameEntry, romFile: File?): Boolean {
         val command = buildCommand(entry, romFile)
         val workingDir = resolveWorkingDirectory(entry, romFile)
 
@@ -83,10 +83,10 @@ class GameRunner {
 
         // If it's a native game with a process-wait, we ignore the initial process exit
         // and instead poll for the named process.
-        if (entry is NativePCGame && entry.waitForProcess != null) {
+        return if (entry is NativePCGame && entry.waitForProcess != null) {
             waitForExternalProcess(entry.waitForProcess)
         } else {
-            process.waitFor()
+            process.waitFor() == 0
         }
     }
 
@@ -98,7 +98,7 @@ class GameRunner {
      * 2. Opens `steam://rungameid/<appId>` to tell Steam to launch the shortcut
      * 3. Polls for the emulator/game process to appear and then exit
      */
-    private suspend fun launchViaSteam(entry: GameEntry, romFile: File?, appId: Int) {
+    private suspend fun launchViaSteam(entry: GameEntry, romFile: File?, appId: Int): Boolean {
         // Step 1: Prepare the launch (write ROM path for emulators)
         if (entry is EmulatorSystem && romFile != null) {
             val manager = SteamShortcutManager()
@@ -113,11 +113,12 @@ class GameRunner {
 
         // Step 3: Wait for the game/emulator process to appear and exit
         val processName = resolveProcessName(entry)
-        if (processName != null) {
+        return if (processName != null) {
             waitForExternalProcess(processName)
         } else {
             // Fallback: wait a reasonable time if we can't detect the process
             delay(5000)
+            true
         }
     }
 
@@ -201,21 +202,48 @@ class GameRunner {
 
     /**
      * Polls the system for a process name.
-     * 1. Waits up to 30s for the process to appear.
-     * 2. Waits indefinitely for the process to disappear.
+     * 1. Waits up to 60s for the process to appear.
+     *    If Steam is actively compiling Vulkan shaders in the background (via fossilize_replay),
+     *    the timeout is continuously renewed so long shader compilation steps (even 5+ mins)
+     *    are not prematurely terminated.
+     * 2. Waits indefinitely for the process to disappear once it has appeared.
+     *
+     * @return true if the process appeared and then finished, false if it never appeared within the timeout.
      */
-    private suspend fun waitForExternalProcess(processName: String) = withContext(Dispatchers.IO) {
-        // Step 1: Wait for appearance (timeout 30s)
-        val appearanceStart = System.currentTimeMillis()
-        while (System.currentTimeMillis() - appearanceStart < 30_000) {
-            if (isProcessRunning(processName)) break
+    private suspend fun waitForExternalProcess(processName: String): Boolean = withContext(Dispatchers.IO) {
+        // Step 1: Wait for appearance (base timeout 60s, dynamically extended while Steam shaders compile)
+        var appeared = false
+        var appearanceStart = System.currentTimeMillis()
+        val timeoutMs = 60_000L
+
+        while (System.currentTimeMillis() - appearanceStart < timeoutMs) {
+            if (isProcessRunning(processName)) {
+                appeared = true
+                break
+            }
+
+            // If Steam is compiling Vulkan shaders in the background, reset timeout window
+            if (isSteamShaderCompiling()) {
+                appearanceStart = System.currentTimeMillis()
+            }
+
             kotlinx.coroutines.delay(1000)
         }
 
-        // Step 2: Wait for disappearance
-        while (isProcessRunning(processName)) {
-            kotlinx.coroutines.delay(2000)
+        // Step 2: Wait for disappearance (indefinite, only if the process appeared)
+        if (appeared) {
+            while (isProcessRunning(processName)) {
+                kotlinx.coroutines.delay(2000)
+            }
         }
+        appeared
+    }
+
+    /**
+     * Checks if Steam's Vulkan shader pre-compilation tool (fossilize_replay) is currently active.
+     */
+    internal fun isSteamShaderCompiling(): Boolean {
+        return isProcessRunning("fossilize_replay") || isProcessRunning("fossilize_replay64")
     }
 
     /**
