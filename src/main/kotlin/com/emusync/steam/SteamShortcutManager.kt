@@ -15,10 +15,18 @@ import kotlin.random.Random
  * path from a signal file and launches the emulator with it. This allows EmuSync to
  * change which ROM is launched each time, while the Steam shortcut remains fixed.
  *
+ * Linux:
  * ```
  * ~/.config/emusync/launchers/
  * ├── launch_game_boy_advance.sh    ← wrapper script for GBA
  * ├── launch_playstation_2.sh       ← wrapper script for PS2
+ * └── .current_rom_gba              ← ROM path written before launch
+ * ```
+ *
+ * Windows:
+ * ```
+ * %APPDATA%\emusync\launchers\
+ * ├── launch_game_boy_advance.bat   ← batch wrapper script with start /wait
  * └── .current_rom_gba              ← ROM path written before launch
  * ```
  *
@@ -33,12 +41,13 @@ import kotlin.random.Random
  * // Then launch via steam://rungameid/<appId>
  * ```
  */
-open class SteamShortcutManager {
+open class SteamShortcutManager(
+    private val customSteamUserdataDir: File? = null,
+    private val customLauncherDir: File? = null,
+    private val registryQuery: (key: String, valueName: String) -> String? = ::defaultRegistryQuery,
+) {
 
     companion object {
-        private val STEAM_BASE = File(System.getProperty("user.home"), ".local/share/Steam/userdata")
-        private val LAUNCHER_DIR = File(System.getProperty("user.home"), ".config/emusync/launchers")
-
         /**
          * Maps executable name patterns to the flags that force the emulator
          * into its fullscreen/Big Picture UI (bypassing the Qt windowed GUI).
@@ -49,6 +58,7 @@ open class SteamShortcutManager {
             "dolphin"      to "-b -e",
             "ppsspp"       to "--fullscreen",
             "rpcs3"        to "--fullscreen",
+            "retroarch"    to "-f",
             "eden"         to "-f",
             "yuzu"         to "-f",
             "suyu"         to "-f",
@@ -61,7 +71,7 @@ open class SteamShortcutManager {
 
         /**
          * Auto-detects the fullscreen flags for an emulator based on its
-         * executable filename.  Returns an empty string if no match is found.
+         * executable filename. Returns an empty string if no match is found.
          */
         fun detectFullscreenArgs(executablePath: String): String {
             val exeName = File(executablePath).nameWithoutExtension.lowercase()
@@ -78,6 +88,147 @@ open class SteamShortcutManager {
         fun resolveFullscreenArgs(entry: EmulatorSystem): String {
             return entry.fullscreenArgs ?: detectFullscreenArgs(entry.executablePath)
         }
+
+        /**
+         * Parses the standard output of Windows `reg query <key> /v <valueName>`.
+         * Returns the extracted string value, or null if not found or invalid.
+         */
+        fun parseRegistryOutput(output: String, valueName: String): String? {
+            val pattern = Regex(
+                """(?m)^\s*${Regex.escape(valueName)}\s+REG_(?:SZ|EXPAND_SZ)\s+(.+)$""",
+                RegexOption.IGNORE_CASE
+            )
+            val match = pattern.find(output) ?: return null
+            return match.groupValues[1].trim().takeIf { it.isNotEmpty() }
+        }
+
+        /**
+         * Default query implementation for Windows registry using `reg query`.
+         */
+        fun defaultRegistryQuery(key: String, valueName: String): String? {
+            if (!System.getProperty("os.name", "").lowercase().contains("windows")) {
+                return null
+            }
+            return try {
+                val process = ProcessBuilder("reg", "query", key, "/v", valueName)
+                    .redirectErrorStream(true)
+                    .start()
+                val output = process.inputStream.bufferedReader().readText()
+                process.waitFor()
+                if (process.exitValue() == 0) {
+                    parseRegistryOutput(output, valueName)
+                } else {
+                    null
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    /**
+     * Indicates whether the host OS is Windows.
+     * Can be overridden in tests to simulate Windows environment.
+     */
+    open fun isWindows(): Boolean =
+        System.getProperty("os.name", "").lowercase().contains("windows")
+
+    /**
+     * Resolves the Steam `userdata` directory.
+     * On Windows, queries the registry and candidate install directories.
+     * On Linux, checks standard and Flatpak Steam locations.
+     */
+    open fun getSteamUserdataDir(): File? {
+        if (customSteamUserdataDir != null) return customSteamUserdataDir
+        return if (isWindows()) {
+            findWindowsSteamUserdataDir()
+        } else {
+            findLinuxSteamUserdataDir()
+        }
+    }
+
+    /**
+     * Locates the Steam `userdata` directory on Windows.
+     */
+    open fun findWindowsSteamUserdataDir(): File? {
+        // 1. Check registry: HKCU\Software\Valve\Steam -> SteamPath
+        val hkcuPath = registryQuery("HKCU\\Software\\Valve\\Steam", "SteamPath")
+        if (!hkcuPath.isNullOrBlank()) {
+            val dir = File(hkcuPath.replace('/', File.separatorChar), "userdata")
+            if (dir.exists() && dir.isDirectory) return dir
+        }
+
+        // 2. Check registry: HKLM\SOFTWARE\WOW6432Node\Valve\Steam -> InstallPath
+        val hklmPath = registryQuery("HKLM\\SOFTWARE\\WOW6432Node\\Valve\\Steam", "InstallPath")
+            ?: registryQuery("HKLM\\SOFTWARE\\Valve\\Steam", "InstallPath")
+        if (!hklmPath.isNullOrBlank()) {
+            val dir = File(hklmPath.replace('/', File.separatorChar), "userdata")
+            if (dir.exists() && dir.isDirectory) return dir
+        }
+
+        // 3. Fallback common paths on Windows
+        val candidates = listOfNotNull(
+            System.getenv("ProgramFiles(x86)")?.let { File(it, "Steam/userdata") },
+            System.getenv("ProgramFiles")?.let { File(it, "Steam/userdata") },
+            File("C:\\Program Files (x86)\\Steam\\userdata"),
+            File("C:\\Program Files\\Steam\\userdata"),
+            File("C:\\Steam\\userdata"),
+            File("D:\\Steam\\userdata"),
+        )
+        val existingCandidate = candidates.firstOrNull { it.exists() && it.isDirectory }
+        if (existingCandidate != null) return existingCandidate
+
+        // If userdata folder does not exist yet but Steam root exists, return userdata path inside it
+        if (!hkcuPath.isNullOrBlank()) {
+            val root = File(hkcuPath.replace('/', File.separatorChar))
+            if (root.exists()) return File(root, "userdata")
+        }
+        if (!hklmPath.isNullOrBlank()) {
+            val root = File(hklmPath.replace('/', File.separatorChar))
+            if (root.exists()) return File(root, "userdata")
+        }
+
+        return candidates.firstOrNull()
+    }
+
+    /**
+     * Locates the Steam `userdata` directory on Linux (standard or Flatpak).
+     */
+    open fun findLinuxSteamUserdataDir(): File? {
+        val userHome = System.getProperty("user.home", "")
+        val candidates = listOfNotNull(
+            File(userHome, ".local/share/Steam/userdata"),
+            File(userHome, ".steam/steam/userdata"),
+            File(userHome, ".steam/root/userdata"),
+            File(userHome, ".var/app/com.valvesoftware.Steam/.local/share/Steam/userdata"),
+            File(userHome, ".var/app/com.valvesoftware.Steam/.steam/steam/userdata"),
+        )
+        return candidates.firstOrNull { it.exists() && it.isDirectory }
+            ?: candidates.first()
+    }
+
+    /**
+     * Returns the directory where generated emulator launcher scripts are stored.
+     * Linux: ~/.config/emusync/launchers
+     * Windows: %APPDATA%\emusync\launchers
+     */
+    open fun getLauncherDir(): File {
+        if (customLauncherDir != null) return customLauncherDir
+        return if (isWindows()) {
+            val appData = System.getenv("APPDATA")
+            if (!appData.isNullOrBlank()) {
+                File(appData, "emusync/launchers")
+            } else {
+                File(System.getProperty("user.home"), "AppData/Roaming/emusync/launchers")
+            }
+        } else {
+            val xdgConfig = System.getenv("XDG_CONFIG_HOME")
+            if (!xdgConfig.isNullOrBlank()) {
+                File(xdgConfig, "emusync/launchers")
+            } else {
+                File(System.getProperty("user.home"), ".config/emusync/launchers")
+            }
+        }
     }
 
     /**
@@ -87,13 +238,17 @@ open class SteamShortcutManager {
      * @return The shortcuts.vdf [File], or null if Steam is not installed.
      */
     open fun findShortcutsFile(): File? {
-        if (!STEAM_BASE.exists()) return null
+        val base = getSteamUserdataDir() ?: return null
+        if (!base.exists() || !base.isDirectory) return null
 
-        return STEAM_BASE.listFiles()
+        val accounts = base.listFiles()
             ?.filter { it.isDirectory && it.name != "0" }
             ?.sortedByDescending { it.lastModified() } // most recently used account first
-            ?.map { File(it, "config/shortcuts.vdf") }
-            ?.firstOrNull { it.exists() || it.parentFile?.exists() == true }
+            ?: return null
+
+        return accounts.map { File(it, "config/shortcuts.vdf") }
+            .firstOrNull { it.exists() || it.parentFile?.exists() == true }
+            ?: accounts.firstOrNull()?.let { File(it, "config/shortcuts.vdf") }
     }
 
     /**
@@ -126,7 +281,7 @@ open class SteamShortcutManager {
      */
     fun registerEntry(entry: GameEntry): SteamShortcut {
         val vdfFile = findShortcutsFile()
-            ?: error("Steam userdata directory not found at $STEAM_BASE")
+            ?: error("Steam userdata directory not found (searched ${getSteamUserdataDir()?.absolutePath ?: "default locations"})")
 
         // Create the file if it doesn't exist yet
         if (!vdfFile.exists()) {
@@ -207,73 +362,34 @@ open class SteamShortcutManager {
         signalFile.writeText(romFile.absolutePath)
     }
 
-    // ── Private helpers ──────────────────────────────────────────────
-
     /**
-     * Builds a display name for the Steam shortcut.
-     * Prefixed with "[EmuSync]" to clearly identify managed shortcuts.
+     * Creates a wrapper script appropriate for the current OS.
      */
-    private fun buildAppName(entry: GameEntry): String {
-        return "[EmuSync] ${entry.name}"
+    fun createWrapperScript(entry: EmulatorSystem): File {
+        return if (isWindows()) {
+            createWindowsWrapperScript(entry)
+        } else {
+            createLinuxWrapperScript(entry)
+        }
     }
 
     /**
-     * Creates a wrapper script for an emulator and returns the shortcut.
-     *
-     * The wrapper script:
-     * 1. Reads the ROM path from a signal file
-     * 2. Launches the emulator with the ROM as argument
-     * 3. Waits for the emulator to exit
+     * Creates a wrapper shell script (`.sh`) for an emulator system on Linux.
      */
-    private fun buildEmulatorShortcut(entry: EmulatorSystem, appName: String): SteamShortcut {
-        val launcherScript = createWrapperScript(entry)
-        val startDir = File(entry.executablePath).parentFile?.absolutePath ?: "."
-
-        return SteamShortcut(
-            appId = generateAppId(),
-            appName = appName,
-            exe = "\"${launcherScript.absolutePath}\"",
-            startDir = startDir,
-            tags = mapOf("0" to "EmuSync"),
-        )
-    }
-
-    /**
-     * Creates a shortcut for a native PC game (direct executable).
-     */
-    private fun buildNativeShortcut(entry: NativePCGame, appName: String): SteamShortcut {
-        val startDir = File(entry.executablePath).parentFile?.absolutePath ?: "."
-        val baseArgs = entry.arguments.joinToString(" ")
-        
-        val launchOptions = if (baseArgs.isNotBlank()) "%command% $baseArgs" else ""
-
-        return SteamShortcut(
-            appId = generateAppId(),
-            appName = appName,
-            exe = "\"${entry.executablePath}\"",
-            startDir = startDir,
-            launchOptions = launchOptions,
-            tags = mapOf("0" to "EmuSync"),
-        )
-    }
-
-    /**
-     * Creates a wrapper shell script for an emulator system.
-     *
-     * The script reads the ROM path from a signal file and launches
-     * the emulator with the correct arguments, replacing {ROM} with
-     * the actual ROM path.
-     */
-    private fun createWrapperScript(entry: EmulatorSystem): File {
-        LAUNCHER_DIR.mkdirs()
+    fun createLinuxWrapperScript(entry: EmulatorSystem): File {
+        val launcherDir = getLauncherDir()
+        launcherDir.mkdirs()
         val safeName = entry.name.lowercase().replace(Regex("[^a-z0-9]+"), "_")
-        val scriptFile = File(LAUNCHER_DIR, "launch_$safeName.sh")
+        val scriptFile = File(launcherDir, "launch_$safeName.sh")
         val signalFile = getSignalFile(entry)
 
         // Build the argument list, with {ROM} replaced by the signal file read
         val argsPart = entry.arguments.joinToString(" ") { arg ->
             if (arg == "{ROM}") "\"\$ROM_PATH\"" else "\"$arg\""
         }
+
+        val fsArgs = resolveFullscreenArgs(entry)
+        val fsArgsLine = if (fsArgs.isNotBlank()) "FULLSCREEN_ARGS=\"$fsArgs\"" else "FULLSCREEN_ARGS=\"\""
 
         scriptFile.writeText(
             """
@@ -296,7 +412,7 @@ open class SteamShortcutManager {
             |fi
             |
             |# Fullscreen/Big Picture flags to bypass Qt windowed GUI
-            |FULLSCREEN_ARGS="${resolveFullscreenArgs(entry)}"
+            |$fsArgsLine
             |
             |echo "EmuSync: Launching ${entry.name} with: ${'$'}ROM_PATH"
             |exec "${entry.executablePath}" ${'$'}FULLSCREEN_ARGS $argsPart
@@ -308,12 +424,140 @@ open class SteamShortcutManager {
     }
 
     /**
+     * Creates a wrapper batch script (`.bat`) for an emulator system on Windows.
+     * Uses `start "" /wait` to ensure the batch interpreter waits for GUI emulator
+     * processes to exit, allowing Steam to track playtime accurately.
+     */
+    fun createWindowsWrapperScript(entry: EmulatorSystem): File {
+        val launcherDir = getLauncherDir()
+        launcherDir.mkdirs()
+        val safeName = entry.name.lowercase().replace(Regex("[^a-z0-9]+"), "_")
+        val scriptFile = File(launcherDir, "launch_$safeName.bat")
+        val signalFile = getSignalFile(entry)
+
+        val argsPart = entry.arguments.joinToString(" ") { arg ->
+            if (arg == "{ROM}") "\"%ROM_PATH%\"" else "\"$arg\""
+        }
+
+        val fsArgs = resolveFullscreenArgs(entry)
+        val combinedArgs = listOf(fsArgs, argsPart).filter { it.isNotBlank() }.joinToString(" ")
+        val launchLine = if (combinedArgs.isNotBlank()) {
+            "start \"\" /wait \"${entry.executablePath}\" $combinedArgs"
+        } else {
+            "start \"\" /wait \"${entry.executablePath}\""
+        }
+
+        val scriptContent = """
+            |@echo off
+            |:: Auto-generated by EmuSync — do not edit manually.
+            |:: Launcher for: ${entry.name}
+            |
+            |set "SIGNAL_FILE=${signalFile.absolutePath}"
+            |
+            |if not exist "%SIGNAL_FILE%" (
+            |    echo EmuSync: No ROM path found. Launch a game from EmuSync first.
+            |    exit /b 1
+            |)
+            |
+            |set /p ROM_PATH=<"%SIGNAL_FILE%"
+            |
+            |if not exist "%ROM_PATH%" (
+            |    echo EmuSync: ROM file not found: %ROM_PATH%
+            |    exit /b 1
+            |)
+            |
+            |echo EmuSync: Launching ${entry.name} with: %ROM_PATH%
+            |$launchLine
+            |exit /b %ERRORLEVEL%
+        """.trimMargin().replace("\n", "\r\n") + "\r\n"
+
+        scriptFile.writeText(scriptContent)
+        return scriptFile
+    }
+
+    /**
      * Returns the signal file path for a given emulator system.
      * This file stores the ROM path to launch next.
      */
-    private fun getSignalFile(entry: EmulatorSystem): File {
+    open fun getSignalFile(entry: EmulatorSystem): File {
         val safeName = entry.name.lowercase().replace(Regex("[^a-z0-9]+"), "_")
-        return File(LAUNCHER_DIR, ".current_rom_$safeName")
+        return File(getLauncherDir(), ".current_rom_$safeName")
+    }
+
+    // ── Private helpers ──────────────────────────────────────────────
+
+    /**
+     * Builds a display name for the Steam shortcut.
+     * Prefixed with "[EmuSync]" to clearly identify managed shortcuts.
+     */
+    private fun buildAppName(entry: GameEntry): String {
+        return "[EmuSync] ${entry.name}"
+    }
+
+    /**
+     * Resolves the start directory for an executable across platforms.
+     */
+    fun resolveStartDir(executablePath: String): String {
+        val normalized = executablePath.replace('\\', '/')
+        val lastSlash = normalized.lastIndexOf('/')
+        if (lastSlash < 0) return "."
+        val parent = normalized.substring(0, lastSlash)
+        if (parent.isEmpty()) return "/"
+        return if (isWindows()) parent.replace('/', '\\') else parent
+    }
+
+    /**
+     * Creates a wrapper script for an emulator and returns the shortcut.
+     *
+     * On Windows:
+     * - Target is `cmd.exe`
+     * - Launch options run the batch script via `/c ""`
+     *
+     * On Linux:
+     * - Target is the `.sh` script directly
+     */
+    private fun buildEmulatorShortcut(entry: EmulatorSystem, appName: String): SteamShortcut {
+        val launcherScript = createWrapperScript(entry)
+        val startDir = resolveStartDir(entry.executablePath)
+
+        return if (isWindows()) {
+            val comspec = System.getenv("COMSPEC") ?: "C:\\Windows\\System32\\cmd.exe"
+            SteamShortcut(
+                appId = generateAppId(),
+                appName = appName,
+                exe = "\"$comspec\"",
+                startDir = startDir,
+                launchOptions = "/c \"\"${launcherScript.absolutePath}\"\"",
+                tags = mapOf("0" to "EmuSync"),
+            )
+        } else {
+            SteamShortcut(
+                appId = generateAppId(),
+                appName = appName,
+                exe = "\"${launcherScript.absolutePath}\"",
+                startDir = startDir,
+                tags = mapOf("0" to "EmuSync"),
+            )
+        }
+    }
+
+    /**
+     * Creates a shortcut for a native PC game (direct executable).
+     */
+    private fun buildNativeShortcut(entry: NativePCGame, appName: String): SteamShortcut {
+        val startDir = resolveStartDir(entry.executablePath)
+        val baseArgs = entry.arguments.joinToString(" ")
+        
+        val launchOptions = if (baseArgs.isNotBlank()) "%command% $baseArgs" else ""
+
+        return SteamShortcut(
+            appId = generateAppId(),
+            appName = appName,
+            exe = "\"${entry.executablePath}\"",
+            startDir = startDir,
+            launchOptions = launchOptions,
+            tags = mapOf("0" to "EmuSync"),
+        )
     }
 
     /**
