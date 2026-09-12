@@ -66,7 +66,7 @@ jobs:
       - name: Upload AppImage Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64
+          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-linux
           path: EmuSync-x86_64.AppImage
           retention-days: 90
 
@@ -97,13 +97,13 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp build/compose/binaries/main/msi/*.msi dist/
-          cp build/compose/binaries/main/exe/*.exe dist/
+          cp build/compose/binaries/main/msi/*.msi dist/EmuSync-x86_64.msi
+          cp build/compose/binaries/main/exe/*.exe dist/EmuSync-x86_64.exe
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-windows
+          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-windows
           path: dist/*
           retention-days: 90
 
@@ -116,13 +116,13 @@ jobs:
       - name: Download Linux Artifact
         uses: actions/download-artifact@v7
         with:
-          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64
+          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-linux
           path: release-assets
 
       - name: Download Windows Artifacts
         uses: actions/download-artifact@v7
         with:
-          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-windows
+          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-windows
           path: release-assets
 
       - name: Publish GitHub Release

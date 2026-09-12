@@ -132,7 +132,7 @@ EmuSync utilizes GitHub Actions for continuous integration and automated release
 - **Publish Release (`.github/workflows/release.yml`)**: Interactive manual trigger (`workflow_dispatch`) that:
   1. Prompts for the SemVer release type (`patch`, `minor`, `major`).
   2. Bumps the application version and creates the git tag (`vX.Y.Z`).
-  3. Builds `EmuSync-x86_64.AppImage` (Linux) and `EmuSync-*.msi` / `EmuSync-*.exe` (Windows) in parallel.
+  3. Builds `EmuSync-x86_64.AppImage` (Linux), `EmuSync-x86_64.msi`, and `EmuSync-x86_64.exe` (Windows) in parallel.
   4. Creates the GitHub Release with automated changelogs and attaches all platform installers as release assets.
 
 ---
