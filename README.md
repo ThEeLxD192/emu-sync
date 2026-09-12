@@ -8,8 +8,10 @@ A modern, offline-first save synchronization manager and universal launcher for 
 
 - 🎮 **Universal Game Launcher**: Launch emulator ROMs and native PC games directly from a sleek dark-themed UI.
 - ☁️ **Google Drive Save Sync**: Automatic pre-play download and post-play upload of game saves with folder organization per emulator/game.
-- 📴 **100% Offline-First**: Launch and play your games instantly without internet connection; saves are safely kept locally and synced whenever connection returns.
+- 🔄 **Bidirectional Timestamp Synchronization**: Google Drive server-side timestamps are mirrored to local files, ensuring seamless sync tracking across app restarts.
+- 📴 **100% Offline-First**: Launch and play your games instantly without an internet connection; saves are safely kept locally and synced whenever connection returns.
 - ⚔️ **Smart Conflict Resolution**: Detects if offline progress is newer than cloud saves, presenting an intuitive resolution dialog.
+- 🚀 **In-App Auto-Updater**: Built-in update detector against GitHub Releases with background download and in-place restart for AppImage builds.
 - 🕹️ **Steam Deck & Controller Layouts**: One-click registration as Non-Steam games into `shortcuts.vdf` for Steam Big Picture / Game Mode and custom controller profiles.
 - 🐳 **Hermetic Docker Build**: Package reproducible, standalone `.AppImage` binaries without requiring local toolchains.
 
@@ -18,7 +20,8 @@ A modern, offline-first save synchronization manager and universal launcher for 
 ## Architecture
 
 - **UI Framework**: Jetpack Compose Multiplatform (Desktop JVM) with Kotlin Coroutines and StateFlow.
-- **HTTP Engine**: Ktor Client with CIO engine, OAuth 2.0 loopback flow, and fast connection timeouts.
+- **HTTP Engine**: Ktor Client with CIO engine, OAuth 2.0 loopback flow, and resilient timeout handling.
+- **Auto-Update Engine**: GitHub Releases API integration with atomic AppImage swap and restart.
 - **Steam Integration**: Binary VDF parser/serializer for Steam's `shortcuts.vdf` and launcher shell scripts.
 - **Build System**: Gradle 8.11 with Java 21 LTS runtime and AppImage packaging toolchain.
 
@@ -91,7 +94,7 @@ Edit `config.json` with your preferred emulators, paths, and Google Drive OAuth 
 
 #### 1. Quick Build via Docker (Recommended)
 
-Generate a standalone `EmuSync-1.0.0-x86_64.AppImage` directly in the project root:
+Generate a standalone `EmuSync-x86_64.AppImage` directly in the project root:
 
 ```bash
 docker compose build && docker compose run --rm build
@@ -100,7 +103,7 @@ docker compose build && docker compose run --rm build
 Then run the AppImage:
 
 ```bash
-./EmuSync-1.0.0-x86_64.AppImage
+./EmuSync-x86_64.AppImage
 ```
 
 #### 2. Local Gradle Build
@@ -109,9 +112,22 @@ Then run the AppImage:
 # Run unit tests
 ./gradlew test
 
-# Run app directly
+# Run app directly in development mode
 ./gradlew run
 ```
+
+---
+
+## CI/CD & Automated Releases
+
+EmuSync utilizes GitHub Actions for continuous integration and automated release packaging:
+
+- **CI Validation (`.github/workflows/ci.yml`)**: Runs on every push and pull request to `main`, verifying unit tests (`./gradlew test`) and Compose Desktop packaging.
+- **Publish Release (`.github/workflows/release.yml`)**: Interactive manual trigger (`workflow_dispatch`) that:
+  1. Prompts for the SemVer release type (`patch`, `minor`, `major`).
+  2. Bumps the application version and creates the git tag (`vX.Y.Z`).
+  3. Packages the standalone `EmuSync-x86_64.AppImage` inside Docker.
+  4. Creates the GitHub Release with automated changelogs and attaches the AppImage as a release asset.
 
 ---
 

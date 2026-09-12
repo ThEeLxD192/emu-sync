@@ -145,7 +145,7 @@ class SyncOrchestrator(
             }
 
             when {
-                !anyFileChecked -> CloudSyncStatus.IDLE
+                !anyFileChecked -> CloudSyncStatus.IN_SYNC
                 hasConflict || (hasNewerLocal && hasNewerCloud) -> CloudSyncStatus.CONFLICT
                 hasNewerLocal || hasNewerCloud -> CloudSyncStatus.OUT_OF_SYNC
                 else -> CloudSyncStatus.IN_SYNC
@@ -262,7 +262,7 @@ class SyncOrchestrator(
             if (choice == SyncDecision.DOWNLOAD_CLOUD) {
                 for (pair in pairs) {
                     pair.localFile.parentFile?.mkdirs()
-                    transfer.download(token, pair.cloudFile.id, pair.localFile)
+                    transfer.download(token, pair.cloudFile.id, pair.localFile, pair.cloudFile.modifiedTime)
                 }
             } else if (choice == SyncDecision.UPLOAD_LOCAL) {
                 for (localFile in localFiles) {
@@ -275,7 +275,7 @@ class SyncOrchestrator(
             for (pair in pairs) {
                 if (pair.decision == SyncDecision.DOWNLOAD_CLOUD) {
                     pair.localFile.parentFile?.mkdirs()
-                    transfer.download(token, pair.cloudFile.id, pair.localFile)
+                    transfer.download(token, pair.cloudFile.id, pair.localFile, pair.cloudFile.modifiedTime)
                 }
             }
             for (localFile in localFiles) {
@@ -297,12 +297,16 @@ class SyncOrchestrator(
 
         if (!localSavePath.exists() && cloudFile != null) {
             localSavePath.parentFile?.mkdirs()
-            transfer.download(token, cloudFile.id, localSavePath)
+            transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
             return
         }
 
         if (localSavePath.exists() && cloudFile == null) {
-            transfer.upload(token, localSavePath, driveName = localSavePath.name, parentFolderId = folderId)
+            val res = transfer.upload(token, localSavePath, driveName = localSavePath.name, parentFolderId = folderId)
+            try {
+                localSavePath.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
+            } catch (_: Exception) {
+            }
             return
         }
 
@@ -310,10 +314,14 @@ class SyncOrchestrator(
             val decision = resolveConflict(localSavePath.lastModified(), cloudFile.modifiedTime)
             when (decision) {
                 SyncDecision.DOWNLOAD_CLOUD -> {
-                    transfer.download(token, cloudFile.id, localSavePath)
+                    transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
                 }
                 SyncDecision.UPLOAD_LOCAL -> {
-                    transfer.update(token, cloudFile.id, localSavePath)
+                    val res = transfer.update(token, cloudFile.id, localSavePath)
+                    try {
+                        localSavePath.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
+                    } catch (_: Exception) {
+                    }
                 }
                 SyncDecision.IN_SYNC -> {
                     // Up to date
@@ -336,9 +344,13 @@ class SyncOrchestrator(
                     }
 
                     if (choice == SyncDecision.DOWNLOAD_CLOUD) {
-                        transfer.download(token, cloudFile.id, localSavePath)
+                        transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
                     } else if (choice == SyncDecision.UPLOAD_LOCAL) {
-                        transfer.update(token, cloudFile.id, localSavePath)
+                        val res = transfer.update(token, cloudFile.id, localSavePath)
+                        try {
+                            localSavePath.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
+                        } catch (_: Exception) {
+                        }
                     }
                 }
             }
@@ -474,7 +486,7 @@ class SyncOrchestrator(
                 if (choice == SyncDecision.DOWNLOAD_CLOUD) {
                     for (pair in pairs) {
                         pair.localFile.parentFile?.mkdirs()
-                        transfer.download(token, pair.cloudFile.id, pair.localFile)
+                        transfer.download(token, pair.cloudFile.id, pair.localFile, pair.cloudFile.modifiedTime)
                     }
                 }
                 return choice
@@ -482,7 +494,7 @@ class SyncOrchestrator(
                 for (pair in pairs) {
                     if (pair.decision == SyncDecision.DOWNLOAD_CLOUD) {
                         pair.localFile.parentFile?.mkdirs()
-                        transfer.download(token, pair.cloudFile.id, pair.localFile)
+                        transfer.download(token, pair.cloudFile.id, pair.localFile, pair.cloudFile.modifiedTime)
                     }
                 }
                 return null
@@ -492,7 +504,7 @@ class SyncOrchestrator(
 
             if (!localSavePath.exists()) {
                 localSavePath.parentFile?.mkdirs()
-                transfer.download(token, cloudFile.id, localSavePath)
+                transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
                 return null
             }
 
@@ -503,7 +515,7 @@ class SyncOrchestrator(
 
             when (decision) {
                 SyncDecision.DOWNLOAD_CLOUD -> {
-                    transfer.download(token, cloudFile.id, localSavePath)
+                    transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
                     return null
                 }
                 SyncDecision.UPLOAD_LOCAL, SyncDecision.IN_SYNC -> {
@@ -526,7 +538,7 @@ class SyncOrchestrator(
                         ))
                     }
                     if (choice == SyncDecision.DOWNLOAD_CLOUD) {
-                        transfer.download(token, cloudFile.id, localSavePath)
+                        transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
                     }
                     return choice
                 }
@@ -574,10 +586,18 @@ class SyncOrchestrator(
             val isNewerLocally = localFile.lastModified() > cloudMs
 
             if (force || isNewerLocally) {
-                transfer.update(token, cloudFile.id, localFile)
+                val res = transfer.update(token, cloudFile.id, localFile)
+                try {
+                    localFile.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
+                } catch (_: Exception) {
+                }
             }
         } else {
-            transfer.upload(token, localFile, driveName = driveName, parentFolderId = parentFolderId)
+            val res = transfer.upload(token, localFile, driveName = driveName, parentFolderId = parentFolderId)
+            try {
+                localFile.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
+            } catch (_: Exception) {
+            }
         }
     }
 

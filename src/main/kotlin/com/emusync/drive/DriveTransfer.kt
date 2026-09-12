@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.io.File
+import java.time.Instant
 
 /**
  * Response from Drive upload (create or update).
@@ -48,12 +49,18 @@ class DriveTransfer(private val client: HttpClient) {
     /**
      * Downloads a file from Google Drive and saves it to a local path.
      *
-     * @param accessToken Valid OAuth 2.0 access token.
-     * @param fileId      Google Drive file ID to download.
-     * @param destination Local [File] path where the content will be written.
+     * @param accessToken  Valid OAuth 2.0 access token.
+     * @param fileId       Google Drive file ID to download.
+     * @param destination  Local [File] path where the content will be written.
+     * @param modifiedTime Optional ISO 8601 modifiedTime from Drive to synchronize local timestamp.
      * @throws DriveApiException if the download fails.
      */
-    suspend fun download(accessToken: String, fileId: String, destination: File) {
+    suspend fun download(
+        accessToken: String,
+        fileId: String,
+        destination: File,
+        modifiedTime: String? = null,
+    ) {
         val response = client.get("$DOWNLOAD_URL/$fileId") {
             header(HttpHeaders.Authorization, "Bearer $accessToken")
             parameter("alt", "media")
@@ -68,6 +75,14 @@ class DriveTransfer(private val client: HttpClient) {
         withContext(Dispatchers.IO) {
             destination.parentFile?.mkdirs()
             destination.writeBytes(bytes)
+            if (modifiedTime != null) {
+                try {
+                    val epochMs = Instant.parse(modifiedTime).toEpochMilli()
+                    destination.setLastModified(epochMs)
+                } catch (_: Exception) {
+                    // Ignore timestamp setting failure
+                }
+            }
         }
     }
 

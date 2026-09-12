@@ -30,6 +30,7 @@ class DirectorySyncTest {
     private fun createMockDriveClient(
         cloudFiles: List<Pair<String, String>>, // Pair(fileName, modifiedTimeIso)
         fileContents: Map<String, ByteArray> = emptyMap(),
+        uploadResponseModTime: String = "2026-06-01T15:00:00.000Z",
     ): HttpClient {
         return HttpClient(MockEngine) {
             install(ContentNegotiation) {
@@ -44,6 +45,13 @@ class DirectorySyncTest {
                         url.contains("oauth2.googleapis.com/token") -> {
                             respond(
                                 content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
+                                headers = jsonHeaders,
+                            )
+                        }
+                        // Upload or update file
+                        url.contains("upload/drive/v3/files") -> {
+                            respond(
+                                content = """{"id":"mock-uploaded-id","name":"mock-file","modifiedTime":"$uploadResponseModTime"}""",
                                 headers = jsonHeaders,
                             )
                         }
@@ -318,5 +326,152 @@ class DirectorySyncTest {
         assertTrue(success)
         assertTrue(conflictEncountered, "Conflict dialog should have been triggered for newer local files")
         assertEquals("CLOUD_OVERWRITE_CONTENT", localSfo.readText(), "Local file should have been overwritten with cloud content")
+    }
+
+    @Test
+    fun `syncEntry manual download should preserve cloud modifiedTime on local files and subsequent check returns IN_SYNC`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val localSaveDir = File(tempDir, "savedata")
+
+        val entry = EmulatorSystem(
+            name = "Playstation 3",
+            executablePath = "rpcs3",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("sfb"),
+            savePaths = listOf(localSaveDir.absolutePath),
+        )
+
+        val config = AppConfig(
+            googleDrive = GoogleDriveConfig(
+                clientId = "test-client",
+                clientSecret = "test-secret",
+                refreshToken = "test-refresh-token",
+            ),
+            entries = listOf(entry),
+        )
+        configManager.save(config)
+
+        val cloudTimestamp = "2026-01-01T12:00:00.000Z"
+        val mockClient = createMockDriveClient(
+            cloudFiles = listOf("BLUS30481/PARAM.SFO" to cloudTimestamp),
+            fileContents = mapOf("file-0" to "MOCK_PARAM_SFO_CONTENT".toByteArray()),
+        )
+
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        val success = orchestrator.syncEntry(entry)
+        assertTrue(success)
+
+        val downloadedSfo = File(localSaveDir, "BLUS30481/PARAM.SFO")
+        assertTrue(downloadedSfo.exists())
+        assertEquals(Instant.parse(cloudTimestamp).toEpochMilli(), downloadedSfo.lastModified())
+
+        val status = orchestrator.checkEntrySyncStatus(entry)
+        assertEquals(CloudSyncStatus.IN_SYNC, status)
+    }
+
+    @Test
+    fun `syncEntry manual upload should update local file timestamp to Drive response modifiedTime and subsequent check returns IN_SYNC`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val localSaveDir = File(tempDir, "savedata/BLUS30481").apply { mkdirs() }
+        val localSfo = File(localSaveDir, "PARAM.SFO").apply {
+            writeText("LOCAL_CONTENT")
+            setLastModified(1000000L)
+        }
+
+        val entry = EmulatorSystem(
+            name = "Playstation 3",
+            executablePath = "rpcs3",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("sfb"),
+            savePaths = listOf(File(tempDir, "savedata").absolutePath),
+        )
+
+        val config = AppConfig(
+            googleDrive = GoogleDriveConfig(
+                clientId = "test-client",
+                clientSecret = "test-secret",
+                refreshToken = "test-refresh-token",
+            ),
+            entries = listOf(entry),
+        )
+        configManager.save(config)
+
+        val expectedDriveTimestamp = "2026-06-01T15:00:00.000Z"
+        val mockClient = createMockDriveClient(
+            cloudFiles = emptyList(),
+            uploadResponseModTime = expectedDriveTimestamp,
+        )
+
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        val success = orchestrator.syncEntry(entry)
+        assertTrue(success)
+
+        val expectedEpochMs = Instant.parse(expectedDriveTimestamp).toEpochMilli()
+        assertEquals(expectedEpochMs, localSfo.lastModified())
+
+        val postUploadClient = createMockDriveClient(
+            cloudFiles = listOf("BLUS30481/PARAM.SFO" to expectedDriveTimestamp),
+        )
+        val postUploadOrchestrator = SyncOrchestrator(
+            client = postUploadClient,
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+        val status = postUploadOrchestrator.checkEntrySyncStatus(entry)
+        assertEquals(CloudSyncStatus.IN_SYNC, status)
+    }
+
+    @Test
+    fun `checkEntrySyncStatus should return IN_SYNC when directory has no local and no cloud files`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val localSaveDir = File(tempDir, "savedata").apply { mkdirs() }
+
+        val entry = EmulatorSystem(
+            name = "Playstation 3",
+            executablePath = "rpcs3",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("sfb"),
+            savePaths = listOf(localSaveDir.absolutePath),
+        )
+
+        val config = AppConfig(
+            googleDrive = GoogleDriveConfig(
+                clientId = "test-client",
+                clientSecret = "test-secret",
+                refreshToken = "test-refresh-token",
+            ),
+            entries = listOf(entry),
+        )
+        configManager.save(config)
+
+        val mockClient = createMockDriveClient(
+            cloudFiles = emptyList(),
+        )
+
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        val status = orchestrator.checkEntrySyncStatus(entry)
+        assertEquals(CloudSyncStatus.IN_SYNC, status)
     }
 }

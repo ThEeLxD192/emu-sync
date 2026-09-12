@@ -86,7 +86,15 @@ class AppViewModel(
      * Selects a category from the sidebar and loads its games.
      */
     suspend fun selectEntry(entry: GameEntry) {
-        _uiState.update { it.copy(isLoading = true, selectedEntry = entry) }
+        val hasDriveLinked = _uiState.value.config?.googleDrive?.refreshToken?.isNotBlank() == true
+        val initialStatus = if (hasDriveLinked) CloudSyncStatus.CHECKING else CloudSyncStatus.NOT_CONFIGURED
+        _uiState.update {
+            it.copy(
+                isLoading = true,
+                selectedEntry = entry,
+                entrySyncStatus = it.entrySyncStatus + (entry.name to initialStatus),
+            )
+        }
         val items = when (entry) {
             is EmulatorSystem -> {
                 val roms = scanRoms(entry.romsDirectory, entry.extensions)
@@ -111,7 +119,7 @@ class AppViewModel(
         _uiState.update { it.copy(isLoading = false, gameItems = items) }
 
         // Trigger background sync check if Google Drive is linked
-        if (_uiState.value.config?.googleDrive?.refreshToken?.isNotBlank() == true) {
+        if (hasDriveLinked) {
             checkSyncForEntry(entry)
         }
     }
