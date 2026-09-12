@@ -58,7 +58,7 @@ compose.desktop {
 
             // Include the HTTP server module needed by the OAuth loopback flow
             modules("jdk.httpserver")
-            packageVersion = "0.2.2"
+            packageVersion = "0.2.3"
             description = "Centralized game launcher and save sync manager"
             vendor = "EmuSync"
 
