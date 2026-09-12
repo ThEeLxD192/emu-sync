@@ -49,9 +49,10 @@ data class UpdateInfo(
     val releaseNotes: String,
     val downloadUrl: String,
     val assetSize: Long,
+    val assetName: String = "",
 )
 
-class UpdateManager(
+open class UpdateManager(
     private val client: HttpClient = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(Json {
@@ -66,6 +67,20 @@ class UpdateManager(
         }
     }
 ) {
+    /**
+     * Indicates whether the host OS is Windows.
+     * Can be overridden in tests to simulate Windows environment.
+     */
+    open fun isWindows(): Boolean =
+        System.getProperty("os.name", "").lowercase().contains("windows")
+
+    /**
+     * Finds the best asset for the current operating system.
+     */
+    open fun findBestAsset(assets: List<GitHubAsset>): GitHubAsset? {
+        return findBestAssetForPlatform(assets, isWindows = isWindows())
+    }
+
     /**
      * Checks GitHub for the latest release and compares with the running version.
      */
@@ -91,10 +106,8 @@ class UpdateManager(
                 return@withContext null
             }
 
-            // Find an AppImage asset (e.g. EmuSync-x86_64.AppImage or any .AppImage)
-            val asset = release.assets.firstOrNull {
-                it.name.endsWith(".AppImage", ignoreCase = true)
-            } ?: return@withContext null
+            // Find platform-appropriate asset (.msi/.exe on Windows, .AppImage on Linux)
+            val asset = findBestAsset(release.assets) ?: return@withContext null
 
             UpdateInfo(
                 version = remoteVersion,
@@ -102,6 +115,7 @@ class UpdateManager(
                 releaseNotes = release.body ?: release.name ?: "New version $remoteVersion available.",
                 downloadUrl = asset.downloadUrl,
                 assetSize = asset.size,
+                assetName = asset.name,
             )
         } catch (_: Throwable) {
             null
@@ -109,7 +123,7 @@ class UpdateManager(
     }
 
     /**
-     * Downloads the AppImage from [downloadUrl] to [destinationFile] reporting progress.
+     * Downloads the asset from [downloadUrl] to [destinationFile] reporting progress.
      */
     suspend fun downloadUpdate(
         downloadUrl: String,
@@ -164,9 +178,58 @@ class UpdateManager(
     }
 
     /**
-     * Replaces the currently running AppImage and restarts the application.
+     * Applies the downloaded update and restarts the application.
+     * On Windows, launches the installer (.msi or .exe) and terminates EmuSync.
+     * On Linux, atomically replaces the AppImage and launches the new executable.
      */
-    fun applyUpdateAndRestart(downloadedFile: File): Boolean {
+    open fun applyUpdateAndRestart(downloadedFile: File): Boolean {
+        if (!downloadedFile.exists()) return false
+
+        return if (isWindows()) {
+            applyWindowsUpdateAndRestart(downloadedFile)
+        } else {
+            applyLinuxUpdateAndRestart(downloadedFile)
+        }
+    }
+
+    /**
+     * Applies an update on Windows by running the installer (.msi or .exe).
+     */
+    open fun applyWindowsUpdateAndRestart(
+        downloadedFile: File,
+        launcher: (List<String>) -> Unit = { cmd ->
+            ProcessBuilder(cmd).start()
+            exitProcess(0)
+        }
+    ): Boolean {
+        return try {
+            val name = downloadedFile.name.lowercase()
+            when {
+                name.endsWith(".msi") -> {
+                    launcher(listOf("msiexec", "/i", downloadedFile.absolutePath))
+                    true
+                }
+                name.endsWith(".exe") -> {
+                    launcher(listOf(downloadedFile.absolutePath))
+                    true
+                }
+                else -> false
+            }
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Replaces the currently running AppImage on Linux and restarts the application.
+     */
+    open fun applyLinuxUpdateAndRestart(
+        downloadedFile: File,
+        launcher: (String) -> Unit = { path ->
+            ProcessBuilder(path).start()
+            exitProcess(0)
+        }
+    ): Boolean {
         val currentAppImagePath = System.getenv("APPIMAGE") ?: return false
         val currentAppImage = File(currentAppImagePath)
         if (!currentAppImage.exists() || !downloadedFile.exists()) return false
@@ -191,17 +254,31 @@ class UpdateManager(
             currentAppImage.setExecutable(true, false)
 
             // Launch the updated AppImage in a separate detached process
-            ProcessBuilder(currentAppImage.absolutePath)
-                .start()
-
-            // Exit current instance cleanly
-            exitProcess(0)
+            launcher(currentAppImage.absolutePath)
+            true
         } catch (_: Throwable) {
             false
         }
     }
 
     companion object {
+        /**
+         * Selects the most appropriate asset from a release based on platform priority.
+         * Windows: .msi > .exe > .zip
+         * Linux: .AppImage > .tar.gz > .deb
+         */
+        fun findBestAssetForPlatform(assets: List<GitHubAsset>, isWindows: Boolean): GitHubAsset? {
+            return if (isWindows) {
+                assets.firstOrNull { it.name.endsWith(".msi", ignoreCase = true) }
+                    ?: assets.firstOrNull { it.name.endsWith(".exe", ignoreCase = true) }
+                    ?: assets.firstOrNull { it.name.endsWith(".zip", ignoreCase = true) }
+            } else {
+                assets.firstOrNull { it.name.endsWith(".AppImage", ignoreCase = true) }
+                    ?: assets.firstOrNull { it.name.endsWith(".tar.gz", ignoreCase = true) }
+                    ?: assets.firstOrNull { it.name.endsWith(".deb", ignoreCase = true) }
+            }
+        }
+
         /**
          * Compares semantic versions (e.g. 0.1.0 vs 0.1.1 or 0.2.0 vs 0.1.9).
          */
