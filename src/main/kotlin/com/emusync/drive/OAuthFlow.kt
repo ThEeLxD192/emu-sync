@@ -434,10 +434,14 @@ class OAuthFlow(private val client: HttpClient) {
                         if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
                             Desktop.getDesktop().browse(URI(authUrl))
                         } else {
-                            ProcessBuilder("cmd", "/c", "start", authUrl).start()
+                            ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", authUrl).start()
                         }
                     } catch (_: Throwable) {
-                        ProcessBuilder("cmd", "/c", "start", authUrl).start()
+                        try {
+                            ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", authUrl).start()
+                        } catch (_: Throwable) {
+                            ProcessBuilder("cmd", "/c", "start", "\"\"", authUrl.replace("&", "^&")).start()
+                        }
                     }
                 } else {
                     if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {

@@ -152,10 +152,10 @@ class GameRunner {
         return when (entry) {
             is EmulatorSystem -> {
                 // Use explicit steamProcessName, or derive from executable basename
-                entry.steamProcessName ?: File(entry.executablePath).name
+                entry.steamProcessName ?: entry.executablePath.replace('\\', '/').substringAfterLast('/').ifBlank { null }
             }
             is NativePCGame -> {
-                entry.waitForProcess ?: File(entry.executablePath).name
+                entry.waitForProcess ?: entry.executablePath.replace('\\', '/').substringAfterLast('/').ifBlank { null }
             }
         }
     }
