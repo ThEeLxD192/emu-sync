@@ -109,8 +109,7 @@ class GameRunner {
         // Non-Steam shortcuts use a 64-bit Game ID: (unsigned_appid << 32) | 0x02000000
         val unsignedAppId = appId.toUInt().toLong()
         val gameId = (unsignedAppId shl 32) or 0x02000000L
-        ProcessBuilder("steam", "steam://rungameid/$gameId")
-            .start()
+        launchSteamUri("steam://rungameid/$gameId")
 
         // Step 3: Wait for the game/emulator process to appear and exit
         val processName = resolveProcessName(entry)
@@ -119,6 +118,28 @@ class GameRunner {
         } else {
             // Fallback: wait a reasonable time if we can't detect the process
             delay(5000)
+        }
+    }
+
+    /**
+     * Launches a steam:// URI in a cross-platform manner.
+     */
+    private fun launchSteamUri(uri: String) {
+        val os = System.getProperty("os.name", "").lowercase()
+        try {
+            if (os.contains("win")) {
+                ProcessBuilder("cmd", "/c", "start", uri).start()
+            } else {
+                ProcessBuilder("steam", uri).start()
+            }
+        } catch (_: Exception) {
+            try {
+                if (java.awt.Desktop.isDesktopSupported() && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.BROWSE)) {
+                    java.awt.Desktop.getDesktop().browse(java.net.URI(uri))
+                }
+            } catch (_: Exception) {
+                // Ignore fallback failure
+            }
         }
     }
 
@@ -197,13 +218,73 @@ class GameRunner {
         }
     }
 
-    private fun isProcessRunning(name: String): Boolean {
+    /**
+     * Checks if a process with [name] is currently running on the system.
+     *
+     * Uses Java 9+ [ProcessHandle] as the primary cross-platform mechanism (Windows, Linux, macOS).
+     * Falls back to platform-specific CLI tools (tasklist on Windows, pgrep on Linux/macOS) if needed.
+     */
+    internal fun isProcessRunning(name: String): Boolean {
+        val cleanName = name.trim().removeSurrounding("\"")
+        if (cleanName.isBlank()) return false
+        val nameWithoutExt = File(cleanName).nameWithoutExtension
+
+        // 1. Cross-platform JVM ProcessHandle API
+        try {
+            val matched = ProcessHandle.allProcesses().anyMatch { handle ->
+                if (!handle.isAlive) return@anyMatch false
+                val info = handle.info()
+
+                val cmd = info.command().orElse(null)
+                if (!cmd.isNullOrBlank()) {
+                    val exeFile = File(cmd)
+                    val exeName = exeFile.name
+                    val exeNameNoExt = exeFile.nameWithoutExtension
+
+                    if (exeName.equals(cleanName, ignoreCase = true) ||
+                        exeNameNoExt.equals(cleanName, ignoreCase = true) ||
+                        exeNameNoExt.equals(nameWithoutExt, ignoreCase = true) ||
+                        exeFile.absolutePath.contains(cleanName, ignoreCase = true)
+                    ) {
+                        return@anyMatch true
+                    }
+                }
+
+                val cmdLine = info.commandLine().orElse(null)
+                if (!cmdLine.isNullOrBlank()) {
+                    if (cmdLine.contains(cleanName, ignoreCase = true) ||
+                        cmdLine.contains(nameWithoutExt, ignoreCase = true)
+                    ) {
+                        return@anyMatch true
+                    }
+                }
+
+                false
+            }
+            if (matched) return true
+        } catch (_: Exception) {
+            // Proceed to fallback
+        }
+
+        // 2. OS-specific fallback CLI tools
+        return fallbackProcessCheck(cleanName)
+    }
+
+    private fun fallbackProcessCheck(cleanName: String): Boolean {
+        val os = System.getProperty("os.name", "").lowercase()
         return try {
-            // Use -f to match against the full command line, since -x can't match
-            // process names longer than 15 characters (e.g. AppImage executables).
-            val process = ProcessBuilder("pgrep", "-f", name).start()
-            process.waitFor() == 0
-        } catch (e: Exception) {
+            if (os.contains("win")) {
+                val targetExe = if (cleanName.endsWith(".exe", ignoreCase = true)) cleanName else "$cleanName.exe"
+                val pb = ProcessBuilder("tasklist", "/FI", "IMAGENAME eq $targetExe", "/NH")
+                val process = pb.start()
+                val output = process.inputStream.bufferedReader().readText()
+                process.waitFor()
+                output.contains(targetExe, ignoreCase = true)
+            } else {
+                val process = ProcessBuilder("pgrep", "-f", cleanName).start()
+                process.waitFor() == 0
+            }
+        } catch (_: Exception) {
             false
         }
     }

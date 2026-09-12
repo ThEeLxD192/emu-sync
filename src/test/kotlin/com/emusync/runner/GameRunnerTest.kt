@@ -59,4 +59,48 @@ class GameRunnerTest {
         assertEquals(0, result.exitCode)
         assertTrue(result.durationMs >= 0)
     }
+
+    @Test
+    fun `isProcessRunning should return false for blank or non-existent process`() {
+        assertEquals(false, runner.isProcessRunning(""))
+        assertEquals(false, runner.isProcessRunning("   "))
+        assertEquals(false, runner.isProcessRunning("definitely_non_existent_process_987654"))
+    }
+
+    @Test
+    fun `isProcessRunning should detect active process and handle lifecycle`() {
+        val process = ProcessBuilder("sleep", "5").start()
+        try {
+            assertTrue(runner.isProcessRunning("sleep"), "Should detect running sleep process")
+            assertTrue(runner.isProcessRunning("\"sleep\""), "Should handle quoted process name")
+        } finally {
+            process.destroyForcibly()
+            process.waitFor()
+        }
+    }
+
+    @Test
+    fun `should wait for external process when launcher exits early`(@TempDir tempDir: File) = runTest {
+        val gameScript = File(tempDir, "real_game.sh").apply {
+            writeText("#!/bin/sh\nsleep 2\n")
+            setExecutable(true)
+        }
+        val launcherScript = File(tempDir, "launcher.sh").apply {
+            writeText("#!/bin/sh\n\"${gameScript.absolutePath}\" &\nexit 0\n")
+            setExecutable(true)
+        }
+
+        val nativeGame = NativePCGame(
+            name = "Async Game",
+            executablePath = launcherScript.absolutePath,
+            waitForProcess = "real_game.sh"
+        )
+
+        val start = System.currentTimeMillis()
+        val result = runner.launch(nativeGame)
+        val elapsed = System.currentTimeMillis() - start
+
+        assertEquals(0, result.exitCode)
+        assertTrue(elapsed >= 1800, "Runner should have waited for real_game.sh to complete (elapsed: ${elapsed}ms)")
+    }
 }
