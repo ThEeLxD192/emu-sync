@@ -9,7 +9,7 @@ import com.emusync.runner.GameRunner
 import com.emusync.ui.AppStatus
 import com.emusync.ui.CloudSyncStatus
 import com.emusync.ui.GameItem
-import io.ktor.client.*
+import io.ktor.client.HttpClient
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -163,15 +163,15 @@ class SyncOrchestrator(
         return try {
             val driveConfig = config.googleDrive
             if (driveConfig == null || driveConfig.refreshToken.isNullOrBlank()) {
-                onStatus(AppStatus.Error("Google Drive no está conectado. Haz clic en 'Connect Drive' en la barra superior para iniciar sesión."))
+                onStatus(AppStatus.Error("Google Drive is not connected. Click 'Connect Drive' in the top bar to sign in."))
                 return false
             }
 
-            onStatus(AppStatus.Syncing("Conectando con Google Drive..."))
+            onStatus(AppStatus.Syncing("Connecting to Google Drive..."))
             val token = try {
                 oauthFlow.authorize(config, configManager, allowInteractive = false)
             } catch (e: Exception) {
-                onStatus(AppStatus.Error("No se pudo conectar con Google Drive (${e.message ?: "sesión expirada"}). Por favor, vuelve a vincular tu cuenta haciendo clic en 'Connect Drive'."))
+                onStatus(AppStatus.Error("Could not connect to Google Drive (${e.message ?: "session expired"}). Please reconnect your account by clicking 'Connect Drive'."))
                 return false
             }
 
@@ -185,7 +185,7 @@ class SyncOrchestrator(
             val cloudFiles = search.listFilesInFolder(token, folderId)
 
             for (savePath in savePaths) {
-                onStatus(AppStatus.Syncing("Sincronizando ${entry.name}..."))
+                onStatus(AppStatus.Syncing("Syncing ${entry.name}..."))
                 val isDirectory = when {
                     savePath.exists() -> savePath.isDirectory
                     savePath.extension.isNotEmpty() -> false
@@ -204,7 +204,7 @@ class SyncOrchestrator(
             onStatus(AppStatus.Idle)
             true
         } catch (e: Exception) {
-            onStatus(AppStatus.Error("Error al sincronizar: ${e.message}"))
+            onStatus(AppStatus.Error("Sync error: ${e.message}"))
             false
         }
     }

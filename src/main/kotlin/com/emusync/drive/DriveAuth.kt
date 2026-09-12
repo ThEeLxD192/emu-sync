@@ -1,9 +1,10 @@
 package com.emusync.drive
 
-import io.ktor.client.*
-import io.ktor.client.call.*
-import io.ktor.client.request.forms.*
-import io.ktor.http.*
+import io.ktor.client.HttpClient
+import io.ktor.client.call.body
+import io.ktor.client.request.forms.submitForm
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.parameters
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 

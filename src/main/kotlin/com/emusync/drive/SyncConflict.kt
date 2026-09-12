@@ -1,6 +1,8 @@
 package com.emusync.drive
 
+import java.time.Duration
 import java.time.Instant
+import kotlin.math.abs
 
 /**
  * The result of comparing a local save file with its cloud counterpart.
@@ -36,11 +38,11 @@ fun resolveConflict(
     cloudModifiedTime: Instant,
     conflictThresholdSeconds: Long = 5L,
 ): SyncDecision {
-    val diffSeconds = java.time.Duration.between(cloudModifiedTime, localModifiedTime).seconds
+    val diffSeconds = Duration.between(cloudModifiedTime, localModifiedTime).seconds
 
     return when {
         // Within threshold → basically in sync
-        kotlin.math.abs(diffSeconds) <= conflictThresholdSeconds -> SyncDecision.IN_SYNC
+        abs(diffSeconds) <= conflictThresholdSeconds -> SyncDecision.IN_SYNC
 
         // Cloud is clearly newer → download
         diffSeconds < 0 -> SyncDecision.DOWNLOAD_CLOUD

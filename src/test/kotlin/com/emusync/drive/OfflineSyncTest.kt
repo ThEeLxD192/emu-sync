@@ -6,14 +6,16 @@ import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
-import io.ktor.client.*
-import io.ktor.client.engine.mock.*
-import io.ktor.http.*
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respondError
+import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.io.IOException
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -63,7 +65,7 @@ class OfflineSyncTest {
 
         val mockClient = HttpClient(MockEngine) {
             engine {
-                addHandler { throw java.io.IOException("Network unreachable (offline)") }
+                addHandler { throw IOException("Network unreachable (offline)") }
             }
         }
 
@@ -111,7 +113,7 @@ class OfflineSyncTest {
         // Mock HTTP client throwing offline errors
         val mockClient = HttpClient(MockEngine) {
             engine {
-                addHandler { throw java.io.IOException("No internet connection") }
+                addHandler { throw IOException("No internet connection") }
             }
         }
 

@@ -1,15 +1,21 @@
 package com.emusync.update
 
 import com.emusync.AppInfo
-import io.ktor.client.*
-import io.ktor.client.call.*
-import io.ktor.client.engine.cio.*
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.client.request.*
-import io.ktor.client.statement.*
-import io.ktor.http.*
-import io.ktor.serialization.kotlinx.json.*
-import io.ktor.utils.io.*
+import io.ktor.client.HttpClient
+import io.ktor.client.call.body
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.timeout
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.statement.HttpResponse
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentLength
+import io.ktor.serialization.kotlinx.json.json
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -52,6 +58,11 @@ class UpdateManager(
                 ignoreUnknownKeys = true
                 isLenient = true
             })
+        }
+        install(HttpTimeout) {
+            connectTimeoutMillis = 15_000
+            socketTimeoutMillis = 60_000
+            requestTimeoutMillis = null
         }
     }
 ) {
@@ -104,21 +115,33 @@ class UpdateManager(
         downloadUrl: String,
         destinationFile: File,
         onProgress: (Float) -> Unit,
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             destinationFile.parentFile?.mkdirs()
-            val response: HttpResponse = client.get(downloadUrl) {
-                header(HttpHeaders.UserAgent, "EmuSync-Desktop-App")
+            if (destinationFile.exists()) {
+                destinationFile.delete()
             }
 
-            if (response.status != HttpStatusCode.OK) return@withContext false
+            val response: HttpResponse = client.get(downloadUrl) {
+                header(HttpHeaders.UserAgent, "EmuSync-Desktop-App")
+                timeout {
+                    requestTimeoutMillis = null
+                    socketTimeoutMillis = 60_000
+                }
+            }
+
+            if (response.status != HttpStatusCode.OK) {
+                return@withContext Result.failure(
+                    IllegalStateException("HTTP ${response.status.value} ${response.status.description}")
+                )
+            }
 
             val totalBytes = response.contentLength() ?: -1L
             val channel: ByteReadChannel = response.body()
             var bytesRead = 0L
 
             destinationFile.outputStream().use { output ->
-                val buffer = ByteArray(32 * 1024)
+                val buffer = ByteArray(64 * 1024)
                 while (!channel.isClosedForRead) {
                     val read = channel.readAvailable(buffer, 0, buffer.size)
                     if (read <= 0) break
@@ -133,10 +156,10 @@ class UpdateManager(
             }
             onProgress(1f)
             destinationFile.setExecutable(true, false)
-            true
-        } catch (_: Throwable) {
+            Result.success(Unit)
+        } catch (e: Throwable) {
             destinationFile.delete()
-            false
+            Result.failure(e)
         }
     }
 
@@ -158,16 +181,17 @@ class UpdateManager(
                     StandardCopyOption.ATOMIC_MOVE
                 )
             } catch (_: Throwable) {
-                Files.move(
+                Files.copy(
                     downloadedFile.toPath(),
                     currentAppImage.toPath(),
                     StandardCopyOption.REPLACE_EXISTING
                 )
+                downloadedFile.delete()
             }
+            currentAppImage.setExecutable(true, false)
 
             // Launch the updated AppImage in a separate detached process
             ProcessBuilder(currentAppImage.absolutePath)
-                .inheritIO()
                 .start()
 
             // Exit current instance cleanly

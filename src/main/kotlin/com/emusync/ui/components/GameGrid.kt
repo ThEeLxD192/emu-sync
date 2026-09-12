@@ -1,47 +1,84 @@
 package com.emusync.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.Image
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.toComposeImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import java.io.File
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
-import com.emusync.model.NativePCGame
 import com.emusync.ui.CloudSyncStatus
 import com.emusync.ui.GameItem
 import com.emusync.ui.theme.EmuSyncColors
+import org.jetbrains.skia.Image
+import java.io.File
+import java.util.Collections
+import javax.imageio.ImageIO
 
 /**
- * Game grid that fills the main content area.
- * Shows game cards in a responsive grid layout with category header and Steam-style cloud sync status.
+ * Main content area displaying games as cards in an adaptive grid.
+ * Features prominent custom cover art with auto-lookup and hover-activated play/edit actions.
  */
 @Composable
 fun GameGrid(
@@ -193,13 +230,13 @@ private fun CloudStatusChip(
                 ) {
                     Icon(
                         imageVector = Icons.Default.CloudDone,
-                        contentDescription = "Partidas sincronizadas",
+                        contentDescription = "Saves in sync",
                         tint = EmuSyncColors.Success,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "Sincronizado",
+                        text = "In Sync",
                         style = MaterialTheme.typography.labelSmall,
                         color = EmuSyncColors.OnSurface
                     )
@@ -211,7 +248,7 @@ private fun CloudStatusChip(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
-                                contentDescription = "Comprobar",
+                                contentDescription = "Check sync",
                                 tint = EmuSyncColors.OnSurfaceDim,
                                 modifier = Modifier.size(13.dp)
                             )
@@ -238,7 +275,7 @@ private fun CloudStatusChip(
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = if (status == CloudSyncStatus.CONFLICT) "Conflicto • Sincronizar" else "No sincronizado • Sincronizar todo",
+                    text = if (status == CloudSyncStatus.CONFLICT) "Conflict • Sync" else "Out of sync • Sync All",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Medium
                 )
@@ -262,7 +299,7 @@ private fun CloudStatusChip(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = if (status == CloudSyncStatus.SYNCING) "Sincronizando..." else "Comprobando...",
+                        text = if (status == CloudSyncStatus.SYNCING) "Syncing..." else "Checking...",
                         style = MaterialTheme.typography.labelSmall,
                         color = EmuSyncColors.OnSurface
                     )
@@ -279,13 +316,13 @@ private fun CloudStatusChip(
                 ) {
                     Icon(
                         imageVector = Icons.Default.CloudSync,
-                        contentDescription = "Sincronizar todo",
+                        contentDescription = "Sync All",
                         tint = EmuSyncColors.Primary,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "Sincronizar todo",
+                        text = "Sync All",
                         style = MaterialTheme.typography.labelSmall
                     )
                 }
@@ -294,7 +331,7 @@ private fun CloudStatusChip(
     }
 }
 
-private val coverCache = java.util.Collections.synchronizedMap(
+private val coverCache = Collections.synchronizedMap(
     object : LinkedHashMap<String, ImageBitmap>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>?): Boolean {
             return size > 100
@@ -308,12 +345,12 @@ private fun loadGameCover(file: File?): ImageBitmap? {
     coverCache[path]?.let { return it }
     return try {
         val bytes = file.readBytes()
-        val bitmap = org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap()
+        val bitmap = Image.makeFromEncoded(bytes).toComposeImageBitmap()
         coverCache[path] = bitmap
         bitmap
     } catch (_: Throwable) {
         try {
-            val bitmap = javax.imageio.ImageIO.read(file)?.toComposeImageBitmap()
+            val bitmap = ImageIO.read(file)?.toComposeImageBitmap()
             if (bitmap != null) coverCache[path] = bitmap
             bitmap
         } catch (_: Throwable) {
@@ -357,7 +394,7 @@ private fun GameCard(
             .hoverable(interactionSource),
         shape = RoundedCornerShape(12.dp),
         color = cardColor,
-        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
+        border = BorderStroke(1.dp, borderColor),
     ) {
         Box(
             modifier = Modifier.fillMaxSize().padding(8.dp)

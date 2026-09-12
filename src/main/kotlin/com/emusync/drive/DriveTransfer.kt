@@ -1,10 +1,20 @@
 package com.emusync.drive
 
-import io.ktor.client.*
-import io.ktor.client.call.*
-import io.ktor.client.request.*
-import io.ktor.client.statement.*
-import io.ktor.http.*
+import io.ktor.client.HttpClient
+import io.ktor.client.call.body
+import io.ktor.client.request.forms.MultiPartFormDataContent
+import io.ktor.client.request.forms.formData
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.parameter
+import io.ktor.client.request.patch
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.Headers
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -88,8 +98,8 @@ class DriveTransfer(private val client: HttpClient) {
             parameter("fields", "id, name, modifiedTime")
 
             setBody(
-                io.ktor.client.request.forms.MultiPartFormDataContent(
-                    io.ktor.client.request.forms.formData {
+                MultiPartFormDataContent(
+                    formData {
                         // Part 1: metadata (JSON)
                         append("metadata", metadataJson,
                             Headers.build {

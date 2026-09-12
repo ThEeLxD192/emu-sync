@@ -1,7 +1,19 @@
 package com.emusync.ui.dialogs
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -9,7 +21,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material3.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,13 +39,14 @@ import androidx.compose.ui.window.Dialog
 import com.emusync.AppInfo
 import com.emusync.ui.UpdateUiState
 import com.emusync.ui.theme.EmuSyncColors
+import com.emusync.update.UpdateInfo
 import java.io.File
 
 @Composable
 fun UpdateDialog(
     state: UpdateUiState,
     onDismiss: () -> Unit,
-    onStartDownload: (com.emusync.update.UpdateInfo) -> Unit,
+    onStartDownload: (UpdateInfo) -> Unit,
     onRestart: (File) -> Unit,
 ) {
     Dialog(onDismissRequest = {
@@ -65,13 +85,13 @@ fun UpdateDialog(
                             Spacer(Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "Actualización disponible",
+                                    text = "Update Available",
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold,
                                     color = EmuSyncColors.OnSurface,
                                 )
                                 Text(
-                                    text = "Versión ${state.info.version} (actual: ${AppInfo.VERSION})",
+                                    text = "Version ${state.info.version} (current: ${AppInfo.VERSION})",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = EmuSyncColors.OnSurfaceDim,
                                 )
@@ -81,7 +101,7 @@ fun UpdateDialog(
                         Spacer(Modifier.height(16.dp))
 
                         Text(
-                            text = "Novedades:",
+                            text = "Release Notes:",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = EmuSyncColors.OnSurface,
@@ -111,7 +131,7 @@ fun UpdateDialog(
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                         ) {
                             TextButton(onClick = onDismiss) {
-                                Text("Más tarde")
+                                Text("Later")
                             }
                             Button(
                                 onClick = { onStartDownload(state.info) },
@@ -119,21 +139,21 @@ fun UpdateDialog(
                             ) {
                                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Actualizar ahora")
+                                Text("Update Now")
                             }
                         }
                     }
 
                     is UpdateUiState.Downloading -> {
                         Text(
-                            text = "Descargando actualización...",
+                            text = "Downloading update...",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = EmuSyncColors.OnSurface,
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "Descargando versión ${state.info.version} de GitHub",
+                            text = "Downloading version ${state.info.version} from GitHub",
                             style = MaterialTheme.typography.bodySmall,
                             color = EmuSyncColors.OnSurfaceDim,
                         )
@@ -171,13 +191,13 @@ fun UpdateDialog(
                             Spacer(Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "¡Actualización completada!",
+                                    text = "Update Complete!",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = EmuSyncColors.OnSurface,
                                 )
                                 Text(
-                                    text = "El nuevo AppImage está listo.",
+                                    text = "The new AppImage is ready.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = EmuSyncColors.OnSurfaceDim,
                                 )
@@ -186,7 +206,7 @@ fun UpdateDialog(
 
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            text = "Para aplicar los cambios y disfrutar de la nueva versión, reinicia EmuSync.",
+                            text = "To apply changes and enjoy the new version, restart EmuSync.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = EmuSyncColors.OnSurface,
                         )
@@ -197,20 +217,20 @@ fun UpdateDialog(
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                         ) {
                             TextButton(onClick = onDismiss) {
-                                Text("Reiniciar después")
+                                Text("Restart Later")
                             }
                             Button(
                                 onClick = { onRestart(state.downloadedFile) },
                                 colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
                             ) {
-                                Text("Reiniciar ahora")
+                                Text("Restart Now")
                             }
                         }
                     }
 
                     is UpdateUiState.Error -> {
                         Text(
-                            text = "Error al actualizar",
+                            text = "Update Error",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = EmuSyncColors.Error,
@@ -227,7 +247,7 @@ fun UpdateDialog(
                             modifier = Modifier.align(Alignment.End),
                             colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
                         ) {
-                            Text("Cerrar")
+                            Text("Close")
                         }
                     }
 

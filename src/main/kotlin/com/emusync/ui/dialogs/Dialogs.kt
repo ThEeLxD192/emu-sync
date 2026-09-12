@@ -1,18 +1,52 @@
 package com.emusync.ui.dialogs
 
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -66,11 +100,11 @@ fun StatusOverlay(
 
 @Composable
 private fun StatusDialog(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     title: String,
     subtitle: String? = null,
     spinning: Boolean,
-    color: androidx.compose.ui.graphics.Color,
+    color: Color,
 ) {
     // Spinner animation
     val infiniteTransition = rememberInfiniteTransition()
@@ -86,7 +120,7 @@ private fun StatusDialog(
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = EmuSyncColors.Surface,
-            border = androidx.compose.foundation.BorderStroke(1.dp, EmuSyncColors.Divider),
+            border = BorderStroke(1.dp, EmuSyncColors.Divider),
             tonalElevation = 8.dp,
         ) {
             Column(
@@ -143,7 +177,7 @@ private fun ErrorDialog(
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = EmuSyncColors.Surface,
-            border = androidx.compose.foundation.BorderStroke(1.dp, EmuSyncColors.Error.copy(alpha = 0.5f)),
+            border = BorderStroke(1.dp, EmuSyncColors.Error.copy(alpha = 0.5f)),
         ) {
             Column(
                 modifier = Modifier.padding(28.dp).widthIn(min = 300.dp, max = 420.dp),
@@ -157,7 +191,7 @@ private fun ErrorDialog(
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = "Aviso de Sincronización",
+                    text = "Sync Notice",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = EmuSyncColors.Error,
@@ -175,7 +209,7 @@ private fun ErrorDialog(
                     colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
                     shape = RoundedCornerShape(10.dp),
                 ) {
-                    Text("Cerrar")
+                    Text("Close")
                 }
             }
         }
@@ -204,7 +238,7 @@ private fun ConflictDialog(
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = EmuSyncColors.Surface,
-            border = androidx.compose.foundation.BorderStroke(
+            border = BorderStroke(
                 1.dp,
                 if (resolved) EmuSyncColors.Primary.copy(alpha = 0.5f)
                 else EmuSyncColors.Warning.copy(alpha = 0.5f),
@@ -309,8 +343,8 @@ private fun ConflictDialog(
 private fun ConflictOptionCard(
     title: String,
     date: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    color: androidx.compose.ui.graphics.Color,
+    icon: ImageVector,
+    color: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -318,7 +352,7 @@ private fun ConflictOptionCard(
         onClick = onClick,
         modifier = modifier.height(IntrinsicSize.Min),
         shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.4f)),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.4f)),
         colors = ButtonDefaults.outlinedButtonColors(
             containerColor = color.copy(alpha = 0.08f),
         ),

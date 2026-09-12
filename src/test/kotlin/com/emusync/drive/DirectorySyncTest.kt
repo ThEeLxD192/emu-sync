@@ -6,9 +6,12 @@ import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
 import com.emusync.ui.AppStatus
 import com.emusync.ui.CloudSyncStatus
-import io.ktor.client.*
-import io.ktor.client.engine.mock.*
-import io.ktor.http.*
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.respondOk
+import io.ktor.http.HttpHeaders
+import io.ktor.http.headersOf
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
@@ -16,6 +19,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -140,7 +144,7 @@ class DirectorySyncTest {
             writeText("PARAM_DATA")
         }
 
-        val nowIso = java.time.Instant.ofEpochMilli(paramSfo.lastModified()).toString()
+        val nowIso = Instant.ofEpochMilli(paramSfo.lastModified()).toString()
 
         val entry = EmulatorSystem(
             name = "Playstation 3",

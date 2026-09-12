@@ -2,18 +2,22 @@ package com.emusync.ui
 
 import com.emusync.config.ConfigManager
 import com.emusync.drive.DriveClientFactory
+import com.emusync.drive.OAuthFlow
 import com.emusync.drive.SyncOrchestrator
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
 import com.emusync.model.NativePCGame
 import com.emusync.scanner.scanRoms
 import com.emusync.steam.SteamShortcutManager
+import com.emusync.update.UpdateInfo
+import com.emusync.update.UpdateManager
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.io.File
 
 /**
  * ViewModel / presentation state holder for the EmuSync app.
@@ -24,7 +28,7 @@ class AppViewModel(
     private val configManager: ConfigManager,
     private val steamManager: SteamShortcutManager = SteamShortcutManager(),
     private val httpClient: HttpClient = DriveClientFactory.create(),
-    private val updateManager: com.emusync.update.UpdateManager = com.emusync.update.UpdateManager(httpClient),
+    private val updateManager: UpdateManager = UpdateManager(),
 ) {
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
@@ -342,7 +346,7 @@ class AppViewModel(
         if (cfg.googleDrive == null) return "Missing googleDrive configuration in config.json"
 
         return try {
-            val flow = com.emusync.drive.OAuthFlow(httpClient)
+            val flow = OAuthFlow(httpClient)
             flow.authorize(cfg, configManager, allowInteractive = true)
             val freshConfig = configManager.load()
             _uiState.update { it.copy(config = freshConfig) }
@@ -372,20 +376,33 @@ class AppViewModel(
         _uiState.update { it.copy(showUpdateDialog = true) }
     }
 
-    suspend fun downloadAndApplyUpdate(info: com.emusync.update.UpdateInfo) {
+    suspend fun downloadAndApplyUpdate(info: UpdateInfo) {
         _uiState.update { it.copy(updateState = UpdateUiState.Downloading(0f, info)) }
-        val tempFile = java.io.File(System.getProperty("java.io.tmpdir"), "EmuSync-update.AppImage")
-        val success = updateManager.downloadUpdate(info.downloadUrl, tempFile) { progress ->
+
+        val currentAppImagePath = System.getenv("APPIMAGE")
+        val targetDir = if (currentAppImagePath != null) {
+            val appImageFile = File(currentAppImagePath)
+            if (appImageFile.parentFile?.canWrite() == true) appImageFile.parentFile else File(System.getProperty("java.io.tmpdir"))
+        } else {
+            File(System.getProperty("java.io.tmpdir"))
+        }
+        val tempFile = File(targetDir, ".EmuSync-update-${System.currentTimeMillis()}.AppImage")
+
+        val result = updateManager.downloadUpdate(info.downloadUrl, tempFile) { progress ->
             _uiState.update { it.copy(updateState = UpdateUiState.Downloading(progress, info)) }
         }
-        if (success) {
-            _uiState.update { it.copy(updateState = UpdateUiState.ReadyToRestart(tempFile)) }
-        } else {
-            _uiState.update { it.copy(updateState = UpdateUiState.Error("Failed to download update")) }
-        }
+
+        result.fold(
+            onSuccess = {
+                _uiState.update { it.copy(updateState = UpdateUiState.ReadyToRestart(tempFile)) }
+            },
+            onFailure = { error ->
+                _uiState.update { it.copy(updateState = UpdateUiState.Error("Failed to download update: ${error.message ?: "Connection error"}")) }
+            }
+        )
     }
 
-    fun restartApp(file: java.io.File): Boolean {
+    fun restartApp(file: File): Boolean {
         return updateManager.applyUpdateAndRestart(file)
     }
 

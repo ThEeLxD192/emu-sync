@@ -4,13 +4,14 @@ import com.emusync.config.ConfigManager
 import com.emusync.model.AppConfig
 import com.emusync.model.GoogleDriveConfig
 import com.sun.net.httpserver.HttpServer
-import io.ktor.client.*
+import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.awt.Desktop
 import java.net.InetSocketAddress
 import java.net.URI
+import java.net.URLDecoder
 import java.net.URLEncoder
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -467,7 +468,7 @@ class OAuthFlow(private val client: HttpClient) {
         if (query.isBlank()) return emptyMap()
         return query.split("&").associate { param ->
             val (key, value) = param.split("=", limit = 2)
-            key to java.net.URLDecoder.decode(value, "UTF-8")
+            key to URLDecoder.decode(value, "UTF-8")
         }
     }
 }

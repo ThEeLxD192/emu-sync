@@ -2,7 +2,7 @@ package com.emusync.ui
 
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.NativePCGame
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
