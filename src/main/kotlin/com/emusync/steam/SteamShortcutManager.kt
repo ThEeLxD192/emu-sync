@@ -245,19 +245,7 @@ open class SteamShortcutManager {
         val startDir = File(entry.executablePath).parentFile?.absolutePath ?: "."
         val baseArgs = entry.arguments.joinToString(" ")
         
-        // Inject scaling fixes via Steam's launch options (covers Qt5, Qt6, and GTK)
-        val launchOptions = buildString {
-            append("QT_QPA_PLATFORM=xcb ")        // Force X11 backend (Qt)
-            append("QT_ENABLE_HIGHDPI_SCALING=0 ") // Disable Qt6 HiDPI auto-scaling
-            append("QT_AUTO_SCREEN_SCALE_FACTOR=0 ") // Disable Qt5 auto-scaling
-            append("QT_SCALE_FACTOR=1 ")           // Force 1x scale (Qt5+6)
-            append("QT_FONT_DPI=96 ")              // Force 96 DPI for font metrics
-            append("GDK_BACKEND=x11 ")             // Force X11 backend (GTK)
-            append("GDK_SCALE=1 ")                 // Force 1x scale (GTK)
-            append("GDK_DPI_SCALE=1 ")             // Force 1x DPI scale (GTK)
-            append("XCURSOR_SIZE=24 ")             // Prevent giant cursor
-            append("%command% $baseArgs")
-        }.trim()
+        val launchOptions = if (baseArgs.isNotBlank()) "%command% $baseArgs" else ""
 
         return SteamShortcut(
             appId = generateAppId(),
@@ -306,19 +294,6 @@ open class SteamShortcutManager {
             |    echo "EmuSync: ROM file not found: ${'$'}ROM_PATH"
             |    exit 1
             |fi
-            |
-            |
-            |# Fix UI scaling issues for Qt5, Qt6, and GTK apps under Gamescope (Game Mode)
-            |# Force X11/XWayland backend to prevent Wayland DPI inflation
-            |export QT_QPA_PLATFORM=xcb
-            |export QT_ENABLE_HIGHDPI_SCALING=0
-            |export QT_AUTO_SCREEN_SCALE_FACTOR=0
-            |export QT_SCALE_FACTOR=1
-            |export QT_FONT_DPI=96
-            |export GDK_BACKEND=x11
-            |export GDK_SCALE=1
-            |export GDK_DPI_SCALE=1
-            |export XCURSOR_SIZE=24
             |
             |# Fullscreen/Big Picture flags to bypass Qt windowed GUI
             |FULLSCREEN_ARGS="${resolveFullscreenArgs(entry)}"

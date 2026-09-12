@@ -79,21 +79,6 @@ class GameRunner {
             .directory(workingDir)
             .inheritIO()
 
-        // Inject scaling fixes and fullscreen flags for emulators
-        // (mirrors what the wrapper scripts do for the Steam launch path)
-        if (entry is EmulatorSystem) {
-            val env = pb.environment()
-            env["QT_QPA_PLATFORM"] = "xcb"
-            env["QT_ENABLE_HIGHDPI_SCALING"] = "0"
-            env["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
-            env["QT_SCALE_FACTOR"] = "1"
-            env["QT_FONT_DPI"] = "96"
-            env["GDK_BACKEND"] = "x11"
-            env["GDK_SCALE"] = "1"
-            env["GDK_DPI_SCALE"] = "1"
-            env["XCURSOR_SIZE"] = "24"
-        }
-
         val process = pb.start()
 
         // If it's a native game with a process-wait, we ignore the initial process exit
