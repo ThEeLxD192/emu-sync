@@ -44,10 +44,6 @@ compose.desktop {
     application {
         mainClass = "MainKt"
 
-        // Force UI scale to 1.0 so gamescope (Steam Deck Game Mode) doesn't
-        // cause the JVM to render at 2× DPI, which cuts off dialogs.
-        jvmArgs += listOf("-Dsun.java2d.uiScale=1.0")
-
         buildTypes.release.proguard {
             isEnabled.set(false)
         }
