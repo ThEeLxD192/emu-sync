@@ -32,7 +32,7 @@ A modern, offline-first save synchronization manager and universal launcher for 
 ### Prerequisites
 
 - **Java 21+** (Eclipse Temurin recommended) or **Docker**
-- **Linux x86_64** (Ubuntu, Arch, SteamOS, Fedora, Debian)
+- **Linux x86_64** (SteamOS, Ubuntu, Arch, Fedora, Debian) or **Windows 10/11 x86_64**
 
 ---
 
@@ -92,7 +92,7 @@ Edit `config.json` with your preferred emulators, paths, and Google Drive OAuth 
 
 ### Building & Running
 
-#### 1. Quick Build via Docker (Recommended)
+#### 1. Quick Build via Docker (Linux AppImage)
 
 Generate a standalone `EmuSync-x86_64.AppImage` directly in the project root:
 
@@ -106,7 +106,7 @@ Then run the AppImage:
 ./EmuSync-x86_64.AppImage
 ```
 
-#### 2. Local Gradle Build
+#### 2. Local Gradle Build (Cross-Platform)
 
 ```bash
 # Run unit tests
@@ -114,6 +114,12 @@ Then run the AppImage:
 
 # Run app directly in development mode
 ./gradlew run
+
+# Package for Windows (MSI installer & EXE bootstrapper)
+./gradlew packageReleaseMsi packageReleaseExe
+
+# Package for Linux (AppImage)
+./gradlew packageReleaseAppImage
 ```
 
 ---
@@ -122,12 +128,12 @@ Then run the AppImage:
 
 EmuSync utilizes GitHub Actions for continuous integration and automated release packaging:
 
-- **CI Validation (`.github/workflows/ci.yml`)**: Runs on every push and pull request to `main`, verifying unit tests (`./gradlew test`) and Compose Desktop packaging.
+- **CI Validation (`.github/workflows/ci.yml`)**: Runs on every push and pull request to `main`, verifying unit tests (`./gradlew test`) and Compose Desktop packaging across both Linux (AppImage) and Windows (MSI & EXE).
 - **Publish Release (`.github/workflows/release.yml`)**: Interactive manual trigger (`workflow_dispatch`) that:
   1. Prompts for the SemVer release type (`patch`, `minor`, `major`).
   2. Bumps the application version and creates the git tag (`vX.Y.Z`).
-  3. Packages the standalone `EmuSync-x86_64.AppImage` inside Docker.
-  4. Creates the GitHub Release with automated changelogs and attaches the AppImage as a release asset.
+  3. Builds `EmuSync-x86_64.AppImage` (Linux), `EmuSync-x86_64.msi`, and `EmuSync-x86_64.exe` (Windows) in parallel.
+  4. Creates the GitHub Release with automated changelogs and attaches all platform installers as release assets.
 
 ---
 

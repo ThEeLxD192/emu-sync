@@ -197,7 +197,7 @@ fun UpdateDialog(
                                     color = EmuSyncColors.OnSurface,
                                 )
                                 Text(
-                                    text = "The new AppImage is ready.",
+                                    text = "The new version is ready to install.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = EmuSyncColors.OnSurfaceDim,
                                 )

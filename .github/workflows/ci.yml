@@ -8,8 +8,16 @@ on:
 
 jobs:
   validate:
-    name: Test & Build Check
-    runs-on: ubuntu-latest
+    name: Test & Build Check (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Linux
+            os: ubuntu-latest
+          - platform: Windows
+            os: windows-latest
 
     steps:
       - name: Checkout Code
@@ -27,5 +35,16 @@ jobs:
       - name: Run Unit Tests
         run: ./gradlew test --no-daemon
 
-      - name: Verify Compose Desktop Packaging
+      - name: Verify Linux Packaging (AppImage)
+        if: matrix.platform == 'Linux'
         run: ./gradlew packageReleaseAppImage --no-daemon
+
+      - name: Verify Windows Packaging (MSI & EXE)
+        if: matrix.platform == 'Windows'
+        run: ./gradlew packageReleaseMsi packageReleaseExe --no-daemon --info
+
+      - name: Print jpackage diagnostic logs on failure
+        if: failure() && matrix.platform == 'Windows'
+        shell: bash
+        run: |
+          find build/compose/logs -type f -exec echo "=== {} ===" \; -exec cat {} \; || true

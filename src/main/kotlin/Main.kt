@@ -33,7 +33,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,9 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.toComposeImageBitmap
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
@@ -97,18 +94,14 @@ fun main() {
             icon = appIcon,
             state = windowState,
         ) {
-            // Force 1:1 dp-to-pixel mapping so gamescope's inflated DPI
-            // doesn't cause the UI to render at 2× on the Steam Deck.
-            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
-                val viewModel = remember { AppViewModel(ConfigManager("config.json")) }
+            val viewModel = remember { AppViewModel(ConfigManager("config.json")) }
 
-                // Load config on first composition
-                LaunchedEffect(Unit) {
-                    viewModel.loadConfig()
-                }
-
-                EmuSyncApp(viewModel, onExit = ::exitApplication)
+            // Load config on first composition
+            LaunchedEffect(Unit) {
+                viewModel.loadConfig()
             }
+
+            EmuSyncApp(viewModel, onExit = ::exitApplication)
         }
     }
 }

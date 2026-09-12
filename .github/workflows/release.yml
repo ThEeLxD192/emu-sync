@@ -17,9 +17,12 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Bump Version, Build & Release
+  bump-version:
+    name: Bump Version & Push Tag
     runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+      tag_name: ${{ steps.bump.outputs.tag_name }}
 
     steps:
       - name: Checkout Code
@@ -44,27 +47,92 @@ jobs:
           git tag "${{ steps.bump.outputs.tag_name }}"
           git push origin "${{ steps.bump.outputs.tag_name }}"
 
+  build-linux:
+    name: Build Linux AppImage
+    needs: bump-version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.bump-version.outputs.tag_name }}
+
       - name: Build AppImage via Docker
         run: |
           docker compose build
           docker compose run --rm build
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ steps.bump.outputs.tag_name }}
-          name: "EmuSync ${{ steps.bump.outputs.tag_name }}"
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          files: |
-            EmuSync-x86_64.AppImage
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Upload AppImage Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: EmuSync-${{ steps.bump.outputs.new_version }}-x86_64
+          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-linux
           path: EmuSync-x86_64.AppImage
           retention-days: 90
+
+  build-windows:
+    name: Build Windows MSI & EXE
+    needs: bump-version
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.bump-version.outputs.tag_name }}
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build Windows Installers (MSI & EXE)
+        run: ./gradlew packageReleaseMsi packageReleaseExe --no-daemon
+
+      - name: Prepare Windows Distribution Files
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/compose/binaries/main/msi/*.msi dist/EmuSync-x86_64.msi
+          cp build/compose/binaries/main/exe/*.exe dist/EmuSync-x86_64.exe
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-windows
+          path: dist/*
+          retention-days: 90
+
+  create-release:
+    name: Create GitHub Release
+    needs: [bump-version, build-linux, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-linux
+          path: release-assets
+
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-windows
+          path: release-assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.bump-version.outputs.tag_name }}
+          name: "EmuSync ${{ needs.bump-version.outputs.tag_name }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -87,14 +87,13 @@ class OfflineSyncTest {
         val configManager = ConfigManager(configFile.absolutePath)
 
         val dummyRom = File(tempDir, "game.bin").apply { writeText("game data") }
-        val dummyExecutable = File(tempDir, "emu.sh").apply {
-            writeText("#!/bin/sh\nexit 0\n")
-            setExecutable(true)
-        }
+        val isWindows = System.getProperty("os.name", "").lowercase().contains("windows")
+        val javaBin = File(System.getProperty("java.home"), if (isWindows) "bin/java.exe" else "bin/java").absolutePath
 
         val system = EmulatorSystem(
             name = "TestSystem",
-            executablePath = dummyExecutable.absolutePath,
+            executablePath = javaBin,
+            arguments = listOf("-version"),
             romsDirectory = tempDir.absolutePath,
             extensions = listOf("bin"),
             savePaths = listOf(File(tempDir, "save.dat").absolutePath)

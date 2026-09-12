@@ -387,14 +387,22 @@ class AppViewModel(
     suspend fun downloadAndApplyUpdate(info: UpdateInfo) {
         _uiState.update { it.copy(updateState = UpdateUiState.Downloading(0f, info)) }
 
-        val currentAppImagePath = System.getenv("APPIMAGE")
-        val targetDir = if (currentAppImagePath != null) {
-            val appImageFile = File(currentAppImagePath)
-            if (appImageFile.parentFile?.canWrite() == true) appImageFile.parentFile else File(System.getProperty("java.io.tmpdir"))
+        val isWindows = System.getProperty("os.name", "").lowercase().contains("windows")
+        val ext = File(info.assetName).extension.ifBlank { if (isWindows) "msi" else "AppImage" }
+
+        val targetDir = if (!isWindows) {
+            val currentAppImagePath = System.getenv("APPIMAGE")
+            if (currentAppImagePath != null) {
+                val appImageFile = File(currentAppImagePath)
+                if (appImageFile.parentFile?.canWrite() == true) appImageFile.parentFile else File(System.getProperty("java.io.tmpdir"))
+            } else {
+                File(System.getProperty("java.io.tmpdir"))
+            }
         } else {
             File(System.getProperty("java.io.tmpdir"))
         }
-        val tempFile = File(targetDir, ".EmuSync-update-${System.currentTimeMillis()}.AppImage")
+        val prefix = if (isWindows) "EmuSync-Setup-${info.version}" else ".EmuSync-update-${System.currentTimeMillis()}"
+        val tempFile = File(targetDir, "$prefix.$ext")
 
         val result = updateManager.downloadUpdate(info.downloadUrl, tempFile) { progress ->
             _uiState.update { it.copy(updateState = UpdateUiState.Downloading(progress, info)) }

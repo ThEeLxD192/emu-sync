@@ -426,11 +426,30 @@ class OAuthFlow(private val client: HttpClient) {
 
             // Open the browser
             try {
-                if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-                    Desktop.getDesktop().browse(URI(authUrl))
+                val os = System.getProperty("os.name", "").lowercase()
+                val isWindows = os.contains("windows")
+
+                if (isWindows) {
+                    try {
+                        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                            Desktop.getDesktop().browse(URI(authUrl))
+                        } else {
+                            ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", authUrl).start()
+                        }
+                    } catch (_: Throwable) {
+                        try {
+                            ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", authUrl).start()
+                        } catch (_: Throwable) {
+                            ProcessBuilder("cmd", "/c", "start", "\"\"", authUrl.replace("&", "^&")).start()
+                        }
+                    }
                 } else {
-                    // Fallback for headless environments (SteamOS Game Mode)
-                    Runtime.getRuntime().exec(arrayOf("xdg-open", authUrl))
+                    if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                        Desktop.getDesktop().browse(URI(authUrl))
+                    } else {
+                        // Fallback for headless environments (SteamOS Game Mode)
+                        Runtime.getRuntime().exec(arrayOf("xdg-open", authUrl))
+                    }
                 }
             } catch (e: Exception) {
                 server.stop(0)
