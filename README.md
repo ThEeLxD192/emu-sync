@@ -128,7 +128,7 @@ Then run the AppImage:
 
 EmuSync utilizes GitHub Actions for continuous integration and automated release packaging:
 
-- **CI Validation (`.github/workflows/ci.yml`)**: Runs on every push and pull request to `main`, verifying unit tests (`./gradlew test`) and Compose Desktop packaging.
+- **CI Validation (`.github/workflows/ci.yml`)**: Runs on every push and pull request to `main`, verifying unit tests (`./gradlew test`) and Compose Desktop packaging across both Linux (AppImage) and Windows (MSI & EXE).
 - **Publish Release (`.github/workflows/release.yml`)**: Interactive manual trigger (`workflow_dispatch`) that:
   1. Prompts for the SemVer release type (`patch`, `minor`, `major`).
   2. Bumps the application version and creates the git tag (`vX.Y.Z`).
