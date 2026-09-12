@@ -49,7 +49,7 @@ compose.desktop {
         }
 
         nativeDistributions {
-            targetFormats(TargetFormat.AppImage)
+            targetFormats(TargetFormat.AppImage, TargetFormat.Msi, TargetFormat.Exe)
             packageName = "EmuSync"
 
             // Include the HTTP server module needed by the OAuth loopback flow
@@ -67,6 +67,11 @@ compose.desktop {
             }
             windows {
                 iconFile.set(project.file("src/main/resources/icon.ico"))
+                menu = true
+                shortcut = false
+                dirChooser = true
+                menuGroup = "EmuSync"
+                upgradeUuid = "a7b3c291-5f4e-4b28-98e1-d63f5e824c90"
             }
         }
     }
