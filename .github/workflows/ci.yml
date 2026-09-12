@@ -41,4 +41,10 @@ jobs:
 
       - name: Verify Windows Packaging (MSI & EXE)
         if: matrix.platform == 'Windows'
-        run: ./gradlew packageReleaseMsi packageReleaseExe --no-daemon
+        run: ./gradlew packageReleaseMsi packageReleaseExe --no-daemon --info
+
+      - name: Print jpackage diagnostic logs on failure
+        if: failure() && matrix.platform == 'Windows'
+        shell: bash
+        run: |
+          find build/compose/logs -type f -exec echo "=== {} ===" \; -exec cat {} \; || true
