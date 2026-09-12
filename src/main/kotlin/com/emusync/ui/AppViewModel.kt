@@ -388,4 +388,8 @@ class AppViewModel(
     fun restartApp(file: java.io.File): Boolean {
         return updateManager.applyUpdateAndRestart(file)
     }
+
+    fun clearStatus() {
+        _uiState.update { it.copy(status = AppStatus.Idle) }
+    }
 }

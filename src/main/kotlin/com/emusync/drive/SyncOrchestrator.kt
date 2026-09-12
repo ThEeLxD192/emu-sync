@@ -161,11 +161,19 @@ class SyncOrchestrator(
      */
     suspend fun syncEntry(entry: GameEntry): Boolean {
         return try {
-            val driveConfig = config.googleDrive ?: return false
-            if (driveConfig.refreshToken.isNullOrBlank()) return false
+            val driveConfig = config.googleDrive
+            if (driveConfig == null || driveConfig.refreshToken.isNullOrBlank()) {
+                onStatus(AppStatus.Error("Google Drive no está conectado. Haz clic en 'Connect Drive' en la barra superior para iniciar sesión."))
+                return false
+            }
 
             onStatus(AppStatus.Syncing("Conectando con Google Drive..."))
-            val token = oauthFlow.authorize(config, configManager, allowInteractive = false)
+            val token = try {
+                oauthFlow.authorize(config, configManager, allowInteractive = false)
+            } catch (e: Exception) {
+                onStatus(AppStatus.Error("No se pudo conectar con Google Drive (${e.message ?: "sesión expirada"}). Por favor, vuelve a vincular tu cuenta haciendo clic en 'Connect Drive'."))
+                return false
+            }
 
             val savePaths = getAllSavePaths(entry)
             if (savePaths.isEmpty()) {

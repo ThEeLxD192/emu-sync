@@ -309,7 +309,10 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
             }
 
             // ── Status Overlays (on top of everything) ──────────────
-            StatusOverlay(uiState.status)
+            StatusOverlay(
+                status = uiState.status,
+                onDismissError = { viewModel.clearStatus() }
+            )
 
             // ── Add Entry Dialog ────────────────────────────────────
             if (showAddDialog) {

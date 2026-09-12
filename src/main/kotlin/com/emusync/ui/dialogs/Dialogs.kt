@@ -26,7 +26,10 @@ import com.emusync.ui.theme.EmuSyncColors
  * Displayed during sync, play, and upload phases.
  */
 @Composable
-fun StatusOverlay(status: AppStatus) {
+fun StatusOverlay(
+    status: AppStatus,
+    onDismissError: (() -> Unit)? = null,
+) {
     when (status) {
         is AppStatus.Syncing -> StatusDialog(
             icon = Icons.Default.CloudSync,
@@ -47,7 +50,10 @@ fun StatusOverlay(status: AppStatus) {
             spinning = true,
             color = EmuSyncColors.OnSurfaceDim,
         )
-        is AppStatus.Error -> ErrorDialog(status.message)
+        is AppStatus.Error -> ErrorDialog(
+            message = status.message,
+            onDismiss = { onDismissError?.invoke() }
+        )
         is AppStatus.Conflict -> ConflictDialog(
             gameName = status.gameName,
             localDate = status.localDate,
@@ -129,15 +135,18 @@ private fun StatusDialog(
 }
 
 @Composable
-private fun ErrorDialog(message: String) {
-    Dialog(onDismissRequest = {}) {
+private fun ErrorDialog(
+    message: String,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = EmuSyncColors.Surface,
             border = androidx.compose.foundation.BorderStroke(1.dp, EmuSyncColors.Error.copy(alpha = 0.5f)),
         ) {
             Column(
-                modifier = Modifier.padding(32.dp).widthIn(min = 280.dp, max = 400.dp),
+                modifier = Modifier.padding(28.dp).widthIn(min = 300.dp, max = 420.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Icon(
@@ -148,7 +157,7 @@ private fun ErrorDialog(message: String) {
                 )
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = "Error",
+                    text = "Aviso de Sincronización",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = EmuSyncColors.Error,
@@ -160,6 +169,14 @@ private fun ErrorDialog(message: String) {
                     color = EmuSyncColors.OnSurface,
                     textAlign = TextAlign.Center,
                 )
+                Spacer(Modifier.height(20.dp))
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Text("Cerrar")
+                }
             }
         }
     }
