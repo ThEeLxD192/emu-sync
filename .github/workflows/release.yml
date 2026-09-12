@@ -97,8 +97,17 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp build/compose/binaries/main/msi/*.msi dist/EmuSync-x86_64.msi
-          cp build/compose/binaries/main/exe/*.exe dist/EmuSync-x86_64.exe
+          MSI_FILE=$(find build/compose/binaries -type f -name "*.msi" | head -n 1)
+          EXE_FILE=$(find build/compose/binaries -type f -name "*.exe" | head -n 1)
+          if [ -z "$MSI_FILE" ] || [ -z "$EXE_FILE" ]; then
+            echo "Error: MSI or EXE binary not found under build/compose/binaries"
+            find build/compose/binaries -type f || true
+            exit 1
+          fi
+          echo "Found MSI: $MSI_FILE"
+          echo "Found EXE: $EXE_FILE"
+          cp "$MSI_FILE" dist/EmuSync-x86_64.msi
+          cp "$EXE_FILE" dist/EmuSync-x86_64.exe
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v7
