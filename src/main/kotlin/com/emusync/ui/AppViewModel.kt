@@ -6,6 +6,7 @@ import com.emusync.drive.OAuthFlow
 import com.emusync.drive.SyncOrchestrator
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
+import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.NativePCGame
 import com.emusync.scanner.scanRoms
 import com.emusync.steam.SteamShortcutManager
@@ -343,7 +344,50 @@ class AppViewModel(
         }
     }
 
+    val configFile: File
+        get() = configManager.configFile
+
     // ── Google Drive Authentication ──────────────────────────────
+
+    /**
+     * Updates or sets Google Drive OAuth credentials in config.json.
+     * If [connectNow] is true, immediately triggers the browser OAuth login.
+     */
+    suspend fun setupGoogleDrive(clientId: String, clientSecret: String, connectNow: Boolean = true): String {
+        val cfg = _uiState.value.config ?: return "No config loaded"
+        val trimmedId = clientId.trim()
+        val trimmedSecret = clientSecret.trim()
+        if (trimmedId.isBlank() || trimmedSecret.isBlank()) {
+            return "Client ID and Client Secret cannot be blank."
+        }
+
+        val updatedDrive = GoogleDriveConfig(
+            clientId = trimmedId,
+            clientSecret = trimmedSecret,
+            refreshToken = cfg.googleDrive?.refreshToken,
+        )
+        val updatedConfig = cfg.copy(googleDrive = updatedDrive)
+        configManager.save(updatedConfig)
+        _uiState.update { it.copy(config = updatedConfig) }
+
+        return if (connectNow) {
+            loginGoogleDrive()
+        } else {
+            "Google Drive credentials saved."
+        }
+    }
+
+    /**
+     * Unlinks Google Drive by clearing the refresh token from config.json.
+     */
+    suspend fun unlinkGoogleDrive(): String {
+        val cfg = _uiState.value.config ?: return "No config loaded"
+        val driveConfig = cfg.googleDrive ?: return "Google Drive is not configured."
+        val updatedConfig = cfg.copy(googleDrive = driveConfig.copy(refreshToken = null))
+        configManager.save(updatedConfig)
+        _uiState.update { it.copy(config = updatedConfig) }
+        return "Google Drive disconnected."
+    }
 
     /**
      * Triggers an interactive browser login to link or re-authenticate Google Drive.

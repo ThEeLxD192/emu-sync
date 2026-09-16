@@ -145,4 +145,58 @@ class AppViewModelTest {
         val reloaded = configManager.load()
         assertEquals(listOf("Spelunky", "Play 1", "Play 2"), reloaded.entries.map { it.name })
     }
+
+    @Test
+    fun `should auto-create default config and reach Idle state when config file is missing`(@TempDir tempDir: File) = runTest {
+        val missingConfigFile = File(tempDir, "missing_config.json")
+        val configManager = ConfigManager(missingConfigFile.absolutePath)
+
+        val viewModel = AppViewModel(
+            configManager = configManager,
+            httpClient = createMockHttpClient(),
+        )
+
+        viewModel.loadConfig()
+
+        val state = viewModel.uiState.value
+        assertEquals(AppStatus.Idle, state.status)
+        assertNotNull(state.config)
+        assertEquals(emptyList(), state.config!!.entries)
+        assertTrue(missingConfigFile.exists())
+    }
+
+    @Test
+    fun `setupGoogleDrive should save credentials and unlinkGoogleDrive should clear refreshToken`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        configManager.save(AppConfig(entries = emptyList()))
+
+        val viewModel = AppViewModel(
+            configManager = configManager,
+            httpClient = createMockHttpClient(),
+        )
+        viewModel.loadConfig()
+
+        // Setup without connecting immediately (connectNow = false)
+        val msg = viewModel.setupGoogleDrive("my-client-id", "my-client-secret", connectNow = false)
+        assertEquals("Google Drive credentials saved.", msg)
+
+        val updated = configManager.load()
+        assertEquals("my-client-id", updated.googleDrive?.clientId)
+        assertEquals("my-client-secret", updated.googleDrive?.clientSecret)
+        assertEquals(null, updated.googleDrive?.refreshToken)
+
+        // Simulate having a refresh token
+        configManager.save(updated.copy(googleDrive = updated.googleDrive!!.copy(refreshToken = "valid-token")))
+        viewModel.loadConfig()
+        assertEquals("valid-token", viewModel.uiState.value.config?.googleDrive?.refreshToken)
+
+        // Unlink
+        val unlinkMsg = viewModel.unlinkGoogleDrive()
+        assertEquals("Google Drive disconnected.", unlinkMsg)
+        assertEquals(null, viewModel.uiState.value.config?.googleDrive?.refreshToken)
+        val reloaded = configManager.load()
+        assertEquals(null, reloaded.googleDrive?.refreshToken)
+        assertEquals("my-client-id", reloaded.googleDrive?.clientId)
+    }
 }

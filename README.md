@@ -38,13 +38,13 @@ A modern, offline-first save synchronization manager and universal launcher for 
 
 ### Configuration
 
-Copy the example configuration to create your local config file:
+When running EmuSync for the first time, a basic `config.json` is **automatically generated** if one does not exist:
+* **Windows (.msi / .exe):** `%APPDATA%\emusync\config.json`
+* **Linux (AppImage / package):** `~/.config/emusync/config.json`
+* **AppImage Portable Mode:** If a `config.json` exists in the same folder as your `.AppImage`, it is automatically detected and used.
+* **Development / CLI:** If a `config.json` is present in the working directory, it takes priority.
 
-```bash
-cp config.example.json config.json
-```
-
-Edit `config.json` with your preferred emulators, paths, and Google Drive OAuth credentials:
+You can configure Google Drive credentials directly inside the app by clicking **"Connect Drive"**, or edit `config.json` manually:
 
 ```json
 {

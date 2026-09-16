@@ -63,6 +63,7 @@ import com.emusync.ui.UpdateUiState
 import com.emusync.ui.components.GameGrid
 import com.emusync.ui.components.Sidebar
 import com.emusync.ui.dialogs.AddEntryDialog
+import com.emusync.ui.dialogs.DriveSetupDialog
 import com.emusync.ui.dialogs.EditGameDialog
 import com.emusync.ui.dialogs.StatusOverlay
 import com.emusync.ui.dialogs.UpdateDialog
@@ -94,7 +95,7 @@ fun main() {
             icon = appIcon,
             state = windowState,
         ) {
-            val viewModel = remember { AppViewModel(ConfigManager("config.json")) }
+            val viewModel = remember { AppViewModel(ConfigManager()) }
 
             // Load config on first composition
             LaunchedEffect(Unit) {
@@ -111,6 +112,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
     val uiState by viewModel.uiState.collectAsState()
     val scope = rememberCoroutineScope()
     var showAddDialog by remember { mutableStateOf(false) }
+    var showDriveSetupDialog by remember { mutableStateOf(false) }
     var entryToEdit by remember { mutableStateOf<GameEntry?>(null) }
     var gameToEdit by remember { mutableStateOf<GameItem?>(null) }
     var steamMessage by remember { mutableStateOf<String?>(null) }
@@ -145,52 +147,55 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                     ) {
                         // Google Drive status indicator / Connect action
                         val googleDrive = uiState.config?.googleDrive
-                        if (googleDrive != null) {
-                            val isLinked = !googleDrive.refreshToken.isNullOrBlank()
-                            if (isLinked) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = EmuSyncColors.SurfaceVariant,
-                                    modifier = Modifier.padding(end = 12.dp)
+                        val isLinked = googleDrive != null && !googleDrive.refreshToken.isNullOrBlank()
+                        if (isLinked) {
+                            Surface(
+                                onClick = { showDriveSetupDialog = true },
+                                shape = RoundedCornerShape(8.dp),
+                                color = EmuSyncColors.SurfaceVariant,
+                                modifier = Modifier.padding(end = 12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Cloud,
-                                            contentDescription = "Drive Connected",
-                                            tint = EmuSyncColors.Success,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(Modifier.width(6.dp))
-                                        Text(
-                                            text = "Drive Linked",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = EmuSyncColors.OnSurface
-                                        )
-                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.Cloud,
+                                        contentDescription = "Drive Connected",
+                                        tint = EmuSyncColors.Success,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = "Drive Linked",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = EmuSyncColors.OnSurface
+                                    )
                                 }
-                            } else {
-                                OutlinedButton(
-                                    onClick = {
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    if (googleDrive?.clientId.isNullOrBlank() || googleDrive?.clientSecret.isNullOrBlank()) {
+                                        showDriveSetupDialog = true
+                                    } else {
                                         scope.launch {
                                             val result = viewModel.loginGoogleDrive()
                                             steamMessage = result
                                         }
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                    modifier = Modifier.padding(end = 12.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.CloudSync,
-                                        contentDescription = "Connect Google Drive",
-                                        tint = EmuSyncColors.Primary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Connect Drive", style = MaterialTheme.typography.labelSmall)
-                                }
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(end = 12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CloudSync,
+                                    contentDescription = "Connect Google Drive",
+                                    tint = EmuSyncColors.Primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("Connect Drive", style = MaterialTheme.typography.labelSmall)
                             }
                         }
 
@@ -408,6 +413,27 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                     },
                     onRestart = { file ->
                         viewModel.restartApp(file)
+                    }
+                )
+            }
+
+            // ── Drive Setup Dialog ──────────────────────────────────
+            if (showDriveSetupDialog) {
+                DriveSetupDialog(
+                    initialConfig = uiState.config?.googleDrive,
+                    configFile = viewModel.configFile,
+                    onDismiss = { showDriveSetupDialog = false },
+                    onSaveAndConnect = { clientId, clientSecret ->
+                        scope.launch {
+                            val result = viewModel.setupGoogleDrive(clientId, clientSecret, connectNow = true)
+                            steamMessage = result
+                        }
+                    },
+                    onUnlink = {
+                        scope.launch {
+                            val result = viewModel.unlinkGoogleDrive()
+                            steamMessage = result
+                        }
                     }
                 )
             }
