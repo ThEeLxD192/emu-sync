@@ -199,4 +199,42 @@ class AppViewModelTest {
         assertEquals(null, reloaded.googleDrive?.refreshToken)
         assertEquals("my-client-id", reloaded.googleDrive?.clientId)
     }
+
+    @Test
+    fun `restartApp sets UpdateUiState Error when updateManager fails`(@TempDir tempDir: File) {
+        val failingManager = object : com.emusync.update.UpdateManager() {
+            override fun applyUpdateAndRestart(downloadedFile: File): Boolean = false
+        }
+        val viewModel = AppViewModel(
+            configManager = ConfigManager(File(tempDir, "config.json")),
+            updateManager = failingManager,
+            httpClient = createMockHttpClient(),
+        )
+
+        val testFile = File(tempDir, "update.AppImage").apply { createNewFile() }
+        val success = viewModel.restartApp(testFile)
+
+        kotlin.test.assertFalse(success)
+        val state = viewModel.uiState.value.updateState
+        assertTrue(state is UpdateUiState.Error)
+        assertTrue(state.message.contains("Could not restart automatically"))
+    }
+
+    @Test
+    fun `restartApp returns true when updateManager succeeds`(@TempDir tempDir: File) {
+        val succeedingManager = object : com.emusync.update.UpdateManager() {
+            override fun applyUpdateAndRestart(downloadedFile: File): Boolean = true
+        }
+        val viewModel = AppViewModel(
+            configManager = ConfigManager(File(tempDir, "config.json")),
+            updateManager = succeedingManager,
+            httpClient = createMockHttpClient(),
+        )
+
+        val testFile = File(tempDir, "update.AppImage").apply { createNewFile() }
+        val success = viewModel.restartApp(testFile)
+
+        assertTrue(success)
+        kotlin.test.assertFalse(viewModel.uiState.value.updateState is UpdateUiState.Error)
+    }
 }

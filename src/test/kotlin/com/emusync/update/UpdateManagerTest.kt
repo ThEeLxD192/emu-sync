@@ -252,4 +252,124 @@ class UpdateManagerTest {
             tempFile.delete()
         }
     }
+
+    @Test
+    fun `applyLinuxUpdateAndRestart replaces AppImage file and calls launcher`(@TempDir tempDir: File) {
+        val currentAppImage = File(tempDir, "EmuSync.AppImage").apply { writeText("OLD_VERSION") }
+        val downloadedUpdate = File(tempDir, ".update.AppImage").apply { writeText("NEW_VERSION") }
+
+        var launchedPath: String? = null
+        val manager = object : UpdateManager() {
+            override fun isWindows() = false
+            override fun isSteamGameMode() = false
+            override fun getCurrentAppImagePath() = currentAppImage.absolutePath
+        }
+
+        val success = manager.applyLinuxUpdateAndRestart(downloadedUpdate) { path ->
+            launchedPath = path
+        }
+
+        assertTrue(success)
+        assertEquals(currentAppImage.absolutePath, launchedPath)
+        assertEquals("NEW_VERSION", currentAppImage.readText())
+        assertFalse(downloadedUpdate.exists())
+    }
+
+    @Test
+    fun `applyLinuxUpdateAndRestart returns false when APPIMAGE path is missing`(@TempDir tempDir: File) {
+        val downloadedUpdate = File(tempDir, ".update.AppImage").apply { writeText("NEW_VERSION") }
+
+        var launched = false
+        val manager = object : UpdateManager() {
+            override fun isWindows() = false
+            override fun getCurrentAppImagePath(): String? = null
+        }
+
+        val success = manager.applyLinuxUpdateAndRestart(downloadedUpdate) { _ ->
+            launched = true
+        }
+
+        assertFalse(success)
+        assertFalse(launched)
+    }
+
+    @Test
+    fun `applyLinuxUpdateAndRestart returns false when downloaded file does not exist`(@TempDir tempDir: File) {
+        val currentAppImage = File(tempDir, "EmuSync.AppImage").apply { writeText("OLD_VERSION") }
+        val nonExistentUpdate = File(tempDir, "does-not-exist.AppImage")
+
+        var launched = false
+        val manager = object : UpdateManager() {
+            override fun isWindows() = false
+            override fun getCurrentAppImagePath() = currentAppImage.absolutePath
+        }
+
+        val success = manager.applyLinuxUpdateAndRestart(nonExistentUpdate) { _ ->
+            launched = true
+        }
+
+        assertFalse(success)
+        assertFalse(launched)
+    }
+
+    @Test
+    fun `replaceAppImageFile safely replaces active file`(@TempDir tempDir: File) {
+        val target = File(tempDir, "Target.AppImage").apply { writeText("INITIAL") }
+        val source = File(tempDir, "Source.AppImage").apply { writeText("UPDATED") }
+
+        val manager = UpdateManager()
+        manager.replaceAppImageFile(source, target)
+
+        assertTrue(target.exists())
+        assertEquals("UPDATED", target.readText())
+        assertFalse(source.exists())
+        assertTrue(target.canExecute())
+    }
+
+    @Test
+    fun `applyUpdateAndRestart delegates to Linux update on Linux platform`(@TempDir tempDir: File) {
+        val currentAppImage = File(tempDir, "EmuSync.AppImage").apply { writeText("V1") }
+        val downloadedUpdate = File(tempDir, "update.AppImage").apply { writeText("V2") }
+
+        var linuxUpdateCalled = false
+        val manager = object : UpdateManager() {
+            override fun isWindows() = false
+            override fun applyLinuxUpdateAndRestart(downloadedFile: File, launcher: (String) -> Unit): Boolean {
+                linuxUpdateCalled = true
+                return true
+            }
+        }
+
+        val success = manager.applyUpdateAndRestart(downloadedUpdate)
+        assertTrue(success)
+        assertTrue(linuxUpdateCalled)
+    }
+
+    @Test
+    fun `applyLinuxUpdateAndRestart in Steam Game Mode calls launcher with updated path`(@TempDir tempDir: File) {
+        val currentAppImage = File(tempDir, "EmuSync.AppImage").apply { writeText("V1") }
+        val downloadedUpdate = File(tempDir, "update.AppImage").apply { writeText("V2") }
+
+        var launchedPath: String? = null
+        val manager = object : UpdateManager() {
+            override fun isWindows() = false
+            override fun isSteamGameMode() = true
+            override fun getCurrentAppImagePath() = currentAppImage.absolutePath
+        }
+
+        val success = manager.applyLinuxUpdateAndRestart(downloadedUpdate) { path ->
+            launchedPath = path
+        }
+
+        assertTrue(success)
+        assertEquals(currentAppImage.absolutePath, launchedPath)
+        assertEquals("V2", currentAppImage.readText())
+    }
+
+    @Test
+    fun `isSteamGameMode returns false by default in non-gaming test environment`() {
+        val manager = UpdateManager()
+        // In the JUnit environment (without SteamGamepadUI or gamescope), it evaluates to false
+        assertFalse(manager.isSteamGameMode())
+    }
 }

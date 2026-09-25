@@ -454,7 +454,14 @@ class AppViewModel(
 
         result.fold(
             onSuccess = {
-                _uiState.update { it.copy(updateState = UpdateUiState.ReadyToRestart(tempFile)) }
+                _uiState.update {
+                    it.copy(
+                        updateState = UpdateUiState.ReadyToRestart(
+                            downloadedFile = tempFile,
+                            isSteamGameMode = updateManager.isSteamGameMode(),
+                        )
+                    )
+                }
             },
             onFailure = { error ->
                 _uiState.update { it.copy(updateState = UpdateUiState.Error("Failed to download update: ${error.message ?: "Connection error"}")) }
@@ -463,7 +470,17 @@ class AppViewModel(
     }
 
     fun restartApp(file: File): Boolean {
-        return updateManager.applyUpdateAndRestart(file)
+        val success = updateManager.applyUpdateAndRestart(file)
+        if (!success) {
+            _uiState.update {
+                it.copy(
+                    updateState = UpdateUiState.Error(
+                        "Could not restart automatically. The update file is saved at: ${file.absolutePath}"
+                    )
+                )
+            }
+        }
+        return success
     }
 
     fun clearStatus() {

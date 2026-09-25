@@ -221,37 +221,126 @@ open class UpdateManager(
     }
 
     /**
+     * Resolves the path to the currently running AppImage on Linux.
+     * Defaults to the APPIMAGE environment variable set by the AppImage runtime.
+     */
+    open fun getCurrentAppImagePath(): String? =
+        System.getenv("APPIMAGE")?.takeIf { it.isNotBlank() }
+
+    /**
+     * Indicates whether the application is running in Steam Deck Gaming Mode (gamescope session).
+     * Can be overridden in tests to simulate SteamOS Game Mode.
+     */
+    open fun isSteamGameMode(): Boolean =
+        System.getenv("SteamGamepadUI") == "1" ||
+        System.getenv("XDG_CURRENT_DESKTOP")?.lowercase() == "gamescope"
+
+    /**
+     * Replaces the running [target] AppImage with [source].
+     * Handles both same-filesystem atomic moves and cross-device moves.
+     * Prevents ETXTBSY on Linux by moving the active binary aside before copying.
+     */
+    internal fun replaceAppImageFile(source: File, target: File) {
+        source.setExecutable(true, false)
+        try {
+            Files.move(
+                source.toPath(),
+                target.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE
+            )
+        } catch (_: Throwable) {
+            val backup = File(target.parentFile, ".${target.name}.old.${System.currentTimeMillis()}")
+            val renamed = target.renameTo(backup)
+            try {
+                Files.copy(
+                    source.toPath(),
+                    target.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING
+                )
+            } finally {
+                source.delete()
+                if (renamed) {
+                    backup.deleteOnExit()
+                    backup.delete()
+                }
+            }
+        }
+        target.setExecutable(true, false)
+    }
+
+    /**
+     * Default launcher for Linux that launches the updated AppImage detached.
+     * In Steam Deck Game Mode, Steam manages the process tree; exiting cleanly lets
+     * the user relaunch the updated app from Steam without leaving ghost processes.
+     */
+    open fun defaultLinuxLauncher(path: String) {
+        if (isSteamGameMode()) {
+            exitProcess(0)
+            return
+        }
+
+        try {
+            val pb = ProcessBuilder(
+                "sh", "-c",
+                """(sleep 0.5 && (exec nohup "$1" || exec "$1")) >/dev/null 2>&1 &""",
+                "_",
+                path
+            )
+            pb.redirectInput(ProcessBuilder.Redirect.DISCARD)
+            pb.redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            pb.redirectError(ProcessBuilder.Redirect.DISCARD)
+
+            val env = pb.environment()
+            val oldAppDir = env["APPDIR"]
+            env.remove("APPDIR")
+            env.remove("ARGV0")
+            env.remove("OWD")
+            if (oldAppDir != null) {
+                val ldPath = env["LD_LIBRARY_PATH"]
+                if (ldPath != null) {
+                    val cleanLd = ldPath.split(File.pathSeparator)
+                        .filterNot { it.contains(oldAppDir) }
+                        .joinToString(File.pathSeparator)
+                    if (cleanLd.isBlank()) {
+                        env.remove("LD_LIBRARY_PATH")
+                    } else {
+                        env["LD_LIBRARY_PATH"] = cleanLd
+                    }
+                }
+            }
+            pb.start()
+        } catch (_: Throwable) {
+            try {
+                val fallbackPb = ProcessBuilder(path)
+                fallbackPb.redirectInput(ProcessBuilder.Redirect.DISCARD)
+                fallbackPb.redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                fallbackPb.redirectError(ProcessBuilder.Redirect.DISCARD)
+                fallbackPb.environment().remove("APPDIR")
+                fallbackPb.environment().remove("ARGV0")
+                fallbackPb.environment().remove("OWD")
+                fallbackPb.start()
+            } catch (_: Throwable) {
+                // Ignore
+            }
+        } finally {
+            exitProcess(0)
+        }
+    }
+
+    /**
      * Replaces the currently running AppImage on Linux and restarts the application.
      */
     open fun applyLinuxUpdateAndRestart(
         downloadedFile: File,
-        launcher: (String) -> Unit = { path ->
-            ProcessBuilder(path).start()
-            exitProcess(0)
-        }
+        launcher: (String) -> Unit = ::defaultLinuxLauncher
     ): Boolean {
-        val currentAppImagePath = System.getenv("APPIMAGE") ?: return false
+        val currentAppImagePath = getCurrentAppImagePath() ?: return false
         val currentAppImage = File(currentAppImagePath)
         if (!currentAppImage.exists() || !downloadedFile.exists()) return false
 
         return try {
-            downloadedFile.setExecutable(true, false)
-            try {
-                Files.move(
-                    downloadedFile.toPath(),
-                    currentAppImage.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE
-                )
-            } catch (_: Throwable) {
-                Files.copy(
-                    downloadedFile.toPath(),
-                    currentAppImage.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING
-                )
-                downloadedFile.delete()
-            }
-            currentAppImage.setExecutable(true, false)
+            replaceAppImageFile(downloadedFile, currentAppImage)
 
             // Launch the updated AppImage in a separate detached process
             launcher(currentAppImage.absolutePath)

@@ -197,7 +197,11 @@ fun UpdateDialog(
                                     color = EmuSyncColors.OnSurface,
                                 )
                                 Text(
-                                    text = "The new version is ready to install.",
+                                    text = if (state.isSteamGameMode) {
+                                        "The new version is ready to apply."
+                                    } else {
+                                        "The new version is ready to install."
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = EmuSyncColors.OnSurfaceDim,
                                 )
@@ -206,7 +210,11 @@ fun UpdateDialog(
 
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            text = "To apply changes and enjoy the new version, restart EmuSync.",
+                            text = if (state.isSteamGameMode) {
+                                "In Steam Deck Game Mode, closing EmuSync applies the update. You can then relaunch it from Steam to start the new version."
+                            } else {
+                                "To apply changes and enjoy the new version, restart EmuSync."
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = EmuSyncColors.OnSurface,
                         )
@@ -217,13 +225,13 @@ fun UpdateDialog(
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                         ) {
                             TextButton(onClick = onDismiss) {
-                                Text("Restart Later")
+                                Text(if (state.isSteamGameMode) "Later" else "Restart Later")
                             }
                             Button(
                                 onClick = { onRestart(state.downloadedFile) },
                                 colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
                             ) {
-                                Text("Restart Now")
+                                Text(if (state.isSteamGameMode) "Close to Apply" else "Restart Now")
                             }
                         }
                     }
