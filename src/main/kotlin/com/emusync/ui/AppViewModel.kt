@@ -275,18 +275,40 @@ class AppViewModel(
     }
 
     /**
-     * Updates the savePathsByRom logic for a specific ROM within an Emulator System.
+     * Updates the save paths and optional cover art for a specific game item.
      */
-    suspend fun editGameOverride(gameItem: GameItem, newPaths: List<String>) {
-        val entry = gameItem.entry
-        if (entry !is EmulatorSystem) return
-        val romName = gameItem.romFile?.name ?: return
+    suspend fun editGameOverride(gameItem: GameItem, newPaths: List<String>, newCoverPath: String? = null) {
+        when (val entry = gameItem.entry) {
+            is EmulatorSystem -> {
+                val romName = gameItem.romFile?.name ?: return
+                val newSaveOverrides = entry.savePathsByRom.toMutableMap()
+                newSaveOverrides[romName] = newPaths
 
-        val newOverrides = entry.savePathsByRom.toMutableMap()
-        newOverrides[romName] = newPaths
+                val newCoverOverrides = entry.coverPathByRom.toMutableMap()
+                if (newCoverPath != null) {
+                    val cleanCover = newCoverPath.trim().takeIf { it.isNotBlank() }
+                    if (cleanCover != null) {
+                        newCoverOverrides[romName] = cleanCover
+                    } else {
+                        newCoverOverrides.remove(romName)
+                    }
+                }
 
-        val newEntry = entry.copy(savePathsByRom = newOverrides)
-        editEntry(entry, newEntry)
+                val newEntry = entry.copy(
+                    savePathsByRom = newSaveOverrides,
+                    coverPathByRom = newCoverOverrides
+                )
+                editEntry(entry, newEntry)
+            }
+            is NativePCGame -> {
+                val cleanCover = if (newCoverPath != null) newCoverPath.trim().takeIf { it.isNotBlank() } else entry.coverPath
+                val newEntry = entry.copy(
+                    savePaths = newPaths,
+                    coverPath = cleanCover
+                )
+                editEntry(entry, newEntry)
+            }
+        }
     }
 
     /**

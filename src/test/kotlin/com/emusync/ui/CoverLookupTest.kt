@@ -78,4 +78,70 @@ class CoverLookupTest {
 
         assertEquals(coverFile.absolutePath, item.coverFile?.absolutePath)
     }
+
+    @Test
+    fun `resolves custom coverPathByRom with highest priority over same-folder and fallback`(@TempDir tempDir: File) {
+        val romDir = File(tempDir, "roms").apply { mkdirs() }
+        val fallbackDir = File(romDir, "covers").apply { mkdirs() }
+        val customCoversDir = File(tempDir, "custom").apply { mkdirs() }
+
+        val romFile = File(romDir, "Pokemon Emerald.gba").apply { writeText("dummy") }
+        val sameFolderCover = File(romDir, "Pokemon Emerald.png").apply { writeText("same-folder") }
+        val fallbackCover = File(fallbackDir, "Pokemon Emerald.png").apply { writeText("fallback") }
+        val individualCustomCover = File(customCoversDir, "emerald_special.jpg").apply { writeText("custom") }
+
+        val system = EmulatorSystem(
+            name = "GBA",
+            executablePath = "/bin/true",
+            romsDirectory = romDir.absolutePath,
+            extensions = listOf("gba"),
+            coverPathByRom = mapOf("Pokemon Emerald.gba" to individualCustomCover.absolutePath)
+        )
+        val item = GameItem(name = "Pokemon Emerald", entry = system, romFile = romFile)
+
+        // Priority 1 wins: individual custom cover!
+        assertEquals(individualCustomCover.absolutePath, item.coverFile?.absolutePath)
+    }
+
+    @Test
+    fun `resolves same-folder image over fallback subfolder when individual cover is not set`(@TempDir tempDir: File) {
+        val romDir = File(tempDir, "roms").apply { mkdirs() }
+        val fallbackDir = File(romDir, "covers").apply { mkdirs() }
+
+        val romFile = File(romDir, "Metroid Fusion.gba").apply { writeText("dummy") }
+        val sameFolderCover = File(romDir, "Metroid Fusion.png").apply { writeText("same-folder") }
+        val fallbackCover = File(fallbackDir, "Metroid Fusion.png").apply { writeText("fallback") }
+
+        val system = EmulatorSystem(
+            name = "GBA",
+            executablePath = "/bin/true",
+            romsDirectory = romDir.absolutePath,
+            extensions = listOf("gba"),
+            coverPathByRom = emptyMap() // No individual cover set
+        )
+        val item = GameItem(name = "Metroid Fusion", entry = system, romFile = romFile)
+
+        // Priority 2 wins: same folder as ROM!
+        assertEquals(sameFolderCover.absolutePath, item.coverFile?.absolutePath)
+    }
+
+    @Test
+    fun `resolves fallback subfolder when no individual cover and no same-folder image exists`(@TempDir tempDir: File) {
+        val romDir = File(tempDir, "roms").apply { mkdirs() }
+        val fallbackDir = File(romDir, "covers").apply { mkdirs() }
+
+        val romFile = File(romDir, "Castlevania - Aria of Sorrow (USA).gba").apply { writeText("dummy") }
+        val fallbackCover = File(fallbackDir, "Castlevania - Aria of Sorrow.png").apply { writeText("fallback") }
+
+        val system = EmulatorSystem(
+            name = "GBA",
+            executablePath = "/bin/true",
+            romsDirectory = romDir.absolutePath,
+            extensions = listOf("gba")
+        )
+        val item = GameItem(name = "Castlevania - Aria of Sorrow (USA)", entry = system, romFile = romFile)
+
+        // Priority 3 wins: fallback in covers/ with region stripped!
+        assertEquals(fallbackCover.absolutePath, item.coverFile?.absolutePath)
+    }
 }

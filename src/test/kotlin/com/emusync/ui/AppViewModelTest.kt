@@ -233,8 +233,83 @@ class AppViewModelTest {
 
         val testFile = File(tempDir, "update.AppImage").apply { createNewFile() }
         val success = viewModel.restartApp(testFile)
-
         assertTrue(success)
         kotlin.test.assertFalse(viewModel.uiState.value.updateState is UpdateUiState.Error)
+    }
+
+    @Test
+    fun `editGameOverride updates coverPathByRom and savePathsByRom for EmulatorSystem`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+
+        val system = EmulatorSystem(
+            name = "GBA",
+            executablePath = "mgba",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("gba")
+        )
+        configManager.save(AppConfig(entries = listOf(system)))
+
+        val viewModel = AppViewModel(
+            configManager = configManager,
+            httpClient = createMockHttpClient(),
+        )
+        viewModel.loadConfig()
+
+        val romFile = File(tempDir, "zelda.gba").apply { createNewFile() }
+        val gameItem = GameItem(name = "zelda", entry = system, romFile = romFile)
+
+        viewModel.editGameOverride(
+            gameItem = gameItem,
+            newPaths = listOf("/path/to/zelda.sav"),
+            newCoverPath = "/path/to/zelda_box.png"
+        )
+
+        val updatedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
+        assertNotNull(updatedSystem)
+        assertEquals(listOf("/path/to/zelda.sav"), updatedSystem.savePathsByRom["zelda.gba"])
+        assertEquals("/path/to/zelda_box.png", updatedSystem.coverPathByRom["zelda.gba"])
+
+        // Now clear the custom cover
+        viewModel.editGameOverride(
+            gameItem = gameItem.copy(entry = updatedSystem),
+            newPaths = listOf("/path/to/zelda.sav"),
+            newCoverPath = ""
+        )
+        val clearedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
+        assertNotNull(clearedSystem)
+        kotlin.test.assertNull(clearedSystem.coverPathByRom["zelda.gba"])
+    }
+
+    @Test
+    fun `editGameOverride updates coverPath and savePaths for NativePCGame`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+
+        val game = NativePCGame(
+            name = "Portal",
+            executablePath = "/games/portal/hl2.exe",
+            savePaths = listOf("/old/save")
+        )
+        configManager.save(AppConfig(entries = listOf(game)))
+
+        val viewModel = AppViewModel(
+            configManager = configManager,
+            httpClient = createMockHttpClient(),
+        )
+        viewModel.loadConfig()
+
+        val gameItem = GameItem(name = "Portal", entry = game)
+
+        viewModel.editGameOverride(
+            gameItem = gameItem,
+            newPaths = listOf("/new/save.dat"),
+            newCoverPath = "/images/portal.png"
+        )
+
+        val updatedGame = viewModel.uiState.value.config?.entries?.first() as? NativePCGame
+        assertNotNull(updatedGame)
+        assertEquals(listOf("/new/save.dat"), updatedGame.savePaths)
+        assertEquals("/images/portal.png", updatedGame.coverPath)
     }
 }

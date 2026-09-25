@@ -258,14 +258,7 @@ fun AddEntryDialog(
                     )
                     Spacer(Modifier.height(12.dp))
 
-                    PathField(
-                        label = "Covers Directory (Optional)",
-                        value = coversDirectory,
-                        onValueChange = { coversDirectory = it },
-                        placeholder = "/path/to/covers (empty to use ROMs folder)",
-                        pickerType = PickerType.DIRECTORY,
-                    )
-                    Spacer(Modifier.height(12.dp))
+
                 }
 
                 if (entryType == EntryType.NATIVE) {
@@ -385,6 +378,9 @@ fun AddEntryDialog(
                                         driveFileId = initialEntry?.driveFileId,
                                         steamAppId = initialEntry?.steamAppId,
                                         steamProcessName = (initialEntry as? EmulatorSystem)?.steamProcessName,
+                                        savePathsByRom = (initialEntry as? EmulatorSystem)?.savePathsByRom ?: emptyMap(),
+                                        coverPathByRom = (initialEntry as? EmulatorSystem)?.coverPathByRom ?: emptyMap(),
+                                        coversDirectory = (initialEntry as? EmulatorSystem)?.coversDirectory,
                                     )
                                     is NativePCGame -> entry.copy(
                                         driveFileId = initialEntry?.driveFileId,

@@ -385,9 +385,9 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                 EditGameDialog(
                     game = gameItem,
                     onDismiss = { gameToEdit = null },
-                    onSave = { newPaths ->
+                    onSave = { newPaths, newCoverPath ->
                         scope.launch {
-                            viewModel.editGameOverride(gameItem, newPaths)
+                            viewModel.editGameOverride(gameItem, newPaths, newCoverPath)
                             gameToEdit = null
                         }
                     }
@@ -399,7 +399,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                 EditGameDialog(
                     game = gameItem,
                     onDismiss = { viewModel.completeSaveSetup(emptyList()) },
-                    onSave = { newPaths -> viewModel.completeSaveSetup(newPaths) }
+                    onSave = { newPaths, _ -> viewModel.completeSaveSetup(newPaths) }
                 )
             }
 

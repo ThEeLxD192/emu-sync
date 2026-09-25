@@ -51,6 +51,8 @@ data class EmulatorSystem(
     val extensions: List<String>,
     override val savePaths: List<String> = emptyList(),
     val savePathsByRom: Map<String, List<String>> = emptyMap(),
+    /** Optional map of ROM filename to custom cover art image path. */
+    val coverPathByRom: Map<String, String> = emptyMap(),
     override val driveFileId: String? = null,
     override val steamAppId: Int? = null,
     val steamProcessName: String? = null,
