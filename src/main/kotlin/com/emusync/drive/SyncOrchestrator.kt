@@ -3,6 +3,7 @@ package com.emusync.drive
 import com.emusync.config.ConfigManager
 import com.emusync.model.AppConfig
 import com.emusync.model.GameEntry
+import com.emusync.model.effectiveCloudFolder
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.NativePCGame
 import com.emusync.runner.GameRunner
@@ -71,7 +72,7 @@ class SyncOrchestrator(
 
         return try {
             val token = oauthFlow.authorize(config, configManager, allowInteractive = false)
-            val folderId = folders.ensureEntryFolder(token, entry.name)
+            val folderId = folders.ensureEntryFolder(token, entry.effectiveCloudFolder)
             val cloudFiles = search.listFilesInFolder(token, folderId)
 
             var hasNewerLocal = false
@@ -181,7 +182,7 @@ class SyncOrchestrator(
                 return true
             }
 
-            val folderId = folders.ensureEntryFolder(token, entry.name)
+            val folderId = folders.ensureEntryFolder(token, entry.effectiveCloudFolder)
             val cloudFiles = search.listFilesInFolder(token, folderId)
 
             for (savePath in savePaths) {
@@ -436,7 +437,7 @@ class SyncOrchestrator(
         localSavePath: File,
         displayName: String = entry.name
     ): SyncDecision? {
-        val folderId = folders.ensureEntryFolder(token, entry.name)
+        val folderId = folders.ensureEntryFolder(token, entry.effectiveCloudFolder)
         val cloudFiles = search.listFilesInFolder(token, folderId)
 
         val isDirectory = when {
@@ -557,7 +558,7 @@ class SyncOrchestrator(
     ) {
         if (!localSavePath.exists()) return
 
-        val folderId = folders.ensureEntryFolder(token, entry.name)
+        val folderId = folders.ensureEntryFolder(token, entry.effectiveCloudFolder)
         val cloudFiles = search.listFilesInFolder(token, folderId)
 
         if (localSavePath.isDirectory) {

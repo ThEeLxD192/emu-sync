@@ -22,6 +22,18 @@ sealed interface GameEntry {
     val savePaths: List<String>
 
     /**
+     * Optional folder/category name to group emulators together in the UI
+     * and share a unified cloud saves folder (e.g. "Switch", "PlayStation").
+     */
+    val group: String?
+
+    /**
+     * Optional custom Google Drive folder name.
+     * When null or blank, defaults to [group] (if set) or [name].
+     */
+    val cloudFolder: String?
+
+    /**
      * Optional Google Drive file ID for an already-uploaded save.
      * When null, the first sync will create the file on Drive.
      */
@@ -32,6 +44,15 @@ sealed interface GameEntry {
      */
     val steamAppId: Int?
 }
+
+/**
+ * Returns the effective Google Drive folder name used for storing saves.
+ * Priority: [GameEntry.cloudFolder] > [GameEntry.group] > [GameEntry.name].
+ */
+val GameEntry.effectiveCloudFolder: String
+    get() = cloudFolder?.trim()?.takeIf { it.isNotBlank() }
+        ?: group?.trim()?.takeIf { it.isNotBlank() }
+        ?: name
 
 /**
  * An emulator-based system.
@@ -53,6 +74,8 @@ data class EmulatorSystem(
     val savePathsByRom: Map<String, List<String>> = emptyMap(),
     /** Optional map of ROM filename to custom cover art image path. */
     val coverPathByRom: Map<String, String> = emptyMap(),
+    override val group: String? = null,
+    override val cloudFolder: String? = null,
     override val driveFileId: String? = null,
     override val steamAppId: Int? = null,
     val steamProcessName: String? = null,
@@ -78,6 +101,8 @@ data class NativePCGame(
     val arguments: List<String> = emptyList(),
     override val savePaths: List<String> = emptyList(),
     val waitForProcess: String? = null,
+    override val group: String? = null,
+    override val cloudFolder: String? = null,
     override val driveFileId: String? = null,
     override val steamAppId: Int? = null,
     /** Optional custom path to a cover art image for this game. */

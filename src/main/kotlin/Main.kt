@@ -360,8 +360,13 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
 
             // ── Add Entry Dialog ────────────────────────────────────
             if (showAddDialog) {
+                val existingGroups = uiState.config?.entries
+                    ?.mapNotNull { it.group?.trim()?.takeIf { g -> g.isNotBlank() } }
+                    ?.distinct()
+                    ?: emptyList()
                 AddEntryDialog(
                     initialEntry = entryToEdit,
+                    existingGroups = existingGroups,
                     onDismiss = { 
                         showAddDialog = false
                         entryToEdit = null

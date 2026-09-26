@@ -64,6 +64,7 @@ private enum class EntryType(val label: String) {
 @Composable
 fun AddEntryDialog(
     initialEntry: GameEntry? = null,
+    existingGroups: List<String> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (GameEntry) -> Unit,
 ) {
@@ -71,6 +72,8 @@ fun AddEntryDialog(
         mutableStateOf(if (initialEntry is NativePCGame) EntryType.NATIVE else EntryType.EMULATOR)
     }
     var name by remember { mutableStateOf(initialEntry?.name ?: "") }
+    var group by remember { mutableStateOf(initialEntry?.group ?: "") }
+    var cloudFolder by remember { mutableStateOf(initialEntry?.cloudFolder ?: "") }
 
     // Shared & Type-specific fields
     var executablePath by remember {
@@ -190,7 +193,51 @@ fun AddEntryDialog(
                     label = "Name",
                     value = name,
                     onValueChange = { name = it },
-                    placeholder = if (entryType == EntryType.EMULATOR) "e.g. Game Boy Advance" else "e.g. Spelunky Classic",
+                    placeholder = if (entryType == EntryType.EMULATOR) "e.g. Yuzu or Eden" else "e.g. Spelunky Classic",
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                // ── Group / Platform Folder ──────────────────────────
+                FormField(
+                    label = "Folder / Platform Group (Optional)",
+                    value = group,
+                    onValueChange = { group = it },
+                    placeholder = "e.g. Switch, PlayStation (shares cloud saves folder)",
+                )
+                if (existingGroups.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "Assign to existing folder:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = EmuSyncColors.OnSurfaceDim,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        existingGroups.forEach { grp ->
+                            FilterChip(
+                                selected = group.equals(grp, ignoreCase = true),
+                                onClick = { group = if (group.equals(grp, ignoreCase = true)) "" else grp },
+                                label = { Text(grp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = EmuSyncColors.PrimaryContainer,
+                                    selectedLabelColor = EmuSyncColors.Primary,
+                                    containerColor = EmuSyncColors.SurfaceVariant,
+                                    labelColor = EmuSyncColors.OnSurface,
+                                ),
+                            )
+                        }
+                    }
+                }
+                val previewCloud = cloudFolder.ifBlank { group.ifBlank { name.ifBlank { "..." } } }
+                Text(
+                    text = "☁️ Google Drive saves folder: \"$previewCloud\"",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (group.isNotBlank()) EmuSyncColors.Primary else EmuSyncColors.OnSurfaceDim,
+                    modifier = Modifier.padding(top = 4.dp, start = 4.dp)
                 )
 
                 Spacer(Modifier.height(12.dp))
@@ -370,6 +417,8 @@ fun AddEntryDialog(
                                 fullscreenArgs = fullscreenArgs.trim(),
                                 coversDirectory = coversDirectory.trim(),
                                 coverPath = coverPath.trim(),
+                                group = group.trim(),
+                                cloudFolder = cloudFolder.trim(),
                             )
                             if (entry != null) {
                                 // Preserve driveFileId and steamAppId if editing
@@ -380,7 +429,6 @@ fun AddEntryDialog(
                                         steamProcessName = (initialEntry as? EmulatorSystem)?.steamProcessName,
                                         savePathsByRom = (initialEntry as? EmulatorSystem)?.savePathsByRom ?: emptyMap(),
                                         coverPathByRom = (initialEntry as? EmulatorSystem)?.coverPathByRom ?: emptyMap(),
-                                        coversDirectory = (initialEntry as? EmulatorSystem)?.coversDirectory,
                                     )
                                     is NativePCGame -> entry.copy(
                                         driveFileId = initialEntry?.driveFileId,
@@ -537,6 +585,8 @@ private fun validateAndBuild(
     fullscreenArgs: String,
     coversDirectory: String = "",
     coverPath: String = "",
+    group: String = "",
+    cloudFolder: String = "",
 ): GameEntry? {
     if (name.isBlank() || executablePath.isBlank()) return null
     
@@ -558,6 +608,8 @@ private fun validateAndBuild(
                 romsDirectory = romsDirectory,
                 extensions = extList,
                 savePaths = validSavePaths,
+                group = group.trim().takeIf { it.isNotBlank() },
+                cloudFolder = cloudFolder.trim().takeIf { it.isNotBlank() },
                 fullscreenArgs = fullscreenArgs.trim().takeIf { it.isNotBlank() },
                 coversDirectory = coversDirectory.trim().takeIf { it.isNotBlank() },
             )
@@ -569,6 +621,8 @@ private fun validateAndBuild(
                 arguments = argList,
                 savePaths = validSavePaths,
                 waitForProcess = waitForProcess.takeIf { it.isNotBlank() },
+                group = group.trim().takeIf { it.isNotBlank() },
+                cloudFolder = cloudFolder.trim().takeIf { it.isNotBlank() },
                 coverPath = coverPath.trim().takeIf { it.isNotBlank() },
             )
         }
