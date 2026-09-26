@@ -283,6 +283,59 @@ class AppViewModelTest {
     }
 
     @Test
+    fun `editGameOverride updates custom title in titleByRom for EmulatorSystem`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+
+        val system = EmulatorSystem(
+            name = "GBA",
+            executablePath = "mgba",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("gba")
+        )
+        configManager.save(AppConfig(entries = listOf(system)))
+
+        val viewModel = AppViewModel(
+            configManager = configManager,
+            httpClient = createMockHttpClient(),
+        )
+        viewModel.loadConfig()
+
+        val romFile = File(tempDir, "The_Legend_of_Zelda_The_Minish_Cap_(USA).gba").apply { createNewFile() }
+        val gameItem = GameItem(name = "The_Legend_of_Zelda_The_Minish_Cap_(USA)", entry = system, romFile = romFile)
+
+        // Default clean title before override
+        assertEquals("The Legend of Zelda The Minish Cap", gameItem.effectiveTitle)
+
+        // Set custom title override
+        viewModel.editGameOverride(
+            gameItem = gameItem,
+            newPaths = emptyList(),
+            newCoverPath = null,
+            newTitle = "Zelda: Minish Cap (Custom)"
+        )
+
+        val updatedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
+        assertNotNull(updatedSystem)
+        assertEquals("Zelda: Minish Cap (Custom)", updatedSystem.titleByRom["The_Legend_of_Zelda_The_Minish_Cap_(USA).gba"])
+
+        val updatedGameItem = gameItem.copy(entry = updatedSystem)
+        assertEquals("Zelda: Minish Cap (Custom)", updatedGameItem.effectiveTitle)
+
+        // Clear custom title override
+        viewModel.editGameOverride(
+            gameItem = updatedGameItem,
+            newPaths = emptyList(),
+            newCoverPath = null,
+            newTitle = ""
+        )
+        val clearedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
+        assertNotNull(clearedSystem)
+        kotlin.test.assertNull(clearedSystem.titleByRom["The_Legend_of_Zelda_The_Minish_Cap_(USA).gba"])
+        assertEquals("The Legend of Zelda The Minish Cap", gameItem.copy(entry = clearedSystem).effectiveTitle)
+    }
+
+    @Test
     fun `editGameOverride updates coverPath and savePaths for NativePCGame`(@TempDir tempDir: File) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)

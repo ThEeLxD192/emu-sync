@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Button
@@ -39,7 +40,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,9 +65,15 @@ import java.io.File
 @Composable
 fun EditGameDialog(
     game: GameItem,
+    notice: String? = null,
     onDismiss: () -> Unit,
-    onSave: (savePaths: List<String>, coverPath: String?) -> Unit,
+    onSave: (title: String?, savePaths: List<String>, coverPath: String?) -> Unit,
 ) {
+    val coroutineScope = rememberCoroutineScope()
+    var customTitle by remember {
+        mutableStateOf(game.effectiveTitle)
+    }
+
     var savePaths by remember {
         mutableStateOf(
             if (game.effectiveSavePaths.isEmpty()) listOf("")
@@ -113,15 +124,113 @@ fun EditGameDialog(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = game.name,
+                    text = game.effectiveTitle,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = EmuSyncColors.Primary,
                 )
                 Text(
-                    text = "Configure custom cover art and specific save files/folders.",
+                    text = "Configure custom title, cover art, and specific save files/folders.",
                     style = MaterialTheme.typography.bodySmall,
                     color = EmuSyncColors.OnSurfaceDim,
+                )
+                Spacer(Modifier.height(18.dp))
+
+                if (notice != null) {
+                    Surface(
+                        color = EmuSyncColors.Primary.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, EmuSyncColors.Primary.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudDownload,
+                                contentDescription = null,
+                                tint = EmuSyncColors.Primary,
+                                modifier = Modifier.size(24.dp),
+                            )
+                            Text(
+                                text = notice,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = EmuSyncColors.OnBackground,
+                            )
+                        }
+                    }
+                }
+
+                // ── Game Title Section ─────────────────────────────
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Game Title",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = EmuSyncColors.OnSurface,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val cleanSuggestion = com.emusync.model.cleanGameTitle(game.romFile?.nameWithoutExtension ?: game.name)
+                        if (customTitle != cleanSuggestion) {
+                            TextButton(
+                                onClick = { customTitle = cleanSuggestion },
+                            ) {
+                                Text(
+                                    text = "Auto-Clean",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = EmuSyncColors.Primary,
+                                )
+                            }
+                        }
+                        val rawFilename = game.romFile?.nameWithoutExtension ?: game.name
+                        if (customTitle != rawFilename) {
+                            TextButton(
+                                onClick = { customTitle = rawFilename },
+                            ) {
+                                Text(
+                                    text = "Raw Name",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = EmuSyncColors.OnSurfaceDim,
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = customTitle,
+                    onValueChange = { customTitle = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = {
+                        Text(
+                            text = com.emusync.model.cleanGameTitle(game.romFile?.nameWithoutExtension ?: game.name),
+                            color = EmuSyncColors.OnSurfaceDim.copy(alpha = 0.5f),
+                        )
+                    },
+                    singleLine = true,
+                    supportingText = {
+                        if (game.romFile != null) {
+                            Text(
+                                text = "ROM File: ${game.romFile.name}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = EmuSyncColors.OnSurfaceDim,
+                            )
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = EmuSyncColors.Primary,
+                        unfocusedBorderColor = EmuSyncColors.Divider,
+                        cursorColor = EmuSyncColors.Primary,
+                        focusedTextColor = EmuSyncColors.OnBackground,
+                        unfocusedTextColor = EmuSyncColors.OnSurface,
+                    ),
+                    shape = RoundedCornerShape(10.dp),
                 )
                 Spacer(Modifier.height(18.dp))
 
@@ -267,12 +376,16 @@ fun EditGameDialog(
                                     val initialDir = coverPath.ifBlank {
                                         game.romFile?.parentFile?.absolutePath ?: ""
                                     }
-                                    val result = FilePicker.pickPath(
-                                        label = "Cover Image",
-                                        initialPath = initialDir,
-                                        type = PickerType.FILE
-                                    )
-                                    if (result != null) coverPath = result
+                                    coroutineScope.launch {
+                                        val result = withContext(Dispatchers.IO) {
+                                            FilePicker.pickPath(
+                                                label = "Cover Image",
+                                                initialPath = initialDir,
+                                                type = PickerType.FILE
+                                            )
+                                        }
+                                        if (result != null) coverPath = result
+                                    }
                                 },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = EmuSyncColors.SurfaceSelected,
@@ -362,7 +475,8 @@ fun EditGameDialog(
                         onClick = {
                             val validSavePaths = savePaths.map { it.trim() }.filter { it.isNotBlank() }
                             val cleanCover = coverPath.trim().takeIf { it.isNotBlank() }
-                            onSave(validSavePaths, cleanCover)
+                            val cleanTitle = customTitle.trim().takeIf { it.isNotBlank() }
+                            onSave(cleanTitle, validSavePaths, cleanCover)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
                     ) {
@@ -380,6 +494,7 @@ private fun EditPathField(
     onValueChange: (String) -> Unit,
     placeholder: String,
 ) {
+    val coroutineScope = rememberCoroutineScope()
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = value,
@@ -404,12 +519,16 @@ private fun EditPathField(
         Spacer(Modifier.width(8.dp))
         Button(
             onClick = {
-                val result = FilePicker.pickPath(
-                    label = "File",
-                    initialPath = value,
-                    type = PickerType.FILE
-                )
-                if (result != null) onValueChange(result)
+                coroutineScope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        FilePicker.pickPath(
+                            label = "File",
+                            initialPath = value,
+                            type = PickerType.FILE
+                        )
+                    }
+                    if (result != null) onValueChange(result)
+                }
             },
             colors = ButtonDefaults.buttonColors(
                 containerColor = EmuSyncColors.SurfaceSelected,
@@ -423,12 +542,16 @@ private fun EditPathField(
         Spacer(Modifier.width(8.dp))
         Button(
             onClick = {
-                val result = FilePicker.pickPath(
-                    label = "Folder",
-                    initialPath = value,
-                    type = PickerType.DIRECTORY
-                )
-                if (result != null) onValueChange(result)
+                coroutineScope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        FilePicker.pickPath(
+                            label = "Folder",
+                            initialPath = value,
+                            type = PickerType.DIRECTORY
+                        )
+                    }
+                    if (result != null) onValueChange(result)
+                }
             },
             colors = ButtonDefaults.buttonColors(
                 containerColor = EmuSyncColors.SurfaceSelected,

@@ -17,6 +17,15 @@ data class GameItem(
     val entry: GameEntry,
     val romFile: File? = null,
 ) {
+    val effectiveTitle: String
+        get() = when (entry) {
+            is EmulatorSystem -> {
+                val romName = romFile?.name ?: name
+                entry.getEffectiveTitle(romName, name)
+            }
+            is NativePCGame -> entry.name
+        }
+
     val effectiveSavePaths: List<String>
         get() = when (entry) {
             is NativePCGame -> entry.savePaths
@@ -50,7 +59,7 @@ data class GameItem(
 
             val extensions = listOf("png", "jpg", "jpeg", "webp")
             val baseName = romFile?.nameWithoutExtension ?: name
-            val cleanName = baseName.replace(Regex("\\s*[\\[\\(].*?[\\]\\)]"), "").trim()
+            val cleanName = com.emusync.model.cleanGameTitle(baseName)
             val spaceName = baseName.replace('_', ' ').trim()
 
             // 2. Same folder as the ROM / game with the exact same name as the ROM
@@ -58,8 +67,11 @@ data class GameItem(
             if (romDir != null && romDir.exists()) {
                 val targetNames = listOfNotNull(
                     baseName,
+                    effectiveTitle,
+                    cleanName,
+                    spaceName,
                     romFile?.name
-                )
+                ).distinct()
                 for (target in targetNames) {
                     for (ext in extensions) {
                         val candidate = File(romDir, "$target.$ext")
@@ -182,6 +194,11 @@ sealed interface UpdateUiState {
     data class Error(val message: String) : UpdateUiState
 }
 
+data class SaveSetupRequest(
+    val item: GameItem,
+    val notice: String? = null,
+)
+
 /**
  * Immutable Single Source of Truth for the entire application UI state.
  */
@@ -191,8 +208,9 @@ data class AppUiState(
     val gameItems: List<GameItem> = emptyList(),
     val status: AppStatus = AppStatus.Idle,
     val isLoading: Boolean = false,
-    val saveSetupRequest: GameItem? = null,
+    val saveSetupRequest: SaveSetupRequest? = null,
     val entrySyncStatus: Map<String, CloudSyncStatus> = emptyMap(),
     val updateState: UpdateUiState = UpdateUiState.Idle,
     val showUpdateDialog: Boolean = false,
 )
+

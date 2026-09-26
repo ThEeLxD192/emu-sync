@@ -8,6 +8,7 @@ import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
 import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.NativePCGame
+import com.emusync.model.effectiveCloudFolder
 import com.emusync.scanner.scanRoms
 import com.emusync.steam.SteamShortcutManager
 import com.emusync.update.UpdateInfo
@@ -34,7 +35,13 @@ class AppViewModel(
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
 
-    private var saveSetupDeferred: CompletableDeferred<List<String>>? = null
+    data class SaveSetupResult(
+        val paths: List<String>,
+        val title: String? = null,
+        val coverPath: String? = null,
+    )
+
+    private var saveSetupDeferred: CompletableDeferred<SaveSetupResult>? = null
 
     /**
      * Loads the config.json and populates the initial state.
@@ -201,8 +208,8 @@ class AppViewModel(
     /**
      * Completes a pending save setup request from the UI.
      */
-    fun completeSaveSetup(paths: List<String>) {
-        saveSetupDeferred?.complete(paths)
+    fun completeSaveSetup(paths: List<String>, title: String? = null, coverPath: String? = null) {
+        saveSetupDeferred?.complete(SaveSetupResult(paths, title, coverPath))
         saveSetupDeferred = null
         _uiState.update { it.copy(saveSetupRequest = null) }
     }
@@ -210,10 +217,10 @@ class AppViewModel(
     /**
      * Pauses coroutine execution, asks the UI for save paths, and resumes.
      */
-    private suspend fun requestSaveSetup(item: GameItem): List<String> {
-        val deferred = CompletableDeferred<List<String>>()
+    private suspend fun requestSaveSetup(item: GameItem, notice: String? = null): SaveSetupResult {
+        val deferred = CompletableDeferred<SaveSetupResult>()
         saveSetupDeferred = deferred
-        _uiState.update { it.copy(saveSetupRequest = item) }
+        _uiState.update { it.copy(saveSetupRequest = SaveSetupRequest(item, notice)) }
         return deferred.await()
     }
 
@@ -230,12 +237,12 @@ class AppViewModel(
             onStatus = { status -> setStatus(status) },
         )
 
-        orchestrator.playWithSync(item, onRequestSaveSetup = { reqItem ->
-            val paths = requestSaveSetup(reqItem)
-            if (paths.isNotEmpty()) {
-                editGameOverride(reqItem, paths)
+        orchestrator.playWithSync(item, onRequestSaveSetup = { reqItem, notice ->
+            val result = requestSaveSetup(reqItem, notice)
+            if (result.paths.isNotEmpty() || result.title != null || result.coverPath != null) {
+                editGameOverride(reqItem, result.paths, result.coverPath, result.title)
             }
-            paths
+            result.paths
         })
         checkSyncForEntry(item.entry)
     }
@@ -270,6 +277,20 @@ class AppViewModel(
                 steamManager.registerEntry(newEntry)
             } catch (_: Exception) { /* best-effort */ }
         }
+
+        // If the entry's effective cloud folder changed (e.g. grouped under Switch), rename/move in Drive
+        if (oldEntry.effectiveCloudFolder != newEntry.effectiveCloudFolder && cfg.googleDrive != null) {
+            val orchestrator = SyncOrchestrator(
+                client = httpClient,
+                config = updatedConfig,
+                configManager = configManager,
+                onStatus = { status -> _uiState.update { it.copy(status = status) } },
+            )
+            orchestrator.renameEntryCloudFolder(
+                oldCloudFolder = oldEntry.effectiveCloudFolder,
+                newCloudFolder = newEntry.effectiveCloudFolder,
+            )
+        }
     }
 
     /**
@@ -287,10 +308,19 @@ class AppViewModel(
     }
 
     /**
-     * Updates the save paths and optional cover art for a specific game item.
+     * Updates the save paths, optional cover art, and custom title for a specific game item.
      */
-    suspend fun editGameOverride(gameItem: GameItem, newPaths: List<String>, newCoverPath: String? = null) {
-        when (val entry = gameItem.entry) {
+    suspend fun editGameOverride(
+        gameItem: GameItem,
+        newPaths: List<String>,
+        newCoverPath: String? = null,
+        newTitle: String? = null,
+    ) {
+        val oldTitle = gameItem.effectiveTitle
+        val cleanTitle = newTitle?.trim()?.takeIf { it.isNotBlank() }
+        val hasRenamed = cleanTitle != null && cleanTitle != oldTitle
+
+        val newEntry: GameEntry = when (val entry = gameItem.entry) {
             is EmulatorSystem -> {
                 val romName = gameItem.romFile?.name ?: return
                 val newSaveOverrides = entry.savePathsByRom.toMutableMap()
@@ -306,19 +336,50 @@ class AppViewModel(
                     }
                 }
 
-                val newEntry = entry.copy(
+                val newTitleOverrides = entry.titleByRom.toMutableMap()
+                if (cleanTitle != null) {
+                    newTitleOverrides[romName] = cleanTitle
+                } else if (newTitle != null) {
+                    newTitleOverrides.remove(romName)
+                }
+
+                entry.copy(
                     savePathsByRom = newSaveOverrides,
-                    coverPathByRom = newCoverOverrides
+                    coverPathByRom = newCoverOverrides,
+                    titleByRom = newTitleOverrides,
                 )
-                editEntry(entry, newEntry)
             }
             is NativePCGame -> {
                 val cleanCover = if (newCoverPath != null) newCoverPath.trim().takeIf { it.isNotBlank() } else entry.coverPath
-                val newEntry = entry.copy(
+                val cleanName = cleanTitle ?: entry.name
+                entry.copy(
+                    name = cleanName,
                     savePaths = newPaths,
-                    coverPath = cleanCover
+                    coverPath = cleanCover,
                 )
-                editEntry(entry, newEntry)
+            }
+        }
+
+        editEntry(gameItem.entry, newEntry)
+
+        if (hasRenamed) {
+            val cfg = _uiState.value.config
+            if (cfg?.googleDrive != null) {
+                val orchestrator = SyncOrchestrator(
+                    client = httpClient,
+                    config = cfg,
+                    configManager = configManager,
+                    onStatus = { status -> _uiState.update { it.copy(status = status) } },
+                )
+                val saveFiles = newPaths.ifEmpty { gameItem.effectiveSavePaths }.map { File(it) }
+                val romName = gameItem.romFile?.name ?: gameItem.name
+                orchestrator.renameGameCloudData(
+                    entry = newEntry,
+                    romName = romName,
+                    oldTitle = oldTitle,
+                    newTitle = cleanTitle!!,
+                    localSavePaths = saveFiles,
+                )
             }
         }
     }

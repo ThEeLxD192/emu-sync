@@ -393,21 +393,24 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                 EditGameDialog(
                     game = gameItem,
                     onDismiss = { gameToEdit = null },
-                    onSave = { newPaths, newCoverPath ->
+                    onSave = { newTitle, newPaths, newCoverPath ->
                         scope.launch {
-                            viewModel.editGameOverride(gameItem, newPaths, newCoverPath)
+                            viewModel.editGameOverride(gameItem, newPaths, newCoverPath, newTitle)
                             gameToEdit = null
                         }
                     }
                 )
             }
 
-            // ── Post-Game Save Setup Dialog ─────────────────────────
-            uiState.saveSetupRequest?.let { gameItem ->
+            // ── Save Setup Dialog (Pre-Launch or Post-Game) ──────────
+            uiState.saveSetupRequest?.let { request ->
                 EditGameDialog(
-                    game = gameItem,
+                    game = request.item,
+                    notice = request.notice,
                     onDismiss = { viewModel.completeSaveSetup(emptyList()) },
-                    onSave = { newPaths, _ -> viewModel.completeSaveSetup(newPaths) }
+                    onSave = { newTitle, newPaths, newCoverPath ->
+                        viewModel.completeSaveSetup(newPaths, newTitle, newCoverPath)
+                    }
                 )
             }
 

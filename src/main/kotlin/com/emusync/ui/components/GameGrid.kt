@@ -415,7 +415,7 @@ private fun GameCard(
                     if (coverBitmap != null) {
                         Image(
                             bitmap = coverBitmap,
-                            contentDescription = item.name,
+                            contentDescription = item.effectiveTitle,
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -456,7 +456,7 @@ private fun GameCard(
 
                 // Game name
                 Text(
-                    text = item.name,
+                    text = item.effectiveTitle,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = EmuSyncColors.OnBackground,

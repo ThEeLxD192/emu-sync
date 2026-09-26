@@ -1,5 +1,6 @@
 package com.emusync.ui
 
+import com.emusync.ui.components.ExternalChooserResult
 import com.emusync.ui.components.FilePicker
 import com.emusync.ui.components.PickerType
 import org.junit.jupiter.api.AfterEach
@@ -17,14 +18,16 @@ class FilePickerTest {
     private val originalIsWindows = FilePicker.isWindowsProvider
     private val originalFileChooser = FilePicker.fileChooser
     private val originalSwingDirectoryChooser = FilePicker.swingDirectoryChooser
-    private val originalLinuxExternalChooser = FilePicker.linuxExternalDirectoryChooser
+    private val originalLinuxExternalDirectoryChooser = FilePicker.linuxExternalDirectoryChooser
+    private val originalLinuxExternalFileChooser = FilePicker.linuxExternalFileChooser
 
     @BeforeEach
     fun setUp() {
         FilePicker.isWindowsProvider = originalIsWindows
         FilePicker.fileChooser = originalFileChooser
         FilePicker.swingDirectoryChooser = originalSwingDirectoryChooser
-        FilePicker.linuxExternalDirectoryChooser = originalLinuxExternalChooser
+        FilePicker.linuxExternalDirectoryChooser = originalLinuxExternalDirectoryChooser
+        FilePicker.linuxExternalFileChooser = originalLinuxExternalFileChooser
     }
 
     @AfterEach
@@ -32,7 +35,8 @@ class FilePickerTest {
         FilePicker.isWindowsProvider = originalIsWindows
         FilePicker.fileChooser = originalFileChooser
         FilePicker.swingDirectoryChooser = originalSwingDirectoryChooser
-        FilePicker.linuxExternalDirectoryChooser = originalLinuxExternalChooser
+        FilePicker.linuxExternalDirectoryChooser = originalLinuxExternalDirectoryChooser
+        FilePicker.linuxExternalFileChooser = originalLinuxExternalFileChooser
     }
 
     @Test
@@ -42,7 +46,8 @@ class FilePickerTest {
     }
 
     @Test
-    fun `pickPath delegates to fileChooser for PickerType FILE`(@TempDir tempDir: File) {
+    fun `pickPath delegates to fileChooser for PickerType FILE on Windows`(@TempDir tempDir: File) {
+        FilePicker.isWindowsProvider = { true }
         val testFile = File(tempDir, "game.rom").apply { writeText("data") }
         var invoked = false
 
@@ -57,6 +62,67 @@ class FilePickerTest {
         val result = FilePicker.pickPath("ROM File", testFile.absolutePath, PickerType.FILE)
         assertTrue(invoked)
         assertEquals("/chosen/game.rom", result)
+    }
+
+    @Test
+    fun `pickFile uses Linux external tool when available`(@TempDir tempDir: File) {
+        FilePicker.isWindowsProvider = { false }
+        val testFile = File(tempDir, "cover.png").apply { writeText("img") }
+        var externalInvoked = false
+        FilePicker.linuxExternalFileChooser = { label, parentDir, startFile ->
+            externalInvoked = true
+            assertEquals("Cover Image", label)
+            assertEquals(tempDir.absolutePath, parentDir.absolutePath)
+            assertEquals(testFile.name, startFile.name)
+            ExternalChooserResult.Selected("/chosen/cover.png")
+        }
+
+        var awtInvoked = false
+        FilePicker.fileChooser = { _, _, _ ->
+            awtInvoked = true
+            null
+        }
+
+        val result = FilePicker.pickPath("Cover Image", testFile.absolutePath, PickerType.FILE)
+        assertTrue(externalInvoked)
+        assertFalse(awtInvoked)
+        assertEquals("/chosen/cover.png", result)
+    }
+
+    @Test
+    fun `pickFile returns null and does not fall back to AWT when Linux external tool is cancelled`(@TempDir tempDir: File) {
+        FilePicker.isWindowsProvider = { false }
+        val testFile = File(tempDir, "cover.png").apply { writeText("img") }
+        FilePicker.linuxExternalFileChooser = { _, _, _ -> ExternalChooserResult.Cancelled }
+
+        var awtInvoked = false
+        FilePicker.fileChooser = { _, _, _ ->
+            awtInvoked = true
+            "/fallback/cover.png"
+        }
+
+        val result = FilePicker.pickPath("Cover Image", testFile.absolutePath, PickerType.FILE)
+        assertNull(result)
+        assertFalse(awtInvoked)
+    }
+
+    @Test
+    fun `pickFile falls back to fileChooser on Linux when external tools are not available`(@TempDir tempDir: File) {
+        FilePicker.isWindowsProvider = { false }
+        val testFile = File(tempDir, "cover.png").apply { writeText("img") }
+        FilePicker.linuxExternalFileChooser = { _, _, _ -> ExternalChooserResult.NotAvailable }
+
+        var awtInvoked = false
+        FilePicker.fileChooser = { label, parentDir, _ ->
+            awtInvoked = true
+            assertEquals("Cover Image", label)
+            assertEquals(tempDir.absolutePath, parentDir.absolutePath)
+            "/fallback/cover.png"
+        }
+
+        val result = FilePicker.pickPath("Cover Image", testFile.absolutePath, PickerType.FILE)
+        assertTrue(awtInvoked)
+        assertEquals("/fallback/cover.png", result)
     }
 
     @Test
@@ -81,7 +147,7 @@ class FilePickerTest {
         FilePicker.isWindowsProvider = { false }
         FilePicker.linuxExternalDirectoryChooser = { label, _ ->
             assertEquals("Linux Folder", label)
-            "/custom/linux/path"
+            ExternalChooserResult.Selected("/custom/linux/path")
         }
 
         var swingInvoked = false
@@ -96,9 +162,25 @@ class FilePickerTest {
     }
 
     @Test
-    fun `pickDirectory falls back to Swing chooser on Linux when external tools fail`(@TempDir tempDir: File) {
+    fun `pickDirectory returns null and does not fall back to Swing when Linux external tool is cancelled`(@TempDir tempDir: File) {
         FilePicker.isWindowsProvider = { false }
-        FilePicker.linuxExternalDirectoryChooser = { _, _ -> null }
+        FilePicker.linuxExternalDirectoryChooser = { _, _ -> ExternalChooserResult.Cancelled }
+
+        var swingInvoked = false
+        FilePicker.swingDirectoryChooser = { _, _ ->
+            swingInvoked = true
+            "/fallback/path"
+        }
+
+        val result = FilePicker.pickPath("Linux Folder", tempDir.absolutePath, PickerType.DIRECTORY)
+        assertNull(result)
+        assertFalse(swingInvoked)
+    }
+
+    @Test
+    fun `pickDirectory falls back to Swing chooser on Linux when external tools are not available`(@TempDir tempDir: File) {
+        FilePicker.isWindowsProvider = { false }
+        FilePicker.linuxExternalDirectoryChooser = { _, _ -> ExternalChooserResult.NotAvailable }
 
         var swingInvoked = false
         FilePicker.swingDirectoryChooser = { label, parentDir ->
@@ -115,6 +197,7 @@ class FilePickerTest {
 
     @Test
     fun `parentDir defaults to user home when initialPath is blank`() {
+        FilePicker.isWindowsProvider = { true }
         var resolvedParent: File? = null
         FilePicker.fileChooser = { _, parentDir, _ ->
             resolvedParent = parentDir

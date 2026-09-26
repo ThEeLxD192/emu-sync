@@ -36,7 +36,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -429,6 +433,7 @@ fun AddEntryDialog(
                                         steamProcessName = (initialEntry as? EmulatorSystem)?.steamProcessName,
                                         savePathsByRom = (initialEntry as? EmulatorSystem)?.savePathsByRom ?: emptyMap(),
                                         coverPathByRom = (initialEntry as? EmulatorSystem)?.coverPathByRom ?: emptyMap(),
+                                        titleByRom = (initialEntry as? EmulatorSystem)?.titleByRom ?: emptyMap(),
                                     )
                                     is NativePCGame -> entry.copy(
                                         driveFileId = initialEntry?.driveFileId,
@@ -497,6 +502,7 @@ private fun PathField(
     placeholder: String,
     pickerType: PickerType
 ) {
+    val coroutineScope = rememberCoroutineScope()
     Column {
         if (label != null) {
             Text(
@@ -531,12 +537,16 @@ private fun PathField(
             if (pickerType == PickerType.FILE || pickerType == PickerType.ANY) {
                 Button(
                     onClick = {
-                        val result = FilePicker.pickPath(
-                            label = label ?: "File",
-                            initialPath = value,
-                            type = PickerType.FILE
-                        )
-                        if (result != null) onValueChange(result)
+                        coroutineScope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                FilePicker.pickPath(
+                                    label = label ?: "File",
+                                    initialPath = value,
+                                    type = PickerType.FILE
+                                )
+                            }
+                            if (result != null) onValueChange(result)
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = EmuSyncColors.SurfaceSelected,
@@ -552,12 +562,16 @@ private fun PathField(
                 if (pickerType == PickerType.ANY) Spacer(Modifier.width(8.dp))
                 Button(
                     onClick = {
-                        val result = FilePicker.pickPath(
-                            label = label ?: "Folder",
-                            initialPath = value,
-                            type = PickerType.DIRECTORY
-                        )
-                        if (result != null) onValueChange(result)
+                        coroutineScope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                FilePicker.pickPath(
+                                    label = label ?: "Folder",
+                                    initialPath = value,
+                                    type = PickerType.DIRECTORY
+                                )
+                            }
+                            if (result != null) onValueChange(result)
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = EmuSyncColors.SurfaceSelected,

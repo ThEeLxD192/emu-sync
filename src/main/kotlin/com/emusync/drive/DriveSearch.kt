@@ -54,8 +54,9 @@ class DriveSearch(private val client: HttpClient) {
         fileName: String,
         parentFolderId: String? = null,
     ): DriveFile? {
+        val escapedFileName = fileName.replace("'", "\\'")
         val query = buildString {
-            append("name = '$fileName' and trashed = false")
+            append("name = '$escapedFileName' and trashed = false")
             if (parentFolderId != null) {
                 append(" and '$parentFolderId' in parents")
             }
