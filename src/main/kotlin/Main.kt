@@ -289,6 +289,9 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                         onReorder = { fromIndex, toIndex ->
                             scope.launch { viewModel.reorderEntries(fromIndex, toIndex) }
                         },
+                        onReorderEntries = { newEntries ->
+                            scope.launch { viewModel.reorderEntriesList(newEntries) }
+                        },
                         steamAvailable = viewModel.isSteamAvailable(),
                         isSteamRegistered = { entry -> viewModel.isSteamRegistered(entry) },
                         onSteamToggle = { entry ->

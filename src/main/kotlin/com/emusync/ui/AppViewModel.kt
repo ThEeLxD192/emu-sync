@@ -187,6 +187,18 @@ class AppViewModel(
     }
 
     /**
+     * Updates the full order of entries and persists the new configuration.
+     */
+    suspend fun reorderEntriesList(newEntries: List<GameEntry>) {
+        val cfg = _uiState.value.config ?: return
+        if (cfg.entries == newEntries) return
+
+        val updatedConfig = cfg.copy(entries = newEntries)
+        configManager.save(updatedConfig)
+        _uiState.update { it.copy(config = updatedConfig) }
+    }
+
+    /**
      * Completes a pending save setup request from the UI.
      */
     fun completeSaveSetup(paths: List<String>) {
