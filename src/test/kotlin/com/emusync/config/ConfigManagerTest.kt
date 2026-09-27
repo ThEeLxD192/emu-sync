@@ -33,6 +33,9 @@ class ConfigManagerTest {
                     savePathsByRom = mapOf(
                         "game.bin" to listOf("/saves/game_1.mcd")
                     ),
+                    coverPathByRom = mapOf(
+                        "game.bin" to "/covers/game_custom.png"
+                    ),
                     steamAppId = 12345
                 ),
                 NativePCGame(
@@ -40,6 +43,7 @@ class ConfigManagerTest {
                     executablePath = "/games/hollow_knight/start.sh",
                     arguments = listOf("--fullscreen"),
                     savePaths = listOf("/saves/hollow_knight.dat"),
+                    coverPath = "/covers/hollow_knight.jpg",
                     steamAppId = 67890
                 )
             )
@@ -58,10 +62,12 @@ class ConfigManagerTest {
         assertEquals(listOf("bin", "cue"), emu.extensions)
         assertEquals(12345, emu.steamAppId)
         assertEquals(listOf("/saves/game_1.mcd"), emu.savePathsByRom["game.bin"])
+        assertEquals("/covers/game_custom.png", emu.coverPathByRom["game.bin"])
 
         val native = reloaded.entries[1] as NativePCGame
         assertEquals("Hollow Knight", native.name)
         assertEquals(listOf("/saves/hollow_knight.dat"), native.savePaths)
+        assertEquals("/covers/hollow_knight.jpg", native.coverPath)
         assertEquals(67890, native.steamAppId)
     }
 

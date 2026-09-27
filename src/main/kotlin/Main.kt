@@ -289,6 +289,9 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                         onReorder = { fromIndex, toIndex ->
                             scope.launch { viewModel.reorderEntries(fromIndex, toIndex) }
                         },
+                        onReorderEntries = { newEntries ->
+                            scope.launch { viewModel.reorderEntriesList(newEntries) }
+                        },
                         steamAvailable = viewModel.isSteamAvailable(),
                         isSteamRegistered = { entry -> viewModel.isSteamRegistered(entry) },
                         onSteamToggle = { entry ->
@@ -360,8 +363,13 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
 
             // ── Add Entry Dialog ────────────────────────────────────
             if (showAddDialog) {
+                val existingGroups = uiState.config?.entries
+                    ?.mapNotNull { it.group?.trim()?.takeIf { g -> g.isNotBlank() } }
+                    ?.distinct()
+                    ?: emptyList()
                 AddEntryDialog(
                     initialEntry = entryToEdit,
+                    existingGroups = existingGroups,
                     onDismiss = { 
                         showAddDialog = false
                         entryToEdit = null
@@ -385,21 +393,24 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                 EditGameDialog(
                     game = gameItem,
                     onDismiss = { gameToEdit = null },
-                    onSave = { newPaths ->
+                    onSave = { newTitle, newPaths, newCoverPath ->
                         scope.launch {
-                            viewModel.editGameOverride(gameItem, newPaths)
+                            viewModel.editGameOverride(gameItem, newPaths, newCoverPath, newTitle)
                             gameToEdit = null
                         }
                     }
                 )
             }
 
-            // ── Post-Game Save Setup Dialog ─────────────────────────
-            uiState.saveSetupRequest?.let { gameItem ->
+            // ── Save Setup Dialog (Pre-Launch or Post-Game) ──────────
+            uiState.saveSetupRequest?.let { request ->
                 EditGameDialog(
-                    game = gameItem,
+                    game = request.item,
+                    notice = request.notice,
                     onDismiss = { viewModel.completeSaveSetup(emptyList()) },
-                    onSave = { newPaths -> viewModel.completeSaveSetup(newPaths) }
+                    onSave = { newTitle, newPaths, newCoverPath ->
+                        viewModel.completeSaveSetup(newPaths, newTitle, newCoverPath)
+                    }
                 )
             }
 

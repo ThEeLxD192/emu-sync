@@ -4,6 +4,7 @@ import com.emusync.config.ConfigManager
 import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.NativePCGame
+import com.emusync.model.effectiveCloudFolder
 import com.emusync.steam.SteamShortcutManager
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -233,8 +234,172 @@ class AppViewModelTest {
 
         val testFile = File(tempDir, "update.AppImage").apply { createNewFile() }
         val success = viewModel.restartApp(testFile)
-
         assertTrue(success)
         kotlin.test.assertFalse(viewModel.uiState.value.updateState is UpdateUiState.Error)
+    }
+
+    @Test
+    fun `editGameOverride updates coverPathByRom and savePathsByRom for EmulatorSystem`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+
+        val system = EmulatorSystem(
+            name = "GBA",
+            executablePath = "mgba",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("gba")
+        )
+        configManager.save(AppConfig(entries = listOf(system)))
+
+        val viewModel = AppViewModel(
+            configManager = configManager,
+            httpClient = createMockHttpClient(),
+        )
+        viewModel.loadConfig()
+
+        val romFile = File(tempDir, "zelda.gba").apply { createNewFile() }
+        val gameItem = GameItem(name = "zelda", entry = system, romFile = romFile)
+
+        viewModel.editGameOverride(
+            gameItem = gameItem,
+            newPaths = listOf("/path/to/zelda.sav"),
+            newCoverPath = "/path/to/zelda_box.png"
+        )
+
+        val updatedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
+        assertNotNull(updatedSystem)
+        assertEquals(listOf("/path/to/zelda.sav"), updatedSystem.savePathsByRom["zelda.gba"])
+        assertEquals("/path/to/zelda_box.png", updatedSystem.coverPathByRom["zelda.gba"])
+
+        // Now clear the custom cover
+        viewModel.editGameOverride(
+            gameItem = gameItem.copy(entry = updatedSystem),
+            newPaths = listOf("/path/to/zelda.sav"),
+            newCoverPath = ""
+        )
+        val clearedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
+        assertNotNull(clearedSystem)
+        kotlin.test.assertNull(clearedSystem.coverPathByRom["zelda.gba"])
+    }
+
+    @Test
+    fun `editGameOverride updates custom title in titleByRom for EmulatorSystem`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+
+        val system = EmulatorSystem(
+            name = "GBA",
+            executablePath = "mgba",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("gba")
+        )
+        configManager.save(AppConfig(entries = listOf(system)))
+
+        val viewModel = AppViewModel(
+            configManager = configManager,
+            httpClient = createMockHttpClient(),
+        )
+        viewModel.loadConfig()
+
+        val romFile = File(tempDir, "The_Legend_of_Zelda_The_Minish_Cap_(USA).gba").apply { createNewFile() }
+        val gameItem = GameItem(name = "The_Legend_of_Zelda_The_Minish_Cap_(USA)", entry = system, romFile = romFile)
+
+        // Default clean title before override
+        assertEquals("The Legend of Zelda The Minish Cap", gameItem.effectiveTitle)
+
+        // Set custom title override
+        viewModel.editGameOverride(
+            gameItem = gameItem,
+            newPaths = emptyList(),
+            newCoverPath = null,
+            newTitle = "Zelda: Minish Cap (Custom)"
+        )
+
+        val updatedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
+        assertNotNull(updatedSystem)
+        assertEquals("Zelda: Minish Cap (Custom)", updatedSystem.titleByRom["The_Legend_of_Zelda_The_Minish_Cap_(USA).gba"])
+
+        val updatedGameItem = gameItem.copy(entry = updatedSystem)
+        assertEquals("Zelda: Minish Cap (Custom)", updatedGameItem.effectiveTitle)
+
+        // Clear custom title override
+        viewModel.editGameOverride(
+            gameItem = updatedGameItem,
+            newPaths = emptyList(),
+            newCoverPath = null,
+            newTitle = ""
+        )
+        val clearedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
+        assertNotNull(clearedSystem)
+        kotlin.test.assertNull(clearedSystem.titleByRom["The_Legend_of_Zelda_The_Minish_Cap_(USA).gba"])
+        assertEquals("The Legend of Zelda The Minish Cap", gameItem.copy(entry = clearedSystem).effectiveTitle)
+    }
+
+    @Test
+    fun `editGameOverride updates coverPath and savePaths for NativePCGame`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+
+        val game = NativePCGame(
+            name = "Portal",
+            executablePath = "/games/portal/hl2.exe",
+            savePaths = listOf("/old/save")
+        )
+        configManager.save(AppConfig(entries = listOf(game)))
+
+        val viewModel = AppViewModel(
+            configManager = configManager,
+            httpClient = createMockHttpClient(),
+        )
+        viewModel.loadConfig()
+
+        val gameItem = GameItem(name = "Portal", entry = game)
+
+        viewModel.editGameOverride(
+            gameItem = gameItem,
+            newPaths = listOf("/new/save.dat"),
+            newCoverPath = "/images/portal.png"
+        )
+
+        val updatedGame = viewModel.uiState.value.config?.entries?.first() as? NativePCGame
+        assertNotNull(updatedGame)
+        assertEquals(listOf("/new/save.dat"), updatedGame.savePaths)
+        assertEquals("/images/portal.png", updatedGame.coverPath)
+    }
+
+    @Test
+    fun `addEntry and editEntry preserve and update group and cloudFolder`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val viewModel = AppViewModel(
+            configManager = configManager,
+            httpClient = createMockHttpClient(),
+        )
+        viewModel.loadConfig()
+
+        val yuzu = EmulatorSystem(
+            name = "Yuzu",
+            executablePath = "/usr/bin/yuzu",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("nsp"),
+            group = "Switch",
+        )
+        viewModel.addEntry(yuzu)
+
+        val configAfterAdd = viewModel.uiState.value.config
+        assertEquals(1, configAfterAdd?.entries?.size)
+        val addedEntry = configAfterAdd?.entries?.first() as? EmulatorSystem
+        assertEquals("Switch", addedEntry?.group)
+        assertEquals("Switch", addedEntry?.effectiveCloudFolder)
+
+        // Edit entry to assign explicit cloudFolder
+        val updatedYuzu = yuzu.copy(cloudFolder = "UnifiedSwitch")
+        viewModel.editEntry(yuzu, updatedYuzu)
+
+        val configAfterEdit = viewModel.uiState.value.config
+        val editedEntry = configAfterEdit?.entries?.first() as? EmulatorSystem
+        assertEquals("Switch", editedEntry?.group)
+        assertEquals("UnifiedSwitch", editedEntry?.cloudFolder)
+        assertEquals("UnifiedSwitch", editedEntry?.effectiveCloudFolder)
     }
 }

@@ -3,6 +3,7 @@ package com.emusync.drive
 import com.emusync.config.ConfigManager
 import com.emusync.model.AppConfig
 import com.emusync.model.GameEntry
+import com.emusync.model.effectiveCloudFolder
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.NativePCGame
 import com.emusync.runner.GameRunner
@@ -43,15 +44,88 @@ class SyncOrchestrator(
     private val oauthFlow = OAuthFlow(client)
     private val runner = GameRunner()
 
+    data class SaveTarget(
+        val file: File,
+        val cloudPathSegments: List<String>,
+        val displayName: String,
+    )
+
+    fun sanitizeCloudFolderName(name: String): String {
+        return name
+            .replace('/', '-')
+            .replace('\\', '-')
+            .trim()
+            .ifBlank { "Unknown" }
+    }
+
+    fun getCloudPathSegments(entry: GameEntry, romName: String? = null, gameTitle: String? = null): List<String> {
+        val baseFolder = entry.effectiveCloudFolder
+        return when (entry) {
+            is EmulatorSystem -> {
+                val hasRomOverride = romName != null && (
+                    entry.savePathsByRom.containsKey(romName) ||
+                    (romName.contains('.') && entry.savePathsByRom.containsKey(romName.substringBeforeLast('.')))
+                )
+                if (romName != null && (hasRomOverride || entry.savePaths.isEmpty())) {
+                    val title = gameTitle ?: entry.getEffectiveTitle(romName, romName)
+                    listOf(baseFolder, sanitizeCloudFolderName(title))
+                } else {
+                    listOf(baseFolder)
+                }
+            }
+            is NativePCGame -> {
+                if (entry.group != null && entry.cloudFolder == null) {
+                    listOf(baseFolder, sanitizeCloudFolderName(entry.name))
+                } else {
+                    listOf(baseFolder)
+                }
+            }
+        }
+    }
+
+    fun getCloudPathSegments(item: GameItem): List<String> {
+        val romName = item.romFile?.name ?: item.name
+        return getCloudPathSegments(item.entry, romName, item.effectiveTitle)
+    }
+
+    fun getSaveTargets(entry: GameEntry): List<SaveTarget> {
+        return when (entry) {
+            is NativePCGame -> {
+                val cloudPath = getCloudPathSegments(entry)
+                entry.savePaths.filter { it.isNotBlank() }.map {
+                    SaveTarget(File(it), cloudPath, entry.name)
+                }
+            }
+            is EmulatorSystem -> {
+                val targets = mutableListOf<SaveTarget>()
+
+                // 1. Global emulator save paths (if any)
+                if (entry.savePaths.isNotEmpty()) {
+                    val globalPath = listOf(entry.effectiveCloudFolder)
+                    for (path in entry.savePaths.filter { it.isNotBlank() }) {
+                        targets.add(SaveTarget(File(path), globalPath, entry.name))
+                    }
+                }
+
+                // 2. Per-ROM save paths
+                for ((romName, paths) in entry.savePathsByRom) {
+                    val title = entry.getEffectiveTitle(romName, romName)
+                    val romCloudPath = listOf(entry.effectiveCloudFolder, sanitizeCloudFolderName(title))
+                    for (path in paths.filter { it.isNotBlank() }) {
+                        targets.add(SaveTarget(File(path), romCloudPath, title))
+                    }
+                }
+
+                targets.distinctBy { it.file.absolutePath }
+            }
+        }
+    }
+
     /**
      * Helper to retrieve all configured save paths for an entry.
      */
     fun getAllSavePaths(entry: GameEntry): List<File> {
-        val paths = when (entry) {
-            is NativePCGame -> entry.savePaths
-            is EmulatorSystem -> (entry.savePaths + entry.savePathsByRom.values.flatten()).distinct()
-        }
-        return paths.filter { it.isNotBlank() }.map { File(it) }
+        return getSaveTargets(entry).map { it.file }
     }
 
     /**
@@ -64,81 +138,95 @@ class SyncOrchestrator(
             return CloudSyncStatus.NOT_CONFIGURED
         }
 
-        val savePaths = getAllSavePaths(entry)
-        if (savePaths.isEmpty()) {
+        val targets = getSaveTargets(entry)
+        if (targets.isEmpty()) {
             return CloudSyncStatus.IDLE
         }
 
         return try {
             val token = oauthFlow.authorize(config, configManager, allowInteractive = false)
-            val folderId = folders.ensureEntryFolder(token, entry.name)
-            val cloudFiles = search.listFilesInFolder(token, folderId)
 
             var hasNewerLocal = false
             var hasNewerCloud = false
             var hasConflict = false
             var anyFileChecked = false
 
-            for (savePath in savePaths) {
-                val isDirectory = when {
-                    savePath.exists() -> savePath.isDirectory
-                    savePath.extension.isNotEmpty() -> false
-                    cloudFiles.isEmpty() -> false
-                    cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
-                    else -> true
+            val targetsByFolder = targets.groupBy { it.cloudPathSegments }
+
+            for ((cloudPath, folderTargets) in targetsByFolder) {
+                val folderId = try {
+                    folders.findPath(token, cloudPath)
+                } catch (_: Exception) {
+                    null
+                }
+                val cloudFiles = if (folderId != null) {
+                    search.listFilesInFolder(token, folderId)
+                } else {
+                    emptyList()
                 }
 
-                if (isDirectory) {
-                    val localFiles = if (savePath.exists() && savePath.isDirectory) {
-                        savePath.walkTopDown().filter { it.isFile }.toList()
-                    } else {
-                        emptyList()
+                for (target in folderTargets) {
+                    val savePath = target.file
+                    val isDirectory = when {
+                        savePath.exists() -> savePath.isDirectory
+                        savePath.extension.isNotEmpty() -> false
+                        cloudFiles.isEmpty() -> false
+                        cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
+                        else -> true
                     }
 
-                    if (localFiles.isEmpty() && cloudFiles.isEmpty()) continue
-                    anyFileChecked = true
-
-                    for (cloudFile in cloudFiles) {
-                        val relPath = cloudFile.name.replace('/', File.separatorChar)
-                        val localFile = File(savePath, relPath)
-                        if (!localFile.exists()) {
-                            hasNewerCloud = true
+                    if (isDirectory) {
+                        val localFiles = if (savePath.exists() && savePath.isDirectory) {
+                            savePath.walkTopDown().filter { it.isFile }.toList()
                         } else {
-                            val decision = resolveConflict(localFile.lastModified(), cloudFile.modifiedTime)
+                            emptyList()
+                        }
+
+                        if (localFiles.isEmpty() && cloudFiles.isEmpty()) continue
+                        anyFileChecked = true
+
+                        for (cloudFile in cloudFiles) {
+                            val relPath = cloudFile.name.replace('/', File.separatorChar)
+                            val localFile = File(savePath, relPath)
+                            if (!localFile.exists()) {
+                                hasNewerCloud = true
+                            } else {
+                                val decision = resolveConflict(localFile.lastModified(), cloudFile.modifiedTime)
+                                when (decision) {
+                                    SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
+                                    SyncDecision.CONFLICT -> hasConflict = true
+                                    SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
+                                    SyncDecision.IN_SYNC -> {}
+                                }
+                            }
+                        }
+
+                        for (localFile in localFiles) {
+                            val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
+                            if (cloudFiles.none { it.name == relPath }) {
+                                hasNewerLocal = true
+                            }
+                        }
+                    } else {
+                        val cloudFile = cloudFiles.find { it.name == savePath.name }
+                        val localExists = savePath.exists()
+                        val cloudExists = cloudFile != null
+
+                        if (!localExists && !cloudExists) continue
+                        anyFileChecked = true
+
+                        if (!localExists && cloudExists) {
+                            hasNewerCloud = true
+                        } else if (localExists && !cloudExists) {
+                            hasNewerLocal = true
+                        } else if (localExists && cloudFile != null) {
+                            val decision = resolveConflict(savePath.lastModified(), cloudFile.modifiedTime)
                             when (decision) {
                                 SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
                                 SyncDecision.CONFLICT -> hasConflict = true
                                 SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
                                 SyncDecision.IN_SYNC -> {}
                             }
-                        }
-                    }
-
-                    for (localFile in localFiles) {
-                        val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
-                        if (cloudFiles.none { it.name == relPath }) {
-                            hasNewerLocal = true
-                        }
-                    }
-                } else {
-                    val cloudFile = cloudFiles.find { it.name == savePath.name }
-                    val localExists = savePath.exists()
-                    val cloudExists = cloudFile != null
-
-                    if (!localExists && !cloudExists) continue
-                    anyFileChecked = true
-
-                    if (!localExists && cloudExists) {
-                        hasNewerCloud = true
-                    } else if (localExists && !cloudExists) {
-                        hasNewerLocal = true
-                    } else if (localExists && cloudFile != null) {
-                        val decision = resolveConflict(savePath.lastModified(), cloudFile.modifiedTime)
-                        when (decision) {
-                            SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
-                            SyncDecision.CONFLICT -> hasConflict = true
-                            SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
-                            SyncDecision.IN_SYNC -> {}
                         }
                     }
                 }
@@ -175,29 +263,34 @@ class SyncOrchestrator(
                 return false
             }
 
-            val savePaths = getAllSavePaths(entry)
-            if (savePaths.isEmpty()) {
+            val targets = getSaveTargets(entry)
+            if (targets.isEmpty()) {
                 onStatus(AppStatus.Idle)
                 return true
             }
 
-            val folderId = folders.ensureEntryFolder(token, entry.name)
-            val cloudFiles = search.listFilesInFolder(token, folderId)
+            val targetsByFolder = targets.groupBy { it.cloudPathSegments }
 
-            for (savePath in savePaths) {
-                onStatus(AppStatus.Syncing("Syncing ${entry.name}..."))
-                val isDirectory = when {
-                    savePath.exists() -> savePath.isDirectory
-                    savePath.extension.isNotEmpty() -> false
-                    cloudFiles.isEmpty() -> false
-                    cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
-                    else -> true
-                }
+            for ((cloudPath, folderTargets) in targetsByFolder) {
+                val folderId = folders.ensurePath(token, cloudPath)
+                val cloudFiles = search.listFilesInFolder(token, folderId)
 
-                if (isDirectory) {
-                    syncDirectoryManual(token, entry, savePath, folderId, cloudFiles)
-                } else {
-                    syncFileManual(token, entry, savePath, folderId, cloudFiles)
+                for (target in folderTargets) {
+                    val savePath = target.file
+                    onStatus(AppStatus.Syncing("Syncing ${target.displayName}..."))
+                    val isDirectory = when {
+                        savePath.exists() -> savePath.isDirectory
+                        savePath.extension.isNotEmpty() -> false
+                        cloudFiles.isEmpty() -> false
+                        cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
+                        else -> true
+                    }
+
+                    if (isDirectory) {
+                        syncDirectoryManual(token, entry, savePath, folderId, cloudFiles, displayName = target.displayName)
+                    } else {
+                        syncFileManual(token, entry, savePath, folderId, cloudFiles, displayName = target.displayName)
+                    }
                 }
             }
 
@@ -209,12 +302,307 @@ class SyncOrchestrator(
         }
     }
 
+    /**
+     * Handles renaming a game's cloud folder on Google Drive when the user changes its title.
+     *
+     * 1. If old folder exists and new folder does not: renames/moves the old folder to the new name.
+     * 2. If new folder already exists (e.g. from another device):
+     *    - Moves non-conflicting files from old folder to new folder.
+     *    - Deletes old folder.
+     *    - Performs conflict check between local save files and cloud saves in new folder.
+     *    - Prompts user with [AppStatus.Conflict] if needed so they decide local vs cloud.
+     */
+    suspend fun renameGameCloudData(
+        entry: GameEntry,
+        romName: String?,
+        oldTitle: String,
+        newTitle: String,
+        localSavePaths: List<File>,
+    ): Boolean {
+        val oldCloudPath = getCloudPathSegments(entry, romName, oldTitle)
+        val newCloudPath = getCloudPathSegments(entry, romName, newTitle)
+
+        if (oldCloudPath == newCloudPath) return true
+
+        val driveConfig = config.googleDrive ?: return true
+        if (driveConfig.refreshToken.isNullOrBlank()) return true
+
+        return try {
+            onStatus(AppStatus.Syncing("Checking cloud folder for $newTitle..."))
+            val token = try {
+                oauthFlow.authorize(config, configManager, allowInteractive = false)
+            } catch (e: Exception) {
+                onStatus(AppStatus.Error("Drive authentication failed: ${e.message}"))
+                return false
+            }
+
+            val oldFolderId = folders.findPath(token, oldCloudPath)
+            val newFolderId = folders.findPath(token, newCloudPath)
+
+            when {
+                // Case 1: Old folder exists, but new folder does NOT exist yet -> Rename old folder!
+                oldFolderId != null && newFolderId == null -> {
+                    onStatus(AppStatus.Syncing("Renaming cloud folder to $newTitle..."))
+                    val oldParentSegments = oldCloudPath.dropLast(1)
+                    val newParentSegments = newCloudPath.dropLast(1)
+
+                    if (oldParentSegments == newParentSegments) {
+                        folders.renameFolder(token, oldFolderId, newCloudPath.last())
+                    } else {
+                        val newParentId = folders.ensurePath(token, newParentSegments)
+                        val oldParentId = folders.findPath(token, oldParentSegments)
+                        folders.renameFolder(
+                            accessToken = token,
+                            folderId = oldFolderId,
+                            newName = newCloudPath.last(),
+                            addParentId = newParentId,
+                            removeParentId = oldParentId,
+                        )
+                    }
+                    onStatus(AppStatus.Idle)
+                    true
+                }
+
+                // Case 2: New folder ALREADY exists! (with or without old folder) -> Check conflict and let user decide!
+                newFolderId != null -> {
+                    onStatus(AppStatus.Syncing("Checking cloud files in $newTitle..."))
+
+                    // If old folder also existed, move non-conflicting files over and delete old folder
+                    if (oldFolderId != null && oldFolderId != newFolderId) {
+                        val oldFiles = search.listFilesInFolder(token, oldFolderId)
+                        val newFiles = search.listFilesInFolder(token, newFolderId)
+
+                        for (file in oldFiles) {
+                            if (newFiles.none { it.name == file.name }) {
+                                try {
+                                    folders.moveFile(token, file.id, addParentId = newFolderId, removeParentId = oldFolderId)
+                                } catch (_: Exception) {}
+                            }
+                        }
+                        try {
+                            folders.deleteFolder(token, oldFolderId)
+                        } catch (_: Exception) {}
+                    }
+
+                    // Now check conflict between local save paths and newFolderId
+                    val cloudFiles = search.listFilesInFolder(token, newFolderId)
+
+                    var hasConflict = false
+                    var hasNewerLocal = false
+                    var hasNewerCloud = false
+
+                    for (savePath in localSavePaths) {
+                        val isDirectory = when {
+                            savePath.exists() -> savePath.isDirectory
+                            savePath.extension.isNotEmpty() -> false
+                            cloudFiles.isEmpty() -> false
+                            cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
+                            else -> true
+                        }
+
+                        if (isDirectory) {
+                            val localDirFiles = if (savePath.exists() && savePath.isDirectory) {
+                                savePath.walkTopDown().filter { it.isFile }.toList()
+                            } else emptyList()
+
+                            for (cloudFile in cloudFiles) {
+                                val rel = cloudFile.name.replace('/', File.separatorChar)
+                                val localF = File(savePath, rel)
+                                if (!localF.exists()) {
+                                    hasNewerCloud = true
+                                } else {
+                                    val decision = resolveConflict(localF.lastModified(), cloudFile.modifiedTime)
+                                    when (decision) {
+                                        SyncDecision.CONFLICT -> hasConflict = true
+                                        SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
+                                        SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
+                                        SyncDecision.IN_SYNC -> {}
+                                    }
+                                }
+                            }
+                            for (localF in localDirFiles) {
+                                val rel = localF.toRelativeString(savePath).replace(File.separatorChar, '/')
+                                if (cloudFiles.none { it.name == rel }) {
+                                    hasNewerLocal = true
+                                }
+                            }
+                        } else {
+                            val cloudFile = cloudFiles.find { it.name == savePath.name }
+                            val localExists = savePath.exists()
+                            val cloudExists = cloudFile != null
+
+                            if (!localExists && cloudExists) {
+                                hasNewerCloud = true
+                            } else if (localExists && !cloudExists) {
+                                hasNewerLocal = true
+                            } else if (localExists && cloudFile != null) {
+                                val decision = resolveConflict(savePath.lastModified(), cloudFile.modifiedTime)
+                                when (decision) {
+                                    SyncDecision.CONFLICT -> hasConflict = true
+                                    SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
+                                    SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
+                                    SyncDecision.IN_SYNC -> {}
+                                }
+                            }
+                        }
+                    }
+
+                    if (hasConflict || (hasNewerLocal && hasNewerCloud)) {
+                        val allLocalFiles = localSavePaths.flatMap { p ->
+                            if (p.isDirectory) p.walkTopDown().filter { it.isFile }.toList() else if (p.exists()) listOf(p) else emptyList()
+                        }
+                        val latestLocalMs = if (allLocalFiles.isNotEmpty()) allLocalFiles.maxOf { it.lastModified() } else System.currentTimeMillis()
+                        val latestCloudMs = if (cloudFiles.isNotEmpty()) cloudFiles.maxOf { Instant.parse(it.modifiedTime).toEpochMilli() } else System.currentTimeMillis()
+
+                        val choice: SyncDecision = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                            onStatus(AppStatus.Conflict(
+                                localDate = formatTimestamp(latestLocalMs),
+                                cloudDate = formatTimestamp(latestCloudMs),
+                                gameName = newTitle,
+                                onResolve = { userChoice ->
+                                    if (continuation.isActive) continuation.resumeWith(Result.success(userChoice))
+                                }
+                            ))
+                        }
+
+                        if (choice == SyncDecision.DOWNLOAD_CLOUD) {
+                            onStatus(AppStatus.Syncing("Downloading cloud saves for $newTitle..."))
+                            for (savePath in localSavePaths) {
+                                val isDirectory = when {
+                                    savePath.exists() -> savePath.isDirectory
+                                    savePath.extension.isNotEmpty() -> false
+                                    cloudFiles.isEmpty() -> false
+                                    cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
+                                    else -> true
+                                }
+                                if (isDirectory) {
+                                    for (cloudFile in cloudFiles) {
+                                        val relPath = cloudFile.name.replace('/', File.separatorChar)
+                                        val localFile = File(savePath, relPath)
+                                        localFile.parentFile?.mkdirs()
+                                        transfer.download(token, cloudFile.id, localFile, cloudFile.modifiedTime)
+                                    }
+                                } else {
+                                    val cloudFile = cloudFiles.find { it.name == savePath.name }
+                                    if (cloudFile != null) {
+                                        savePath.parentFile?.mkdirs()
+                                        transfer.download(token, cloudFile.id, savePath, cloudFile.modifiedTime)
+                                    }
+                                }
+                            }
+                        } else if (choice == SyncDecision.UPLOAD_LOCAL) {
+                            onStatus(AppStatus.Syncing("Uploading local saves for $newTitle..."))
+                            for (savePath in localSavePaths) {
+                                if (savePath.isDirectory) {
+                                    val localFiles = savePath.walkTopDown().filter { it.isFile }.toList()
+                                    for (localFile in localFiles) {
+                                        val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
+                                        val cloudFile = cloudFiles.find { it.name == relPath }
+                                        syncSingleFilePost(token, localFile, cloudFile, newFolderId, relPath, force = true)
+                                    }
+                                } else if (savePath.exists()) {
+                                    val cloudFile = cloudFiles.find { it.name == savePath.name }
+                                    syncSingleFilePost(token, savePath, cloudFile, newFolderId, savePath.name, force = true)
+                                }
+                            }
+                        }
+                    } else if (hasNewerCloud && !hasNewerLocal) {
+                        onStatus(AppStatus.Syncing("Downloading cloud saves for $newTitle..."))
+                        for (savePath in localSavePaths) {
+                            val isDirectory = when {
+                                savePath.exists() -> savePath.isDirectory
+                                savePath.extension.isNotEmpty() -> false
+                                cloudFiles.isEmpty() -> false
+                                cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
+                                else -> true
+                            }
+                            if (isDirectory) {
+                                for (cloudFile in cloudFiles) {
+                                    val relPath = cloudFile.name.replace('/', File.separatorChar)
+                                    val localFile = File(savePath, relPath)
+                                    localFile.parentFile?.mkdirs()
+                                    transfer.download(token, cloudFile.id, localFile, cloudFile.modifiedTime)
+                                }
+                            } else {
+                                val cloudFile = cloudFiles.find { it.name == savePath.name }
+                                if (cloudFile != null) {
+                                    savePath.parentFile?.mkdirs()
+                                    transfer.download(token, cloudFile.id, savePath, cloudFile.modifiedTime)
+                                }
+                            }
+                        }
+                    } else if (hasNewerLocal && !hasNewerCloud) {
+                        onStatus(AppStatus.Syncing("Uploading local saves for $newTitle..."))
+                        for (savePath in localSavePaths) {
+                            if (savePath.isDirectory) {
+                                val localFiles = savePath.walkTopDown().filter { it.isFile }.toList()
+                                for (localFile in localFiles) {
+                                    val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
+                                    val cloudFile = cloudFiles.find { it.name == relPath }
+                                    syncSingleFilePost(token, localFile, cloudFile, newFolderId, relPath, force = false)
+                                }
+                            } else if (savePath.exists()) {
+                                val cloudFile = cloudFiles.find { it.name == savePath.name }
+                                syncSingleFilePost(token, savePath, cloudFile, newFolderId, savePath.name, force = false)
+                            }
+                        }
+                    }
+
+                    onStatus(AppStatus.Idle)
+                    true
+                }
+
+                // Case 3: Neither old nor new folder exists in Drive
+                else -> {
+                    onStatus(AppStatus.Idle)
+                    true
+                }
+            }
+        } catch (e: Exception) {
+            onStatus(AppStatus.Error("Cloud rename error: ${e.message}"))
+            false
+        }
+    }
+
+    suspend fun renameEntryCloudFolder(
+        oldCloudFolder: String,
+        newCloudFolder: String,
+    ): Boolean {
+        if (oldCloudFolder == newCloudFolder) return true
+        val driveConfig = config.googleDrive ?: return true
+        if (driveConfig.refreshToken.isNullOrBlank()) return true
+
+        return try {
+            val token = oauthFlow.authorize(config, configManager, allowInteractive = false)
+            val oldFolderId = folders.findPath(token, listOf(oldCloudFolder))
+            val newFolderId = folders.findPath(token, listOf(newCloudFolder))
+
+            if (oldFolderId != null && newFolderId == null) {
+                folders.renameFolder(token, oldFolderId, newCloudFolder)
+            } else if (oldFolderId != null && newFolderId != null) {
+                val subFiles = search.listFilesInFolder(token, oldFolderId)
+                for (file in subFiles) {
+                    try {
+                        folders.moveFile(token, file.id, addParentId = newFolderId, removeParentId = oldFolderId)
+                    } catch (_: Exception) {}
+                }
+                try {
+                    folders.deleteFolder(token, oldFolderId)
+                } catch (_: Exception) {}
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private suspend fun syncDirectoryManual(
         token: String,
         entry: GameEntry,
         localSavePath: File,
         folderId: String,
         cloudFiles: List<DriveFile>,
+        displayName: String = entry.name,
     ) {
         data class FilePair(val localFile: File, val cloudFile: DriveFile, val decision: SyncDecision)
 
@@ -250,7 +638,7 @@ class SyncOrchestrator(
                 onStatus(AppStatus.Conflict(
                     localDate = formatTimestamp(latestLocalMs),
                     cloudDate = formatTimestamp(latestCloudMs),
-                    gameName = entry.name,
+                    gameName = displayName,
                     onResolve = { userChoice ->
                         if (continuation.isActive) {
                             continuation.resumeWith(Result.success(userChoice))
@@ -292,6 +680,7 @@ class SyncOrchestrator(
         localSavePath: File,
         folderId: String,
         cloudFiles: List<DriveFile>,
+        displayName: String = entry.name,
     ) {
         val cloudFile = cloudFiles.find { it.name == localSavePath.name }
 
@@ -334,7 +723,7 @@ class SyncOrchestrator(
                         onStatus(AppStatus.Conflict(
                             localDate = localDate,
                             cloudDate = cloudDate,
-                            gameName = entry.name,
+                            gameName = displayName,
                             onResolve = { userChoice ->
                                 if (continuation.isActive) {
                                     continuation.resumeWith(Result.success(userChoice))
@@ -365,12 +754,14 @@ class SyncOrchestrator(
      */
     suspend fun playWithSync(
         item: GameItem,
-        onRequestSaveSetup: suspend (GameItem) -> List<String> = { emptyList() }
+        onRequestSaveSetup: suspend (item: GameItem, notice: String?) -> List<String> = { _, _ -> emptyList() }
     ) {
         try {
             val hasDriveConfig = config.googleDrive != null
             var cachedToken: String? = null
             var forceUploadLocal = false
+            var currentSyncPaths = item.effectiveSavePaths
+            val cloudPath = getCloudPathSegments(item)
 
             // ── Step 1: Pre-Sync (download cloud save if newer) ─────
             if (hasDriveConfig) {
@@ -378,12 +769,42 @@ class SyncOrchestrator(
                     onStatus(AppStatus.Syncing("Checking cloud saves..."))
                     cachedToken = oauthFlow.authorize(config, configManager, allowInteractive = false)
 
-                    onStatus(AppStatus.Syncing("Syncing saves for ${item.name}..."))
-                    for (pathStr in item.effectiveSavePaths) {
-                        val saveFile = File(pathStr)
-                        val decision = preSync(cachedToken, item.entry, saveFile, displayName = item.name)
-                        if (decision == SyncDecision.UPLOAD_LOCAL) {
-                            forceUploadLocal = true
+                    // Case 1: If game has no save paths configured locally, check if cloud saves exist on Drive!
+                    if (currentSyncPaths.isEmpty()) {
+                        val cloudFolderId = folders.findPath(cachedToken, cloudPath)
+                        val cloudFiles = if (cloudFolderId != null) {
+                            search.listFilesInFolder(cachedToken, cloudFolderId)
+                        } else {
+                            emptyList()
+                        }
+
+                        if (cloudFiles.isNotEmpty()) {
+                            onStatus(AppStatus.Idle)
+                            val notice = "Cloud save data was found for this game! Please select the local file or folder where it should be downloaded before launching."
+                            val requested = onRequestSaveSetup(item, notice)
+                            if (requested.isNotEmpty()) {
+                                currentSyncPaths = requested
+                            } else {
+                                // User cancelled save setup prior to launch; abort launch to prevent playing without cloud saves.
+                                return
+                            }
+                        }
+                    }
+
+                    if (currentSyncPaths.isNotEmpty()) {
+                        onStatus(AppStatus.Syncing("Syncing saves for ${item.effectiveTitle}..."))
+                        for (pathStr in currentSyncPaths) {
+                            val saveFile = File(pathStr)
+                            val decision = preSync(
+                                token = cachedToken,
+                                entry = item.entry,
+                                localSavePath = saveFile,
+                                cloudPathSegments = cloudPath,
+                                displayName = item.effectiveTitle,
+                            )
+                            if (decision == SyncDecision.UPLOAD_LOCAL) {
+                                forceUploadLocal = true
+                            }
                         }
                     }
                 } catch (_: Exception) {
@@ -400,19 +821,25 @@ class SyncOrchestrator(
             val result = runner.launch(item.entry, item.romFile, steamAppId)
 
             // ── Step 2.5: Ask for save paths if empty ───────────────
-            var currentSyncPaths = item.effectiveSavePaths
             if (currentSyncPaths.isEmpty() && result.exitCode == 0) {
-                currentSyncPaths = onRequestSaveSetup(item)
+                currentSyncPaths = onRequestSaveSetup(item, null)
             }
 
             // ── Step 3: Post-Sync (upload local save if modified) ───
             if (hasDriveConfig && cachedToken != null && result.exitCode == 0) {
                 try {
-                    onStatus(AppStatus.Syncing("Uploading save for ${item.name}..."))
+                    onStatus(AppStatus.Syncing("Uploading save for ${item.effectiveTitle}..."))
+                    val postCloudPath = getCloudPathSegments(item)
                     for (pathStr in currentSyncPaths) {
                         val saveFile = File(pathStr)
                         if (saveFile.exists()) {
-                            postSync(cachedToken, item.entry, saveFile, forceAll = forceUploadLocal)
+                            postSync(
+                                token = cachedToken,
+                                entry = item.entry,
+                                localSavePath = saveFile,
+                                cloudPathSegments = postCloudPath,
+                                forceAll = forceUploadLocal,
+                            )
                         }
                     }
                 } catch (_: Exception) {
@@ -434,9 +861,10 @@ class SyncOrchestrator(
         token: String,
         entry: GameEntry,
         localSavePath: File,
-        displayName: String = entry.name
+        cloudPathSegments: List<String> = listOf(entry.effectiveCloudFolder),
+        displayName: String = entry.name,
     ): SyncDecision? {
-        val folderId = folders.ensureEntryFolder(token, entry.name)
+        val folderId = folders.ensurePath(token, cloudPathSegments)
         val cloudFiles = search.listFilesInFolder(token, folderId)
 
         val isDirectory = when {
@@ -553,11 +981,12 @@ class SyncOrchestrator(
         token: String,
         entry: GameEntry,
         localSavePath: File,
-        forceAll: Boolean = false
+        cloudPathSegments: List<String> = listOf(entry.effectiveCloudFolder),
+        forceAll: Boolean = false,
     ) {
         if (!localSavePath.exists()) return
 
-        val folderId = folders.ensureEntryFolder(token, entry.name)
+        val folderId = folders.ensurePath(token, cloudPathSegments)
         val cloudFiles = search.listFilesInFolder(token, folderId)
 
         if (localSavePath.isDirectory) {

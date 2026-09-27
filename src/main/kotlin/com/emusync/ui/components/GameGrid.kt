@@ -194,7 +194,7 @@ fun GameGrid(
                     GameCard(
                         item = gameItem,
                         onClick = { onGameClicked(gameItem) },
-                        onEdit = if (gameItem.entry is EmulatorSystem) { { onEditGame(gameItem) } } else null,
+                        onEdit = { onEditGame(gameItem) },
                     )
                 }
             }
@@ -339,7 +339,7 @@ private val coverCache = Collections.synchronizedMap(
     }
 )
 
-private fun loadGameCover(file: File?): ImageBitmap? {
+internal fun loadGameCover(file: File?): ImageBitmap? {
     if (file == null || !file.exists() || !file.isFile) return null
     val path = file.absolutePath
     coverCache[path]?.let { return it }
@@ -415,7 +415,7 @@ private fun GameCard(
                     if (coverBitmap != null) {
                         Image(
                             bitmap = coverBitmap,
-                            contentDescription = item.name,
+                            contentDescription = item.effectiveTitle,
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -456,7 +456,7 @@ private fun GameCard(
 
                 // Game name
                 Text(
-                    text = item.name,
+                    text = item.effectiveTitle,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = EmuSyncColors.OnBackground,
