@@ -188,23 +188,24 @@ class SyncOrchestrator(
                         for (cloudFile in cloudFiles) {
                             val relPath = cloudFile.name.replace('/', File.separatorChar)
                             val localFile = File(savePath, relPath)
-                            if (!localFile.exists()) {
-                                hasNewerCloud = true
-                            } else {
-                                val decision = resolveConflict(localFile.lastModified(), cloudFile.modifiedTime)
-                                when (decision) {
-                                    SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
-                                    SyncDecision.CONFLICT -> hasConflict = true
-                                    SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
-                                    SyncDecision.IN_SYNC -> {}
-                                }
+                            val decision = planSyncDecision(
+                                localModifiedTimeMs = localFile.takeIf { it.exists() }?.lastModified(),
+                                cloudModifiedTimeIso = cloudFile.modifiedTime,
+                            )
+                            when (decision) {
+                                SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
+                                SyncDecision.CONFLICT -> hasConflict = true
+                                SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
+                                SyncDecision.IN_SYNC -> {}
                             }
                         }
 
                         for (localFile in localFiles) {
                             val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
                             if (cloudFiles.none { it.name == relPath }) {
-                                hasNewerLocal = true
+                                if (planSyncDecision(localFile.lastModified(), null) == SyncDecision.UPLOAD_LOCAL) {
+                                    hasNewerLocal = true
+                                }
                             }
                         }
                     } else {
@@ -212,21 +213,18 @@ class SyncOrchestrator(
                         val localExists = savePath.exists()
                         val cloudExists = cloudFile != null
 
-                        if (!localExists && !cloudExists) continue
+                        val decision = planSyncDecision(
+                            localModifiedTimeMs = savePath.takeIf { localExists }?.lastModified(),
+                            cloudModifiedTimeIso = cloudFile?.modifiedTime,
+                        )
+                        if (decision == SyncDecision.IN_SYNC && !localExists && !cloudExists) continue
                         anyFileChecked = true
 
-                        if (!localExists && cloudExists) {
-                            hasNewerCloud = true
-                        } else if (localExists && !cloudExists) {
-                            hasNewerLocal = true
-                        } else if (localExists && cloudFile != null) {
-                            val decision = resolveConflict(savePath.lastModified(), cloudFile.modifiedTime)
-                            when (decision) {
-                                SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
-                                SyncDecision.CONFLICT -> hasConflict = true
-                                SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
-                                SyncDecision.IN_SYNC -> {}
-                            }
+                        when (decision) {
+                            SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
+                            SyncDecision.CONFLICT -> hasConflict = true
+                            SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
+                            SyncDecision.IN_SYNC -> {}
                         }
                     }
                 }
@@ -609,11 +607,10 @@ class SyncOrchestrator(
         val pairs = cloudFiles.map { cloudFile ->
             val relativePath = cloudFile.name.replace('/', File.separatorChar)
             val localFile = File(localSavePath, relativePath)
-            val decision = if (!localFile.exists()) {
-                SyncDecision.DOWNLOAD_CLOUD
-            } else {
-                resolveConflict(localFile.lastModified(), cloudFile.modifiedTime)
-            }
+            val decision = planSyncDecision(
+                localModifiedTimeMs = localFile.takeIf { it.exists() }?.lastModified(),
+                cloudModifiedTimeIso = cloudFile.modifiedTime,
+            )
             FilePair(localFile, cloudFile, decision)
         }
 
@@ -626,7 +623,8 @@ class SyncOrchestrator(
         val conflictingPairs = pairs.filter { it.decision == SyncDecision.CONFLICT }
         val hasLocalOnly = localFiles.any { local ->
             val rel = local.toRelativeString(localSavePath).replace(File.separatorChar, '/')
-            cloudFiles.none { it.name == rel }
+            cloudFiles.none { it.name == rel } &&
+                planSyncDecision(local.lastModified(), null) == SyncDecision.UPLOAD_LOCAL
         }
         val hasCloudNewer = pairs.any { it.decision == SyncDecision.DOWNLOAD_CLOUD }
 
@@ -684,65 +682,64 @@ class SyncOrchestrator(
     ) {
         val cloudFile = cloudFiles.find { it.name == localSavePath.name }
 
-        if (!localSavePath.exists() && cloudFile != null) {
-            localSavePath.parentFile?.mkdirs()
-            transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
-            return
-        }
+        val localExists = localSavePath.exists()
+        val decision = planSyncDecision(
+            localModifiedTimeMs = localSavePath.takeIf { localExists }?.lastModified(),
+            cloudModifiedTimeIso = cloudFile?.modifiedTime,
+        )
 
-        if (localSavePath.exists() && cloudFile == null) {
-            val res = transfer.upload(token, localSavePath, driveName = localSavePath.name, parentFolderId = folderId)
-            try {
-                localSavePath.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
-            } catch (_: Exception) {
+        when (decision) {
+            SyncDecision.IN_SYNC -> Unit
+            SyncDecision.DOWNLOAD_CLOUD -> {
+                val remote = cloudFile ?: return
+                localSavePath.parentFile?.mkdirs()
+                transfer.download(token, remote.id, localSavePath, remote.modifiedTime)
             }
-            return
-        }
+            SyncDecision.UPLOAD_LOCAL -> {
+                if (!localExists) return
+                val result = transfer.upload(
+                    token,
+                    localSavePath,
+                    driveName = localSavePath.name,
+                    parentFolderId = folderId,
+                )
+                setLocalModifiedTime(localSavePath, result.modifiedTime)
+            }
+            SyncDecision.CONFLICT -> {
+                val remote = cloudFile ?: return
+                val localDate = formatTimestamp(localSavePath.lastModified())
+                val cloudDate = formatTimestamp(Instant.parse(remote.modifiedTime).toEpochMilli())
 
-        if (localSavePath.exists() && cloudFile != null) {
-            val decision = resolveConflict(localSavePath.lastModified(), cloudFile.modifiedTime)
-            when (decision) {
-                SyncDecision.DOWNLOAD_CLOUD -> {
-                    transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
-                }
-                SyncDecision.UPLOAD_LOCAL -> {
-                    val res = transfer.update(token, cloudFile.id, localSavePath)
-                    try {
-                        localSavePath.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
-                    } catch (_: Exception) {
-                    }
-                }
-                SyncDecision.IN_SYNC -> {
-                    // Up to date
-                }
-                SyncDecision.CONFLICT -> {
-                    val localDate = formatTimestamp(localSavePath.lastModified())
-                    val cloudDate = formatTimestamp(Instant.parse(cloudFile.modifiedTime).toEpochMilli())
-
-                    val choice: SyncDecision = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                        onStatus(AppStatus.Conflict(
-                            localDate = localDate,
-                            cloudDate = cloudDate,
-                            gameName = displayName,
-                            onResolve = { userChoice ->
-                                if (continuation.isActive) {
-                                    continuation.resumeWith(Result.success(userChoice))
-                                }
+                val choice: SyncDecision = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                    onStatus(AppStatus.Conflict(
+                        localDate = localDate,
+                        cloudDate = cloudDate,
+                        gameName = displayName,
+                        onResolve = { userChoice ->
+                            if (continuation.isActive) {
+                                continuation.resumeWith(Result.success(userChoice))
                             }
-                        ))
-                    }
-
-                    if (choice == SyncDecision.DOWNLOAD_CLOUD) {
-                        transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
-                    } else if (choice == SyncDecision.UPLOAD_LOCAL) {
-                        val res = transfer.update(token, cloudFile.id, localSavePath)
-                        try {
-                            localSavePath.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
-                        } catch (_: Exception) {
                         }
+                    ))
+                }
+
+                when (choice) {
+                    SyncDecision.DOWNLOAD_CLOUD -> transfer.download(token, remote.id, localSavePath, remote.modifiedTime)
+                    SyncDecision.UPLOAD_LOCAL -> {
+                        val result = transfer.update(token, remote.id, localSavePath)
+                        setLocalModifiedTime(localSavePath, result.modifiedTime)
                     }
+                    else -> Unit
                 }
             }
+        }
+    }
+
+    private fun setLocalModifiedTime(file: File, modifiedTime: String) {
+        try {
+            file.setLastModified(Instant.parse(modifiedTime).toEpochMilli())
+        } catch (_: Exception) {
+            // Drive may return a timestamp format the local filesystem cannot apply.
         }
     }
 
