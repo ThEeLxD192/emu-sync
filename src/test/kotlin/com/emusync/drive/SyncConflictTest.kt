@@ -73,4 +73,36 @@ class SyncConflictTest {
         )
         assertEquals(SyncDecision.DOWNLOAD_CLOUD, decision)
     }
+
+    @Test
+    fun `plan chooses no action when neither copy exists`() {
+        assertEquals(SyncDecision.IN_SYNC, planSyncDecision(null, null))
+    }
+
+    @Test
+    fun `plan downloads when only cloud copy exists`() {
+        assertEquals(
+            SyncDecision.DOWNLOAD_CLOUD,
+            planSyncDecision(null, "2026-03-18T12:00:00Z"),
+        )
+    }
+
+    @Test
+    fun `plan uploads when only local copy exists`() {
+        assertEquals(
+            SyncDecision.UPLOAD_LOCAL,
+            planSyncDecision(baseTime.toEpochMilli(), null),
+        )
+    }
+
+    @Test
+    fun `plan delegates to timestamp conflict policy when both copies exist`() {
+        assertEquals(
+            SyncDecision.CONFLICT,
+            planSyncDecision(
+                localModifiedTimeMs = baseTime.plusSeconds(6).toEpochMilli(),
+                cloudModifiedTimeIso = baseTime.toString(),
+            ),
+        )
+    }
 }

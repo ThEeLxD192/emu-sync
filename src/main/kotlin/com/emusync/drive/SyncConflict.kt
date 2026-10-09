@@ -22,6 +22,23 @@ enum class SyncDecision {
 }
 
 /**
+ * Selects the synchronization action for a local/cloud file pair.
+ *
+ * Missing timestamps represent a missing side. When both sides exist, the
+ * established timestamp conflict policy is used by [resolveConflict].
+ */
+fun planSyncDecision(
+    localModifiedTimeMs: Long?,
+    cloudModifiedTimeIso: String?,
+    conflictThresholdSeconds: Long = 5L,
+): SyncDecision = when {
+    localModifiedTimeMs == null && cloudModifiedTimeIso == null -> SyncDecision.IN_SYNC
+    localModifiedTimeMs == null -> SyncDecision.DOWNLOAD_CLOUD
+    cloudModifiedTimeIso == null -> SyncDecision.UPLOAD_LOCAL
+    else -> resolveConflict(localModifiedTimeMs, cloudModifiedTimeIso, conflictThresholdSeconds)
+}
+
+/**
  * Pure function that determines the sync action based on file timestamps.
  *
  * This contains NO I/O — it's a deterministic decision function that can be
