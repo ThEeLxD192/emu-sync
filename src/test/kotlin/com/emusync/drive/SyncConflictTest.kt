@@ -105,4 +105,16 @@ class SyncConflictTest {
             ),
         )
     }
+
+    @Test
+    fun `post-play policy uploads even when local timestamp is inside conflict window`() {
+        assertEquals(
+            SyncDecision.UPLOAD_LOCAL,
+            planSyncDecision(
+                localModifiedTimeMs = baseTime.plusSeconds(1).toEpochMilli(),
+                cloudModifiedTimeIso = baseTime.toString(),
+                localNewerAction = LocalNewerAction.UPLOAD,
+            ),
+        )
+    }
 }

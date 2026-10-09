@@ -878,14 +878,10 @@ class SyncOrchestrator(
             val pairs = cloudFiles.map { cloudFile ->
                 val relativePath = cloudFile.name.replace('/', File.separatorChar)
                 val localFile = File(localSavePath, relativePath)
-                val decision = if (!localFile.exists()) {
-                    SyncDecision.DOWNLOAD_CLOUD
-                } else {
-                    resolveConflict(
-                        localModifiedTimeMs = localFile.lastModified(),
-                        cloudModifiedTimeIso = cloudFile.modifiedTime,
-                    )
-                }
+                val decision = planSyncDecision(
+                    localModifiedTimeMs = localFile.takeIf { it.exists() }?.lastModified(),
+                    cloudModifiedTimeIso = cloudFile.modifiedTime,
+                )
                 FilePair(localFile, cloudFile, decision)
             }
 
@@ -926,20 +922,14 @@ class SyncOrchestrator(
             }
         } else {
             val cloudFile = cloudFiles.find { it.name == localSavePath.name } ?: return null
-
-            if (!localSavePath.exists()) {
-                localSavePath.parentFile?.mkdirs()
-                transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
-                return null
-            }
-
-            val decision = resolveConflict(
-                localModifiedTimeMs = localSavePath.lastModified(),
+            val plannedDecision = planSyncDecision(
+                localModifiedTimeMs = localSavePath.takeIf { it.exists() }?.lastModified(),
                 cloudModifiedTimeIso = cloudFile.modifiedTime,
             )
 
-            when (decision) {
+            when (plannedDecision) {
                 SyncDecision.DOWNLOAD_CLOUD -> {
+                    localSavePath.parentFile?.mkdirs()
                     transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
                     return null
                 }
@@ -1008,10 +998,13 @@ class SyncOrchestrator(
         force: Boolean = false
     ) {
         if (cloudFile != null) {
-            val cloudMs = Instant.parse(cloudFile.modifiedTime).toEpochMilli()
-            val isNewerLocally = localFile.lastModified() > cloudMs
+            val decision = planSyncDecision(
+                localModifiedTimeMs = localFile.lastModified(),
+                cloudModifiedTimeIso = cloudFile.modifiedTime,
+                localNewerAction = LocalNewerAction.UPLOAD,
+            )
 
-            if (force || isNewerLocally) {
+            if (force || decision == SyncDecision.UPLOAD_LOCAL) {
                 val res = transfer.update(token, cloudFile.id, localFile)
                 try {
                     localFile.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
