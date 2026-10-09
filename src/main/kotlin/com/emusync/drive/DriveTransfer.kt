@@ -20,6 +20,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.time.Instant
 
 /**
@@ -73,15 +76,37 @@ class DriveTransfer(private val client: HttpClient) {
 
         val bytes: ByteArray = response.body()
         withContext(Dispatchers.IO) {
-            destination.parentFile?.mkdirs()
-            destination.writeBytes(bytes)
-            if (modifiedTime != null) {
+            val parent = destination.absoluteFile.parentFile
+                ?: throw DriveApiException("Could not resolve destination directory for $destination")
+            if (!parent.exists() && !parent.mkdirs()) {
+                throw DriveApiException("Could not create destination directory: $parent")
+            }
+
+            var temporaryFile: java.nio.file.Path? = null
+            try {
+                temporaryFile = Files.createTempFile(parent.toPath(), ".${destination.name}.", ".part")
+                Files.write(temporaryFile, bytes)
                 try {
-                    val epochMs = Instant.parse(modifiedTime).toEpochMilli()
-                    destination.setLastModified(epochMs)
-                } catch (_: Exception) {
-                    // Ignore timestamp setting failure
+                    Files.move(
+                        temporaryFile,
+                        destination.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                } catch (_: AtomicMoveNotSupportedException) {
+                    Files.move(temporaryFile, destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
                 }
+                temporaryFile = null
+
+                if (modifiedTime != null) {
+                    try {
+                        destination.setLastModified(Instant.parse(modifiedTime).toEpochMilli())
+                    } catch (_: Exception) {
+                        // Ignore timestamp setting failure
+                    }
+                }
+            } finally {
+                temporaryFile?.let { Files.deleteIfExists(it) }
             }
         }
     }
