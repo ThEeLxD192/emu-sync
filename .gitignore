@@ -6,6 +6,7 @@ config.json
 build/
 .gradle/
 .kotlin/
+docs/
 
 # ── Executables & Binaries ────────────────────────────
 *.AppImage
