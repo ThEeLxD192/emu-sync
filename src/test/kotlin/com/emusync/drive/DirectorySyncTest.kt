@@ -48,8 +48,15 @@ class DirectorySyncTest {
                                 headers = jsonHeaders,
                             )
                         }
-                        // Upload or update file
-                        url.contains("upload/drive/v3/files") -> {
+                        // Start a resumable upload or update session
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            respond(
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/directory-sync"),
+                            )
+                        }
+                        // Complete the media upload
+                        request.method.value == "PUT" -> {
                             respond(
                                 content = """{"id":"mock-uploaded-id","name":"mock-file","modifiedTime":"$uploadResponseModTime"}""",
                                 headers = jsonHeaders,

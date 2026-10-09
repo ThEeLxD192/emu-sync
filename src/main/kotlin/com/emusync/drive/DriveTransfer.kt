@@ -2,16 +2,14 @@ package com.emusync.drive
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
-import io.ktor.client.request.forms.MultiPartFormDataContent
-import io.ktor.client.request.forms.formData
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
-import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
@@ -20,6 +18,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -47,6 +46,8 @@ class DriveTransfer(private val client: HttpClient) {
     companion object {
         private const val DOWNLOAD_URL = "https://www.googleapis.com/drive/v3/files"
         private const val UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
+        private const val UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+        private const val UPLOAD_FIELDS = "id, name, modifiedTime"
     }
 
     /**
@@ -127,43 +128,13 @@ class DriveTransfer(private val client: HttpClient) {
         driveName: String = localFile.name,
         parentFolderId: String? = null,
     ): DriveUploadResponse {
-        val fileBytes = withContext(Dispatchers.IO) { localFile.readBytes() }
-
-        val parentsJson = if (parentFolderId != null) """, "parents": ["$parentFolderId"]""" else ""
-        val metadataJson = """{"name": "$driveName"$parentsJson}"""
-
-        val response = client.post(UPLOAD_URL) {
-            header(HttpHeaders.Authorization, "Bearer $accessToken")
-            parameter("uploadType", "multipart")
-            parameter("fields", "id, name, modifiedTime")
-
-            setBody(
-                MultiPartFormDataContent(
-                    formData {
-                        // Part 1: metadata (JSON)
-                        append("metadata", metadataJson,
-                            Headers.build {
-                                append(HttpHeaders.ContentType, "application/json")
-                            }
-                        )
-                        // Part 2: file content
-                        append("file", fileBytes,
-                            Headers.build {
-                                append(HttpHeaders.ContentType, "application/octet-stream")
-                                append(HttpHeaders.ContentDisposition, "filename=\"$driveName\"")
-                            }
-                        )
-                    }
-                )
-            )
-        }
-
-        if (response.status != HttpStatusCode.OK && response.status != HttpStatusCode.Created) {
-            val errorBody = response.body<String>()
-            throw DriveApiException("Drive upload failed (${response.status}): $errorBody")
-        }
-
-        return response.body<DriveUploadResponse>()
+        val sessionUri = startResumableUpload(
+            accessToken = accessToken,
+            localFile = localFile,
+            driveName = driveName,
+            parentFolderId = parentFolderId,
+        )
+        return uploadResumableContent(accessToken, localFile, sessionUri)
     }
 
     /**
@@ -180,21 +151,114 @@ class DriveTransfer(private val client: HttpClient) {
         fileId: String,
         localFile: File,
     ): DriveUploadResponse {
-        val fileBytes = withContext(Dispatchers.IO) { localFile.readBytes() }
+        val sessionUri = startResumableUpload(
+            accessToken = accessToken,
+            localFile = localFile,
+            fileId = fileId,
+        )
+        return uploadResumableContent(accessToken, localFile, sessionUri)
+    }
 
-        val response = client.patch("$UPLOAD_URL/$fileId") {
-            header(HttpHeaders.Authorization, "Bearer $accessToken")
-            parameter("uploadType", "media")
-            parameter("fields", "id, name, modifiedTime")
-            contentType(ContentType.Application.OctetStream)
-            setBody(fileBytes)
+    private suspend fun startResumableUpload(
+        accessToken: String,
+        localFile: File,
+        driveName: String = localFile.name,
+        parentFolderId: String? = null,
+        fileId: String? = null,
+    ): String {
+        val metadata = if (fileId == null) {
+            val escapedName = driveName.replace("\\", "\\\\").replace("\"", "\\\"")
+            val parentsJson = parentFolderId?.let { ", \"parents\": [\"$it\"]" } ?: ""
+            "{\"name\": \"$escapedName\"$parentsJson}"
+        } else {
+            "{}"
         }
 
-        if (response.status != HttpStatusCode.OK) {
+        val requestUrl = if (fileId == null) UPLOAD_URL else "$UPLOAD_URL/$fileId"
+        val response = if (fileId == null) {
+            client.post(requestUrl) {
+                configureResumableSession(accessToken, localFile, metadata)
+            }
+        } else {
+            client.patch(requestUrl) {
+                configureResumableSession(accessToken, localFile, metadata)
+            }
+        }
+
+        if (response.status != HttpStatusCode.OK && response.status != HttpStatusCode.Created) {
             val errorBody = response.body<String>()
-            throw DriveApiException("Drive update failed (${response.status}): $errorBody")
+            throw DriveApiException("Drive upload session creation failed (${response.status}): $errorBody")
         }
 
-        return response.body<DriveUploadResponse>()
+        return response.headers[HttpHeaders.Location]
+            ?: throw DriveApiException("Drive upload session response did not include a Location header")
+    }
+
+    private fun io.ktor.client.request.HttpRequestBuilder.configureResumableSession(
+        accessToken: String,
+        localFile: File,
+        metadata: String,
+    ) {
+        header(HttpHeaders.Authorization, "Bearer $accessToken")
+        header("X-Upload-Content-Type", "application/octet-stream")
+        header("X-Upload-Content-Length", localFile.length().toString())
+        parameter("uploadType", "resumable")
+        parameter("fields", UPLOAD_FIELDS)
+        contentType(ContentType.Application.Json)
+        setBody(metadata)
+    }
+
+    private suspend fun uploadResumableContent(
+        accessToken: String,
+        localFile: File,
+        sessionUri: String,
+    ): DriveUploadResponse = withContext(Dispatchers.IO) {
+        val totalBytes = localFile.length()
+        var offset = 0L
+
+        RandomAccessFile(localFile, "r").use { source ->
+            while (offset < totalBytes || (totalBytes == 0L && offset == 0L)) {
+                val chunkLength = minOf(UPLOAD_CHUNK_SIZE.toLong(), totalBytes - offset).toInt()
+                val chunk = ByteArray(chunkLength)
+                if (chunkLength > 0) {
+                    source.seek(offset)
+                    source.readFully(chunk)
+                }
+
+                val response = client.put(sessionUri) {
+                    header(HttpHeaders.Authorization, "Bearer $accessToken")
+                    header(HttpHeaders.ContentLength, chunkLength.toString())
+                    if (totalBytes > 0) {
+                        header(HttpHeaders.ContentRange, "bytes $offset-${offset + chunkLength - 1}/$totalBytes")
+                    }
+                    contentType(ContentType.Application.OctetStream)
+                    setBody(chunk)
+                }
+
+                when {
+                    response.status == HttpStatusCode.OK || response.status == HttpStatusCode.Created -> {
+                        return@withContext response.body<DriveUploadResponse>()
+                    }
+                    response.status.value == 308 -> {
+                        val receivedThrough = response.headers[HttpHeaders.Range]
+                            ?.substringAfterLast('-')
+                            ?.toLongOrNull()
+                        val nextOffset = receivedThrough?.plus(1) ?: 0L
+                        if (nextOffset <= offset || nextOffset > totalBytes) {
+                            throw DriveApiException("Drive upload made no progress at byte $offset")
+                        }
+                        offset = nextOffset
+                    }
+                    else -> {
+                        val errorBody = response.body<String>()
+                        throw DriveApiException("Drive upload failed (${response.status}): $errorBody")
+                    }
+                }
+
+                if (totalBytes == 0L) break
+            }
+        }
+
+        throw DriveApiException("Drive upload ended without a completed file response")
     }
 }

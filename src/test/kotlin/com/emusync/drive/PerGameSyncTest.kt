@@ -13,10 +13,14 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -148,6 +152,7 @@ class PerGameSyncTest {
 
         val createdFolders = mutableListOf<String>()
         val uploadedFiles = mutableListOf<Pair<String, String>>() // Pair(parentFolderId, driveName)
+        var currentUploadName = "mock-file"
 
         val mockClient = HttpClient(MockEngine) {
             install(ContentNegotiation) {
@@ -196,13 +201,25 @@ class PerGameSyncTest {
                         q.contains("in parents and trashed = false") -> {
                             respond(content = """{"files":[]}""", headers = jsonHeaders)
                         }
-                        // File upload
-                        url.contains("upload/drive/v3/files") -> {
-                            val driveName = request.url.parameters["name"] ?: "unknown"
-                            val parent = request.url.parameters["parents"] ?: ""
-                            uploadedFiles.add(parent to driveName)
+                        // Start a resumable upload or update session
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            if (request.method.value == "POST") {
+                                val metadata = Json.parseToJsonElement(
+                                    (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+                                ).jsonObject
+                                val driveName = metadata["name"]?.jsonPrimitive?.content ?: "unknown"
+                                currentUploadName = driveName
+                                val parent = metadata["parents"]?.jsonArray?.single()?.jsonPrimitive?.content ?: ""
+                                uploadedFiles.add(parent to driveName)
+                            }
                             respond(
-                                content = """{"id":"uploaded-file-id","name":"$driveName","modifiedTime":"2026-09-25T18:00:00.000Z"}""",
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/per-game-create"),
+                            )
+                        }
+                        request.method.value == "PUT" -> {
+                            respond(
+                                content = """{"id":"uploaded-file-id","name":"$currentUploadName","modifiedTime":"2026-09-25T18:00:00.000Z"}""",
                                 headers = jsonHeaders,
                             )
                         }
@@ -221,7 +238,7 @@ class PerGameSyncTest {
         )
 
         val success = orchestrator.syncEntry(system)
-        assertTrue(success)
+        assertTrue(success, "Sync failed with statuses: $statuses")
 
         // Verify subfolder was created
         assertTrue(createdFolders.contains("Crash Team Racing Nitro-Fueled"), "Subfolder for game should be created")
@@ -301,7 +318,13 @@ class PerGameSyncTest {
                         q.contains("in parents and trashed = false") -> {
                             respond(content = """{"files":[]}""", headers = jsonHeaders)
                         }
-                        url.contains("upload/drive/v3/files") -> {
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            respond(
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/per-game-post"),
+                            )
+                        }
+                        request.method.value == "PUT" -> {
                             respond(
                                 content = """{"id":"uploaded-file-id","name":"OCTANE_0.sav","modifiedTime":"2026-09-25T18:00:00.000Z"}""",
                                 headers = jsonHeaders,
@@ -593,8 +616,14 @@ class PerGameSyncTest {
                         request.url.parameters["alt"] == "media" -> {
                             respond("OCTANE_CLOUD_DATA".toByteArray(), headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"))
                         }
-                        url.contains("upload/drive/v3/files") -> {
-                            respond(content = """{"id":"cloud-file-id","name":"OCTANE_0.sav"}""", headers = jsonHeaders)
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            respond(content = "", headers = headersOf(HttpHeaders.Location, "https://uploads.example/per-game-setup"))
+                        }
+                        request.method.value == "PUT" -> {
+                            respond(
+                                content = """{"id":"cloud-file-id","name":"OCTANE_0.sav","modifiedTime":"2026-09-25T18:00:00.000Z"}""",
+                                headers = jsonHeaders,
+                            )
                         }
                         else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
                     }
@@ -751,9 +780,15 @@ class PerGameSyncTest {
                         q.contains("name = 'New Game'") -> {
                             respond(content = """{"files":[]}""", headers = jsonHeaders)
                         }
-                        url.contains("upload/drive/v3/files") -> {
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
                             uploadedFileToCloud = true
-                            respond(content = """{"id":"new-cloud-file-id","name":"new_game.sav"}""", headers = jsonHeaders)
+                            respond(content = "", headers = headersOf(HttpHeaders.Location, "https://uploads.example/new-save"))
+                        }
+                        request.method.value == "PUT" -> {
+                            respond(
+                                content = """{"id":"new-cloud-file-id","name":"new_game.sav","modifiedTime":"2026-09-25T18:00:00.000Z"}""",
+                                headers = jsonHeaders,
+                            )
                         }
                         request.method.value == "POST" && url.contains("drive/v3/files") -> {
                             respond(content = """{"id":"created-folder-id","name":"New Game"}""", headers = jsonHeaders)
