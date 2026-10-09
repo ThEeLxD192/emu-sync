@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.io.IOException
 import java.time.Instant
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -188,5 +189,192 @@ class DriveTransferTest {
             ),
             ranges,
         )
+    }
+
+    @Test
+    fun `upload recovers from lost chunk response using server acknowledged range`(@TempDir tempDir: File) = runTest {
+        val chunkSize = 8 * 1024 * 1024
+        val file = File(tempDir, "interrupted.sav").apply { writeBytes(ByteArray(chunkSize + 9) { it.toByte() }) }
+        val requestRanges = mutableListOf<String?>()
+        var lostFirstResponse = false
+        val client = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    when (request.method.value) {
+                        "POST" -> respond(content = "", headers = headersOf(HttpHeaders.Location, "https://uploads.example/recover"))
+                        "PUT" -> {
+                            val range = request.headers[HttpHeaders.ContentRange]
+                            requestRanges += range
+                            when {
+                                range == "bytes */${chunkSize + 9}" -> respond(
+                                    content = "",
+                                    status = HttpStatusCode.fromValue(308),
+                                    headers = headersOf(HttpHeaders.Range, "bytes=0-${chunkSize - 1}"),
+                                )
+                                !lostFirstResponse -> {
+                                    lostFirstResponse = true
+                                    throw IOException("Connection reset after server accepted chunk")
+                                }
+                                else -> respond(
+                                    content = """{"id":"recovered-id","name":"interrupted.sav","modifiedTime":"2026-03-18T12:00:00Z"}""",
+                                    headers = jsonHeaders,
+                                )
+                            }
+                        }
+                        else -> error("Unexpected ${request.method.value} request")
+                    }
+                }
+            }
+        }
+
+        val result = DriveTransfer(client).upload("token", file)
+
+        assertEquals("recovered-id", result.id)
+        assertEquals(
+            listOf<String?>(
+                "bytes 0-${chunkSize - 1}/${chunkSize + 9}",
+                "bytes */${chunkSize + 9}",
+                "bytes $chunkSize-${chunkSize + 8}/${chunkSize + 9}",
+            ),
+            requestRanges,
+        )
+    }
+
+    @Test
+    fun `upload retries a chunk when server reports no bytes received`(@TempDir tempDir: File) = runTest {
+        val file = File(tempDir, "retry.sav").apply { writeText("retry this save") }
+        val contentRanges = mutableListOf<String?>()
+        var contentRequestCount = 0
+        val client = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    when (request.method.value) {
+                        "POST" -> respond(content = "", headers = headersOf(HttpHeaders.Location, "https://uploads.example/retry"))
+                        "PUT" -> {
+                            val range = request.headers[HttpHeaders.ContentRange]
+                            contentRanges += range
+                            if (range?.startsWith("bytes */") == true) {
+                                respond(content = "", status = HttpStatusCode.fromValue(308))
+                            } else {
+                                contentRequestCount++
+                                if (contentRequestCount == 1) {
+                                    respond(content = "temporary outage", status = HttpStatusCode.ServiceUnavailable)
+                                } else if (contentRequestCount == 2) {
+                                    respond(content = "", status = HttpStatusCode.fromValue(308))
+                                } else {
+                                    respond(
+                                        content = """{"id":"retry-id","name":"retry.sav","modifiedTime":"2026-03-18T12:00:00Z"}""",
+                                        headers = jsonHeaders,
+                                    )
+                                }
+                            }
+                        }
+                        else -> error("Unexpected ${request.method.value} request")
+                    }
+                }
+            }
+        }
+
+        val result = DriveTransfer(client).upload("token", file)
+
+        assertEquals("retry-id", result.id)
+        assertEquals(3, contentRequestCount)
+        assertEquals("bytes 0-${file.length() - 1}/${file.length()}", contentRanges[0])
+        assertEquals("bytes */${file.length()}", contentRanges[1])
+        assertEquals("bytes 0-${file.length() - 1}/${file.length()}", contentRanges[2])
+    }
+
+    @Test
+    fun `upload restarts once when resumable session expired`(@TempDir tempDir: File) = runTest {
+        val file = File(tempDir, "expired.sav").apply { writeText("save") }
+        var sessionCount = 0
+        val client = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    when (request.method.value) {
+                        "POST" -> {
+                            sessionCount++
+                            respond(
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/session-$sessionCount"),
+                            )
+                        }
+                        "PUT" -> if (request.url.toString().endsWith("session-1")) {
+                            respond(content = "expired", status = HttpStatusCode.NotFound)
+                        } else {
+                            respond(
+                                content = """{"id":"new-session-id","name":"expired.sav","modifiedTime":"2026-03-18T12:00:00Z"}""",
+                                headers = jsonHeaders,
+                            )
+                        }
+                        else -> error("Unexpected ${request.method.value} request")
+                    }
+                }
+            }
+        }
+
+        val result = DriveTransfer(client).upload("token", file)
+
+        assertEquals(2, sessionCount)
+        assertEquals("new-session-id", result.id)
+    }
+
+    @Test
+    fun `upload handles empty save file`() = runTest {
+        val file = File.createTempFile("emusync-empty", ".sav").apply { writeBytes(byteArrayOf()) }
+        var contentRange: String? = "unexpected"
+        var contentLength: String? = null
+        val client = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    when (request.method.value) {
+                        "POST" -> respond(content = "", headers = headersOf(HttpHeaders.Location, "https://uploads.example/empty"))
+                        "PUT" -> {
+                            contentRange = request.headers[HttpHeaders.ContentRange]
+                            contentLength = request.headers[HttpHeaders.ContentLength]
+                            respond(
+                                content = """{"id":"empty-id","name":"empty.sav","modifiedTime":"2026-03-18T12:00:00Z"}""",
+                                headers = jsonHeaders,
+                            )
+                        }
+                        else -> error("Unexpected ${request.method.value} request")
+                    }
+                }
+            }
+        }
+
+        val result = DriveTransfer(client).upload("token", file)
+
+        assertEquals("empty-id", result.id)
+        assertEquals(null, contentRange)
+        assertEquals("0", contentLength)
+        file.delete()
+    }
+
+    @Test
+    fun `upload propagates permanent server errors instead of reporting success`(@TempDir tempDir: File) = runTest {
+        val file = File(tempDir, "rejected.sav").apply { writeText("save") }
+        val client = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    when (request.method.value) {
+                        "POST" -> respond(content = "", headers = headersOf(HttpHeaders.Location, "https://uploads.example/rejected"))
+                        "PUT" -> respond(content = "invalid save", status = HttpStatusCode.BadRequest)
+                        else -> error("Unexpected ${request.method.value} request")
+                    }
+                }
+            }
+        }
+
+        val error = org.junit.jupiter.api.assertThrows<DriveApiException> {
+            DriveTransfer(client).upload("token", file)
+        }
+
+        assertEquals(true, error.message?.contains("400"))
     }
 }

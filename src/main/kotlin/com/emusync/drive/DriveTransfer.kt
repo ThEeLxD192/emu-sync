@@ -13,7 +13,9 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -48,6 +50,7 @@ class DriveTransfer(private val client: HttpClient) {
         private const val UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
         private const val UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024
         private const val UPLOAD_FIELDS = "id, name, modifiedTime"
+        private const val MAX_UPLOAD_RECOVERIES = 3
     }
 
     /**
@@ -128,13 +131,12 @@ class DriveTransfer(private val client: HttpClient) {
         driveName: String = localFile.name,
         parentFolderId: String? = null,
     ): DriveUploadResponse {
-        val sessionUri = startResumableUpload(
+        return uploadResumable(
             accessToken = accessToken,
             localFile = localFile,
             driveName = driveName,
             parentFolderId = parentFolderId,
         )
-        return uploadResumableContent(accessToken, localFile, sessionUri)
     }
 
     /**
@@ -151,12 +153,32 @@ class DriveTransfer(private val client: HttpClient) {
         fileId: String,
         localFile: File,
     ): DriveUploadResponse {
-        val sessionUri = startResumableUpload(
+        return uploadResumable(
             accessToken = accessToken,
             localFile = localFile,
             fileId = fileId,
         )
-        return uploadResumableContent(accessToken, localFile, sessionUri)
+    }
+
+    private suspend fun uploadResumable(
+        accessToken: String,
+        localFile: File,
+        driveName: String = localFile.name,
+        parentFolderId: String? = null,
+        fileId: String? = null,
+    ): DriveUploadResponse {
+        var sessionRestarts = 0
+        while (true) {
+            val sessionUri = startResumableUpload(accessToken, localFile, driveName, parentFolderId, fileId)
+            try {
+                return uploadResumableContent(accessToken, localFile, sessionUri)
+            } catch (e: UploadSessionExpiredException) {
+                if (sessionRestarts >= 1) {
+                    throw DriveApiException("Drive upload session expired after restarting once", e)
+                }
+                sessionRestarts++
+            }
+        }
     }
 
     private suspend fun startResumableUpload(
@@ -215,6 +237,7 @@ class DriveTransfer(private val client: HttpClient) {
     ): DriveUploadResponse = withContext(Dispatchers.IO) {
         val totalBytes = localFile.length()
         var offset = 0L
+        var recoveryAttempts = 0
 
         RandomAccessFile(localFile, "r").use { source ->
             while (offset < totalBytes || (totalBytes == 0L && offset == 0L)) {
@@ -225,14 +248,32 @@ class DriveTransfer(private val client: HttpClient) {
                     source.readFully(chunk)
                 }
 
-                val response = client.put(sessionUri) {
-                    header(HttpHeaders.Authorization, "Bearer $accessToken")
-                    header(HttpHeaders.ContentLength, chunkLength.toString())
-                    if (totalBytes > 0) {
-                        header(HttpHeaders.ContentRange, "bytes $offset-${offset + chunkLength - 1}/$totalBytes")
+                val response = try {
+                    client.put(sessionUri) {
+                        header(HttpHeaders.Authorization, "Bearer $accessToken")
+                        header(HttpHeaders.ContentLength, chunkLength.toString())
+                        if (totalBytes > 0) {
+                            header(HttpHeaders.ContentRange, "bytes $offset-${offset + chunkLength - 1}/$totalBytes")
+                        }
+                        contentType(ContentType.Application.OctetStream)
+                        setBody(chunk)
                     }
-                    contentType(ContentType.Application.OctetStream)
-                    setBody(chunk)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    val progress = queryUploadProgress(accessToken, sessionUri, totalBytes)
+                    when (progress) {
+                        is UploadProgress.Complete -> return@withContext progress.response
+                        is UploadProgress.Incomplete -> {
+                            if (progress.nextOffset != offset) {
+                                offset = progress.nextOffset
+                                recoveryAttempts = 0
+                            } else {
+                                recoveryAttempts = retryAfterNoProgress(recoveryAttempts, e)
+                            }
+                            continue
+                        }
+                    }
                 }
 
                 when {
@@ -240,14 +281,28 @@ class DriveTransfer(private val client: HttpClient) {
                         return@withContext response.body<DriveUploadResponse>()
                     }
                     response.status.value == 308 -> {
-                        val receivedThrough = response.headers[HttpHeaders.Range]
-                            ?.substringAfterLast('-')
-                            ?.toLongOrNull()
-                        val nextOffset = receivedThrough?.plus(1) ?: 0L
-                        if (nextOffset <= offset || nextOffset > totalBytes) {
-                            throw DriveApiException("Drive upload made no progress at byte $offset")
+                        val nextOffset = nextUploadOffset(response.headers[HttpHeaders.Range], totalBytes)
+                        if (nextOffset == offset) {
+                            recoveryAttempts = retryAfterNoProgress(recoveryAttempts)
+                        } else {
+                            offset = nextOffset
+                            recoveryAttempts = 0
                         }
-                        offset = nextOffset
+                    }
+                    response.status == HttpStatusCode.NotFound -> throw UploadSessionExpiredException()
+                    response.status.value in 500..599 -> {
+                        val progress = queryUploadProgress(accessToken, sessionUri, totalBytes)
+                        when (progress) {
+                            is UploadProgress.Complete -> return@withContext progress.response
+                            is UploadProgress.Incomplete -> {
+                                if (progress.nextOffset != offset) {
+                                    offset = progress.nextOffset
+                                    recoveryAttempts = 0
+                                } else {
+                                    recoveryAttempts = retryAfterNoProgress(recoveryAttempts)
+                                }
+                            }
+                        }
                     }
                     else -> {
                         val errorBody = response.body<String>()
@@ -261,4 +316,77 @@ class DriveTransfer(private val client: HttpClient) {
 
         throw DriveApiException("Drive upload ended without a completed file response")
     }
+
+    private sealed interface UploadProgress {
+        data class Incomplete(val nextOffset: Long) : UploadProgress
+        data class Complete(val response: DriveUploadResponse) : UploadProgress
+    }
+
+    private class UploadSessionExpiredException : Exception("Drive upload session expired")
+
+    private suspend fun queryUploadProgress(
+        accessToken: String,
+        sessionUri: String,
+        totalBytes: Long,
+    ): UploadProgress {
+        var lastError: Exception? = null
+        repeat(MAX_UPLOAD_RECOVERIES) { attempt ->
+            val response = try {
+                client.put(sessionUri) {
+                    header(HttpHeaders.Authorization, "Bearer $accessToken")
+                    header(HttpHeaders.ContentLength, "0")
+                    header(HttpHeaders.ContentRange, "bytes */$totalBytes")
+                    setBody(ByteArray(0))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                lastError = e
+                delay(retryDelayMs(attempt))
+                return@repeat
+            }
+
+            when {
+                response.status == HttpStatusCode.OK || response.status == HttpStatusCode.Created -> {
+                    return UploadProgress.Complete(response.body<DriveUploadResponse>())
+                }
+                response.status.value == 308 -> {
+                    return UploadProgress.Incomplete(nextUploadOffset(response.headers[HttpHeaders.Range], totalBytes))
+                }
+                response.status == HttpStatusCode.NotFound -> throw UploadSessionExpiredException()
+                response.status.value in 500..599 -> {
+                    lastError = DriveApiException("Drive upload status check failed (${response.status})")
+                    delay(retryDelayMs(attempt))
+                }
+                else -> {
+                    val errorBody = response.body<String>()
+                    throw DriveApiException("Drive upload status check failed (${response.status}): $errorBody")
+                }
+            }
+        }
+
+        throw DriveApiException("Could not recover Drive upload status after retries", lastError)
+    }
+
+    private fun nextUploadOffset(rangeHeader: String?, totalBytes: Long): Long {
+        if (rangeHeader.isNullOrBlank()) return 0L
+        val receivedThrough = rangeHeader.substringAfterLast('-').toLongOrNull()
+            ?: throw DriveApiException("Invalid Drive upload Range header: $rangeHeader")
+        val nextOffset = receivedThrough + 1
+        if (nextOffset < 0 || nextOffset > totalBytes) {
+            throw DriveApiException("Drive upload Range exceeds file size: $rangeHeader")
+        }
+        return nextOffset
+    }
+
+    private suspend fun retryAfterNoProgress(attempts: Int, cause: Exception? = null): Int {
+        val nextAttempt = attempts + 1
+        if (nextAttempt > MAX_UPLOAD_RECOVERIES) {
+            throw DriveApiException("Drive upload made no progress after $MAX_UPLOAD_RECOVERIES retries", cause)
+        }
+        delay(retryDelayMs(attempts))
+        return nextAttempt
+    }
+
+    private fun retryDelayMs(attempt: Int): Long = 250L * (1L shl attempt.coerceAtMost(4))
 }
