@@ -1,10 +1,14 @@
 package com.emusync.drive
 
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class SaveRestorePathsTest {
     @Test
@@ -68,5 +72,22 @@ class SaveRestorePathsTest {
             File(tempDir, "slot/one/save.dat").absoluteFile.normalize(),
             resolveRemoteFile(tempDir, "slot\\one\\save.dat")?.absoluteFile?.normalize(),
         )
+    }
+
+    @Test
+    fun `restore paths reject a nested symlink that points outside the selected folder`(@TempDir tempDir: File) {
+        val selectedFolder = File(tempDir, "selected").apply { mkdirs() }
+        val outsideFolder = File(tempDir, "outside").apply { mkdirs() }
+        val outsideSave = File(outsideFolder, "save.dat").apply { writeText("keep me") }
+
+        val symlinkCreated = runCatching {
+            Files.createSymbolicLink(Path.of(selectedFolder.path, "slot"), outsideFolder.toPath())
+        }.isSuccess
+        assumeTrue(symlinkCreated, "This platform does not permit creating symbolic links")
+
+        assertNull(resolveRemoteFile(selectedFolder, "slot/save.dat"))
+        assertEquals(emptyList(), resolveCloudRestorePaths(selectedFolder.absolutePath, listOf("slot/save.dat")))
+        assertEquals("keep me", outsideSave.readText())
+        assertTrue(Files.isSymbolicLink(Path.of(selectedFolder.path, "slot")))
     }
 }

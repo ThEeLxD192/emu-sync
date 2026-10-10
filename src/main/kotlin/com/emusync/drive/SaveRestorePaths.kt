@@ -22,12 +22,9 @@ fun resolveRemoteFile(destinationRoot: File, remoteName: String): File? {
     val segments = remoteName.split(Regex("[/\\\\]"), limit = 0)
     if (segments.isEmpty() || segments.any { it.isBlank() || it == "." || it == ".." }) return null
 
-    val requestedRoot = destinationRoot.toPath().toAbsolutePath().normalize()
-    val root = if (Files.exists(requestedRoot, LinkOption.NOFOLLOW_LINKS)) {
-        runCatching { requestedRoot.toRealPath() }.getOrNull() ?: return null
-    } else {
-        requestedRoot
-    }
+    // Preserve the selected path's spelling. On Windows, toRealPath() can expand an
+    // 8.3 path (for example RUNNER~1) and break callers' path comparisons.
+    val root = destinationRoot.toPath().toAbsolutePath().normalize()
     val relative = segments.fold(Path.of("")) { path, segment -> path.resolve(segment) }
     val resolved = root.resolve(relative).normalize()
     if (!resolved.startsWith(root) || resolved == root) return null
@@ -42,7 +39,11 @@ fun resolveRemoteFile(destinationRoot: File, remoteName: String): File? {
 
     // Also verify the canonical parent when it already exists. This protects against
     // non-obvious filesystem aliases and keeps accepted targets beneath the chosen root.
-    val canonicalRoot = runCatching { root.toRealPath() }.getOrNull() ?: root
+    val canonicalRoot = if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
+        runCatching { root.toRealPath() }.getOrNull() ?: return null
+    } else {
+        root
+    }
     val parent = resolved.parent
     if (parent != null && Files.exists(parent)) {
         val canonicalParent = runCatching { parent.toRealPath() }.getOrNull() ?: return null
