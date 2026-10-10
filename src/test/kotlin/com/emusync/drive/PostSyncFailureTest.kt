@@ -17,6 +17,8 @@ import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -109,8 +111,12 @@ class PostSyncFailureTest {
         assertEquals(1, statuses.count { it == AppStatus.Playing }, "Retry must not launch the game again")
     }
 
-    @Test
-    fun `directory retry does not force overwrite a cloud file updated after partial success`(@TempDir tempDir: File) = runTest {
+    @ParameterizedTest
+    @EnumSource(value = SyncDecision::class, names = ["UPLOAD_LOCAL", "DOWNLOAD_CLOUD"])
+    fun `directory retry resolves a newer cloud conflict using the selected copy`(
+        cloudNewerChoice: SyncDecision,
+        @TempDir tempDir: File,
+    ) = runTest {
         val rom = File(tempDir, "Game.rom").apply { writeText("ROM") }
         val saveDirectory = File(tempDir, "saves").apply { mkdirs() }
         val firstSave = File(saveDirectory, "first.dat").apply { writeText("FIRST") }
@@ -191,7 +197,7 @@ class PostSyncFailureTest {
         val orchestrator = SyncOrchestrator(client, config, configManager) { status ->
             statuses += status
             if (status is AppStatus.Conflict) {
-                val choice = if (status.cloudDate > status.localDate) SyncDecision.DOWNLOAD_CLOUD else SyncDecision.UPLOAD_LOCAL
+                val choice = if (status.cloudDate > status.localDate) cloudNewerChoice else SyncDecision.UPLOAD_LOCAL
                 status.onResolve(choice)
             }
         }
@@ -225,9 +231,11 @@ class PostSyncFailureTest {
 
         assertEquals(AppStatus.Idle, statuses.last())
         assertEquals(1, firstUpdates, "Retry must not force-update the file that already succeeded")
-        assertEquals(1, secondUpdates, "A newer cloud copy should require a choice, not an upload")
+        val expectedSecondUpdates = if (cloudNewerChoice == SyncDecision.UPLOAD_LOCAL) 2 else 1
+        assertEquals(expectedSecondUpdates, secondUpdates)
         assertEquals("FIRST", firstSave.readText())
-        assertEquals("NEWER CLOUD SECOND", secondSave.readText())
+        val expectedSecondSave = if (cloudNewerChoice == SyncDecision.UPLOAD_LOCAL) "SECOND" else "NEWER CLOUD SECOND"
+        assertEquals(expectedSecondSave, secondSave.readText())
         assertTrue(statuses.filterIsInstance<AppStatus.Conflict>().any { it.cloudDate > it.localDate })
         assertEquals(1, statuses.count { it == AppStatus.Playing }, "Retries must not launch the game again")
     }
