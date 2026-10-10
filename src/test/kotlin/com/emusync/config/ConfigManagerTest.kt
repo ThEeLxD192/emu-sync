@@ -4,6 +4,9 @@ import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.NativePCGame
+import com.emusync.model.SaveTarget
+import com.emusync.model.SaveTargetType
+import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -161,5 +164,54 @@ class ConfigManagerTest {
             propertyProvider = { if (it == "os.name") "Linux" else null },
         )
         assertEquals(File("/home/gamer/.config/emusync/config.json").absolutePath, resolved.absolutePath)
+    }
+
+    @Test
+    fun `legacy paths are migrated once to explicit save target types`(@TempDir tempDir: File) {
+        val extensionlessFile = File(tempDir, "SAVE_SLOT").apply { writeText("save") }
+        val dottedDirectory = File(tempDir, "profile.d").apply { mkdirs() }
+        val configFile = File(tempDir, "config.json").apply {
+            writeText(
+                """
+                {
+                  "entries": [{
+                    "type": "native",
+                    "name": "Legacy",
+                    "executablePath": "/game/start",
+                    "savePaths": [${Json.encodeToString(extensionlessFile.absolutePath)}, ${Json.encodeToString(dottedDirectory.absolutePath)}]
+                  }]
+                }
+                """.trimIndent()
+            )
+        }
+
+        val migrated = ConfigManager(configFile).load().entries.single() as NativePCGame
+
+        assertEquals(
+            listOf(
+                SaveTarget(extensionlessFile.absolutePath, SaveTargetType.FILE),
+                SaveTarget(dottedDirectory.absolutePath, SaveTargetType.DIRECTORY),
+            ),
+            migrated.saveTargets,
+        )
+        assertTrue(configFile.readText().contains("saveTargets"))
+    }
+
+    @Test
+    fun `explicit save target type is never inferred again`(@TempDir tempDir: File) {
+        val ambiguous = File(tempDir, "future.folder")
+        val manager = ConfigManager(File(tempDir, "config.json"))
+        manager.save(
+            AppConfig(entries = listOf(
+                NativePCGame(
+                    name = "Explicit",
+                    executablePath = "/game/start",
+                    saveTargets = listOf(SaveTarget(ambiguous.absolutePath, SaveTargetType.DIRECTORY)),
+                )
+            ))
+        )
+
+        val loaded = manager.load().entries.single() as NativePCGame
+        assertEquals(SaveTargetType.DIRECTORY, loaded.saveTargets.single().type)
     }
 }

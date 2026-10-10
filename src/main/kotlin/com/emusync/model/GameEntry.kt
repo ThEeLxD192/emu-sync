@@ -2,6 +2,30 @@ package com.emusync.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.io.File
+
+@Serializable
+enum class SaveTargetType {
+    @SerialName("file") FILE,
+    @SerialName("directory") DIRECTORY,
+}
+
+@Serializable
+data class SaveTarget(
+    val path: String,
+    val type: SaveTargetType,
+)
+
+/** Used only while migrating legacy string-only save paths. */
+fun inferLegacySaveTarget(path: String): SaveTarget {
+    val file = File(path)
+    val type = when {
+        file.exists() -> if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
+        file.extension.isNotEmpty() -> SaveTargetType.FILE
+        else -> SaveTargetType.DIRECTORY
+    }
+    return SaveTarget(path, type)
+}
 
 /**
  * Sealed interface representing a game entry in the configuration.
@@ -20,6 +44,9 @@ sealed interface GameEntry {
     // Note: savePaths acts as a global fallback for EmulatorSystem, 
     // overridden by savePathsByRom for explicit games.
     val savePaths: List<String>
+
+    /** Explicitly typed replacement for [savePaths]. */
+    val saveTargets: List<SaveTarget>
 
     /**
      * Optional folder/category name to group emulators together in the UI
@@ -71,7 +98,9 @@ data class EmulatorSystem(
     val romsDirectory: String,
     val extensions: List<String>,
     override val savePaths: List<String> = emptyList(),
+    override val saveTargets: List<SaveTarget> = emptyList(),
     val savePathsByRom: Map<String, List<String>> = emptyMap(),
+    val saveTargetsByRom: Map<String, List<SaveTarget>> = emptyMap(),
     /** Optional map of ROM filename to custom cover art image path. */
     val coverPathByRom: Map<String, String> = emptyMap(),
     /** Optional map of ROM filename to custom game display title. */
@@ -127,6 +156,7 @@ data class NativePCGame(
     val executablePath: String,
     val arguments: List<String> = emptyList(),
     override val savePaths: List<String> = emptyList(),
+    override val saveTargets: List<SaveTarget> = emptyList(),
     val waitForProcess: String? = null,
     override val group: String? = null,
     override val cloudFolder: String? = null,
@@ -135,3 +165,30 @@ data class NativePCGame(
     /** Optional custom path to a cover art image for this game. */
     val coverPath: String? = null,
 ) : GameEntry
+
+fun GameEntry.effectiveSaveTargets(): List<SaveTarget> =
+    saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) }
+
+fun EmulatorSystem.effectiveSaveTargetsForRom(romName: String): List<SaveTarget> =
+    saveTargetsByRom[romName]
+        ?: saveTargetsByRom[romName.substringBeforeLast('.', romName)]
+        ?: savePathsByRom[romName]?.filter { it.isNotBlank() }?.map(::inferLegacySaveTarget)
+        ?: savePathsByRom[romName.substringBeforeLast('.', romName)]?.filter { it.isNotBlank() }?.map(::inferLegacySaveTarget)
+        ?: emptyList()
+
+/** Adds explicit types to legacy paths without changing their path values. */
+fun GameEntry.migrateLegacySaveTargets(): GameEntry = when (this) {
+    is EmulatorSystem -> copy(
+        saveTargets = saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) },
+        saveTargetsByRom = saveTargetsByRom.toMutableMap().apply {
+            savePathsByRom.forEach { (rom, paths) ->
+                if (rom !in this && paths.isNotEmpty()) {
+                    this[rom] = paths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget)
+                }
+            }
+        },
+    )
+    is NativePCGame -> copy(
+        saveTargets = saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) },
+    )
+}
