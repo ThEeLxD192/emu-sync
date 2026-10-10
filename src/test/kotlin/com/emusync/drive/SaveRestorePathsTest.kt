@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class SaveRestorePathsTest {
     @Test
@@ -35,5 +36,37 @@ class SaveRestorePathsTest {
         )
 
         assertEquals(listOf(File(tempDir, "safe.mcd").absolutePath), paths)
+    }
+
+    @Test
+    fun `remote paths reject traversal absolute paths and empty segments`(@TempDir tempDir: File) {
+        val invalidNames = listOf(
+            "../outside.sav",
+            "..\\outside.sav",
+            "folder/../../outside.sav",
+            "/tmp/outside.sav",
+            "\\\\server\\share\\outside.sav",
+            "C:\\outside.sav",
+            "folder//save.sav",
+            "folder\\\\save.sav",
+            "./save.sav",
+            "folder/./save.sav",
+        )
+
+        invalidNames.forEach { name ->
+            assertNull(resolveRemoteFile(tempDir, name), "Expected '$name' to be rejected")
+        }
+    }
+
+    @Test
+    fun `remote paths accept nested names with either separator`(@TempDir tempDir: File) {
+        assertEquals(
+            File(tempDir, "slot/one/save.dat").absoluteFile.normalize(),
+            resolveRemoteFile(tempDir, "slot/one/save.dat")?.absoluteFile?.normalize(),
+        )
+        assertEquals(
+            File(tempDir, "slot/one/save.dat").absoluteFile.normalize(),
+            resolveRemoteFile(tempDir, "slot\\one\\save.dat")?.absoluteFile?.normalize(),
+        )
     }
 }
