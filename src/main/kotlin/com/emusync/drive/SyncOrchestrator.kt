@@ -198,8 +198,7 @@ class SyncOrchestrator(
                         anyFileChecked = true
 
                         for (cloudFile in cloudFiles) {
-                            val relPath = cloudFile.name.replace('/', File.separatorChar)
-                            val localFile = File(savePath, relPath)
+                            val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
                             val decision = planSyncDecision(
                                 localModifiedTimeMs = localFile.takeIf { it.exists() }?.lastModified(),
                                 cloudModifiedTimeIso = cloudFile.modifiedTime,
@@ -416,8 +415,7 @@ class SyncOrchestrator(
                             } else emptyList()
 
                             for (cloudFile in cloudFiles) {
-                                val rel = cloudFile.name.replace('/', File.separatorChar)
-                                val localF = File(savePath, rel)
+                                val localF = resolveRemoteFile(savePath, cloudFile.name) ?: continue
                                 if (!localF.exists()) {
                                     hasNewerCloud = true
                                 } else {
@@ -487,8 +485,7 @@ class SyncOrchestrator(
                                 }
                                 if (isDirectory) {
                                     for (cloudFile in cloudFiles) {
-                                        val relPath = cloudFile.name.replace('/', File.separatorChar)
-                                        val localFile = File(savePath, relPath)
+                                        val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
                                         localFile.parentFile?.mkdirs()
                                         transfer.download(token, cloudFile.id, localFile, cloudFile.modifiedTime)
                                     }
@@ -528,8 +525,7 @@ class SyncOrchestrator(
                             }
                             if (isDirectory) {
                                 for (cloudFile in cloudFiles) {
-                                    val relPath = cloudFile.name.replace('/', File.separatorChar)
-                                    val localFile = File(savePath, relPath)
+                                    val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
                                     localFile.parentFile?.mkdirs()
                                     transfer.download(token, cloudFile.id, localFile, cloudFile.modifiedTime)
                                 }
@@ -616,9 +612,8 @@ class SyncOrchestrator(
     ) {
         data class FilePair(val localFile: File, val cloudFile: DriveFile, val decision: SyncDecision)
 
-        val pairs = cloudFiles.map { cloudFile ->
-            val relativePath = cloudFile.name.replace('/', File.separatorChar)
-            val localFile = File(localSavePath, relativePath)
+        val pairs = cloudFiles.mapNotNull { cloudFile ->
+            val localFile = resolveRemoteFile(localSavePath, cloudFile.name) ?: return@mapNotNull null
             val decision = planSyncDecision(
                 localModifiedTimeMs = localFile.takeIf { it.exists() }?.lastModified(),
                 cloudModifiedTimeIso = cloudFile.modifiedTime,
@@ -887,9 +882,8 @@ class SyncOrchestrator(
         if (isDirectory) {
             data class FilePair(val localFile: File, val cloudFile: DriveFile, val decision: SyncDecision)
 
-            val pairs = cloudFiles.map { cloudFile ->
-                val relativePath = cloudFile.name.replace('/', File.separatorChar)
-                val localFile = File(localSavePath, relativePath)
+            val pairs = cloudFiles.mapNotNull { cloudFile ->
+                val localFile = resolveRemoteFile(localSavePath, cloudFile.name) ?: return@mapNotNull null
                 val decision = planSyncDecision(
                     localModifiedTimeMs = localFile.takeIf { it.exists() }?.lastModified(),
                     cloudModifiedTimeIso = cloudFile.modifiedTime,

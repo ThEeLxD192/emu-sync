@@ -4,15 +4,21 @@ import com.emusync.config.ConfigManager
 import com.emusync.model.AppConfig
 import com.emusync.model.GoogleDriveConfig
 import com.sun.net.httpserver.HttpServer
+import com.sun.net.httpserver.HttpHandler
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.awt.Desktop
+import java.io.IOException
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.Base64
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -390,46 +396,28 @@ class OAuthFlow(private val client: HttpClient) {
      * and suspends until the authorization code is received (with 60s timeout).
      */
     private suspend fun startLoopbackAndGetCode(clientId: String): String = kotlinx.coroutines.withTimeout(60_000) {
-        // Build the authorization URL
-        val authUrl = buildAuthUrl(clientId)
+        val state = generateState()
+        val authUrl = buildAuthUrl(clientId, state)
 
         return@withTimeout suspendCancellableCoroutine { continuation ->
-            val server = HttpServer.create(InetSocketAddress(LOOPBACK_PORT), 0)
+            val server = try {
+                HttpServer.create(loopbackAddress(), 0)
+            } catch (e: IOException) {
+                continuation.resumeWithException(
+                    DriveApiException("Could not start the OAuth callback on localhost:$LOOPBACK_PORT. The port may be in use.", e)
+                )
+                return@suspendCancellableCoroutine
+            }
 
             continuation.invokeOnCancellation {
                 server.stop(0)
             }
 
-            server.createContext("/") { exchange ->
-                val query = exchange.requestURI.query ?: ""
-                val params = parseQueryParams(query)
-
-                val code = params["code"]
-                val error = params["error"]
-
-                val (statusCode, html) = when {
-                    code != null -> 200 to SUCCESS_HTML
-                    else -> 400 to ERROR_HTML
+            server.createContext("/", callbackHandler(server, state) { result ->
+                if (continuation.isActive) {
+                    result.fold(onSuccess = continuation::resume, onFailure = continuation::resumeWithException)
                 }
-
-                val responseBytes = html.toByteArray()
-                exchange.responseHeaders.add("Content-Type", "text/html; charset=utf-8")
-                exchange.sendResponseHeaders(statusCode, responseBytes.size.toLong())
-                exchange.responseBody.use { it.write(responseBytes) }
-
-                // Stop the server after responding
-                server.stop(1)
-
-                when {
-                    code != null -> continuation.resume(code)
-                    error != null -> continuation.resumeWithException(
-                        DriveApiException("User denied authorization: $error")
-                    )
-                    else -> continuation.resumeWithException(
-                        DriveApiException("No authorization code received")
-                    )
-                }
-            }
+            })
 
             server.start()
 
@@ -472,7 +460,7 @@ class OAuthFlow(private val client: HttpClient) {
     /**
      * Builds the Google OAuth 2.0 authorization URL.
      */
-    private fun buildAuthUrl(clientId: String): String {
+    internal fun buildAuthUrl(clientId: String, state: String): String {
         val params = mapOf(
             "client_id" to clientId,
             "redirect_uri" to REDIRECT_URI,
@@ -480,6 +468,7 @@ class OAuthFlow(private val client: HttpClient) {
             "scope" to SCOPE,
             "access_type" to "offline",     // Ensures we get a refresh_token
             "prompt" to "consent",          // Forces consent screen (always returns refresh_token)
+            "state" to state,
         )
 
         val queryString = params.entries.joinToString("&") { (key, value) ->
@@ -492,11 +481,77 @@ class OAuthFlow(private val client: HttpClient) {
     /**
      * Parses a URI query string into a map.
      */
-    private fun parseQueryParams(query: String): Map<String, String> {
+    internal fun parseQueryParams(query: String): Map<String, String> {
         if (query.isBlank()) return emptyMap()
-        return query.split("&").associate { param ->
-            val (key, value) = param.split("=", limit = 2)
-            key to URLDecoder.decode(value, "UTF-8")
+        return query.split("&").mapNotNull { parameter ->
+            val separator = parameter.indexOf('=')
+            if (separator <= 0) return@mapNotNull null
+            runCatching {
+                val key = URLDecoder.decode(parameter.substring(0, separator), "UTF-8")
+                val value = URLDecoder.decode(parameter.substring(separator + 1), "UTF-8")
+                key to value
+            }.getOrNull()
+        }.toMap()
+    }
+
+    internal fun validateCallback(params: Map<String, String>, expectedState: String): String {
+        if (!hasValidState(params, expectedState)) throw DriveApiException("OAuth callback state is missing or invalid")
+
+        params["error"]?.let { error ->
+            val description = params["error_description"]?.takeIf { it.isNotBlank() }
+            throw DriveApiException(description ?: "Authorization was cancelled or denied: $error")
         }
+
+        return params["code"]?.takeIf { it.isNotBlank() }
+            ?: throw DriveApiException("No authorization code received")
+    }
+
+    private fun hasValidState(params: Map<String, String>, expectedState: String): Boolean {
+        val receivedState = params["state"] ?: return false
+        return MessageDigest.isEqual(
+            expectedState.toByteArray(Charsets.UTF_8),
+            receivedState.toByteArray(Charsets.UTF_8),
+        )
+    }
+
+    /** Creates a callback handler that ignores invalid requests and stays available for Google. */
+    internal fun callbackHandler(
+        server: HttpServer,
+        expectedState: String,
+        onResult: (Result<String>) -> Unit,
+    ): HttpHandler = HttpHandler { exchange ->
+        val params = if (exchange.requestMethod == "GET") {
+            parseQueryParams(exchange.requestURI.query ?: "")
+        } else {
+            emptyMap()
+        }
+        val hasValidState = hasValidState(params, expectedState)
+        val hasCode = params["code"]?.isNotBlank() == true
+        val hasProviderError = params["error"]?.isNotBlank() == true
+        val terminalCallback = hasValidState && (hasCode || hasProviderError)
+
+        val result = if (terminalCallback) {
+            runCatching { validateCallback(params, expectedState) }
+        } else {
+            Result.failure(DriveApiException("OAuth callback is invalid; waiting for Google's response"))
+        }
+        val responseBytes = (if (terminalCallback && result.isSuccess) SUCCESS_HTML else ERROR_HTML).toByteArray()
+        exchange.responseHeaders.add("Content-Type", "text/html; charset=utf-8")
+        exchange.sendResponseHeaders(if (terminalCallback && result.isSuccess) 200 else 400, responseBytes.size.toLong())
+        exchange.responseBody.use { it.write(responseBytes) }
+
+        if (terminalCallback) {
+            server.stop(0)
+            onResult(result)
+        }
+    }
+
+    internal fun loopbackAddress(): InetSocketAddress =
+        InetSocketAddress(InetAddress.getLoopbackAddress(), LOOPBACK_PORT)
+
+    private fun generateState(): String {
+        val bytes = ByteArray(32)
+        SecureRandom().nextBytes(bytes)
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
     }
 }
