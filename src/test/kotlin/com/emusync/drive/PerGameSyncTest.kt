@@ -64,6 +64,51 @@ class PerGameSyncTest {
     }
 
     @Test
+    fun `global save paths use emulator cloud folder despite empty or copied rom overrides`() {
+        val orchestrator = SyncOrchestrator(
+            client = HttpClient(MockEngine) { engine { addHandler { respond("") } } },
+            config = AppConfig(googleDrive = null),
+            configManager = ConfigManager("/tmp/mock_config.json"),
+            onStatus = {},
+        )
+        val baseSystem = EmulatorSystem(
+            name = "RPCS3",
+            executablePath = "/usr/bin/rpcs3",
+            romsDirectory = "/games/ps3",
+            extensions = listOf("iso"),
+            group = "PlayStation",
+            savePaths = listOf("/mnt/Juegos/Saves/PS3"),
+        )
+
+        val emptyOverride = baseSystem.copy(
+            savePathsByRom = mapOf("Black.iso" to emptyList()),
+        )
+        val copiedGlobalOverride = baseSystem.copy(
+            savePathsByRom = mapOf("Black.iso" to listOf("/mnt/Juegos/Saves/PS3")),
+        )
+        val distinctPerGameOverride = baseSystem.copy(
+            savePathsByRom = mapOf("Black.iso" to listOf("/mnt/Juegos/Saves/PS3/Black")),
+        )
+
+        assertEquals(
+            listOf("PlayStation"),
+            orchestrator.getCloudPathSegments(baseSystem, "Black.iso", "Black"),
+        )
+        assertEquals(
+            listOf("PlayStation"),
+            orchestrator.getCloudPathSegments(emptyOverride, "Black.iso", "Black"),
+        )
+        assertEquals(
+            listOf("PlayStation"),
+            orchestrator.getCloudPathSegments(copiedGlobalOverride, "Black.iso", "Black"),
+        )
+        assertEquals(
+            listOf("PlayStation", "Black"),
+            orchestrator.getCloudPathSegments(distinctPerGameOverride, "Black.iso", "Black"),
+        )
+    }
+
+    @Test
     fun `getCloudPathSegments handles custom title in titleByRom`() {
         val orchestrator = SyncOrchestrator(
             client = HttpClient(MockEngine) { engine { addHandler { respond("") } } },

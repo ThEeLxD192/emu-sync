@@ -62,11 +62,20 @@ class SyncOrchestrator(
         val baseFolder = entry.effectiveCloudFolder
         return when (entry) {
             is EmulatorSystem -> {
-                val hasRomOverride = romName != null && (
-                    entry.savePathsByRom.containsKey(romName) ||
-                    (romName.contains('.') && entry.savePathsByRom.containsKey(romName.substringBeforeLast('.')))
-                )
-                if (romName != null && (hasRomOverride || entry.savePaths.isEmpty())) {
+                val globalPaths = entry.savePaths
+                    .filter { it.isNotBlank() }
+                    .map(::normalizeSavePath)
+                    .toSet()
+                val romPaths = romName?.let { name ->
+                    entry.savePathsByRom[name]
+                        ?: if (name.contains('.')) entry.savePathsByRom[name.substringBeforeLast('.')] else null
+                }.orEmpty().filter { it.isNotBlank() }
+                val hasDistinctRomPath = romPaths.any { normalizeSavePath(it) !in globalPaths }
+
+                // A configured global save path uses the emulator folder unless this ROM has
+                // a real, distinct path of its own. Empty or copied global-path entries are
+                // legacy per-ROM override records, not per-game save configuration.
+                if (romName != null && (hasDistinctRomPath || globalPaths.isEmpty())) {
                     val title = gameTitle ?: entry.getEffectiveTitle(romName, romName)
                     listOf(baseFolder, sanitizeCloudFolderName(title))
                 } else {
@@ -82,6 +91,9 @@ class SyncOrchestrator(
             }
         }
     }
+
+    private fun normalizeSavePath(path: String): String =
+        path.trim().replace('\\', '/').trimEnd('/').ifBlank { "/" }
 
     fun getCloudPathSegments(item: GameItem): List<String> {
         val romName = item.romFile?.name ?: item.name
