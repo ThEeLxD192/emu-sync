@@ -149,7 +149,14 @@ class DirectorySyncTest {
         assertEquals("SIBLING_FILE", siblingFilePath.readText())
         assertEquals("LOCAL_DIRECTORY_SAVE", conflictingDirectorySave.readText())
         assertEquals(0, writeCount, "The colliding directory file must not overwrite the sibling Drive file")
-        assertTrue(statuses.any { it is AppStatus.PostSyncFailed }, "The unsynced collision should be reported")
+        assertTrue(
+            statuses.any { it is AppStatus.Error && it.message.contains("Rename or reconfigure") },
+            "A deterministic name collision should explain how to resolve it",
+        )
+        assertFalse(
+            statuses.any { it is AppStatus.PostSyncFailed },
+            "A deterministic collision should not offer a retry that must fail again",
+        )
     }
 
     private fun createMockDriveClient(

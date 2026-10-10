@@ -84,6 +84,7 @@ class SyncOrchestrator(
     private data class PostSyncResult(
         val completedCount: Int,
         val failedTargets: List<SaveUploadTarget>,
+        val blockedReasons: List<String> = emptyList(),
     )
 
     private val logger = Logger.getLogger(SyncOrchestrator::class.java.name)
@@ -932,11 +933,13 @@ class SyncOrchestrator(
         retryTargets: List<SaveUploadTarget>? = null,
         completedBeforeRetry: Int = 0,
         isRetry: Boolean = false,
+        blockedFailuresBeforeRetry: List<String> = emptyList(),
     ): Boolean {
         onStatus(AppStatus.Syncing("Uploading saves for ${item.effectiveTitle}..."))
         var completedCount = completedBeforeRetry
         val failedConfiguredTargets = mutableListOf<ConfiguredSaveTarget>()
         val failedFileTargets = mutableListOf<SaveUploadTarget>()
+        val blockedReasons = blockedFailuresBeforeRetry.toMutableList()
         var firstFailureReason: String? = null
         try {
             val token = existingToken ?: oauthFlow.authorize(config, configManager, allowInteractive = false)
@@ -957,6 +960,7 @@ class SyncOrchestrator(
                     )
                     completedCount += result.completedCount
                     failedFileTargets += result.failedTargets
+                    blockedReasons += result.blockedReasons
                     if (firstFailureReason == null) {
                         firstFailureReason = result.failedTargets.firstNotNullOfOrNull { it.failureReason }
                     }
@@ -985,6 +989,7 @@ class SyncOrchestrator(
                     )
                     completedCount += result.completedCount
                     failedFileTargets += result.failedTargets
+                    blockedReasons += result.blockedReasons
                     if (firstFailureReason == null) {
                         firstFailureReason = result.failedTargets.firstNotNullOfOrNull { it.failureReason }
                     }
@@ -1001,19 +1006,27 @@ class SyncOrchestrator(
             firstFailureReason = firstFailureReason ?: e.message
         }
 
+        val distinctBlockedReasons = blockedReasons.distinct()
         if (failedConfiguredTargets.isEmpty() && failedFileTargets.isEmpty()) {
+            if (distinctBlockedReasons.isNotEmpty()) {
+                onStatus(AppStatus.Error(distinctBlockedReasons.joinToString("\n")))
+                return false
+            }
             onStatus(AppStatus.Idle)
             return true
         }
 
-        val reason = firstFailureReason?.takeIf { it.isNotBlank() } ?: "Unknown Drive error"
+        val reason = buildList {
+            firstFailureReason?.takeIf { it.isNotBlank() }?.let(::add)
+            addAll(distinctBlockedReasons)
+        }.distinct().joinToString("\n").ifBlank { "Unknown Drive error" }
         logger.log(Level.WARNING, "Post-game Drive sync failed for {0}: {1}", arrayOf(item.effectiveTitle, reason))
         onStatus(
             AppStatus.PostSyncFailed(
                 gameName = item.effectiveTitle,
                 reason = reason,
                 completedSaveCount = completedCount,
-                pendingSaveCount = failedConfiguredTargets.size + failedFileTargets.size,
+                pendingSaveCount = failedConfiguredTargets.size + failedFileTargets.size + distinctBlockedReasons.size,
                 onRetry = {
                     uploadAfterPlay(
                         item = item,
@@ -1023,6 +1036,7 @@ class SyncOrchestrator(
                         retryTargets = failedFileTargets,
                         completedBeforeRetry = completedCount,
                         isRetry = true,
+                        blockedFailuresBeforeRetry = distinctBlockedReasons,
                     )
                 },
             )
@@ -1159,13 +1173,8 @@ class SyncOrchestrator(
         if (targetType == SaveTargetType.FILE && driveName in knownFileSiblingNames) {
             return PostSyncResult(
                 0,
-                listOf(SaveUploadTarget(
-                    localSavePath,
-                    SaveTargetType.FILE,
-                    driveName,
-                    "The save name '$driveName' is already used by another configured file target.",
-                    knownFileSiblingNames,
-                )),
+                emptyList(),
+                listOf("The save name '$driveName' is already used by another configured file target."),
             )
         }
 
@@ -1173,6 +1182,7 @@ class SyncOrchestrator(
         val cloudFiles = search.listFilesInFolder(token, folderId)
         var completedCount = 0
         val failedTargets = mutableListOf<SaveUploadTarget>()
+        val blockedReasons = mutableListOf<String>()
 
         // Legacy paths that did not exist during config migration remain UNKNOWN until
         // the game creates them. Resolve from the filesystem after the game exits.
@@ -1183,13 +1193,7 @@ class SyncOrchestrator(
             for (localFile in localFiles) {
                 val relativePath = localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/')
                 if (relativePath in knownFileSiblingNames) {
-                    failedTargets += SaveUploadTarget(
-                        localFile,
-                        SaveTargetType.FILE,
-                        relativePath,
-                        "The directory save '$relativePath' conflicts with another configured file target.",
-                        knownFileSiblingNames,
-                    )
+                    blockedReasons += "The directory save '$relativePath' conflicts with another configured file target. Rename or reconfigure one of the saves before syncing it."
                     continue
                 }
                 val cloudFile = cloudFiles.find { it.name == relativePath }
@@ -1225,7 +1229,7 @@ class SyncOrchestrator(
                 )
             }
         }
-        return PostSyncResult(completedCount, failedTargets)
+        return PostSyncResult(completedCount, failedTargets, blockedReasons)
     }
 
     private suspend fun syncSingleFilePost(
