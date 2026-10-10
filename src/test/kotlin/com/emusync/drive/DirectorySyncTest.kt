@@ -312,6 +312,131 @@ class DirectorySyncTest {
         )
     }
 
+    @Test
+    fun `migrated missing per ROM extensionless file restores exact Drive match before play`(@TempDir tempDir: File) = runTest {
+        val romFile = File(tempDir, "Game.rom").apply { writeText("ROM") }
+        val legacySave = File(tempDir, "not-created-yet/SAVE_SLOT")
+        val javaExecutable = File(
+            System.getProperty("java.home"),
+            "bin/${if (System.getProperty("os.name").lowercase().contains("win")) "java.exe" else "java"}",
+        ).absolutePath
+        val configFile = File(tempDir, "config.json").apply {
+            writeText(
+                """
+                {
+                  "googleDrive": {
+                    "clientId": "test-client",
+                    "clientSecret": "test-secret",
+                    "refreshToken": "test-refresh-token"
+                  },
+                  "entries": [{
+                    "type": "emulator",
+                    "name": "Legacy emulator",
+                    "executablePath": ${Json.encodeToString(javaExecutable)},
+                    "arguments": ["-version"],
+                    "romsDirectory": ${Json.encodeToString(tempDir.absolutePath)},
+                    "extensions": ["rom"],
+                    "group": "Legacy system",
+                    "savePathsByRom": {
+                      "${romFile.name}": [${Json.encodeToString(legacySave.absolutePath)}]
+                    }
+                  }]
+                }
+                """.trimIndent(),
+            )
+        }
+        val configManager = ConfigManager(configFile)
+        val migratedConfig = configManager.load()
+        val entry = migratedConfig.entries.single() as EmulatorSystem
+
+        assertEquals(
+            SaveTargetType.UNKNOWN,
+            entry.saveTargetsByRom[romFile.name]?.single()?.type,
+            "A missing extensionless legacy per-ROM path should stay UNKNOWN through migration",
+        )
+        assertFalse(legacySave.exists())
+
+        val cloudModifiedTime = "2026-09-25T15:00:00.000Z"
+        val uploadRequests = mutableListOf<String>()
+        var sawRestoredFileBeforePlay = false
+        var currentUploadName = "SAVE_SLOT"
+        val mockClient = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    val url = request.url.toString()
+                    val q = request.url.parameters["q"] ?: ""
+                    when {
+                        url.contains("oauth2.googleapis.com/token") -> respond(
+                            content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
+                            headers = jsonHeaders,
+                        )
+                        q.contains("name = 'EmuSync'") -> respond(
+                            content = """{"files":[{"id":"root-id","name":"EmuSync"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Legacy system'") -> respond(
+                            content = """{"files":[{"id":"system-id","name":"Legacy system"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Game'") -> respond(
+                            content = """{"files":[{"id":"game-id","name":"Game"}]}""", headers = jsonHeaders,
+                        )
+                        request.url.parameters["alt"] == "media" -> respond(
+                            "LEGACY_CLOUD_SAVE".toByteArray(),
+                            headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                        )
+                        q.contains("'game-id' in parents") -> respond(
+                            content = """{"files":[{"id":"legacy-save-id","name":"SAVE_SLOT","modifiedTime":"$cloudModifiedTime"}]}""",
+                            headers = jsonHeaders,
+                        )
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            if (request.method.value == "PATCH") {
+                                uploadRequests += "PATCH:${request.url.segments.last()}"
+                            } else {
+                                val metadata = Json.parseToJsonElement(
+                                    (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString(),
+                                ).jsonObject
+                                currentUploadName = metadata["name"]?.jsonPrimitive?.content ?: ""
+                                uploadRequests += "POST:$currentUploadName"
+                            }
+                            respond(
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/legacy-file"),
+                            )
+                        }
+                        request.method.value == "PUT" -> respond(
+                            content = """{"id":"legacy-save-id","name":"$currentUploadName","modifiedTime":"2026-10-09T15:00:00.000Z"}""",
+                            headers = jsonHeaders,
+                        )
+                        else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
+                    }
+                }
+            }
+        }
+
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = migratedConfig,
+            configManager = configManager,
+            onStatus = { status ->
+                if (status == AppStatus.Playing) {
+                    sawRestoredFileBeforePlay = legacySave.isFile && legacySave.readText() == "LEGACY_CLOUD_SAVE"
+                    if (sawRestoredFileBeforePlay) {
+                        legacySave.writeText("UPDATED_DURING_PLAY")
+                        legacySave.setLastModified(Instant.now().plusSeconds(30).toEpochMilli())
+                    }
+                }
+            },
+        )
+
+        orchestrator.playWithSync(
+            GameItem(name = romFile.nameWithoutExtension, entry = entry, romFile = romFile),
+        )
+
+        assertTrue(sawRestoredFileBeforePlay, "The exact cloud match should be restored as a file before launch")
+        assertEquals("UPDATED_DURING_PLAY", legacySave.readText())
+        assertEquals(setOf("PATCH:legacy-save-id"), uploadRequests.toSet())
+    }
+
     private fun createMockDriveClient(
         cloudFiles: List<Pair<String, String>>, // Pair(fileName, modifiedTimeIso)
         fileContents: Map<String, ByteArray> = emptyMap(),
