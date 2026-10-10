@@ -15,10 +15,13 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondOk
 import io.ktor.http.HttpHeaders
+import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -109,6 +112,156 @@ class DirectorySyncTest {
         assertEquals("DIRECTORY_SAVE_ONE", File(directoryPath, "state-one.sav").readText())
         assertEquals("DIRECTORY_SAVE_TWO", File(directoryPath, "state-two.sav").readText())
         assertFalse(File(directoryPath, "SAVE_SLOT").exists())
+    }
+
+    @Test
+    fun `migrated per ROM unknown directory restores before play and uploads after play`(@TempDir tempDir: File) = runTest {
+        val romFile = File(tempDir, "Game.rom").apply { writeText("ROM") }
+        val saveDirectory = File(tempDir, "not-created-yet/profile.d")
+        val javaExecutable = File(
+            System.getProperty("java.home"),
+            "bin/${if (System.getProperty("os.name").lowercase().contains("win")) "java.exe" else "java"}",
+        ).absolutePath
+        val configFile = File(tempDir, "config.json").apply {
+            writeText(
+                """
+                {
+                  "googleDrive": {
+                    "clientId": "test-client",
+                    "clientSecret": "test-secret",
+                    "refreshToken": "test-refresh-token"
+                  },
+                  "entries": [{
+                    "type": "emulator",
+                    "name": "Legacy emulator",
+                    "executablePath": ${Json.encodeToString(javaExecutable)},
+                    "arguments": ["-version"],
+                    "romsDirectory": ${Json.encodeToString(tempDir.absolutePath)},
+                    "extensions": ["rom"],
+                    "group": "Legacy system",
+                    "savePathsByRom": {
+                      "${romFile.name}": [${Json.encodeToString(saveDirectory.absolutePath)}]
+                    }
+                  }]
+                }
+                """.trimIndent(),
+            )
+        }
+        val configManager = ConfigManager(configFile)
+        val migratedConfig = configManager.load()
+        val entry = migratedConfig.entries.single() as EmulatorSystem
+
+        assertEquals(
+            SaveTargetType.UNKNOWN,
+            entry.saveTargetsByRom[romFile.name]?.single()?.type,
+            "A missing legacy per-ROM target should remain UNKNOWN after migration",
+        )
+
+        val cloudFiles = listOf(
+            "cloud-initial" to ("profiles/slot1/save.dat" to "2026-09-25T15:00:00.000Z"),
+            "cloud-options" to ("profiles/slot2/options.ini" to "2026-09-25T15:00:00.000Z"),
+        )
+        val cloudContents = mapOf(
+            "cloud-initial" to "CLOUD_INITIAL".toByteArray(),
+            "cloud-options" to "CLOUD_OPTIONS".toByteArray(),
+        )
+        val uploadRequests = mutableListOf<String>()
+        var currentUploadName = ""
+        val mockClient = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    val url = request.url.toString()
+                    val q = request.url.parameters["q"] ?: ""
+                    when {
+                        url.contains("oauth2.googleapis.com/token") -> respond(
+                            content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
+                            headers = jsonHeaders,
+                        )
+                        q.contains("name = 'EmuSync'") -> respond(
+                            content = """{"files":[{"id":"root-id","name":"EmuSync"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Legacy system'") -> respond(
+                            content = """{"files":[{"id":"system-id","name":"Legacy system"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Game'") -> respond(
+                            content = """{"files":[{"id":"game-id","name":"Game"}]}""", headers = jsonHeaders,
+                        )
+                        request.url.parameters["alt"] == "media" -> {
+                            val fileId = request.url.segments.last()
+                            respond(
+                                cloudContents.getValue(fileId),
+                                headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                            )
+                        }
+                        q.contains("'game-id' in parents") -> {
+                            val filesJson = cloudFiles.joinToString(",") { (id, details) ->
+                                val (name, modifiedTime) = details
+                                """{"id":"$id","name":"$name","modifiedTime":"$modifiedTime"}"""
+                            }
+                            respond(content = """{"files":[$filesJson]}""", headers = jsonHeaders)
+                        }
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            if (request.method.value == "PATCH") {
+                                uploadRequests += "PATCH:${request.url.segments.last()}"
+                                currentUploadName = "profiles/slot1/save.dat"
+                            } else {
+                                val metadata = Json.parseToJsonElement(
+                                    (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString(),
+                                ).jsonObject
+                                currentUploadName = metadata["name"]?.jsonPrimitive?.content ?: ""
+                                uploadRequests += "POST:$currentUploadName"
+                            }
+                            respond(
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/legacy-per-rom"),
+                            )
+                        }
+                        request.method.value == "PUT" -> respond(
+                            content = """{"id":"uploaded-id","name":"$currentUploadName","modifiedTime":"2026-10-09T15:00:00.000Z"}""",
+                            headers = jsonHeaders,
+                        )
+                        else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
+                    }
+                }
+            }
+        }
+
+        val preSyncRestored = mutableListOf<String>()
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = migratedConfig,
+            configManager = configManager,
+            onStatus = { status ->
+                if (status == AppStatus.Playing) {
+                    val restored = File(saveDirectory, "profiles/slot1/save.dat")
+                    preSyncRestored += restored.takeIf { it.exists() }?.readText() ?: "MISSING"
+                    File(saveDirectory, "profiles/slot2/options.ini").apply {
+                        if (exists()) preSyncRestored += readText() else preSyncRestored += "MISSING_OPTIONS"
+                    }
+                    restored.writeText("UPDATED_DURING_PLAY")
+                    restored.setLastModified(Instant.now().plusSeconds(30).toEpochMilli())
+                    File(saveDirectory, "profiles/new-slot/new.sav").apply {
+                        parentFile.mkdirs()
+                        writeText("CREATED_DURING_PLAY")
+                    }
+                }
+            },
+        )
+
+        orchestrator.playWithSync(
+            GameItem(name = romFile.nameWithoutExtension, entry = entry, romFile = romFile),
+        )
+
+        assertEquals(listOf("CLOUD_INITIAL", "CLOUD_OPTIONS"), preSyncRestored)
+        assertEquals("UPDATED_DURING_PLAY", File(saveDirectory, "profiles/slot1/save.dat").readText())
+        assertEquals("CLOUD_OPTIONS", File(saveDirectory, "profiles/slot2/options.ini").readText())
+        assertEquals("CREATED_DURING_PLAY", File(saveDirectory, "profiles/new-slot/new.sav").readText())
+        assertEquals(
+            setOf("PATCH:cloud-initial", "POST:profiles/new-slot/new.sav"),
+            uploadRequests.toSet(),
+            "Post-sync should update and create files using relative paths from the UNKNOWN directory target",
+        )
     }
 
     @Test
