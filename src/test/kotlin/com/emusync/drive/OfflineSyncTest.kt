@@ -82,7 +82,7 @@ class OfflineSyncTest {
     }
 
     @Test
-    fun `SyncOrchestrator should launch game and return to Idle when offline`(@TempDir tempDir: File) = runTest {
+    fun `SyncOrchestrator should launch game and report unsynced save when offline`(@TempDir tempDir: File) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
 
@@ -129,8 +129,10 @@ class OfflineSyncTest {
         // Should NOT throw, should complete play flow cleanly
         orchestrator.playWithSync(gameItem)
 
-        // Verifies status transitioned through Playing and ended in Idle
+        // Offline mode still launches the game, but must not imply that Drive was updated.
         assertTrue(statuses.any { it is AppStatus.Playing })
-        assertEquals(AppStatus.Idle, statuses.last())
+        val failure = statuses.last() as AppStatus.PostSyncFailed
+        assertEquals("game", failure.gameName)
+        assertTrue(failure.reason.contains("offline", ignoreCase = true))
     }
 }
