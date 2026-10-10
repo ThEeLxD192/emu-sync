@@ -4,6 +4,9 @@ import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.NativePCGame
+import com.emusync.model.SaveTarget
+import com.emusync.model.SaveTargetType
+import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
@@ -161,5 +164,119 @@ class ConfigManagerTest {
             propertyProvider = { if (it == "os.name") "Linux" else null },
         )
         assertEquals(File("/home/gamer/.config/emusync/config.json").absolutePath, resolved.absolutePath)
+    }
+
+    @Test
+    fun `legacy paths are migrated once to explicit save target types`(@TempDir tempDir: File) {
+        val extensionlessFile = File(tempDir, "SAVE_SLOT").apply { writeText("save") }
+        val dottedDirectory = File(tempDir, "profile.d").apply { mkdirs() }
+        val configFile = File(tempDir, "config.json").apply {
+            writeText(
+                """
+                {
+                  "entries": [{
+                    "type": "native",
+                    "name": "Legacy",
+                    "executablePath": "/game/start",
+                    "savePaths": [${Json.encodeToString(extensionlessFile.absolutePath)}, ${Json.encodeToString(dottedDirectory.absolutePath)}]
+                  }]
+                }
+                """.trimIndent()
+            )
+        }
+
+        val migrated = ConfigManager(configFile).load().entries.single() as NativePCGame
+
+        assertEquals(
+            listOf(
+                SaveTarget(extensionlessFile.absolutePath, SaveTargetType.FILE),
+                SaveTarget(dottedDirectory.absolutePath, SaveTargetType.DIRECTORY),
+            ),
+            migrated.saveTargets,
+        )
+        assertTrue(configFile.readText().contains("saveTargets"))
+    }
+
+    @Test
+    fun `explicit save target type is never inferred again`(@TempDir tempDir: File) {
+        val ambiguous = File(tempDir, "future.folder")
+        val manager = ConfigManager(File(tempDir, "config.json"))
+        manager.save(
+            AppConfig(entries = listOf(
+                NativePCGame(
+                    name = "Explicit",
+                    executablePath = "/game/start",
+                    saveTargets = listOf(SaveTarget(ambiguous.absolutePath, SaveTargetType.DIRECTORY)),
+                )
+            ))
+        )
+
+        val loaded = manager.load().entries.single() as NativePCGame
+        assertEquals(SaveTargetType.DIRECTORY, loaded.saveTargets.single().type)
+    }
+
+    @Test
+    fun `missing dotted legacy path stays unknown until created as a directory`(@TempDir tempDir: File) {
+        val dottedPath = File(tempDir, "profile.d")
+        val configFile = File(tempDir, "config.json").apply {
+            writeText(
+                """
+                {
+                  "entries": [{
+                    "type": "native",
+                    "name": "Legacy",
+                    "executablePath": "/game/start",
+                    "savePaths": [${Json.encodeToString(dottedPath.absolutePath)}]
+                  }]
+                }
+                """.trimIndent()
+            )
+        }
+        val manager = ConfigManager(configFile)
+
+        val firstLoad = manager.load().entries.single() as NativePCGame
+        assertEquals(SaveTargetType.UNKNOWN, firstLoad.saveTargets.single().type)
+
+        dottedPath.mkdirs()
+        File(dottedPath, "save.dat").writeText("save")
+
+        val secondLoad = manager.load().entries.single() as NativePCGame
+        assertEquals(SaveTargetType.DIRECTORY, secondLoad.saveTargets.single().type)
+        assertTrue(configFile.readText().contains("\"directory\""))
+    }
+
+    @Test
+    fun `missing legacy per ROM paths migrate and resolve after creation`(@TempDir tempDir: File) {
+        val rom = File(tempDir, "Game.rom")
+        val dottedDirectory = File(tempDir, "profile.d")
+        val configFile = File(tempDir, "config.json")
+        val manager = ConfigManager(configFile)
+        manager.save(
+            AppConfig(entries = listOf(
+                EmulatorSystem(
+                    name = "Legacy emulator",
+                    executablePath = "/emulator",
+                    romsDirectory = tempDir.absolutePath,
+                    extensions = listOf("rom"),
+                    savePathsByRom = mapOf(rom.name to listOf(dottedDirectory.absolutePath)),
+                ),
+            )),
+        )
+
+        val firstLoad = manager.load().entries.single() as EmulatorSystem
+        assertEquals(
+            SaveTargetType.UNKNOWN,
+            firstLoad.saveTargetsByRom[rom.name]?.single()?.type,
+        )
+
+        dottedDirectory.mkdirs()
+        File(dottedDirectory, "save.dat").writeText("save")
+
+        val secondLoad = manager.load().entries.single() as EmulatorSystem
+        assertEquals(
+            SaveTargetType.DIRECTORY,
+            secondLoad.saveTargetsByRom[rom.name]?.single()?.type,
+        )
+        assertTrue(configFile.readText().contains("\"directory\""))
     }
 }

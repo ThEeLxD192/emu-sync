@@ -5,6 +5,9 @@ import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.NativePCGame
+import com.emusync.model.SaveTarget
+import com.emusync.model.SaveTargetType
+import com.emusync.model.inferLegacySaveTarget
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
 import io.ktor.client.HttpClient
@@ -26,11 +29,35 @@ import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.time.Instant
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class PerGameSyncTest {
 
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
+
+    @Test
+    fun `unknown missing target ignores exact cloud name owned by sibling target`(@TempDir tempDir: File) {
+        val missingTarget = File(tempDir, "SAVE_SLOT")
+        val cloudSave = DriveFile("save-id", "SAVE_SLOT", "2026-09-25T18:00:00.000Z")
+
+        assertFalse(
+            isDirectorySaveTarget(SaveTargetType.UNKNOWN, missingTarget, listOf(cloudSave)),
+            "A matching Drive filename identifies a missing legacy target as a file",
+        )
+        assertTrue(
+            isDirectorySaveTarget(SaveTargetType.UNKNOWN, missingTarget, listOf(cloudSave), setOf("SAVE_SLOT")),
+            "A matching cloud file claimed by a known file target must not classify this target as a file",
+        )
+        assertFalse(
+            isDirectorySaveTarget(SaveTargetType.UNKNOWN, missingTarget, listOf(cloudSave)),
+            "An UNKNOWN sibling with the same name cannot claim the exact cloud match",
+        )
+        assertTrue(
+            isDirectorySaveTarget(SaveTargetType.UNKNOWN, missingTarget, listOf(cloudSave.copy(name = "slot/save.dat"))),
+            "Nested cloud names identify a missing legacy target as a directory",
+        )
+    }
 
     @Test
     fun `getCloudPathSegments respects game title for EmulatorSystem with savePathsByRom`() {
@@ -485,7 +512,7 @@ class PerGameSyncTest {
             romName = "CTR.nsp",
             oldTitle = "Crash Team Racing",
             newTitle = "Crash Team Racing Nitro-Fueled",
-            localSavePaths = listOf(saveFile),
+            localSaveTargets = listOf(SaveTarget(saveFile.absolutePath, SaveTargetType.FILE)),
         )
 
         assertTrue(result)
@@ -594,12 +621,327 @@ class PerGameSyncTest {
             romName = "CTR.nsp",
             oldTitle = "Crash Team Racing",
             newTitle = "Crash Team Racing Nitro-Fueled",
-            localSavePaths = listOf(saveFile),
+            localSaveTargets = listOf(SaveTarget(saveFile.absolutePath, SaveTargetType.FILE)),
         )
 
         assertTrue(result)
         assertEquals("old-ctr-id", deletedOldFolderId)
         assertEquals("DOWNLOADED_FROM_CLOUD", saveFile.readText())
+    }
+
+    @Test
+    fun `rename conflict date ignores newer in-sync file sibling excluded from directory`(@TempDir tempDir: File) = runTest {
+        val configManager = ConfigManager(File(tempDir, "config.json").absolutePath)
+        val saveDirectory = File(tempDir, "saves").apply { mkdirs() }
+        val localSave = File(saveDirectory, "slot.dat").apply { writeText("LOCAL") }
+        val directoryCloudTime = Instant.parse("2026-09-25T15:00:00Z")
+        val localConflictTime = directoryCloudTime.plusSeconds(30)
+        localSave.setLastModified(localConflictTime.toEpochMilli())
+        val siblingFile = File(tempDir, "SAVE_SLOT").apply { writeText("SIBLING") }
+        val siblingCloudTime = Instant.parse("2026-09-26T15:00:00Z")
+        siblingFile.setLastModified(siblingCloudTime.toEpochMilli())
+
+        val system = EmulatorSystem(
+            name = "Eden",
+            executablePath = "echo",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("nsp"),
+            group = "Switch",
+            savePaths = emptyList(),
+            savePathsByRom = emptyMap(),
+        )
+        val config = AppConfig(
+            googleDrive = GoogleDriveConfig(
+                clientId = "test-client",
+                clientSecret = "test-secret",
+                refreshToken = "test-refresh-token",
+            ),
+            entries = listOf(system),
+        )
+        configManager.save(config)
+
+        var shownLocalDate: String? = null
+        var shownCloudDate: String? = null
+        val mockClient = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    val url = request.url.toString()
+                    val q = request.url.parameters["q"] ?: ""
+                    when {
+                        url.contains("oauth2.googleapis.com/token") -> respond(
+                            content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
+                            headers = jsonHeaders,
+                        )
+                        q.contains("name = 'EmuSync'") -> respond(
+                            content = """{"files":[{"id":"root-id","name":"EmuSync"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Switch'") -> respond(
+                            content = """{"files":[{"id":"switch-id","name":"Switch"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Old Title'") -> respond(
+                            content = """{"files":[]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'New Title'") -> respond(
+                            content = """{"files":[{"id":"new-folder","name":"New Title"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("'new-folder' in parents") -> respond(
+                            content = """{"files":[{"id":"directory-save","name":"slot.dat","modifiedTime":"${directoryCloudTime}"},{"id":"sibling-save","name":"SAVE_SLOT","modifiedTime":"${siblingCloudTime}"}]}""",
+                            headers = jsonHeaders,
+                        )
+                        else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
+                    }
+                }
+            }
+        }
+
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = config,
+            configManager = configManager,
+            onStatus = { status ->
+                if (status is AppStatus.Conflict) {
+                    shownLocalDate = status.localDate
+                    shownCloudDate = status.cloudDate
+                    status.onResolve(SyncDecision.DOWNLOAD_CLOUD)
+                }
+            },
+        )
+
+        val result = orchestrator.renameGameCloudData(
+            entry = system,
+            romName = "game.nsp",
+            oldTitle = "Old Title",
+            newTitle = "New Title",
+            localSaveTargets = listOf(
+                SaveTarget(saveDirectory.absolutePath, SaveTargetType.DIRECTORY),
+                SaveTarget(siblingFile.absolutePath, SaveTargetType.FILE),
+            ),
+        )
+
+        assertTrue(result)
+        assertEquals(
+            SyncOrchestrator.formatTimestamp(localConflictTime.toEpochMilli()),
+            shownLocalDate,
+        )
+        assertEquals(
+            SyncOrchestrator.formatTimestamp(directoryCloudTime.toEpochMilli()),
+            shownCloudDate,
+        )
+    }
+
+    @Test
+    fun `rename uploads nested directory saves with their relative cloud paths`(@TempDir tempDir: File) = runTest {
+        val configManager = ConfigManager(File(tempDir, "config.json").absolutePath)
+        val saveDirectory = File(tempDir, "saves").apply { mkdirs() }
+        val existingNestedSave = File(saveDirectory, "profiles/slot1/save.dat").apply {
+            parentFile.mkdirs()
+            writeText("UPDATED_SAVE")
+            setLastModified(Instant.parse("2026-10-08T15:00:00Z").toEpochMilli())
+        }
+        val newNestedSave = File(saveDirectory, "profiles/slot2/settings.json").apply {
+            parentFile.mkdirs()
+            writeText("NEW_SETTINGS")
+            setLastModified(Instant.parse("2026-10-08T15:00:00Z").toEpochMilli())
+        }
+        val cloudModifiedTime = "2026-09-25T15:00:00.000Z"
+
+        val system = EmulatorSystem(
+            name = "Eden",
+            executablePath = "echo",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("nsp"),
+            group = "Switch",
+            savePaths = emptyList(),
+            savePathsByRom = emptyMap(),
+        )
+        val config = AppConfig(
+            googleDrive = GoogleDriveConfig(
+                clientId = "test-client",
+                clientSecret = "test-secret",
+                refreshToken = "test-refresh-token",
+            ),
+            entries = listOf(system),
+        )
+        configManager.save(config)
+
+        val uploadOperations = mutableListOf<String>()
+        var currentUploadName = ""
+        val mockClient = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    val url = request.url.toString()
+                    val q = request.url.parameters["q"] ?: ""
+                    when {
+                        url.contains("oauth2.googleapis.com/token") -> respond(
+                            content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
+                            headers = jsonHeaders,
+                        )
+                        q.contains("name = 'EmuSync'") -> respond(
+                            content = """{"files":[{"id":"root-id","name":"EmuSync"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Switch'") -> respond(
+                            content = """{"files":[{"id":"switch-id","name":"Switch"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Old Title'") -> respond(
+                            content = """{"files":[]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'New Title'") -> respond(
+                            content = """{"files":[{"id":"new-folder","name":"New Title"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("'new-folder' in parents") -> respond(
+                            content = """{"files":[{"id":"existing-save-id","name":"profiles/slot1/save.dat","modifiedTime":"$cloudModifiedTime"}]}""",
+                            headers = jsonHeaders,
+                        )
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            if (request.method.value == "PATCH") {
+                                uploadOperations += "PATCH:${request.url.segments.last()}"
+                                currentUploadName = "profiles/slot1/save.dat"
+                            } else {
+                                val metadata = Json.parseToJsonElement(
+                                    (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString(),
+                                ).jsonObject
+                                currentUploadName = metadata["name"]?.jsonPrimitive?.content ?: ""
+                                uploadOperations += "POST:$currentUploadName"
+                            }
+                            respond(
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/rename-directory"),
+                            )
+                        }
+                        request.method.value == "PUT" -> respond(
+                            content = """{"id":"uploaded-id","name":"$currentUploadName","modifiedTime":"2026-10-09T15:00:00.000Z"}""",
+                            headers = jsonHeaders,
+                        )
+                        else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
+                    }
+                }
+            }
+        }
+
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = config,
+            configManager = configManager,
+            onStatus = { status ->
+                if (status is AppStatus.Conflict) {
+                    status.onResolve(SyncDecision.UPLOAD_LOCAL)
+                }
+            },
+        )
+
+        val result = orchestrator.renameGameCloudData(
+            entry = system,
+            romName = "game.nsp",
+            oldTitle = "Old Title",
+            newTitle = "New Title",
+            localSaveTargets = listOf(SaveTarget(saveDirectory.absolutePath, SaveTargetType.DIRECTORY)),
+        )
+
+        assertTrue(result)
+        assertTrue(existingNestedSave.exists())
+        assertTrue(newNestedSave.exists())
+        assertEquals(
+            setOf("PATCH:existing-save-id", "POST:profiles/slot2/settings.json"),
+            uploadOperations.toSet(),
+        )
+    }
+
+    @Test
+    fun `rename downloads nested directory saves to their relative local paths`(@TempDir tempDir: File) = runTest {
+        val configManager = ConfigManager(File(tempDir, "config.json").absolutePath)
+        val saveDirectory = File(tempDir, "saves").apply { mkdirs() }
+        val downloadedContents = mapOf(
+            "cloud-save-1" to "SLOT_ONE_SAVE",
+            "cloud-save-2" to "SLOT_TWO_SETTINGS",
+        )
+        val relativePaths = mapOf(
+            "cloud-save-1" to "profiles/slot1/save.dat",
+            "cloud-save-2" to "profiles/slot2/settings.json",
+        )
+        val cloudModifiedTime = "2026-09-25T15:00:00.000Z"
+
+        val system = EmulatorSystem(
+            name = "Eden",
+            executablePath = "echo",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("nsp"),
+            group = "Switch",
+            savePaths = emptyList(),
+            savePathsByRom = emptyMap(),
+        )
+        val config = AppConfig(
+            googleDrive = GoogleDriveConfig(
+                clientId = "test-client",
+                clientSecret = "test-secret",
+                refreshToken = "test-refresh-token",
+            ),
+            entries = listOf(system),
+        )
+        configManager.save(config)
+
+        val mockClient = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    val url = request.url.toString()
+                    val q = request.url.parameters["q"] ?: ""
+                    when {
+                        url.contains("oauth2.googleapis.com/token") -> respond(
+                            content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
+                            headers = jsonHeaders,
+                        )
+                        q.contains("name = 'EmuSync'") -> respond(
+                            content = """{"files":[{"id":"root-id","name":"EmuSync"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Switch'") -> respond(
+                            content = """{"files":[{"id":"switch-id","name":"Switch"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Old Title'") -> respond(
+                            content = """{"files":[]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'New Title'") -> respond(
+                            content = """{"files":[{"id":"new-folder","name":"New Title"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("'new-folder' in parents") -> respond(
+                            content = """{"files":[{"id":"cloud-save-1","name":"profiles/slot1/save.dat","modifiedTime":"$cloudModifiedTime"},{"id":"cloud-save-2","name":"profiles/slot2/settings.json","modifiedTime":"$cloudModifiedTime"}]}""",
+                            headers = jsonHeaders,
+                        )
+                        request.url.parameters["alt"] == "media" -> {
+                            val fileId = request.url.segments.last()
+                            respond(
+                                downloadedContents.getValue(fileId).toByteArray(),
+                                headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                            )
+                        }
+                        else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
+                    }
+                }
+            }
+        }
+
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        val result = orchestrator.renameGameCloudData(
+            entry = system,
+            romName = "game.nsp",
+            oldTitle = "Old Title",
+            newTitle = "New Title",
+            localSaveTargets = listOf(SaveTarget(saveDirectory.absolutePath, SaveTargetType.DIRECTORY)),
+        )
+
+        assertTrue(result)
+        for ((fileId, relativePath) in relativePaths) {
+            assertEquals(downloadedContents.getValue(fileId), File(saveDirectory, relativePath).readText())
+        }
+        assertFalse(File(saveDirectory, "save.dat").exists())
+        assertFalse(File(saveDirectory, "settings.json").exists())
     }
 
     @Test
@@ -702,6 +1044,7 @@ class PerGameSyncTest {
                 requestedNotice = notice
                 requestedCloudFileNames = cloudFileNames
                 resolveCloudRestorePaths(destinationFolder.absolutePath, cloudFileNames)
+                    .map { SaveTarget(it, SaveTargetType.FILE) }
             }
         )
 
@@ -872,7 +1215,7 @@ class PerGameSyncTest {
             onRequestSaveSetup = { _, notice, _ ->
                 promptCount++
                 receivedNotice = notice
-                listOf(createdSave.absolutePath)
+                listOf(SaveTarget(createdSave.absolutePath, SaveTargetType.FILE))
             }
         )
 

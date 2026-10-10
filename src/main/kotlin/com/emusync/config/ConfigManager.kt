@@ -1,6 +1,7 @@
 package com.emusync.config
 
 import com.emusync.model.AppConfig
+import com.emusync.model.migrateLegacySaveTargets
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -60,7 +61,10 @@ class ConfigManager(
             }
         }
         val content = configFile.readText()
-        return json.decodeFromString<AppConfig>(content)
+        val decoded = json.decodeFromString<AppConfig>(content)
+        val migrated = decoded.copy(entries = decoded.entries.map { it.migrateLegacySaveTargets() })
+        if (migrated != decoded) save(migrated)
+        return migrated
     }
 
     /**

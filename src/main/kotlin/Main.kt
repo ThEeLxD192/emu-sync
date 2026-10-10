@@ -396,9 +396,9 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                 EditGameDialog(
                     game = gameItem,
                     onDismiss = { gameToEdit = null },
-                    onSave = { newTitle, newPaths, newCoverPath ->
+                    onSave = { newTitle, newTargets, newCoverPath ->
                         scope.launch {
-                            viewModel.editGameOverride(gameItem, newPaths, newCoverPath, newTitle)
+                            viewModel.editGameOverride(gameItem, newTargets, newCoverPath, newTitle)
                             gameToEdit = null
                         }
                     }
@@ -412,8 +412,8 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                     notice = request.notice,
                     cloudRestoreFileNames = request.cloudFileNames,
                     onDismiss = { viewModel.completeSaveSetup(emptyList()) },
-                    onSave = { newTitle, newPaths, newCoverPath ->
-                        viewModel.completeSaveSetup(newPaths, newTitle, newCoverPath)
+                    onSave = { newTitle, newTargets, newCoverPath ->
+                        viewModel.completeSaveSetup(newTargets, newTitle, newCoverPath)
                     }
                 )
             }

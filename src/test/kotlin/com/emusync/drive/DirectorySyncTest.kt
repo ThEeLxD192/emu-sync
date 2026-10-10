@@ -4,33 +4,444 @@ import com.emusync.config.ConfigManager
 import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
+import com.emusync.model.NativePCGame
+import com.emusync.model.SaveTarget
+import com.emusync.model.SaveTargetType
 import com.emusync.ui.AppStatus
 import com.emusync.ui.CloudSyncStatus
+import com.emusync.ui.GameItem
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondOk
 import io.ktor.http.HttpHeaders
+import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.time.Instant
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class DirectorySyncTest {
 
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
 
+    private fun unknownDirectoryWithFileSibling(tempDir: File): Pair<NativePCGame, Pair<File, File>> {
+        val directoryPath = File(tempDir, "missing/SAVE_SLOT")
+        val siblingFilePath = File(tempDir, "other/SAVE_SLOT")
+        val entry = NativePCGame(
+            name = "Playstation 3",
+            executablePath = "echo",
+            arguments = listOf("test"),
+            saveTargets = listOf(
+                SaveTarget(directoryPath.absolutePath, SaveTargetType.UNKNOWN),
+                SaveTarget(siblingFilePath.absolutePath, SaveTargetType.FILE),
+            ),
+        )
+        return entry to (directoryPath to siblingFilePath)
+    }
+
+    private fun siblingCloudFiles() = listOf(
+        "SAVE_SLOT" to "2026-01-01T12:00:00.000Z",
+        "state-one.sav" to "2026-01-01T12:00:00.000Z",
+        "state-two.sav" to "2026-01-01T12:00:00.000Z",
+    )
+
+    private fun siblingCloudContents() = mapOf(
+        "file-0" to "SIBLING_FILE".toByteArray(),
+        "file-1" to "DIRECTORY_SAVE_ONE".toByteArray(),
+        "file-2" to "DIRECTORY_SAVE_TWO".toByteArray(),
+    )
+
+    private fun driveConfig() = AppConfig(
+        googleDrive = GoogleDriveConfig(
+            clientId = "test-client",
+            clientSecret = "test-secret",
+            refreshToken = "test-refresh-token",
+        ),
+    )
+
+    @Test
+    fun `play pre-sync separates unknown directory from same-name file sibling`(@TempDir tempDir: File) = runTest {
+        val (entry, paths) = unknownDirectoryWithFileSibling(tempDir)
+        val (directoryPath, siblingFilePath) = paths
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val config = driveConfig().copy(entries = listOf(entry))
+        val orchestrator = SyncOrchestrator(
+            client = createMockDriveClient(siblingCloudFiles(), siblingCloudContents()),
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        orchestrator.playWithSync(GameItem(name = entry.name, entry = entry))
+
+        assertEquals("SIBLING_FILE", siblingFilePath.readText())
+        assertEquals("DIRECTORY_SAVE_ONE", File(directoryPath, "state-one.sav").readText())
+        assertEquals("DIRECTORY_SAVE_TWO", File(directoryPath, "state-two.sav").readText())
+        assertFalse(File(directoryPath, "SAVE_SLOT").exists())
+    }
+
+    @Test
+    fun `manual sync separates unknown directory from same-name file sibling`(@TempDir tempDir: File) = runTest {
+        val (entry, paths) = unknownDirectoryWithFileSibling(tempDir)
+        val (directoryPath, siblingFilePath) = paths
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val config = driveConfig().copy(entries = listOf(entry))
+        val orchestrator = SyncOrchestrator(
+            client = createMockDriveClient(siblingCloudFiles(), siblingCloudContents()),
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        assertTrue(orchestrator.syncEntry(entry))
+
+        assertEquals("SIBLING_FILE", siblingFilePath.readText())
+        assertEquals("DIRECTORY_SAVE_ONE", File(directoryPath, "state-one.sav").readText())
+        assertEquals("DIRECTORY_SAVE_TWO", File(directoryPath, "state-two.sav").readText())
+        assertFalse(File(directoryPath, "SAVE_SLOT").exists())
+    }
+
+    @Test
+    fun `migrated per ROM unknown directory restores before play and uploads after play`(@TempDir tempDir: File) = runTest {
+        val romFile = File(tempDir, "Game.rom").apply { writeText("ROM") }
+        val saveDirectory = File(tempDir, "not-created-yet/profile.d")
+        val javaExecutable = File(
+            System.getProperty("java.home"),
+            "bin/${if (System.getProperty("os.name").lowercase().contains("win")) "java.exe" else "java"}",
+        ).absolutePath
+        val configFile = File(tempDir, "config.json").apply {
+            writeText(
+                """
+                {
+                  "googleDrive": {
+                    "clientId": "test-client",
+                    "clientSecret": "test-secret",
+                    "refreshToken": "test-refresh-token"
+                  },
+                  "entries": [{
+                    "type": "emulator",
+                    "name": "Legacy emulator",
+                    "executablePath": ${Json.encodeToString(javaExecutable)},
+                    "arguments": ["-version"],
+                    "romsDirectory": ${Json.encodeToString(tempDir.absolutePath)},
+                    "extensions": ["rom"],
+                    "group": "Legacy system",
+                    "savePathsByRom": {
+                      "${romFile.name}": [${Json.encodeToString(saveDirectory.absolutePath)}]
+                    }
+                  }]
+                }
+                """.trimIndent(),
+            )
+        }
+        val configManager = ConfigManager(configFile)
+        val migratedConfig = configManager.load()
+        val entry = migratedConfig.entries.single() as EmulatorSystem
+
+        assertEquals(
+            SaveTargetType.UNKNOWN,
+            entry.saveTargetsByRom[romFile.name]?.single()?.type,
+            "A missing legacy per-ROM target should remain UNKNOWN after migration",
+        )
+
+        val cloudFiles = listOf(
+            "cloud-initial" to ("profiles/slot1/save.dat" to "2026-09-25T15:00:00.000Z"),
+            "cloud-options" to ("profiles/slot2/options.ini" to "2026-09-25T15:00:00.000Z"),
+        )
+        val cloudContents = mapOf(
+            "cloud-initial" to "CLOUD_INITIAL".toByteArray(),
+            "cloud-options" to "CLOUD_OPTIONS".toByteArray(),
+        )
+        val uploadRequests = mutableListOf<String>()
+        var currentUploadName = ""
+        val mockClient = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    val url = request.url.toString()
+                    val q = request.url.parameters["q"] ?: ""
+                    when {
+                        url.contains("oauth2.googleapis.com/token") -> respond(
+                            content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
+                            headers = jsonHeaders,
+                        )
+                        q.contains("name = 'EmuSync'") -> respond(
+                            content = """{"files":[{"id":"root-id","name":"EmuSync"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Legacy system'") -> respond(
+                            content = """{"files":[{"id":"system-id","name":"Legacy system"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Game'") -> respond(
+                            content = """{"files":[{"id":"game-id","name":"Game"}]}""", headers = jsonHeaders,
+                        )
+                        request.url.parameters["alt"] == "media" -> {
+                            val fileId = request.url.segments.last()
+                            respond(
+                                cloudContents.getValue(fileId),
+                                headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                            )
+                        }
+                        q.contains("'game-id' in parents") -> {
+                            val filesJson = cloudFiles.joinToString(",") { (id, details) ->
+                                val (name, modifiedTime) = details
+                                """{"id":"$id","name":"$name","modifiedTime":"$modifiedTime"}"""
+                            }
+                            respond(content = """{"files":[$filesJson]}""", headers = jsonHeaders)
+                        }
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            if (request.method.value == "PATCH") {
+                                uploadRequests += "PATCH:${request.url.segments.last()}"
+                                currentUploadName = "profiles/slot1/save.dat"
+                            } else {
+                                val metadata = Json.parseToJsonElement(
+                                    (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString(),
+                                ).jsonObject
+                                currentUploadName = metadata["name"]?.jsonPrimitive?.content ?: ""
+                                uploadRequests += "POST:$currentUploadName"
+                            }
+                            respond(
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/legacy-per-rom"),
+                            )
+                        }
+                        request.method.value == "PUT" -> respond(
+                            content = """{"id":"uploaded-id","name":"$currentUploadName","modifiedTime":"2026-10-09T15:00:00.000Z"}""",
+                            headers = jsonHeaders,
+                        )
+                        else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
+                    }
+                }
+            }
+        }
+
+        val preSyncRestored = mutableListOf<String>()
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = migratedConfig,
+            configManager = configManager,
+            onStatus = { status ->
+                if (status == AppStatus.Playing) {
+                    val restored = File(saveDirectory, "profiles/slot1/save.dat")
+                    preSyncRestored += restored.takeIf { it.exists() }?.readText() ?: "MISSING"
+                    File(saveDirectory, "profiles/slot2/options.ini").apply {
+                        if (exists()) preSyncRestored += readText() else preSyncRestored += "MISSING_OPTIONS"
+                    }
+                    restored.writeText("UPDATED_DURING_PLAY")
+                    restored.setLastModified(Instant.now().plusSeconds(30).toEpochMilli())
+                    File(saveDirectory, "profiles/new-slot/new.sav").apply {
+                        parentFile.mkdirs()
+                        writeText("CREATED_DURING_PLAY")
+                    }
+                }
+            },
+        )
+
+        orchestrator.playWithSync(
+            GameItem(name = romFile.nameWithoutExtension, entry = entry, romFile = romFile),
+        )
+
+        assertEquals(listOf("CLOUD_INITIAL", "CLOUD_OPTIONS"), preSyncRestored)
+        assertEquals("UPDATED_DURING_PLAY", File(saveDirectory, "profiles/slot1/save.dat").readText())
+        assertEquals("CLOUD_OPTIONS", File(saveDirectory, "profiles/slot2/options.ini").readText())
+        assertEquals("CREATED_DURING_PLAY", File(saveDirectory, "profiles/new-slot/new.sav").readText())
+        assertEquals(
+            setOf("PATCH:cloud-initial", "POST:profiles/new-slot/new.sav"),
+            uploadRequests.toSet(),
+            "Post-sync should update and create files using relative paths from the UNKNOWN directory target",
+        )
+    }
+
+    @Test
+    fun `post-sync does not update file sibling with colliding directory save`(@TempDir tempDir: File) = runTest {
+        val directoryPath = File(tempDir, "saves/SAVE_SLOT").apply { mkdirs() }
+        val conflictingDirectorySave = File(directoryPath, "SAVE_SLOT").apply {
+            writeText("LOCAL_DIRECTORY_SAVE")
+            setLastModified(System.currentTimeMillis())
+        }
+        val siblingFilePath = File(tempDir, "other/SAVE_SLOT")
+        val entry = NativePCGame(
+            name = "Playstation 3",
+            executablePath = "echo",
+            arguments = listOf("test"),
+            saveTargets = listOf(
+                SaveTarget(directoryPath.absolutePath, SaveTargetType.DIRECTORY),
+                SaveTarget(siblingFilePath.absolutePath, SaveTargetType.FILE),
+            ),
+        )
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val config = driveConfig().copy(entries = listOf(entry))
+        var writeCount = 0
+        val statuses = mutableListOf<AppStatus>()
+        val orchestrator = SyncOrchestrator(
+            client = createMockDriveClient(
+                cloudFiles = listOf("SAVE_SLOT" to "2026-01-01T12:00:00.000Z"),
+                fileContents = mapOf("file-0" to "SIBLING_FILE".toByteArray()),
+                onWrite = { writeCount++ },
+            ),
+            config = config,
+            configManager = configManager,
+            onStatus = statuses::add,
+        )
+
+        orchestrator.playWithSync(GameItem(name = entry.name, entry = entry))
+
+        assertEquals("SIBLING_FILE", siblingFilePath.readText())
+        assertEquals("LOCAL_DIRECTORY_SAVE", conflictingDirectorySave.readText())
+        assertEquals(0, writeCount, "The colliding directory file must not overwrite the sibling Drive file")
+        assertTrue(
+            statuses.any { it is AppStatus.Error && it.message.contains("Rename or reconfigure") },
+            "A deterministic name collision should explain how to resolve it",
+        )
+        assertFalse(
+            statuses.any { it is AppStatus.PostSyncFailed },
+            "A deterministic collision should not offer a retry that must fail again",
+        )
+    }
+
+    @Test
+    fun `migrated missing per ROM extensionless file restores exact Drive match before play`(@TempDir tempDir: File) = runTest {
+        val romFile = File(tempDir, "Game.rom").apply { writeText("ROM") }
+        val legacySave = File(tempDir, "not-created-yet/SAVE_SLOT")
+        val javaExecutable = File(
+            System.getProperty("java.home"),
+            "bin/${if (System.getProperty("os.name").lowercase().contains("win")) "java.exe" else "java"}",
+        ).absolutePath
+        val configFile = File(tempDir, "config.json").apply {
+            writeText(
+                """
+                {
+                  "googleDrive": {
+                    "clientId": "test-client",
+                    "clientSecret": "test-secret",
+                    "refreshToken": "test-refresh-token"
+                  },
+                  "entries": [{
+                    "type": "emulator",
+                    "name": "Legacy emulator",
+                    "executablePath": ${Json.encodeToString(javaExecutable)},
+                    "arguments": ["-version"],
+                    "romsDirectory": ${Json.encodeToString(tempDir.absolutePath)},
+                    "extensions": ["rom"],
+                    "group": "Legacy system",
+                    "savePathsByRom": {
+                      "${romFile.name}": [${Json.encodeToString(legacySave.absolutePath)}]
+                    }
+                  }]
+                }
+                """.trimIndent(),
+            )
+        }
+        val configManager = ConfigManager(configFile)
+        val migratedConfig = configManager.load()
+        val entry = migratedConfig.entries.single() as EmulatorSystem
+
+        assertEquals(
+            SaveTargetType.UNKNOWN,
+            entry.saveTargetsByRom[romFile.name]?.single()?.type,
+            "A missing extensionless legacy per-ROM path should stay UNKNOWN through migration",
+        )
+        assertFalse(legacySave.exists())
+
+        val cloudModifiedTime = "2026-09-25T15:00:00.000Z"
+        val uploadRequests = mutableListOf<String>()
+        var sawRestoredFileBeforePlay = false
+        var currentUploadName = "SAVE_SLOT"
+        val mockClient = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    val url = request.url.toString()
+                    val q = request.url.parameters["q"] ?: ""
+                    when {
+                        url.contains("oauth2.googleapis.com/token") -> respond(
+                            content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
+                            headers = jsonHeaders,
+                        )
+                        q.contains("name = 'EmuSync'") -> respond(
+                            content = """{"files":[{"id":"root-id","name":"EmuSync"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Legacy system'") -> respond(
+                            content = """{"files":[{"id":"system-id","name":"Legacy system"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Game'") -> respond(
+                            content = """{"files":[{"id":"game-id","name":"Game"}]}""", headers = jsonHeaders,
+                        )
+                        request.url.parameters["alt"] == "media" -> respond(
+                            "LEGACY_CLOUD_SAVE".toByteArray(),
+                            headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                        )
+                        q.contains("'game-id' in parents") -> respond(
+                            content = """{"files":[{"id":"legacy-save-id","name":"SAVE_SLOT","modifiedTime":"$cloudModifiedTime"}]}""",
+                            headers = jsonHeaders,
+                        )
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            if (request.method.value == "PATCH") {
+                                uploadRequests += "PATCH:${request.url.segments.last()}"
+                            } else {
+                                val metadata = Json.parseToJsonElement(
+                                    (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString(),
+                                ).jsonObject
+                                currentUploadName = metadata["name"]?.jsonPrimitive?.content ?: ""
+                                uploadRequests += "POST:$currentUploadName"
+                            }
+                            respond(
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/legacy-file"),
+                            )
+                        }
+                        request.method.value == "PUT" -> respond(
+                            content = """{"id":"legacy-save-id","name":"$currentUploadName","modifiedTime":"2026-10-09T15:00:00.000Z"}""",
+                            headers = jsonHeaders,
+                        )
+                        else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
+                    }
+                }
+            }
+        }
+
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = migratedConfig,
+            configManager = configManager,
+            onStatus = { status ->
+                if (status == AppStatus.Playing) {
+                    sawRestoredFileBeforePlay = legacySave.isFile && legacySave.readText() == "LEGACY_CLOUD_SAVE"
+                    if (sawRestoredFileBeforePlay) {
+                        legacySave.writeText("UPDATED_DURING_PLAY")
+                        legacySave.setLastModified(Instant.now().plusSeconds(30).toEpochMilli())
+                    }
+                }
+            },
+        )
+
+        orchestrator.playWithSync(
+            GameItem(name = romFile.nameWithoutExtension, entry = entry, romFile = romFile),
+        )
+
+        assertTrue(sawRestoredFileBeforePlay, "The exact cloud match should be restored as a file before launch")
+        assertEquals("UPDATED_DURING_PLAY", legacySave.readText())
+        assertEquals(setOf("PATCH:legacy-save-id"), uploadRequests.toSet())
+    }
+
     private fun createMockDriveClient(
         cloudFiles: List<Pair<String, String>>, // Pair(fileName, modifiedTimeIso)
         fileContents: Map<String, ByteArray> = emptyMap(),
         uploadResponseModTime: String = "2026-06-01T15:00:00.000Z",
+        onWrite: () -> Unit = {},
     ): HttpClient {
         return HttpClient(MockEngine) {
             install(ContentNegotiation) {
@@ -50,6 +461,7 @@ class DirectorySyncTest {
                         }
                         // Start a resumable upload or update session
                         url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            onWrite()
                             respond(
                                 content = "",
                                 headers = headersOf(HttpHeaders.Location, "https://uploads.example/directory-sync"),
@@ -57,6 +469,7 @@ class DirectorySyncTest {
                         }
                         // Complete the media upload
                         request.method.value == "PUT" -> {
+                            onWrite()
                             respond(
                                 content = """{"id":"mock-uploaded-id","name":"mock-file","modifiedTime":"$uploadResponseModTime"}""",
                                 headers = jsonHeaders,
