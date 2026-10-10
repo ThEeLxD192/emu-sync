@@ -106,7 +106,7 @@ class GameRunner {
         // If it's a native game with a process-wait, we ignore the initial process exit
         // and instead poll for the named process.
         return if (waitForProcess != null) {
-            waitForExternalProcess(waitForProcess, existingMatches)
+            waitForExternalProcess(waitForProcess, existingMatches, launchRequest = process)
         } else {
             process.waitFor() == 0
         }
@@ -133,11 +133,11 @@ class GameRunner {
         val gameId = (unsignedAppId shl 32) or 0x02000000L
         val processName = resolveProcessName(entry)
         val existingMatches = processName?.let(::matchingProcessIds).orEmpty()
-        launchSteamUri("steam://rungameid/$gameId")
+        val launchRequest = launchSteamUri("steam://rungameid/$gameId")
 
         // Step 3: Wait for a newly-created game/emulator process to appear and exit
         return if (processName != null) {
-            waitForExternalProcess(processName, existingMatches)
+            waitForExternalProcess(processName, existingMatches, launchRequest = launchRequest)
         } else {
             // Fallback: wait a reasonable time if we can't detect the process
             delay(5000)
@@ -148,10 +148,10 @@ class GameRunner {
     /**
      * Launches a steam:// URI in a cross-platform manner.
      */
-    private fun launchSteamUri(uri: String) {
+    private fun launchSteamUri(uri: String): Process? {
         val os = System.getProperty("os.name", "").lowercase()
         try {
-            if (os.contains("win")) {
+            return if (os.contains("win")) {
                 ProcessBuilder("cmd", "/c", "start", uri).start()
             } else {
                 ProcessBuilder("steam", uri).start()
@@ -165,6 +165,7 @@ class GameRunner {
                 // Ignore fallback failure
             }
         }
+        return null
     }
 
     /**
@@ -236,14 +237,17 @@ class GameRunner {
     internal suspend fun waitForExternalProcess(
         processName: String,
         existingProcessIds: Set<Long> = emptySet(),
+        launchRequest: Process? = null,
         appearanceTimeoutMs: Long = 60_000L,
         pollIntervalMs: Long = 1_000L,
         exitPollIntervalMs: Long = 2_000L,
+        reuseConfirmationDelayMs: Long = 1_000L,
     ): Boolean = withContext(Dispatchers.IO) {
         // Step 1: Wait for appearance (base timeout 60s, dynamically extended while Steam shaders compile)
         val trackedProcessIds = mutableSetOf<Long>()
         var appeared = false
         var appearanceStart = System.currentTimeMillis()
+        var successfulLaunchRequestAt: Long? = null
 
         while (System.currentTimeMillis() - appearanceStart < appearanceTimeoutMs) {
             val newMatches = matchingProcessIds(processName) - existingProcessIds
@@ -253,22 +257,32 @@ class GameRunner {
                 break
             }
 
+            if (launchRequest?.isAlive == false) {
+                val launchExitCode = runCatching { launchRequest.exitValue() }.getOrNull()
+                when {
+                    launchExitCode == null -> Unit
+                    launchExitCode != 0 -> break
+                    else -> {
+                        val now = System.currentTimeMillis()
+                        val confirmedAt = successfulLaunchRequestAt ?: now.also { successfulLaunchRequestAt = it }
+                        if (now - confirmedAt >= reuseConfirmationDelayMs) {
+                            val reusedMatches = matchingProcessIds(processName).intersect(existingProcessIds)
+                            if (reusedMatches.isNotEmpty()) {
+                                trackedProcessIds += reusedMatches
+                                appeared = true
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+
             // If Steam is compiling Vulkan shaders in the background, reset timeout window
             if (isSteamShaderCompiling()) {
                 appearanceStart = System.currentTimeMillis()
             }
 
             kotlinx.coroutines.delay(pollIntervalMs)
-        }
-
-        // A single-instance launcher may hand the request to a process that was already running.
-        // If no new process appeared, treat a still-matching pre-launch process as the launched game.
-        if (trackedProcessIds.isEmpty()) {
-            val reusedMatches = matchingProcessIds(processName).intersect(existingProcessIds)
-            if (reusedMatches.isNotEmpty()) {
-                trackedProcessIds += reusedMatches
-                appeared = true
-            }
         }
 
         // Step 2: Wait for disappearance (indefinite, only if the process appeared)
