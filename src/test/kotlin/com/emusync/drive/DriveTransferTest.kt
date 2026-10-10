@@ -5,12 +5,15 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -23,6 +26,9 @@ import java.io.IOException
 import java.time.Instant
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+import io.ktor.utils.io.ByteChannel
+import io.ktor.utils.io.writeFully
 
 class DriveTransferTest {
 
@@ -73,6 +79,44 @@ class DriveTransferTest {
         assertContentEquals(originalBytes, destination.readBytes())
         assertEquals(originalModifiedTime, destination.lastModified())
         assertEquals(listOf("slot.sav"), tempDir.list()?.toList())
+    }
+
+    @Test
+    fun `download streams a slow large response and reports progress`(@TempDir tempDir: File) = runTest {
+        val destination = File(tempDir, "large-save.bin")
+        val chunk = ByteArray(1024 * 1024) { (it % 251).toByte() }
+        val chunkCount = 12
+        val totalSize = chunk.size.toLong() * chunkCount
+        val progress = mutableListOf<TransferProgress>()
+        val client = HttpClient(MockEngine) {
+            install(HttpTimeout) {
+                requestTimeoutMillis = 25
+                socketTimeoutMillis = 1_000
+            }
+            engine {
+                addHandler {
+                    val body = ByteChannel(autoFlush = true)
+                    backgroundScope.launch {
+                        repeat(chunkCount) {
+                            delay(10)
+                            body.writeFully(chunk)
+                        }
+                        body.close()
+                    }
+                    respond(
+                        content = body,
+                        headers = headersOf(HttpHeaders.ContentLength, totalSize.toString()),
+                    )
+                }
+            }
+        }
+
+        DriveTransfer(client, progress::add).download("token", "large-file", destination)
+
+        assertEquals(totalSize, destination.length())
+        assertTrue(progress.size > 1)
+        assertEquals(totalSize, progress.last().transferredBytes)
+        assertEquals(totalSize, progress.last().totalBytes)
     }
 
     @Test

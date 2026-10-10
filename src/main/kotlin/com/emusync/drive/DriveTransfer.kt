@@ -2,6 +2,8 @@ package com.emusync.drive
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.plugins.HttpTimeoutConfig
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
@@ -13,10 +15,14 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -43,7 +49,19 @@ data class DriveUploadResponse(
  * - Upload (create): POST new file to Drive.
  * - Upload (update): PATCH existing file on Drive.
  */
-class DriveTransfer(private val client: HttpClient) {
+data class TransferProgress(
+    val direction: Direction,
+    val fileName: String,
+    val transferredBytes: Long,
+    val totalBytes: Long?,
+) {
+    enum class Direction { DOWNLOAD, UPLOAD }
+}
+
+class DriveTransfer(
+    private val client: HttpClient,
+    private val onProgress: (TransferProgress) -> Unit = {},
+) {
 
     companion object {
         private const val DOWNLOAD_URL = "https://www.googleapis.com/drive/v3/files"
@@ -71,6 +89,7 @@ class DriveTransfer(private val client: HttpClient) {
         val response = client.get("$DOWNLOAD_URL/$fileId") {
             header(HttpHeaders.Authorization, "Bearer $accessToken")
             parameter("alt", "media")
+            transferTimeout()
         }
 
         if (response.status != HttpStatusCode.OK) {
@@ -78,7 +97,8 @@ class DriveTransfer(private val client: HttpClient) {
             throw DriveApiException("Drive download failed (${response.status}): $errorBody")
         }
 
-        val bytes: ByteArray = response.body()
+        val channel = response.bodyAsChannel()
+        val totalBytes = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
         withContext(Dispatchers.IO) {
             val parent = destination.absoluteFile.parentFile
                 ?: throw DriveApiException("Could not resolve destination directory for $destination")
@@ -89,7 +109,19 @@ class DriveTransfer(private val client: HttpClient) {
             var temporaryFile: java.nio.file.Path? = null
             try {
                 temporaryFile = Files.createTempFile(parent.toPath(), ".${destination.name}.", ".part")
-                Files.write(temporaryFile, bytes)
+                Files.newOutputStream(temporaryFile).use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var transferred = 0L
+                    while (!channel.isClosedForRead) {
+                        currentCoroutineContext().ensureActive()
+                        val count = channel.readAvailable(buffer)
+                        if (count == -1) break
+                        if (count == 0) continue
+                        output.write(buffer, 0, count)
+                        transferred += count
+                        onProgress(TransferProgress(TransferProgress.Direction.DOWNLOAD, destination.name, transferred, totalBytes))
+                    }
+                }
                 try {
                     Files.move(
                         temporaryFile,
@@ -257,6 +289,7 @@ class DriveTransfer(private val client: HttpClient) {
                         }
                         contentType(ContentType.Application.OctetStream)
                         setBody(chunk)
+                        transferTimeout()
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -278,6 +311,7 @@ class DriveTransfer(private val client: HttpClient) {
 
                 when {
                     response.status == HttpStatusCode.OK || response.status == HttpStatusCode.Created -> {
+                        onProgress(TransferProgress(TransferProgress.Direction.UPLOAD, localFile.name, totalBytes, totalBytes))
                         return@withContext response.body<DriveUploadResponse>()
                     }
                     response.status.value == 308 -> {
@@ -287,6 +321,7 @@ class DriveTransfer(private val client: HttpClient) {
                         } else {
                             offset = nextOffset
                             recoveryAttempts = 0
+                            onProgress(TransferProgress(TransferProgress.Direction.UPLOAD, localFile.name, offset, totalBytes))
                         }
                     }
                     response.status == HttpStatusCode.NotFound -> throw UploadSessionExpiredException()
@@ -389,4 +424,11 @@ class DriveTransfer(private val client: HttpClient) {
     }
 
     private fun retryDelayMs(attempt: Int): Long = 250L * (1L shl attempt.coerceAtMost(4))
+
+    private fun io.ktor.client.request.HttpRequestBuilder.transferTimeout() {
+        timeout {
+            requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+            socketTimeoutMillis = 60_000
+        }
+    }
 }
