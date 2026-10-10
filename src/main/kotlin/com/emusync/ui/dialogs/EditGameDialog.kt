@@ -87,6 +87,14 @@ fun EditGameDialog(
     }
     var restoreDestinationFolder by remember { mutableStateOf("") }
     var restoreWholeFolder by remember { mutableStateOf(false) }
+    val selectedRestorePaths = remember(restoreDestinationFolder, restoreWholeFolder, cloudRestoreFileNames) {
+        val destination = restoreDestinationFolder.trim()
+        when {
+            cloudRestoreFileNames.isEmpty() || destination.isBlank() -> emptyList()
+            restoreWholeFolder -> listOf(destination)
+            else -> resolveCloudRestorePaths(destination, cloudRestoreFileNames)
+        }
+    }
 
     var coverPath by remember {
         mutableStateOf(game.effectiveCoverPath ?: "")
@@ -462,9 +470,17 @@ fun EditGameDialog(
                     EditPathField(
                         value = restoreDestinationFolder,
                         onValueChange = { restoreDestinationFolder = it },
-                        placeholder = "/home/user/saves/PS1",
+                        placeholder = "Choose a destination folder with the Folder button",
                         allowFileSelection = false,
                     )
+                    if (selectedRestorePaths.isEmpty()) {
+                        Text(
+                            text = "Select a destination folder before saving.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = EmuSyncColors.Error,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
                     Spacer(Modifier.height(10.dp))
                     cloudRestoreFileNames.forEach { fileName ->
                         Text(
@@ -527,15 +543,9 @@ fun EditGameDialog(
                         Text("Cancel")
                     }
                     Button(
+                        enabled = cloudRestoreFileNames.isEmpty() || selectedRestorePaths.isNotEmpty(),
                         onClick = {
-                            val validSavePaths = if (cloudRestoreFileNames.isNotEmpty()) {
-                                val destination = restoreDestinationFolder.trim()
-                                when {
-                                    destination.isBlank() -> emptyList()
-                                    restoreWholeFolder -> listOf(destination)
-                                    else -> resolveCloudRestorePaths(destination, cloudRestoreFileNames)
-                                }
-                            } else {
+                            val validSavePaths = if (cloudRestoreFileNames.isNotEmpty()) selectedRestorePaths else {
                                 savePaths.map { it.trim() }.filter { it.isNotBlank() }
                             }
                             val cleanCover = coverPath.trim().takeIf { it.isNotBlank() }

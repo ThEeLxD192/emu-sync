@@ -7,6 +7,11 @@ import kotlin.test.assertEquals
 
 class SaveRestorePathsTest {
     @Test
+    fun `restore paths are empty until a destination is selected`() {
+        assertEquals(emptyList(), resolveCloudRestorePaths("", listOf("save.mcd")))
+    }
+
+    @Test
     fun `restore folder resolves to one explicit path per cloud file`(@TempDir tempDir: File) {
         val paths = resolveCloudRestorePaths(
             destinationFolder = tempDir.absolutePath,
