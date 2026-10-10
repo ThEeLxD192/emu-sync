@@ -28,7 +28,7 @@ internal fun isDirectorySaveTarget(
     type: SaveTargetType,
     path: File,
     cloudFiles: List<DriveFile>,
-    siblingSavePaths: Collection<File> = emptyList(),
+    knownFileSiblingNames: Set<String> = emptySet(),
 ): Boolean = when (type) {
     SaveTargetType.DIRECTORY -> true
     SaveTargetType.FILE -> false
@@ -36,9 +36,7 @@ internal fun isDirectorySaveTarget(
         path.isDirectory
     } else {
         cloudFiles.none { cloudFile ->
-            cloudFile.name == path.name && siblingSavePaths.none { sibling ->
-                sibling.absoluteFile != path.absoluteFile && sibling.name == cloudFile.name
-            }
+            cloudFile.name == path.name && cloudFile.name !in knownFileSiblingNames
         }
     }
 }
@@ -221,7 +219,8 @@ class SyncOrchestrator(
                     val savePath = target.file
                     val isDirectory = isDirectorySaveTarget(
                         target.type, savePath, cloudFiles,
-                        folderTargets.map { it.file },
+                        folderTargets.filter { it.type == SaveTargetType.FILE }
+                            .mapTo(mutableSetOf()) { it.file.name },
                     )
 
                     if (isDirectory) {
@@ -326,7 +325,8 @@ class SyncOrchestrator(
                     onStatus(AppStatus.Syncing("Syncing ${target.displayName}..."))
                     val isDirectory = isDirectorySaveTarget(
                         target.type, savePath, cloudFiles,
-                        folderTargets.map { it.file },
+                        folderTargets.filter { it.type == SaveTargetType.FILE }
+                            .mapTo(mutableSetOf()) { it.file.name },
                     )
 
                     if (isDirectory) {
@@ -438,7 +438,8 @@ class SyncOrchestrator(
                         val savePath = File(target.path)
                         val isDirectory = isDirectorySaveTarget(
                             target.type, savePath, cloudFiles,
-                            localSaveTargets.map { File(it.path) },
+                            localSaveTargets.filter { it.type == SaveTargetType.FILE }
+                                .mapTo(mutableSetOf()) { File(it.path).name },
                         )
 
                         if (isDirectory) {
@@ -492,7 +493,8 @@ class SyncOrchestrator(
                             val path = File(target.path)
                             if (isDirectorySaveTarget(
                                     target.type, path, cloudFiles,
-                                    localSaveTargets.map { File(it.path) },
+                                    localSaveTargets.filter { it.type == SaveTargetType.FILE }
+                                        .mapTo(mutableSetOf()) { File(it.path).name },
                                 ) && path.exists()) path.walkTopDown().filter { it.isFile }.toList()
                             else if (path.exists()) listOf(path) else emptyList()
                         }
@@ -516,7 +518,8 @@ class SyncOrchestrator(
                                 val savePath = File(target.path)
                                 val isDirectory = isDirectorySaveTarget(
                                     target.type, savePath, cloudFiles,
-                                    localSaveTargets.map { File(it.path) },
+                                    localSaveTargets.filter { it.type == SaveTargetType.FILE }
+                                        .mapTo(mutableSetOf()) { File(it.path).name },
                                 )
                                 if (isDirectory) {
                                     for (cloudFile in cloudFiles) {
@@ -538,7 +541,8 @@ class SyncOrchestrator(
                                 val savePath = File(target.path)
                                 if (isDirectorySaveTarget(
                                         target.type, savePath, cloudFiles,
-                                        localSaveTargets.map { File(it.path) },
+                                        localSaveTargets.filter { it.type == SaveTargetType.FILE }
+                                            .mapTo(mutableSetOf()) { File(it.path).name },
                                     )) {
                                     val localFiles = savePath.walkTopDown().filter { it.isFile }.toList()
                                     for (localFile in localFiles) {
@@ -558,7 +562,8 @@ class SyncOrchestrator(
                             val savePath = File(target.path)
                             val isDirectory = isDirectorySaveTarget(
                                 target.type, savePath, cloudFiles,
-                                localSaveTargets.map { File(it.path) },
+                                localSaveTargets.filter { it.type == SaveTargetType.FILE }
+                                    .mapTo(mutableSetOf()) { File(it.path).name },
                             )
                             if (isDirectory) {
                                 for (cloudFile in cloudFiles) {
@@ -580,7 +585,8 @@ class SyncOrchestrator(
                             val savePath = File(target.path)
                             if (isDirectorySaveTarget(
                                     target.type, savePath, cloudFiles,
-                                    localSaveTargets.map { File(it.path) },
+                                    localSaveTargets.filter { it.type == SaveTargetType.FILE }
+                                        .mapTo(mutableSetOf()) { File(it.path).name },
                                 )) {
                                 val localFiles = savePath.walkTopDown().filter { it.isFile }.toList()
                                 for (localFile in localFiles) {
@@ -847,7 +853,9 @@ class SyncOrchestrator(
                                 targetType = target.type,
                                 cloudPathSegments = cloudPath,
                                 displayName = item.effectiveTitle,
-                                siblingSavePaths = currentSyncTargets.filter { it.path != target.path }.map { File(it.path) },
+                                knownFileSiblingNames = currentSyncTargets
+                                    .filter { it.type == SaveTargetType.FILE && it.path != target.path }
+                                    .mapTo(mutableSetOf()) { File(it.path).name },
                             )
                             if (decision == SyncDecision.UPLOAD_LOCAL) {
                                 forceUploadLocal = true
@@ -1002,12 +1010,12 @@ class SyncOrchestrator(
         targetType: SaveTargetType,
         cloudPathSegments: List<String> = listOf(entry.effectiveCloudFolder),
         displayName: String = entry.name,
-        siblingSavePaths: Collection<File> = emptyList(),
+        knownFileSiblingNames: Set<String> = emptySet(),
     ): SyncDecision? {
         val folderId = folders.ensurePath(token, cloudPathSegments)
         val cloudFiles = search.listFilesInFolder(token, folderId)
 
-        val isDirectory = isDirectorySaveTarget(targetType, localSavePath, cloudFiles, siblingSavePaths)
+        val isDirectory = isDirectorySaveTarget(targetType, localSavePath, cloudFiles, knownFileSiblingNames)
 
         if (isDirectory) {
             data class FilePair(val localFile: File, val cloudFile: DriveFile, val decision: SyncDecision)
