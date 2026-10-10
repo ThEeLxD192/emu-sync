@@ -102,12 +102,12 @@ class DriveTransferCioTest {
     fun `CIO resumable upload completes when response is slow beyond configured request timeout`(@TempDir tempDir: File) = runTest {
         val server = LocalHttpServer(connectionCount = 2) { socket ->
             val request = socket.readRequest()
-            if (request.startsWith("POST ")) {
+            if (request.line.startsWith("POST ")) {
                 socket.respond(
                     "HTTP/1.1 200 OK\r\nLocation: http://127.0.0.1:${socket.localPort}/session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 )
             } else {
-                assertTrue(request.startsWith("PUT /session "))
+                assertTrue(request.line.startsWith("PUT /session "))
                 Thread.sleep(300)
                 val responseBody = "{\"id\":\"cio-upload\",\"name\":\"save.sav\",\"modifiedTime\":\"2026-03-18T12:00:00Z\"}"
                 socket.respond(
@@ -141,12 +141,12 @@ class DriveTransferCioTest {
         val releaseServer = CountDownLatch(1)
         val server = LocalHttpServer(connectionCount = 2) { socket ->
             val request = socket.readRequest()
-            if (request.startsWith("POST ")) {
+            if (request.line.startsWith("POST ")) {
                 socket.respond(
                     "HTTP/1.1 200 OK\r\nLocation: http://127.0.0.1:${socket.localPort}/session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 )
             } else {
-                assertTrue(request.startsWith("PUT /session "))
+                assertTrue(request.line.startsWith("PUT /session "))
                 uploadReceived.countDown()
                 releaseServer.await(3, TimeUnit.SECONDS)
             }
@@ -172,6 +172,47 @@ class DriveTransferCioTest {
             assertEquals("upload contents", file.readText())
         } finally {
             releaseServer.countDown()
+            client.close()
+            server.close()
+        }
+    }
+
+    @Test
+    fun `CIO resumable upload recovers when server accepts a chunk but drops its response`(@TempDir tempDir: File) = runTest {
+        val contentRanges = mutableListOf<String?>()
+        val server = LocalHttpServer(connectionCount = 4) { socket ->
+            val request = socket.readRequest()
+            when {
+                request.line.startsWith("POST ") -> socket.respond(
+                    "HTTP/1.1 200 OK\r\nLocation: http://127.0.0.1:${socket.localPort}/session\r\n" +
+                        "Content-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                request.line.startsWith("PUT ") -> {
+                    val range = request.headers["content-range"]
+                    contentRanges += range
+                    when (range) {
+                        "bytes 0-3/4" -> Unit // Accept the chunk, then close the socket without a response.
+                        "bytes */4" -> socket.respond(
+                            "HTTP/1.1 308 Resume Incomplete\r\nRange: bytes=0-1\r\n" +
+                                "Content-Length: 0\r\nConnection: close\r\n\r\n",
+                        )
+                        "bytes 2-3/4" -> socket.respond(uploadSuccessResponse())
+                        else -> error("Unexpected upload range: $range")
+                    }
+                }
+                else -> error("Unexpected request: ${request.line}")
+            }
+        }
+        val client = cioClientWithShortTimeouts()
+        val file = File(tempDir, "recovered.sav").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+
+        try {
+            val result = DriveTransfer(client, server.filesUrl, server.uploadFilesUrl).upload("token", file)
+            server.awaitCompletion()
+
+            assertEquals("cio-upload", result.id)
+            assertEquals(listOf<String?>("bytes 0-3/4", "bytes */4", "bytes 2-3/4"), contentRanges)
+        } finally {
             client.close()
             server.close()
         }
@@ -225,7 +266,9 @@ class DriveTransferCioTest {
         while (reader.readLine()?.isNotEmpty() == true) Unit
     }
 
-    private fun Socket.readRequest(): String {
+    private data class LocalRequest(val line: String, val headers: Map<String, String>)
+
+    private fun Socket.readRequest(): LocalRequest {
         val input = getInputStream()
         val headerBytes = ByteArrayOutputStream()
         var delimiterMatches = 0
@@ -243,13 +286,15 @@ class DriveTransferCioTest {
             }
         }
         val headerLines = headerBytes.toString(StandardCharsets.US_ASCII).split("\r\n")
-        val contentLength = headerLines.drop(1)
-            .firstOrNull { it.startsWith("Content-Length:", ignoreCase = true) }
-            ?.substringAfter(':')?.trim()?.toIntOrNull() ?: 0
+        val headers = headerLines.drop(1).mapNotNull { line ->
+            val separator = line.indexOf(':')
+            if (separator < 0) null else line.substring(0, separator).lowercase() to line.substring(separator + 1).trim()
+        }.toMap()
+        val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
         repeat(contentLength) {
             if (input.read() == -1) error("Connection closed before request body was complete")
         }
-        return headerLines.first()
+        return LocalRequest(headerLines.first(), headers)
     }
 
     private fun Socket.respond(response: String) {
@@ -257,6 +302,13 @@ class DriveTransferCioTest {
             write(response.toByteArray(StandardCharsets.US_ASCII))
             flush()
         }
+    }
+
+    private fun uploadSuccessResponse(): String {
+        val body = "{\"id\":\"cio-upload\",\"name\":\"recovered.sav\",\"modifiedTime\":\"2026-03-18T12:00:00Z\"}"
+        return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
+            "Content-Length: ${body.toByteArray(StandardCharsets.US_ASCII).size}\r\n" +
+            "Connection: close\r\n\r\n$body"
     }
 
 }
