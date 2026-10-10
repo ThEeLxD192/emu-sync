@@ -442,6 +442,7 @@ class DirectorySyncTest {
         fileContents: Map<String, ByteArray> = emptyMap(),
         uploadResponseModTime: String = "2026-06-01T15:00:00.000Z",
         onWrite: () -> Unit = {},
+        onUpdate: (String) -> Unit = {},
     ): HttpClient {
         return HttpClient(MockEngine) {
             install(ContentNegotiation) {
@@ -461,6 +462,9 @@ class DirectorySyncTest {
                         }
                         // Start a resumable upload or update session
                         url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            if (request.method.value == "PATCH") {
+                                onUpdate(request.url.segments.last())
+                            }
                             onWrite()
                             respond(
                                 content = "",
@@ -854,6 +858,47 @@ class DirectorySyncTest {
         )
         val status = postUploadOrchestrator.checkEntrySyncStatus(entry)
         assertEquals(CloudSyncStatus.IN_SYNC, status)
+    }
+
+    @Test
+    fun `manual upload updates the cloud duplicate selected by the planner`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val localSaveDir = File(tempDir, "savedata").apply { mkdirs() }
+        File(localSaveDir, "save.dat").apply {
+            writeText("LOCAL_SAVE")
+            setLastModified(Instant.parse("2026-03-01T12:00:00Z").toEpochMilli())
+        }
+        val entry = NativePCGame(
+            name = "Playstation 3",
+            executablePath = "rpcs3",
+            saveTargets = listOf(SaveTarget(localSaveDir.absolutePath, SaveTargetType.DIRECTORY)),
+        )
+        val config = driveConfig().copy(entries = listOf(entry))
+        configManager.save(config)
+
+        val updatedCloudIds = mutableListOf<String>()
+        val statuses = mutableListOf<AppStatus>()
+        val mockClient = createMockDriveClient(
+            cloudFiles = listOf(
+                "save.dat" to "2026-01-01T12:00:00.000Z",
+                "save.dat" to "2026-02-01T12:00:00.000Z",
+            ),
+            onUpdate = updatedCloudIds::add,
+        )
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = config,
+            configManager = configManager,
+            onStatus = { status ->
+                statuses += status
+                if (status is AppStatus.Conflict) status.onResolve(SyncDecision.UPLOAD_LOCAL)
+            },
+        )
+
+        assertTrue(orchestrator.syncEntry(entry))
+        assertTrue(statuses.any { it is AppStatus.Conflict })
+        assertEquals(listOf("file-1"), updatedCloudIds)
     }
 
     @Test
