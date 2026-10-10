@@ -731,6 +731,124 @@ class PerGameSyncTest {
     }
 
     @Test
+    fun `rename uploads nested directory saves with their relative cloud paths`(@TempDir tempDir: File) = runTest {
+        val configManager = ConfigManager(File(tempDir, "config.json").absolutePath)
+        val saveDirectory = File(tempDir, "saves").apply { mkdirs() }
+        val existingNestedSave = File(saveDirectory, "profiles/slot1/save.dat").apply {
+            parentFile.mkdirs()
+            writeText("UPDATED_SAVE")
+            setLastModified(Instant.parse("2026-10-08T15:00:00Z").toEpochMilli())
+        }
+        val newNestedSave = File(saveDirectory, "profiles/slot2/settings.json").apply {
+            parentFile.mkdirs()
+            writeText("NEW_SETTINGS")
+            setLastModified(Instant.parse("2026-10-08T15:00:00Z").toEpochMilli())
+        }
+        val cloudModifiedTime = "2026-09-25T15:00:00.000Z"
+
+        val system = EmulatorSystem(
+            name = "Eden",
+            executablePath = "echo",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("nsp"),
+            group = "Switch",
+            savePaths = emptyList(),
+            savePathsByRom = emptyMap(),
+        )
+        val config = AppConfig(
+            googleDrive = GoogleDriveConfig(
+                clientId = "test-client",
+                clientSecret = "test-secret",
+                refreshToken = "test-refresh-token",
+            ),
+            entries = listOf(system),
+        )
+        configManager.save(config)
+
+        val uploadOperations = mutableListOf<String>()
+        var currentUploadName = ""
+        val mockClient = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    val url = request.url.toString()
+                    val q = request.url.parameters["q"] ?: ""
+                    when {
+                        url.contains("oauth2.googleapis.com/token") -> respond(
+                            content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
+                            headers = jsonHeaders,
+                        )
+                        q.contains("name = 'EmuSync'") -> respond(
+                            content = """{"files":[{"id":"root-id","name":"EmuSync"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Switch'") -> respond(
+                            content = """{"files":[{"id":"switch-id","name":"Switch"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Old Title'") -> respond(
+                            content = """{"files":[]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'New Title'") -> respond(
+                            content = """{"files":[{"id":"new-folder","name":"New Title"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("'new-folder' in parents") -> respond(
+                            content = """{"files":[{"id":"existing-save-id","name":"profiles/slot1/save.dat","modifiedTime":"$cloudModifiedTime"}]}""",
+                            headers = jsonHeaders,
+                        )
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            if (request.method.value == "PATCH") {
+                                uploadOperations += "PATCH:${request.url.segments.last()}"
+                                currentUploadName = "profiles/slot1/save.dat"
+                            } else {
+                                val metadata = Json.parseToJsonElement(
+                                    (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString(),
+                                ).jsonObject
+                                currentUploadName = metadata["name"]?.jsonPrimitive?.content ?: ""
+                                uploadOperations += "POST:$currentUploadName"
+                            }
+                            respond(
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/rename-directory"),
+                            )
+                        }
+                        request.method.value == "PUT" -> respond(
+                            content = """{"id":"uploaded-id","name":"$currentUploadName","modifiedTime":"2026-10-09T15:00:00.000Z"}""",
+                            headers = jsonHeaders,
+                        )
+                        else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
+                    }
+                }
+            }
+        }
+
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = config,
+            configManager = configManager,
+            onStatus = { status ->
+                if (status is AppStatus.Conflict) {
+                    status.onResolve(SyncDecision.UPLOAD_LOCAL)
+                }
+            },
+        )
+
+        val result = orchestrator.renameGameCloudData(
+            entry = system,
+            romName = "game.nsp",
+            oldTitle = "Old Title",
+            newTitle = "New Title",
+            localSaveTargets = listOf(SaveTarget(saveDirectory.absolutePath, SaveTargetType.DIRECTORY)),
+        )
+
+        assertTrue(result)
+        assertTrue(existingNestedSave.exists())
+        assertTrue(newNestedSave.exists())
+        assertEquals(
+            setOf("PATCH:existing-save-id", "POST:profiles/slot2/settings.json"),
+            uploadOperations.toSet(),
+        )
+    }
+
+    @Test
     fun `playWithSync prompts for save path before launch when cloud saves exist and downloads them to selected path`(@TempDir tempDir: File) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
