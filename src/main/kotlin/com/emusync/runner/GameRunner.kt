@@ -233,17 +233,19 @@ class GameRunner {
      *
      * @return true if the process appeared and then finished, false if it never appeared within the timeout.
      */
-    private suspend fun waitForExternalProcess(
+    internal suspend fun waitForExternalProcess(
         processName: String,
         existingProcessIds: Set<Long> = emptySet(),
+        appearanceTimeoutMs: Long = 60_000L,
+        pollIntervalMs: Long = 1_000L,
+        exitPollIntervalMs: Long = 2_000L,
     ): Boolean = withContext(Dispatchers.IO) {
         // Step 1: Wait for appearance (base timeout 60s, dynamically extended while Steam shaders compile)
         val trackedProcessIds = mutableSetOf<Long>()
         var appeared = false
         var appearanceStart = System.currentTimeMillis()
-        val timeoutMs = 60_000L
 
-        while (System.currentTimeMillis() - appearanceStart < timeoutMs) {
+        while (System.currentTimeMillis() - appearanceStart < appearanceTimeoutMs) {
             val newMatches = matchingProcessIds(processName) - existingProcessIds
             if (newMatches.isNotEmpty()) {
                 trackedProcessIds += newMatches
@@ -256,17 +258,29 @@ class GameRunner {
                 appearanceStart = System.currentTimeMillis()
             }
 
-            kotlinx.coroutines.delay(1000)
+            kotlinx.coroutines.delay(pollIntervalMs)
+        }
+
+        // A single-instance launcher may hand the request to a process that was already running.
+        // If no new process appeared, treat a still-matching pre-launch process as the launched game.
+        if (trackedProcessIds.isEmpty()) {
+            val reusedMatches = matchingProcessIds(processName).intersect(existingProcessIds)
+            if (reusedMatches.isNotEmpty()) {
+                trackedProcessIds += reusedMatches
+                appeared = true
+            }
         }
 
         // Step 2: Wait for disappearance (indefinite, only if the process appeared)
         if (trackedProcessIds.isNotEmpty()) {
             while (true) {
-                val activeMatches = matchingProcessIds(processName) - existingProcessIds
+                val activeMatches = matchingProcessIds(processName).filterTo(mutableSetOf()) {
+                    it !in existingProcessIds || it in trackedProcessIds
+                }
                 trackedProcessIds += activeMatches
                 trackedProcessIds.removeIf { pid -> ProcessHandle.of(pid).map { it.isAlive }.orElse(false).not() }
                 if (trackedProcessIds.isEmpty()) break
-                kotlinx.coroutines.delay(2000)
+                kotlinx.coroutines.delay(exitPollIntervalMs)
             }
         }
         appeared

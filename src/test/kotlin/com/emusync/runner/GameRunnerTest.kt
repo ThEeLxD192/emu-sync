@@ -186,6 +186,43 @@ class GameRunnerTest {
     }
 
     @Test
+    fun `existing single instance process is tracked when launcher reuses it`(@TempDir tempDir: File) = runTest {
+        assumeFalse(System.getProperty("os.name", "").lowercase().contains("windows"))
+        val gameScript = File(tempDir, "single_instance_game.sh").apply {
+            writeText("#!/bin/sh\nsleep \"\$1\"\n")
+            setExecutable(true)
+        }
+        val existingGame = ProcessBuilder(gameScript.absolutePath, "1.2").start()
+
+        try {
+            var existingProcessIds = emptySet<Long>()
+            for (attempt in 0 until 50) {
+                existingProcessIds = runner.matchingProcessIds(gameScript.name)
+                if (existingProcessIds.isNotEmpty()) break
+                kotlinx.coroutines.delay(10)
+            }
+            assertTrue(existingProcessIds.isNotEmpty(), "The existing game process should be detectable")
+
+            val started = System.currentTimeMillis()
+            val launched = runner.waitForExternalProcess(
+                processName = gameScript.name,
+                existingProcessIds = existingProcessIds,
+                appearanceTimeoutMs = 100L,
+                pollIntervalMs = 10L,
+                exitPollIntervalMs = 10L,
+            )
+            val elapsed = System.currentTimeMillis() - started
+
+            assertTrue(launched, "The existing single-instance game should count as a successful launch")
+            assertTrue(elapsed >= 800, "Runner should wait for the reused game to exit (elapsed: ${elapsed}ms)")
+            assertTrue(!existingGame.isAlive)
+        } finally {
+            existingGame.destroyForcibly()
+            existingGame.waitFor()
+        }
+    }
+
+    @Test
     fun `isSteamShaderCompiling should detect fossilize_replay active state`(@TempDir tempDir: File) {
         assertEquals(false, runner.isSteamShaderCompiling())
 
