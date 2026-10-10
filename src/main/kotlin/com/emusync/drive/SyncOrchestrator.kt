@@ -78,6 +78,7 @@ class SyncOrchestrator(
         val type: SaveTargetType,
         val driveName: String?,
         val failureReason: String? = null,
+        val reservedDriveNames: Set<String> = emptySet(),
     )
 
     private data class PostSyncResult(
@@ -952,6 +953,7 @@ class SyncOrchestrator(
                         forceAll = false,
                         driveNameOverride = target.driveName,
                         resolveCloudNewer = isRetry,
+                        knownFileSiblingNames = target.reservedDriveNames,
                     )
                     completedCount += result.completedCount
                     failedFileTargets += result.failedTargets
@@ -967,6 +969,9 @@ class SyncOrchestrator(
             for (target in syncTargets) {
                 val saveFile = File(target.path)
                 if (!saveFile.exists()) continue
+                val knownFileSiblingNames = syncTargets
+                    .filter { it.type == SaveTargetType.FILE && it.path != target.path }
+                    .mapTo(mutableSetOf()) { File(it.path).name }
                 try {
                     val result = postSync(
                         token = token,
@@ -976,6 +981,7 @@ class SyncOrchestrator(
                         cloudPathSegments = cloudPath,
                         forceAll = forceUploadLocal,
                         resolveCloudNewer = isRetry,
+                        knownFileSiblingNames = knownFileSiblingNames,
                     )
                     completedCount += result.completedCount
                     failedFileTargets += result.failedTargets
@@ -1145,8 +1151,23 @@ class SyncOrchestrator(
         forceAll: Boolean = false,
         driveNameOverride: String? = null,
         resolveCloudNewer: Boolean = false,
+        knownFileSiblingNames: Set<String> = emptySet(),
     ): PostSyncResult {
         if (!localSavePath.exists()) return PostSyncResult(0, emptyList())
+
+        val driveName = driveNameOverride ?: localSavePath.name
+        if (targetType == SaveTargetType.FILE && driveName in knownFileSiblingNames) {
+            return PostSyncResult(
+                0,
+                listOf(SaveUploadTarget(
+                    localSavePath,
+                    SaveTargetType.FILE,
+                    driveName,
+                    "The save name '$driveName' is already used by another configured file target.",
+                    knownFileSiblingNames,
+                )),
+            )
+        }
 
         val folderId = folders.ensurePath(token, cloudPathSegments)
         val cloudFiles = search.listFilesInFolder(token, folderId)
@@ -1161,6 +1182,16 @@ class SyncOrchestrator(
             val localFiles = localSavePath.walkTopDown().filter { it.isFile }.toList()
             for (localFile in localFiles) {
                 val relativePath = localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/')
+                if (relativePath in knownFileSiblingNames) {
+                    failedTargets += SaveUploadTarget(
+                        localFile,
+                        SaveTargetType.FILE,
+                        relativePath,
+                        "The directory save '$relativePath' conflicts with another configured file target.",
+                        knownFileSiblingNames,
+                    )
+                    continue
+                }
                 val cloudFile = cloudFiles.find { it.name == relativePath }
                 try {
                     syncSingleFilePost(
@@ -1172,11 +1203,12 @@ class SyncOrchestrator(
                     completedCount++
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
-                    failedTargets += SaveUploadTarget(localFile, SaveTargetType.FILE, relativePath, e.message)
+                    failedTargets += SaveUploadTarget(
+                        localFile, SaveTargetType.FILE, relativePath, e.message, knownFileSiblingNames,
+                    )
                 }
             }
         } else {
-            val driveName = driveNameOverride ?: localSavePath.name
             val cloudFile = cloudFiles.find { it.name == driveName }
             try {
                 syncSingleFilePost(
@@ -1188,7 +1220,9 @@ class SyncOrchestrator(
                 completedCount++
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                failedTargets += SaveUploadTarget(localSavePath, SaveTargetType.FILE, driveName, e.message)
+                failedTargets += SaveUploadTarget(
+                    localSavePath, SaveTargetType.FILE, driveName, e.message, knownFileSiblingNames,
+                )
             }
         }
         return PostSyncResult(completedCount, failedTargets)

@@ -111,10 +111,52 @@ class DirectorySyncTest {
         assertFalse(File(directoryPath, "SAVE_SLOT").exists())
     }
 
+    @Test
+    fun `post-sync does not update file sibling with colliding directory save`(@TempDir tempDir: File) = runTest {
+        val directoryPath = File(tempDir, "saves/SAVE_SLOT").apply { mkdirs() }
+        val conflictingDirectorySave = File(directoryPath, "SAVE_SLOT").apply {
+            writeText("LOCAL_DIRECTORY_SAVE")
+            setLastModified(System.currentTimeMillis())
+        }
+        val siblingFilePath = File(tempDir, "other/SAVE_SLOT")
+        val entry = NativePCGame(
+            name = "Playstation 3",
+            executablePath = "echo",
+            arguments = listOf("test"),
+            saveTargets = listOf(
+                SaveTarget(directoryPath.absolutePath, SaveTargetType.DIRECTORY),
+                SaveTarget(siblingFilePath.absolutePath, SaveTargetType.FILE),
+            ),
+        )
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val config = driveConfig().copy(entries = listOf(entry))
+        var writeCount = 0
+        val statuses = mutableListOf<AppStatus>()
+        val orchestrator = SyncOrchestrator(
+            client = createMockDriveClient(
+                cloudFiles = listOf("SAVE_SLOT" to "2026-01-01T12:00:00.000Z"),
+                fileContents = mapOf("file-0" to "SIBLING_FILE".toByteArray()),
+                onWrite = { writeCount++ },
+            ),
+            config = config,
+            configManager = configManager,
+            onStatus = statuses::add,
+        )
+
+        orchestrator.playWithSync(GameItem(name = entry.name, entry = entry))
+
+        assertEquals("SIBLING_FILE", siblingFilePath.readText())
+        assertEquals("LOCAL_DIRECTORY_SAVE", conflictingDirectorySave.readText())
+        assertEquals(0, writeCount, "The colliding directory file must not overwrite the sibling Drive file")
+        assertTrue(statuses.any { it is AppStatus.PostSyncFailed }, "The unsynced collision should be reported")
+    }
+
     private fun createMockDriveClient(
         cloudFiles: List<Pair<String, String>>, // Pair(fileName, modifiedTimeIso)
         fileContents: Map<String, ByteArray> = emptyMap(),
         uploadResponseModTime: String = "2026-06-01T15:00:00.000Z",
+        onWrite: () -> Unit = {},
     ): HttpClient {
         return HttpClient(MockEngine) {
             install(ContentNegotiation) {
@@ -134,6 +176,7 @@ class DirectorySyncTest {
                         }
                         // Start a resumable upload or update session
                         url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            onWrite()
                             respond(
                                 content = "",
                                 headers = headersOf(HttpHeaders.Location, "https://uploads.example/directory-sync"),
@@ -141,6 +184,7 @@ class DirectorySyncTest {
                         }
                         // Complete the media upload
                         request.method.value == "PUT" -> {
+                            onWrite()
                             respond(
                                 content = """{"id":"mock-uploaded-id","name":"mock-file","modifiedTime":"$uploadResponseModTime"}""",
                                 headers = jsonHeaders,
