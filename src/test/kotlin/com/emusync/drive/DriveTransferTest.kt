@@ -113,11 +113,17 @@ class DriveTransferTest {
     fun `download removes temporary file and preserves existing save when stream write fails`(@TempDir tempDir: File) = runTest {
         val parent = File(tempDir, "saves").apply { mkdirs() }
         val destination = File(parent, "slot.sav").apply { writeText("existing save") }
+        val body = ByteChannel(autoFlush = true)
         val client = HttpClient(MockEngine) {
             engine {
                 addHandler {
+                    backgroundScope.launch {
+                        body.writeFully(ByteArray(1024) { 7 })
+                        delay(1_000)
+                        body.close()
+                    }
                     respond(
-                        content = ByteArray(1024) { 7 },
+                        content = body,
                         headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
                     )
                 }
@@ -131,17 +137,24 @@ class DriveTransferTest {
 
         assertEquals("existing save", destination.readText(), "Failed downloads must preserve the previous save")
         assertEquals(listOf("slot.sav"), parent.list()?.toList(), "The partial temporary file should be removed")
+        assertTrue(body.isClosedForRead, "A failed download must release the still-open response channel")
     }
 
     @Test
     fun `cancelled download removes temporary file and preserves existing save`(@TempDir tempDir: File) = runTest {
         val parent = File(tempDir, "saves").apply { mkdirs() }
         val destination = File(parent, "slot.sav").apply { writeText("existing save") }
+        val body = ByteChannel(autoFlush = true)
         val client = HttpClient(MockEngine) {
             engine {
                 addHandler {
+                    backgroundScope.launch {
+                        body.writeFully(ByteArray(1024) { 9 })
+                        delay(1_000)
+                        body.close()
+                    }
                     respond(
-                        content = ByteArray(1024) { 9 },
+                        content = body,
                         headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
                     )
                 }
@@ -155,6 +168,7 @@ class DriveTransferTest {
 
         assertEquals("existing save", destination.readText(), "Cancellation must preserve the previous save")
         assertEquals(listOf("slot.sav"), parent.list()?.toList(), "Cancellation should remove the partial temporary file")
+        assertTrue(body.isClosedForRead, "A cancelled download must release the still-open response channel")
     }
 
     @Test
@@ -199,6 +213,7 @@ class DriveTransferTest {
     fun `upload creates resumable session and sends file content`() = runTest {
         val file = File.createTempFile("emusync-upload", ".sav").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
         val requests = mutableListOf<io.ktor.client.request.HttpRequestData>()
+        val progress = mutableListOf<TransferProgress>()
         val sessionUri = "https://uploads.example/session-create"
         val client = HttpClient(MockEngine) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
@@ -221,7 +236,7 @@ class DriveTransferTest {
             }
         }
 
-        val result = DriveTransfer(client).upload("token", file, "slot.sav", "save-folder")
+        val result = DriveTransfer(client, progress::add).upload("token", file, "slot.sav", "save-folder")
 
         assertEquals("created-id", result.id)
         assertEquals("resumable", requests[0].url.parameters["uploadType"])
@@ -233,6 +248,10 @@ class DriveTransferTest {
         assertEquals("save-folder", metadata["parents"]?.jsonArray?.single()?.jsonPrimitive?.content)
         assertEquals(sessionUri, requests[1].url.toString())
         assertEquals("bytes 0-3/4", requests[1].headers[HttpHeaders.ContentRange])
+        assertEquals(
+            listOf(TransferProgress(TransferProgress.Direction.UPLOAD, file.name, 4, 4)),
+            progress,
+        )
         file.delete()
     }
 
