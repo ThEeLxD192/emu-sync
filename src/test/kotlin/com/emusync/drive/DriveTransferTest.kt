@@ -291,6 +291,7 @@ class DriveTransferTest {
         val chunkSize = 8 * 1024 * 1024
         val file = File(tempDir, "large.sav").apply { writeBytes(ByteArray(chunkSize + 17) { it.toByte() }) }
         val ranges = mutableListOf<String?>()
+        val progress = mutableListOf<TransferProgress>()
         val client = HttpClient(MockEngine) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
             engine {
@@ -318,7 +319,7 @@ class DriveTransferTest {
             }
         }
 
-        val result = DriveTransfer(client).upload("token", file)
+        val result = DriveTransfer(client, progress::add).upload("token", file)
 
         assertEquals("large-id", result.id)
         assertEquals(
@@ -327,6 +328,13 @@ class DriveTransferTest {
                 "bytes $chunkSize-${chunkSize + 16}/${chunkSize + 17}",
             ),
             ranges,
+        )
+        assertEquals(
+            listOf(
+                TransferProgress(TransferProgress.Direction.UPLOAD, file.name, chunkSize.toLong(), file.length()),
+                TransferProgress(TransferProgress.Direction.UPLOAD, file.name, file.length(), file.length()),
+            ),
+            progress,
         )
     }
 
