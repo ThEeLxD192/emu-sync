@@ -1,6 +1,7 @@
 package com.emusync.util
 
 import org.junit.jupiter.api.Test
+import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
@@ -16,12 +17,15 @@ class AppImageEnvironmentTest {
                 "/usr/lib",
                 "/tmp/.mount_OtherApp456/usr/lib",
                 "/opt/emulator/lib",
-            ).joinToString(":"),
+            ).joinToString(File.pathSeparator),
         )
 
         AppImageEnvironment.clean(environment)
 
-        assertEquals("/usr/lib:/opt/emulator/lib", environment["LD_LIBRARY_PATH"])
+        assertEquals(
+            listOf("/usr/lib", "/opt/emulator/lib").joinToString(File.pathSeparator),
+            environment["LD_LIBRARY_PATH"],
+        )
         assertFalse(environment.containsKey("APPDIR"))
         assertFalse(environment.containsKey("ARGV0"))
         assertFalse(environment.containsKey("OWD"))
