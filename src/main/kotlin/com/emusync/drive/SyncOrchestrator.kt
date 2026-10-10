@@ -865,6 +865,7 @@ class SyncOrchestrator(
         existingToken: String?,
         retryTargets: List<SaveUploadTarget>? = null,
         completedBeforeRetry: Int = 0,
+        isRetry: Boolean = false,
     ): Boolean {
         val pendingPaths = syncPaths
 
@@ -886,6 +887,7 @@ class SyncOrchestrator(
                         cloudPathSegments = cloudPath,
                         forceAll = false,
                         driveNameOverride = target.driveName,
+                        resolveCloudNewer = isRetry,
                     )
                     completedCount += result.completedCount
                     failedTargets += result.failedTargets
@@ -905,6 +907,7 @@ class SyncOrchestrator(
                         localSavePath = File(path),
                         cloudPathSegments = cloudPath,
                         forceAll = forceUploadLocal,
+                        resolveCloudNewer = isRetry,
                     )
                     completedCount += result.completedCount
                     failedTargets += result.failedTargets
@@ -945,6 +948,7 @@ class SyncOrchestrator(
                         existingToken = null,
                         retryTargets = failedTargets,
                         completedBeforeRetry = completedCount,
+                        isRetry = true,
                     )
                 },
             )
@@ -1072,6 +1076,7 @@ class SyncOrchestrator(
         cloudPathSegments: List<String> = listOf(entry.effectiveCloudFolder),
         forceAll: Boolean = false,
         driveNameOverride: String? = null,
+        resolveCloudNewer: Boolean = false,
     ): PostSyncResult {
         if (!localSavePath.exists()) return PostSyncResult(0, emptyList())
 
@@ -1086,7 +1091,12 @@ class SyncOrchestrator(
                 val relativePath = localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/')
                 val cloudFile = cloudFiles.find { it.name == relativePath }
                 try {
-                    syncSingleFilePost(token, localFile, cloudFile, folderId, relativePath, force = forceAll)
+                    syncSingleFilePost(
+                        token, localFile, cloudFile, folderId, relativePath,
+                        force = forceAll,
+                        resolveCloudNewer = resolveCloudNewer,
+                        displayName = entry.name,
+                    )
                     completedCount++
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
@@ -1097,7 +1107,12 @@ class SyncOrchestrator(
             val driveName = driveNameOverride ?: localSavePath.name
             val cloudFile = cloudFiles.find { it.name == driveName }
             try {
-                syncSingleFilePost(token, localSavePath, cloudFile, folderId, driveName, force = forceAll)
+                syncSingleFilePost(
+                    token, localSavePath, cloudFile, folderId, driveName,
+                    force = forceAll,
+                    resolveCloudNewer = resolveCloudNewer,
+                    displayName = entry.name,
+                )
                 completedCount++
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -1113,7 +1128,9 @@ class SyncOrchestrator(
         cloudFile: DriveFile?,
         parentFolderId: String,
         driveName: String,
-        force: Boolean = false
+        force: Boolean = false,
+        resolveCloudNewer: Boolean = false,
+        displayName: String = driveName,
     ) {
         if (cloudFile != null) {
             val decision = planSyncDecision(
@@ -1122,11 +1139,33 @@ class SyncOrchestrator(
                 localNewerAction = LocalNewerAction.UPLOAD,
             )
 
-            if (force || decision == SyncDecision.UPLOAD_LOCAL) {
-                val res = transfer.update(token, cloudFile.id, localFile)
-                try {
-                    localFile.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
-                } catch (_: Exception) {
+            when {
+                force || decision == SyncDecision.UPLOAD_LOCAL -> {
+                    val res = transfer.update(token, cloudFile.id, localFile)
+                    try {
+                        localFile.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
+                    } catch (_: Exception) {
+                    }
+                }
+                decision == SyncDecision.DOWNLOAD_CLOUD && resolveCloudNewer -> {
+                    val selectedDecision = kotlinx.coroutines.suspendCancellableCoroutine<SyncDecision> { continuation ->
+                        onStatus(AppStatus.Conflict(
+                            localDate = formatTimestamp(localFile.lastModified()),
+                            cloudDate = formatTimestamp(Instant.parse(cloudFile.modifiedTime).toEpochMilli()),
+                            gameName = displayName,
+                            onResolve = { choice ->
+                                if (continuation.isActive) continuation.resumeWith(Result.success(choice))
+                            },
+                        ))
+                    }
+                    when (selectedDecision) {
+                        SyncDecision.UPLOAD_LOCAL -> {
+                            val res = transfer.update(token, cloudFile.id, localFile)
+                            runCatching { localFile.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli()) }
+                        }
+                        SyncDecision.DOWNLOAD_CLOUD -> transfer.download(token, cloudFile.id, localFile, cloudFile.modifiedTime)
+                        else -> Unit
+                    }
                 }
             }
         } else {

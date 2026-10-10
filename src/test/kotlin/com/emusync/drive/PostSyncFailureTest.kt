@@ -11,6 +11,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
@@ -132,6 +133,7 @@ class PostSyncFailureTest {
         )
         val configManager = ConfigManager(File(tempDir, "config.json").absolutePath).apply { save(config) }
         var firstCloudTime = "2020-01-01T00:00:00Z"
+        var secondCloudTime = "2020-01-01T00:00:00Z"
         var firstUpdates = 0
         var secondUpdates = 0
         var failSecondUpdate = true
@@ -143,6 +145,9 @@ class PostSyncFailureTest {
                     val url = request.url.toString()
                     val query = request.url.parameters["q"].orEmpty()
                     when {
+                        url.contains("www.googleapis.com/drive/v3/files/second-id") && request.method == HttpMethod.Get -> respond(
+                            "NEWER CLOUD SECOND", HttpStatusCode.OK,
+                        )
                         url.contains("oauth2.googleapis.com/token") && failTokenRefresh -> respond(
                             "offline", HttpStatusCode.InternalServerError,
                         )
@@ -153,7 +158,7 @@ class PostSyncFailureTest {
                         query.contains("name = 'Tests'") -> respond("""{"files":[{"id":"group","name":"Tests"}]}""", headers = jsonHeaders)
                         query.contains("name = 'Game'") -> respond("""{"files":[{"id":"game","name":"Game"}]}""", headers = jsonHeaders)
                         query.contains("in parents and trashed = false") -> respond(
-                            """{"files":[{"id":"first-id","name":"first.dat","modifiedTime":"$firstCloudTime"},{"id":"second-id","name":"second.dat","modifiedTime":"2020-01-01T00:00:00Z"}]}""",
+                            """{"files":[{"id":"first-id","name":"first.dat","modifiedTime":"$firstCloudTime"},{"id":"second-id","name":"second.dat","modifiedTime":"$secondCloudTime"}]}""",
                             headers = jsonHeaders,
                         )
                         url.contains("upload/drive/v3/files/first-id") -> {
@@ -185,7 +190,10 @@ class PostSyncFailureTest {
         val statuses = mutableListOf<AppStatus>()
         val orchestrator = SyncOrchestrator(client, config, configManager) { status ->
             statuses += status
-            if (status is AppStatus.Conflict) status.onResolve(SyncDecision.UPLOAD_LOCAL)
+            if (status is AppStatus.Conflict) {
+                val choice = if (status.cloudDate > status.localDate) SyncDecision.DOWNLOAD_CLOUD else SyncDecision.UPLOAD_LOCAL
+                status.onResolve(choice)
+            }
         }
 
         orchestrator.playWithSync(GameItem("Game", entry, rom))
@@ -212,13 +220,15 @@ class PostSyncFailureTest {
 
         failTokenRefresh = false
         failSecondUpdate = false
+        secondCloudTime = "2027-01-01T00:00:00Z"
         authorizationFailure.onRetry()
 
         assertEquals(AppStatus.Idle, statuses.last())
         assertEquals(1, firstUpdates, "Retry must not force-update the file that already succeeded")
-        assertEquals(2, secondUpdates)
+        assertEquals(1, secondUpdates, "A newer cloud copy should require a choice, not an upload")
         assertEquals("FIRST", firstSave.readText())
-        assertEquals("SECOND", secondSave.readText())
+        assertEquals("NEWER CLOUD SECOND", secondSave.readText())
+        assertTrue(statuses.filterIsInstance<AppStatus.Conflict>().any { it.cloudDate > it.localDate })
         assertEquals(1, statuses.count { it == AppStatus.Playing }, "Retries must not launch the game again")
     }
 }
