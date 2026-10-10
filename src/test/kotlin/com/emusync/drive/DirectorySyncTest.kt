@@ -4,8 +4,12 @@ import com.emusync.config.ConfigManager
 import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
+import com.emusync.model.NativePCGame
+import com.emusync.model.SaveTarget
+import com.emusync.model.SaveTargetType
 import com.emusync.ui.AppStatus
 import com.emusync.ui.CloudSyncStatus
+import com.emusync.ui.GameItem
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -21,11 +25,91 @@ import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.time.Instant
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class DirectorySyncTest {
 
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
+
+    private fun unknownDirectoryWithFileSibling(tempDir: File): Pair<NativePCGame, Pair<File, File>> {
+        val directoryPath = File(tempDir, "missing/SAVE_SLOT")
+        val siblingFilePath = File(tempDir, "other/SAVE_SLOT")
+        val entry = NativePCGame(
+            name = "Playstation 3",
+            executablePath = "echo",
+            arguments = listOf("test"),
+            saveTargets = listOf(
+                SaveTarget(directoryPath.absolutePath, SaveTargetType.UNKNOWN),
+                SaveTarget(siblingFilePath.absolutePath, SaveTargetType.FILE),
+            ),
+        )
+        return entry to (directoryPath to siblingFilePath)
+    }
+
+    private fun siblingCloudFiles() = listOf(
+        "SAVE_SLOT" to "2026-01-01T12:00:00.000Z",
+        "state-one.sav" to "2026-01-01T12:00:00.000Z",
+        "state-two.sav" to "2026-01-01T12:00:00.000Z",
+    )
+
+    private fun siblingCloudContents() = mapOf(
+        "file-0" to "SIBLING_FILE".toByteArray(),
+        "file-1" to "DIRECTORY_SAVE_ONE".toByteArray(),
+        "file-2" to "DIRECTORY_SAVE_TWO".toByteArray(),
+    )
+
+    private fun driveConfig() = AppConfig(
+        googleDrive = GoogleDriveConfig(
+            clientId = "test-client",
+            clientSecret = "test-secret",
+            refreshToken = "test-refresh-token",
+        ),
+    )
+
+    @Test
+    fun `play pre-sync separates unknown directory from same-name file sibling`(@TempDir tempDir: File) = runTest {
+        val (entry, paths) = unknownDirectoryWithFileSibling(tempDir)
+        val (directoryPath, siblingFilePath) = paths
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val config = driveConfig().copy(entries = listOf(entry))
+        val orchestrator = SyncOrchestrator(
+            client = createMockDriveClient(siblingCloudFiles(), siblingCloudContents()),
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        orchestrator.playWithSync(GameItem(name = entry.name, entry = entry))
+
+        assertEquals("SIBLING_FILE", siblingFilePath.readText())
+        assertEquals("DIRECTORY_SAVE_ONE", File(directoryPath, "state-one.sav").readText())
+        assertEquals("DIRECTORY_SAVE_TWO", File(directoryPath, "state-two.sav").readText())
+        assertFalse(File(directoryPath, "SAVE_SLOT").exists())
+    }
+
+    @Test
+    fun `manual sync separates unknown directory from same-name file sibling`(@TempDir tempDir: File) = runTest {
+        val (entry, paths) = unknownDirectoryWithFileSibling(tempDir)
+        val (directoryPath, siblingFilePath) = paths
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val config = driveConfig().copy(entries = listOf(entry))
+        val orchestrator = SyncOrchestrator(
+            client = createMockDriveClient(siblingCloudFiles(), siblingCloudContents()),
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        assertTrue(orchestrator.syncEntry(entry))
+
+        assertEquals("SIBLING_FILE", siblingFilePath.readText())
+        assertEquals("DIRECTORY_SAVE_ONE", File(directoryPath, "state-one.sav").readText())
+        assertEquals("DIRECTORY_SAVE_TWO", File(directoryPath, "state-two.sav").readText())
+        assertFalse(File(directoryPath, "SAVE_SLOT").exists())
+    }
 
     private fun createMockDriveClient(
         cloudFiles: List<Pair<String, String>>, // Pair(fileName, modifiedTimeIso)
