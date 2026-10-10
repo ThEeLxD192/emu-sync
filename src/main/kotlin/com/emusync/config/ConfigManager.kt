@@ -90,7 +90,12 @@ class ConfigManager(
         var temporary: Path? = null
         try {
             temporary = Files.createTempFile(parent.toPath(), ".${configFile.name}.", ".tmp")
-            Files.writeString(temporary, content, StandardOpenOption.TRUNCATE_EXISTING)
+            Files.writeString(
+                temporary,
+                content,
+                StandardOpenOption.WRITE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+            )
             restrictToCurrentUser(temporary)
             FileChannel.open(temporary, StandardOpenOption.WRITE).use { it.force(true) }
             beforeReplace(temporary)
