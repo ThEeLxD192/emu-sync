@@ -17,8 +17,9 @@ permissions:
   contents: write
 
 jobs:
-  bump-version:
-    name: Bump Version & Push Tag
+  prepare-version:
+    name: Prepare Release Version
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
@@ -28,8 +29,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.sha }}
 
       - name: Bump Version
         id: bump
@@ -37,26 +37,21 @@ jobs:
           chmod +x scripts/bump-version.sh
           ./scripts/bump-version.sh "${{ github.event.inputs.release_type }}"
 
-      - name: Commit & Push New Version and Tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/main/kotlin/com/emusync/AppInfo.kt build.gradle.kts
-          git commit -m "chore(release): ${{ steps.bump.outputs.tag_name }}"
-          git push origin main
-          git tag "${{ steps.bump.outputs.tag_name }}"
-          git push origin "${{ steps.bump.outputs.tag_name }}"
-
   build-linux:
     name: Build Linux AppImage
-    needs: bump-version
+    needs: prepare-version
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.bump-version.outputs.tag_name }}
+          ref: ${{ github.sha }}
+
+      - name: Apply Candidate Version
+        run: |
+          chmod +x scripts/bump-version.sh
+          ./scripts/bump-version.sh "${{ github.event.inputs.release_type }}"
 
       - name: Build AppImage via Docker
         run: |
@@ -66,20 +61,26 @@ jobs:
       - name: Upload AppImage Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-linux
+          name: EmuSync-${{ needs.prepare-version.outputs.new_version }}-x86_64-linux
           path: EmuSync-x86_64.AppImage
           retention-days: 90
 
   build-windows:
     name: Build Windows MSI & EXE
-    needs: bump-version
+    needs: prepare-version
     runs-on: windows-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.bump-version.outputs.tag_name }}
+          ref: ${{ github.sha }}
+
+      - name: Apply Candidate Version
+        shell: bash
+        run: |
+          chmod +x scripts/bump-version.sh
+          ./scripts/bump-version.sh "${{ github.event.inputs.release_type }}"
 
       - name: Set up Java 21
         uses: actions/setup-java@v6
@@ -112,33 +113,53 @@ jobs:
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-windows
+          name: EmuSync-${{ needs.prepare-version.outputs.new_version }}-x86_64-windows
           path: dist/*
           retention-days: 90
 
   create-release:
     name: Create GitHub Release
-    needs: [bump-version, build-linux, build-windows]
+    needs: [prepare-version, build-linux, build-windows]
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Validated Candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Download Linux Artifact
         uses: actions/download-artifact@v7
         with:
-          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-linux
+          name: EmuSync-${{ needs.prepare-version.outputs.new_version }}-x86_64-linux
           path: release-assets
 
       - name: Download Windows Artifacts
         uses: actions/download-artifact@v7
         with:
-          name: EmuSync-${{ needs.bump-version.outputs.new_version }}-x86_64-windows
+          name: EmuSync-${{ needs.prepare-version.outputs.new_version }}-x86_64-windows
           path: release-assets
+
+      - name: Publish Version Commit and Tag
+        id: publish
+        run: |
+          chmod +x scripts/bump-version.sh
+          ./scripts/bump-version.sh "${{ github.event.inputs.release_type }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/main/kotlin/com/emusync/AppInfo.kt build.gradle.kts
+          git commit -m "chore(release): ${{ needs.prepare-version.outputs.tag_name }}"
+          git tag "${{ needs.prepare-version.outputs.tag_name }}"
+          git push origin HEAD:main
+          git push origin "${{ needs.prepare-version.outputs.tag_name }}"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ needs.bump-version.outputs.tag_name }}
-          name: "EmuSync ${{ needs.bump-version.outputs.tag_name }}"
+          tag_name: ${{ needs.prepare-version.outputs.tag_name }}
+          name: "EmuSync ${{ needs.prepare-version.outputs.tag_name }}"
           draft: false
           prerelease: false
           generate_release_notes: true
