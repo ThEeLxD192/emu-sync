@@ -95,12 +95,17 @@ class PostSyncFailureTest {
         assertEquals(1, failure.completedSaveCount)
         assertEquals(1, failure.pendingSaveCount)
         assertEquals(1, successfulUploads)
+        assertEquals("LOCAL SAVE", save.readText())
+        assertEquals("SECOND SAVE", secondSave.readText())
 
         failure.onRetry()
 
         assertEquals(AppStatus.Idle, statuses.last())
         assertEquals(3, uploadInitiations)
         assertEquals(2, successfulUploads)
+        assertEquals("LOCAL SAVE", save.readText())
+        assertEquals("SECOND SAVE", secondSave.readText())
+        assertEquals(1, statuses.count { it == AppStatus.Playing }, "Retry must not launch the game again")
     }
 
     @Test
@@ -190,6 +195,8 @@ class PostSyncFailureTest {
         assertEquals(1, failure.pendingSaveCount)
         assertEquals(1, firstUpdates)
         assertEquals(1, secondUpdates)
+        assertEquals("FIRST", firstSave.readText())
+        assertEquals("SECOND", secondSave.readText())
 
         failTokenRefresh = true
         failure.onRetry()
@@ -200,6 +207,8 @@ class PostSyncFailureTest {
         assertEquals(1, authorizationFailure.pendingSaveCount)
         assertEquals(1, firstUpdates)
         assertEquals(1, secondUpdates)
+        assertEquals("FIRST", firstSave.readText())
+        assertEquals("SECOND", secondSave.readText())
 
         failTokenRefresh = false
         failSecondUpdate = false
@@ -208,5 +217,8 @@ class PostSyncFailureTest {
         assertEquals(AppStatus.Idle, statuses.last())
         assertEquals(1, firstUpdates, "Retry must not force-update the file that already succeeded")
         assertEquals(2, secondUpdates)
+        assertEquals("FIRST", firstSave.readText())
+        assertEquals("SECOND", secondSave.readText())
+        assertEquals(1, statuses.count { it == AppStatus.Playing }, "Retries must not launch the game again")
     }
 }
