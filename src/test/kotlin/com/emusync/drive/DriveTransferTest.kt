@@ -5,12 +5,16 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -23,6 +27,10 @@ import java.io.IOException
 import java.time.Instant
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+import io.ktor.utils.io.ByteChannel
+import io.ktor.utils.io.writeFully
 
 class DriveTransferTest {
 
@@ -76,9 +84,136 @@ class DriveTransferTest {
     }
 
     @Test
+    fun `download fails cleanly when destination parent cannot be created`(@TempDir tempDir: File) = runTest {
+        val blockingFile = File(tempDir, "not-a-directory").apply { writeText("blocker") }
+        val destination = File(blockingFile, "saves/slot.sav")
+        val body = ByteChannel(autoFlush = true)
+        body.writeFully(byteArrayOf(1))
+        body.close()
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler {
+                    respond(
+                        content = body,
+                        headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                    )
+                }
+            }
+        }
+
+        assertThrows<DriveApiException> {
+            DriveTransfer(client).download("token", "file-id", destination)
+        }
+
+        assertFalse(destination.exists())
+        assertEquals(listOf("not-a-directory"), tempDir.list()?.toList())
+    }
+
+    @Test
+    fun `download removes temporary file and preserves existing save when stream write fails`(@TempDir tempDir: File) = runTest {
+        val parent = File(tempDir, "saves").apply { mkdirs() }
+        val destination = File(parent, "slot.sav").apply { writeText("existing save") }
+        val body = ByteChannel(autoFlush = true)
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler {
+                    backgroundScope.launch {
+                        body.writeFully(ByteArray(1024) { 7 })
+                        delay(1_000)
+                        body.close()
+                    }
+                    respond(
+                        content = body,
+                        headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                    )
+                }
+            }
+        }
+
+        assertThrows<IOException> {
+            DriveTransfer(client) { throw IOException("simulated stream write failure") }
+                .download("token", "file-id", destination)
+        }
+
+        assertEquals("existing save", destination.readText(), "Failed downloads must preserve the previous save")
+        assertEquals(listOf("slot.sav"), parent.list()?.toList(), "The partial temporary file should be removed")
+        assertTrue(body.isClosedForRead, "A failed download must release the still-open response channel")
+    }
+
+    @Test
+    fun `cancelled download removes temporary file and preserves existing save`(@TempDir tempDir: File) = runTest {
+        val parent = File(tempDir, "saves").apply { mkdirs() }
+        val destination = File(parent, "slot.sav").apply { writeText("existing save") }
+        val body = ByteChannel(autoFlush = true)
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler {
+                    backgroundScope.launch {
+                        body.writeFully(ByteArray(1024) { 9 })
+                        delay(1_000)
+                        body.close()
+                    }
+                    respond(
+                        content = body,
+                        headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                    )
+                }
+            }
+        }
+
+        assertThrows<CancellationException> {
+            DriveTransfer(client) { throw CancellationException("simulated download cancellation") }
+                .download("token", "file-id", destination)
+        }
+
+        assertEquals("existing save", destination.readText(), "Cancellation must preserve the previous save")
+        assertEquals(listOf("slot.sav"), parent.list()?.toList(), "Cancellation should remove the partial temporary file")
+        assertTrue(body.isClosedForRead, "A cancelled download must release the still-open response channel")
+    }
+
+    @Test
+    fun `download streams a slow large response and reports progress`(@TempDir tempDir: File) = runTest {
+        val destination = File(tempDir, "large-save.bin")
+        val chunk = ByteArray(1024 * 1024) { (it % 251).toByte() }
+        val chunkCount = 12
+        val totalSize = chunk.size.toLong() * chunkCount
+        val progress = mutableListOf<TransferProgress>()
+        val client = HttpClient(MockEngine) {
+            install(HttpTimeout) {
+                requestTimeoutMillis = 25
+                socketTimeoutMillis = 1_000
+            }
+            engine {
+                addHandler {
+                    val body = ByteChannel(autoFlush = true)
+                    backgroundScope.launch {
+                        repeat(chunkCount) {
+                            delay(10)
+                            body.writeFully(chunk)
+                        }
+                        body.close()
+                    }
+                    respond(
+                        content = body,
+                        headers = headersOf(HttpHeaders.ContentLength, totalSize.toString()),
+                    )
+                }
+            }
+        }
+
+        DriveTransfer(client, progress::add).download("token", "large-file", destination)
+
+        assertEquals(totalSize, destination.length())
+        assertTrue(progress.size > 1)
+        assertEquals(totalSize, progress.last().transferredBytes)
+        assertEquals(totalSize, progress.last().totalBytes)
+    }
+
+    @Test
     fun `upload creates resumable session and sends file content`() = runTest {
         val file = File.createTempFile("emusync-upload", ".sav").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
         val requests = mutableListOf<io.ktor.client.request.HttpRequestData>()
+        val progress = mutableListOf<TransferProgress>()
         val sessionUri = "https://uploads.example/session-create"
         val client = HttpClient(MockEngine) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
@@ -101,7 +236,7 @@ class DriveTransferTest {
             }
         }
 
-        val result = DriveTransfer(client).upload("token", file, "slot.sav", "save-folder")
+        val result = DriveTransfer(client, progress::add).upload("token", file, "slot.sav", "save-folder")
 
         assertEquals("created-id", result.id)
         assertEquals("resumable", requests[0].url.parameters["uploadType"])
@@ -113,6 +248,10 @@ class DriveTransferTest {
         assertEquals("save-folder", metadata["parents"]?.jsonArray?.single()?.jsonPrimitive?.content)
         assertEquals(sessionUri, requests[1].url.toString())
         assertEquals("bytes 0-3/4", requests[1].headers[HttpHeaders.ContentRange])
+        assertEquals(
+            listOf(TransferProgress(TransferProgress.Direction.UPLOAD, file.name, 4, 4)),
+            progress,
+        )
         file.delete()
     }
 
@@ -152,6 +291,7 @@ class DriveTransferTest {
         val chunkSize = 8 * 1024 * 1024
         val file = File(tempDir, "large.sav").apply { writeBytes(ByteArray(chunkSize + 17) { it.toByte() }) }
         val ranges = mutableListOf<String?>()
+        val progress = mutableListOf<TransferProgress>()
         val client = HttpClient(MockEngine) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
             engine {
@@ -179,7 +319,7 @@ class DriveTransferTest {
             }
         }
 
-        val result = DriveTransfer(client).upload("token", file)
+        val result = DriveTransfer(client, progress::add).upload("token", file)
 
         assertEquals("large-id", result.id)
         assertEquals(
@@ -188,6 +328,13 @@ class DriveTransferTest {
                 "bytes $chunkSize-${chunkSize + 16}/${chunkSize + 17}",
             ),
             ranges,
+        )
+        assertEquals(
+            listOf(
+                TransferProgress(TransferProgress.Direction.UPLOAD, file.name, chunkSize.toLong(), file.length()),
+                TransferProgress(TransferProgress.Direction.UPLOAD, file.name, file.length(), file.length()),
+            ),
+            progress,
         )
     }
 

@@ -89,7 +89,14 @@ class SyncOrchestrator(
 
     private val logger = Logger.getLogger(SyncOrchestrator::class.java.name)
     private val search = DriveSearch(client)
-    private val transfer = DriveTransfer(client)
+    private val transfer = DriveTransfer(client) { progress ->
+        val verb = if (progress.direction == TransferProgress.Direction.DOWNLOAD) "Downloading" else "Uploading"
+        val percent = progress.totalBytes
+            ?.takeIf { it > 0L }
+            ?.let { ((progress.transferredBytes * 100L) / it).coerceIn(0L, 100L) }
+        val suffix = percent?.let { " ($it%)" }.orEmpty()
+        onStatus(AppStatus.Syncing("$verb ${progress.fileName}$suffix"))
+    }
     private val folders = DriveFolders(client)
     private val oauthFlow = OAuthFlow(client)
     private val runner = GameRunner()
