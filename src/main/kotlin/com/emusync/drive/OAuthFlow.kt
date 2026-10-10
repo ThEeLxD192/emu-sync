@@ -4,6 +4,7 @@ import com.emusync.config.ConfigManager
 import com.emusync.model.AppConfig
 import com.emusync.model.GoogleDriveConfig
 import com.sun.net.httpserver.HttpServer
+import com.sun.net.httpserver.HttpHandler
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -412,28 +413,11 @@ class OAuthFlow(private val client: HttpClient) {
                 server.stop(0)
             }
 
-            server.createContext("/") { exchange ->
-                val query = exchange.requestURI.query ?: ""
-                val params = parseQueryParams(query)
-
-                val result = runCatching { validateCallback(params, state) }
-                val (statusCode, html) = if (result.isSuccess) 200 to SUCCESS_HTML else 400 to ERROR_HTML
-
-                val responseBytes = html.toByteArray()
-                exchange.responseHeaders.add("Content-Type", "text/html; charset=utf-8")
-                exchange.sendResponseHeaders(statusCode, responseBytes.size.toLong())
-                exchange.responseBody.use { it.write(responseBytes) }
-
-                // Stop the server after responding
-                server.stop(1)
-
+            server.createContext("/", callbackHandler(server, state) { result ->
                 if (continuation.isActive) {
-                    result.fold(
-                        onSuccess = continuation::resume,
-                        onFailure = continuation::resumeWithException,
-                    )
+                    result.fold(onSuccess = continuation::resume, onFailure = continuation::resumeWithException)
                 }
-            }
+            })
 
             server.start()
 
@@ -509,12 +493,7 @@ class OAuthFlow(private val client: HttpClient) {
     }
 
     internal fun validateCallback(params: Map<String, String>, expectedState: String): String {
-        val receivedState = params["state"]
-        val stateMatches = receivedState != null && MessageDigest.isEqual(
-            expectedState.toByteArray(Charsets.UTF_8),
-            receivedState.toByteArray(Charsets.UTF_8),
-        )
-        if (!stateMatches) throw DriveApiException("OAuth callback state is missing or invalid")
+        if (!hasValidState(params, expectedState)) throw DriveApiException("OAuth callback state is missing or invalid")
 
         params["error"]?.let { error ->
             val description = params["error_description"]?.takeIf { it.isNotBlank() }
@@ -523,6 +502,46 @@ class OAuthFlow(private val client: HttpClient) {
 
         return params["code"]?.takeIf { it.isNotBlank() }
             ?: throw DriveApiException("No authorization code received")
+    }
+
+    private fun hasValidState(params: Map<String, String>, expectedState: String): Boolean {
+        val receivedState = params["state"] ?: return false
+        return MessageDigest.isEqual(
+            expectedState.toByteArray(Charsets.UTF_8),
+            receivedState.toByteArray(Charsets.UTF_8),
+        )
+    }
+
+    /** Creates a callback handler that ignores invalid requests and stays available for Google. */
+    internal fun callbackHandler(
+        server: HttpServer,
+        expectedState: String,
+        onResult: (Result<String>) -> Unit,
+    ): HttpHandler = HttpHandler { exchange ->
+        val params = if (exchange.requestMethod == "GET") {
+            parseQueryParams(exchange.requestURI.query ?: "")
+        } else {
+            emptyMap()
+        }
+        val hasValidState = hasValidState(params, expectedState)
+        val hasCode = params["code"]?.isNotBlank() == true
+        val hasProviderError = params["error"]?.isNotBlank() == true
+        val terminalCallback = hasValidState && (hasCode || hasProviderError)
+
+        val result = if (terminalCallback) {
+            runCatching { validateCallback(params, expectedState) }
+        } else {
+            Result.failure(DriveApiException("OAuth callback is invalid; waiting for Google's response"))
+        }
+        val responseBytes = (if (terminalCallback && result.isSuccess) SUCCESS_HTML else ERROR_HTML).toByteArray()
+        exchange.responseHeaders.add("Content-Type", "text/html; charset=utf-8")
+        exchange.sendResponseHeaders(if (terminalCallback && result.isSuccess) 200 else 400, responseBytes.size.toLong())
+        exchange.responseBody.use { it.write(responseBytes) }
+
+        if (terminalCallback) {
+            server.stop(0)
+            onResult(result)
+        }
     }
 
     internal fun loopbackAddress(): InetSocketAddress =
