@@ -1,5 +1,7 @@
 package com.emusync.drive
 
+import java.time.Instant
+
 /** Immutable metadata used to plan a sync without performing file or network I/O. */
 data class LocalFileState(val relativePath: String, val modifiedTimeMs: Long)
 
@@ -9,6 +11,7 @@ data class PlannedFileAction(
     val relativePath: String,
     val local: LocalFileState?,
     val cloud: CloudFileState?,
+    val duplicateCloudFiles: List<CloudFileState>,
     val decision: SyncDecision,
 )
 
@@ -19,14 +22,18 @@ fun planDirectorySync(
     localNewerAction: LocalNewerAction = LocalNewerAction.RESOLVE_CONFLICT,
 ): List<PlannedFileAction> {
     val localByPath = localFiles.associateBy { it.relativePath }
-    val cloudByPath = cloudFiles.associateBy { it.relativePath }
+    val cloudByPath = cloudFiles.groupBy { it.relativePath }.mapValues { (_, files) ->
+        files.sortedWith(compareBy<CloudFileState> { Instant.parse(it.modifiedTimeIso) }.thenBy { it.id })
+    }
     return (localByPath.keys + cloudByPath.keys).sorted().map { relativePath ->
         val local = localByPath[relativePath]
-        val cloud = cloudByPath[relativePath]
+        val cloudCandidates = cloudByPath[relativePath].orEmpty()
+        val cloud = cloudCandidates.lastOrNull()
         PlannedFileAction(
             relativePath = relativePath,
             local = local,
             cloud = cloud,
+            duplicateCloudFiles = cloudCandidates.dropLast(1),
             decision = planSyncDecision(
                 localModifiedTimeMs = local?.modifiedTimeMs,
                 cloudModifiedTimeIso = cloud?.modifiedTimeIso,

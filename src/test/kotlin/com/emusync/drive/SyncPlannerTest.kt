@@ -40,4 +40,17 @@ class SyncPlannerTest {
 
         assertEquals(SyncDecision.UPLOAD_LOCAL, plan.single().decision)
     }
+
+    @Test
+    fun `duplicate cloud paths choose the newest file independent of input order`() {
+        val older = CloudFileState("file-a", "save.dat", base.toString())
+        val newer = CloudFileState("file-b", "save.dat", base.plusSeconds(10).toString())
+
+        val forward = planDirectorySync(emptyList(), listOf(older, newer)).single()
+        val reversed = planDirectorySync(emptyList(), listOf(newer, older)).single()
+
+        assertEquals("file-b", forward.cloud?.id)
+        assertEquals(listOf("file-a"), forward.duplicateCloudFiles.map { it.id })
+        assertEquals(forward, reversed)
+    }
 }
