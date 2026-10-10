@@ -29,11 +29,27 @@ import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.time.Instant
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class PerGameSyncTest {
 
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
+
+    @Test
+    fun `unknown missing target is a file when Drive has an exact name match`(@TempDir tempDir: File) {
+        val missingTarget = File(tempDir, "SAVE_SLOT")
+        val cloudSave = DriveFile("save-id", "SAVE_SLOT", "2026-09-25T18:00:00.000Z")
+
+        assertFalse(
+            isDirectorySaveTarget(SaveTargetType.UNKNOWN, missingTarget, listOf(cloudSave)),
+            "A matching Drive filename identifies a missing legacy target as a file",
+        )
+        assertTrue(
+            isDirectorySaveTarget(SaveTargetType.UNKNOWN, missingTarget, listOf(cloudSave.copy(name = "slot/save.dat"))),
+            "Nested cloud names identify a missing legacy target as a directory",
+        )
+    }
 
     @Test
     fun `getCloudPathSegments respects game title for EmulatorSystem with savePathsByRom`() {

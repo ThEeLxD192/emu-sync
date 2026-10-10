@@ -24,6 +24,20 @@ import java.time.format.DateTimeFormatter
 import java.util.logging.Level
 import java.util.logging.Logger
 
+internal fun isDirectorySaveTarget(
+    type: SaveTargetType,
+    path: File,
+    cloudFiles: List<DriveFile>,
+): Boolean = when (type) {
+    SaveTargetType.DIRECTORY -> true
+    SaveTargetType.FILE -> false
+    SaveTargetType.UNKNOWN -> if (path.exists()) {
+        path.isDirectory
+    } else {
+        cloudFiles.none { it.name == path.name }
+    }
+}
+
 /**
  * Orchestrates the full game lifecycle and standalone save sync:
  *
@@ -200,7 +214,7 @@ class SyncOrchestrator(
 
                 for (target in folderTargets) {
                     val savePath = target.file
-                    val isDirectory = target.type != SaveTargetType.FILE
+                    val isDirectory = isDirectorySaveTarget(target.type, savePath, cloudFiles)
 
                     if (isDirectory) {
                         val localFiles = if (savePath.exists() && savePath.isDirectory) {
@@ -302,7 +316,7 @@ class SyncOrchestrator(
                 for (target in folderTargets) {
                     val savePath = target.file
                     onStatus(AppStatus.Syncing("Syncing ${target.displayName}..."))
-                    val isDirectory = target.type != SaveTargetType.FILE
+                    val isDirectory = isDirectorySaveTarget(target.type, savePath, cloudFiles)
 
                     if (isDirectory) {
                         syncDirectoryManual(token, entry, savePath, folderId, cloudFiles, displayName = target.displayName)
@@ -411,7 +425,7 @@ class SyncOrchestrator(
 
                     for (target in localSaveTargets) {
                         val savePath = File(target.path)
-                        val isDirectory = target.type != SaveTargetType.FILE
+                        val isDirectory = isDirectorySaveTarget(target.type, savePath, cloudFiles)
 
                         if (isDirectory) {
                             val localDirFiles = if (savePath.exists() && savePath.isDirectory) {
@@ -462,7 +476,7 @@ class SyncOrchestrator(
                     if (hasConflict || (hasNewerLocal && hasNewerCloud)) {
                         val allLocalFiles = localSaveTargets.flatMap { target ->
                             val path = File(target.path)
-                            if (target.type != SaveTargetType.FILE && path.exists()) path.walkTopDown().filter { it.isFile }.toList()
+                            if (isDirectorySaveTarget(target.type, path, cloudFiles) && path.exists()) path.walkTopDown().filter { it.isFile }.toList()
                             else if (path.exists()) listOf(path) else emptyList()
                         }
                         val latestLocalMs = if (allLocalFiles.isNotEmpty()) allLocalFiles.maxOf { it.lastModified() } else System.currentTimeMillis()
@@ -483,7 +497,7 @@ class SyncOrchestrator(
                             onStatus(AppStatus.Syncing("Downloading cloud saves for $newTitle..."))
                             for (target in localSaveTargets) {
                                 val savePath = File(target.path)
-                                val isDirectory = target.type != SaveTargetType.FILE
+                                val isDirectory = isDirectorySaveTarget(target.type, savePath, cloudFiles)
                                 if (isDirectory) {
                                     for (cloudFile in cloudFiles) {
                                         val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
@@ -502,7 +516,7 @@ class SyncOrchestrator(
                             onStatus(AppStatus.Syncing("Uploading local saves for $newTitle..."))
                             for (target in localSaveTargets) {
                                 val savePath = File(target.path)
-                                if (target.type != SaveTargetType.FILE) {
+                                if (isDirectorySaveTarget(target.type, savePath, cloudFiles)) {
                                     val localFiles = savePath.walkTopDown().filter { it.isFile }.toList()
                                     for (localFile in localFiles) {
                                         val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
@@ -519,7 +533,7 @@ class SyncOrchestrator(
                         onStatus(AppStatus.Syncing("Downloading cloud saves for $newTitle..."))
                         for (target in localSaveTargets) {
                             val savePath = File(target.path)
-                            val isDirectory = target.type != SaveTargetType.FILE
+                            val isDirectory = isDirectorySaveTarget(target.type, savePath, cloudFiles)
                             if (isDirectory) {
                                 for (cloudFile in cloudFiles) {
                                     val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
@@ -538,7 +552,7 @@ class SyncOrchestrator(
                         onStatus(AppStatus.Syncing("Uploading local saves for $newTitle..."))
                         for (target in localSaveTargets) {
                             val savePath = File(target.path)
-                            if (target.type != SaveTargetType.FILE) {
+                            if (isDirectorySaveTarget(target.type, savePath, cloudFiles)) {
                                 val localFiles = savePath.walkTopDown().filter { it.isFile }.toList()
                                 for (localFile in localFiles) {
                                     val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
@@ -962,7 +976,7 @@ class SyncOrchestrator(
         val folderId = folders.ensurePath(token, cloudPathSegments)
         val cloudFiles = search.listFilesInFolder(token, folderId)
 
-        val isDirectory = targetType != SaveTargetType.FILE
+        val isDirectory = isDirectorySaveTarget(targetType, localSavePath, cloudFiles)
 
         if (isDirectory) {
             data class FilePair(val localFile: File, val cloudFile: DriveFile, val decision: SyncDecision)
