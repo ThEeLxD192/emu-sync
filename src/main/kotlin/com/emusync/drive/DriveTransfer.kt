@@ -58,10 +58,21 @@ data class TransferProgress(
     enum class Direction { DOWNLOAD, UPLOAD }
 }
 
-class DriveTransfer(
+class DriveTransfer private constructor(
     private val client: HttpClient,
-    private val onProgress: (TransferProgress) -> Unit = {},
+    private val onProgress: (TransferProgress) -> Unit,
+    private val downloadFilesUrl: String,
 ) {
+
+    constructor(
+        client: HttpClient,
+        onProgress: (TransferProgress) -> Unit = {},
+    ) : this(client, onProgress, DOWNLOAD_URL)
+
+    internal constructor(
+        client: HttpClient,
+        downloadFilesUrl: String,
+    ) : this(client, {}, downloadFilesUrl)
 
     companion object {
         private const val DOWNLOAD_URL = "https://www.googleapis.com/drive/v3/files"
@@ -86,7 +97,7 @@ class DriveTransfer(
         destination: File,
         modifiedTime: String? = null,
     ) {
-        val response = client.get("$DOWNLOAD_URL/$fileId") {
+        val response = client.get("$downloadFilesUrl/$fileId") {
             header(HttpHeaders.Authorization, "Bearer $accessToken")
             parameter("alt", "media")
             transferTimeout()
