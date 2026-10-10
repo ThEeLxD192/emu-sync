@@ -21,6 +21,39 @@ enum class SyncDecision {
     CONFLICT,
 }
 
+/** Determines how a newer local copy is handled by [planSyncDecision]. */
+enum class LocalNewerAction {
+    /** Ask for conflict resolution when the local copy is clearly newer. */
+    RESOLVE_CONFLICT,
+
+    /** Prefer local progress, as in the post-play upload step. */
+    UPLOAD,
+}
+
+/**
+ * Selects the synchronization action for a local/cloud file pair.
+ *
+ * Missing timestamps represent a missing side. When both sides exist, the
+ * established timestamp conflict policy is used by [resolveConflict].
+ */
+fun planSyncDecision(
+    localModifiedTimeMs: Long?,
+    cloudModifiedTimeIso: String?,
+    conflictThresholdSeconds: Long = 5L,
+    localNewerAction: LocalNewerAction = LocalNewerAction.RESOLVE_CONFLICT,
+): SyncDecision {
+    if (localModifiedTimeMs == null && cloudModifiedTimeIso == null) return SyncDecision.IN_SYNC
+    if (localModifiedTimeMs == null) return SyncDecision.DOWNLOAD_CLOUD
+    if (cloudModifiedTimeIso == null) return SyncDecision.UPLOAD_LOCAL
+
+    val cloudModifiedTimeMs = Instant.parse(cloudModifiedTimeIso).toEpochMilli()
+    if (localNewerAction == LocalNewerAction.UPLOAD && localModifiedTimeMs > cloudModifiedTimeMs) {
+        return SyncDecision.UPLOAD_LOCAL
+    }
+
+    return resolveConflict(localModifiedTimeMs, cloudModifiedTimeIso, conflictThresholdSeconds)
+}
+
 /**
  * Pure function that determines the sync action based on file timestamps.
  *

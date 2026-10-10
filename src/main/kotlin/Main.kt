@@ -325,6 +325,9 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                         onGameClicked = { gameItem ->
                             scope.launch { viewModel.launchGame(gameItem) }
                         },
+                        onOpenEmulator = { entry ->
+                            scope.launch { viewModel.openEmulator(entry) }
+                        },
                         onSyncCategory = {
                             uiState.selectedEntry?.let { entry ->
                                 scope.launch { viewModel.syncEntryNow(entry) }
@@ -407,6 +410,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                 EditGameDialog(
                     game = request.item,
                     notice = request.notice,
+                    cloudRestoreFileNames = request.cloudFileNames,
                     onDismiss = { viewModel.completeSaveSetup(emptyList()) },
                     onSave = { newTitle, newPaths, newCoverPath ->
                         viewModel.completeSaveSetup(newPaths, newTitle, newCoverPath)

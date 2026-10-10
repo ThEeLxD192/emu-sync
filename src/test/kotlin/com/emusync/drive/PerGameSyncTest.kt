@@ -13,13 +13,18 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -56,6 +61,51 @@ class PerGameSyncTest {
         )
 
         assertEquals(listOf("Switch", "Crash Team Racing Nitro-Fueled"), pathSegments)
+    }
+
+    @Test
+    fun `global save paths use emulator cloud folder despite empty or copied rom overrides`() {
+        val orchestrator = SyncOrchestrator(
+            client = HttpClient(MockEngine) { engine { addHandler { respond("") } } },
+            config = AppConfig(googleDrive = null),
+            configManager = ConfigManager("/tmp/mock_config.json"),
+            onStatus = {},
+        )
+        val baseSystem = EmulatorSystem(
+            name = "RPCS3",
+            executablePath = "/usr/bin/rpcs3",
+            romsDirectory = "/games/ps3",
+            extensions = listOf("iso"),
+            group = "PlayStation",
+            savePaths = listOf("/mnt/Juegos/Saves/PS3"),
+        )
+
+        val emptyOverride = baseSystem.copy(
+            savePathsByRom = mapOf("Black.iso" to emptyList()),
+        )
+        val copiedGlobalOverride = baseSystem.copy(
+            savePathsByRom = mapOf("Black.iso" to listOf("/mnt/Juegos/Saves/PS3")),
+        )
+        val distinctPerGameOverride = baseSystem.copy(
+            savePathsByRom = mapOf("Black.iso" to listOf("/mnt/Juegos/Saves/PS3/Black")),
+        )
+
+        assertEquals(
+            listOf("PlayStation"),
+            orchestrator.getCloudPathSegments(baseSystem, "Black.iso", "Black"),
+        )
+        assertEquals(
+            listOf("PlayStation"),
+            orchestrator.getCloudPathSegments(emptyOverride, "Black.iso", "Black"),
+        )
+        assertEquals(
+            listOf("PlayStation"),
+            orchestrator.getCloudPathSegments(copiedGlobalOverride, "Black.iso", "Black"),
+        )
+        assertEquals(
+            listOf("PlayStation", "Black"),
+            orchestrator.getCloudPathSegments(distinctPerGameOverride, "Black.iso", "Black"),
+        )
     }
 
     @Test
@@ -148,6 +198,7 @@ class PerGameSyncTest {
 
         val createdFolders = mutableListOf<String>()
         val uploadedFiles = mutableListOf<Pair<String, String>>() // Pair(parentFolderId, driveName)
+        var currentUploadName = "mock-file"
 
         val mockClient = HttpClient(MockEngine) {
             install(ContentNegotiation) {
@@ -196,13 +247,25 @@ class PerGameSyncTest {
                         q.contains("in parents and trashed = false") -> {
                             respond(content = """{"files":[]}""", headers = jsonHeaders)
                         }
-                        // File upload
-                        url.contains("upload/drive/v3/files") -> {
-                            val driveName = request.url.parameters["name"] ?: "unknown"
-                            val parent = request.url.parameters["parents"] ?: ""
-                            uploadedFiles.add(parent to driveName)
+                        // Start a resumable upload or update session
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            if (request.method.value == "POST") {
+                                val metadata = Json.parseToJsonElement(
+                                    (request.body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+                                ).jsonObject
+                                val driveName = metadata["name"]?.jsonPrimitive?.content ?: "unknown"
+                                currentUploadName = driveName
+                                val parent = metadata["parents"]?.jsonArray?.single()?.jsonPrimitive?.content ?: ""
+                                uploadedFiles.add(parent to driveName)
+                            }
                             respond(
-                                content = """{"id":"uploaded-file-id","name":"$driveName","modifiedTime":"2026-09-25T18:00:00.000Z"}""",
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/per-game-create"),
+                            )
+                        }
+                        request.method.value == "PUT" -> {
+                            respond(
+                                content = """{"id":"uploaded-file-id","name":"$currentUploadName","modifiedTime":"2026-09-25T18:00:00.000Z"}""",
                                 headers = jsonHeaders,
                             )
                         }
@@ -221,7 +284,7 @@ class PerGameSyncTest {
         )
 
         val success = orchestrator.syncEntry(system)
-        assertTrue(success)
+        assertTrue(success, "Sync failed with statuses: $statuses")
 
         // Verify subfolder was created
         assertTrue(createdFolders.contains("Crash Team Racing Nitro-Fueled"), "Subfolder for game should be created")
@@ -301,7 +364,13 @@ class PerGameSyncTest {
                         q.contains("in parents and trashed = false") -> {
                             respond(content = """{"files":[]}""", headers = jsonHeaders)
                         }
-                        url.contains("upload/drive/v3/files") -> {
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            respond(
+                                content = "",
+                                headers = headersOf(HttpHeaders.Location, "https://uploads.example/per-game-post"),
+                            )
+                        }
+                        request.method.value == "PUT" -> {
                             respond(
                                 content = """{"id":"uploaded-file-id","name":"OCTANE_0.sav","modifiedTime":"2026-09-25T18:00:00.000Z"}""",
                                 headers = jsonHeaders,
@@ -538,7 +607,9 @@ class PerGameSyncTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
         val romFile = File(tempDir, "Crash Team Racing Nitro-Fueled.nsp").apply { writeText("ROM") }
-        val targetLocalSave = File(tempDir, "OCTANE_0.sav") // does not exist yet
+        val destinationFolder = File(tempDir, "shared-ps1-saves").apply { mkdirs() }
+        val unrelatedLocalSave = File(destinationFolder, "Other Game.mcd").apply { writeText("OTHER_GAME_DATA") }
+        val cloudModifiedTime = Instant.now().minusSeconds(120).toString()
 
         val system = EmulatorSystem(
             name = "Eden",
@@ -560,7 +631,9 @@ class PerGameSyncTest {
         )
 
         var requestedNotice: String? = null
+        var requestedCloudFileNames: List<String> = emptyList()
         var onRequestSaveCalledCount = 0
+        var uploadSessionCount = 0
 
         val mockClient = HttpClient(MockEngine) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
@@ -586,15 +659,22 @@ class PerGameSyncTest {
                         }
                         q.contains("'game-folder-id' in parents") -> {
                             respond(
-                                content = """{"files":[{"id":"cloud-file-id","name":"OCTANE_0.sav","modifiedTime":"2026-09-25T18:00:00.000Z"}]}""",
+                                content = """{"files":[{"id":"cloud-file-id-0","name":"Bugs Bunny_1.mcd","modifiedTime":"$cloudModifiedTime"},{"id":"cloud-file-id-1","name":"Bugs Bunny_2.mcd","modifiedTime":"$cloudModifiedTime"}]}""",
                                 headers = jsonHeaders,
                             )
                         }
                         request.url.parameters["alt"] == "media" -> {
                             respond("OCTANE_CLOUD_DATA".toByteArray(), headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"))
                         }
-                        url.contains("upload/drive/v3/files") -> {
-                            respond(content = """{"id":"cloud-file-id","name":"OCTANE_0.sav"}""", headers = jsonHeaders)
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            uploadSessionCount++
+                            respond(content = "", headers = headersOf(HttpHeaders.Location, "https://uploads.example/per-game-setup"))
+                        }
+                        request.method.value == "PUT" -> {
+                            respond(
+                                content = """{"id":"uploaded-file","name":"save.mcd","modifiedTime":"$cloudModifiedTime"}""",
+                                headers = jsonHeaders,
+                            )
                         }
                         else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
                     }
@@ -617,17 +697,21 @@ class PerGameSyncTest {
 
         orchestrator.playWithSync(
             item = gameItem,
-            onRequestSaveSetup = { _, notice ->
+            onRequestSaveSetup = { _, notice, cloudFileNames ->
                 onRequestSaveCalledCount++
                 requestedNotice = notice
-                listOf(targetLocalSave.absolutePath)
+                requestedCloudFileNames = cloudFileNames
+                resolveCloudRestorePaths(destinationFolder.absolutePath, cloudFileNames)
             }
         )
 
         assertEquals(1, onRequestSaveCalledCount, "onRequestSaveSetup should be called once before launch")
         assertTrue(requestedNotice?.contains("Cloud save data was found") == true, "Notice should inform user of cloud save found")
-        assertTrue(targetLocalSave.exists(), "Target local save should have been downloaded")
-        assertEquals("OCTANE_CLOUD_DATA", targetLocalSave.readText())
+        assertEquals(listOf("Bugs Bunny_1.mcd", "Bugs Bunny_2.mcd"), requestedCloudFileNames)
+        assertEquals("OCTANE_CLOUD_DATA", File(destinationFolder, "Bugs Bunny_1.mcd").readText())
+        assertEquals("OCTANE_CLOUD_DATA", File(destinationFolder, "Bugs Bunny_2.mcd").readText())
+        assertEquals("OTHER_GAME_DATA", unrelatedLocalSave.readText())
+        assertEquals(0, uploadSessionCount, "Unrelated files in the chosen folder must not be uploaded")
     }
 
     @Test
@@ -697,7 +781,7 @@ class PerGameSyncTest {
 
         orchestrator.playWithSync(
             item = gameItem,
-            onRequestSaveSetup = { _, _ ->
+            onRequestSaveSetup = { _, _, _ ->
                 cancelledPromptCalled = true
                 emptyList()
             }
@@ -751,9 +835,15 @@ class PerGameSyncTest {
                         q.contains("name = 'New Game'") -> {
                             respond(content = """{"files":[]}""", headers = jsonHeaders)
                         }
-                        url.contains("upload/drive/v3/files") -> {
+                        url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
                             uploadedFileToCloud = true
-                            respond(content = """{"id":"new-cloud-file-id","name":"new_game.sav"}""", headers = jsonHeaders)
+                            respond(content = "", headers = headersOf(HttpHeaders.Location, "https://uploads.example/new-save"))
+                        }
+                        request.method.value == "PUT" -> {
+                            respond(
+                                content = """{"id":"new-cloud-file-id","name":"new_game.sav","modifiedTime":"2026-09-25T18:00:00.000Z"}""",
+                                headers = jsonHeaders,
+                            )
                         }
                         request.method.value == "POST" && url.contains("drive/v3/files") -> {
                             respond(content = """{"id":"created-folder-id","name":"New Game"}""", headers = jsonHeaders)
@@ -779,7 +869,7 @@ class PerGameSyncTest {
 
         orchestrator.playWithSync(
             item = gameItem,
-            onRequestSaveSetup = { _, notice ->
+            onRequestSaveSetup = { _, notice, _ ->
                 promptCount++
                 receivedNotice = notice
                 listOf(createdSave.absolutePath)

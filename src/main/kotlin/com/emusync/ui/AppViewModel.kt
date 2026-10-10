@@ -10,6 +10,7 @@ import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.NativePCGame
 import com.emusync.model.effectiveCloudFolder
 import com.emusync.scanner.scanRoms
+import com.emusync.runner.GameRunner
 import com.emusync.steam.SteamShortcutManager
 import com.emusync.update.UpdateInfo
 import com.emusync.update.UpdateManager
@@ -31,6 +32,7 @@ class AppViewModel(
     private val steamManager: SteamShortcutManager = SteamShortcutManager(),
     private val httpClient: HttpClient = DriveClientFactory.create(),
     private val updateManager: UpdateManager = UpdateManager(),
+    private val gameRunner: GameRunner = GameRunner(),
 ) {
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
@@ -217,10 +219,14 @@ class AppViewModel(
     /**
      * Pauses coroutine execution, asks the UI for save paths, and resumes.
      */
-    private suspend fun requestSaveSetup(item: GameItem, notice: String? = null): SaveSetupResult {
+    private suspend fun requestSaveSetup(
+        item: GameItem,
+        notice: String? = null,
+        cloudFileNames: List<String> = emptyList(),
+    ): SaveSetupResult {
         val deferred = CompletableDeferred<SaveSetupResult>()
         saveSetupDeferred = deferred
-        _uiState.update { it.copy(saveSetupRequest = SaveSetupRequest(item, notice)) }
+        _uiState.update { it.copy(saveSetupRequest = SaveSetupRequest(item, notice, cloudFileNames)) }
         return deferred.await()
     }
 
@@ -237,14 +243,23 @@ class AppViewModel(
             onStatus = { status -> setStatus(status) },
         )
 
-        orchestrator.playWithSync(item, onRequestSaveSetup = { reqItem, notice ->
-            val result = requestSaveSetup(reqItem, notice)
+        orchestrator.playWithSync(item, onRequestSaveSetup = { reqItem, notice, cloudFileNames ->
+            val result = requestSaveSetup(reqItem, notice, cloudFileNames)
             if (result.paths.isNotEmpty() || result.title != null || result.coverPath != null) {
                 editGameOverride(reqItem, result.paths, result.coverPath, result.title)
             }
             result.paths
         })
         checkSyncForEntry(item.entry)
+    }
+
+    /** Opens an emulator interface directly for configuration, without launching a ROM. */
+    suspend fun openEmulator(entry: EmulatorSystem) {
+        try {
+            gameRunner.openEmulator(entry)
+        } catch (e: Exception) {
+            _uiState.update { it.copy(status = AppStatus.Error("Could not open ${entry.name}: ${e.message}")) }
+        }
     }
 
     /**
@@ -324,7 +339,12 @@ class AppViewModel(
             is EmulatorSystem -> {
                 val romName = gameItem.romFile?.name ?: return
                 val newSaveOverrides = entry.savePathsByRom.toMutableMap()
-                newSaveOverrides[romName] = newPaths
+                val cleanSavePaths = newPaths.map { it.trim() }.filter { it.isNotBlank() }
+                if (cleanSavePaths.isEmpty()) {
+                    newSaveOverrides.remove(romName)
+                } else {
+                    newSaveOverrides[romName] = cleanSavePaths
+                }
 
                 val newCoverOverrides = entry.coverPathByRom.toMutableMap()
                 if (newCoverPath != null) {

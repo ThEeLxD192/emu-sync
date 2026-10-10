@@ -1,5 +1,7 @@
 package com.emusync.update
 
+import com.emusync.util.AppImageEnvironment
+
 import com.emusync.AppInfo
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -291,24 +293,7 @@ open class UpdateManager(
             pb.redirectOutput(ProcessBuilder.Redirect.DISCARD)
             pb.redirectError(ProcessBuilder.Redirect.DISCARD)
 
-            val env = pb.environment()
-            val oldAppDir = env["APPDIR"]
-            env.remove("APPDIR")
-            env.remove("ARGV0")
-            env.remove("OWD")
-            if (oldAppDir != null) {
-                val ldPath = env["LD_LIBRARY_PATH"]
-                if (ldPath != null) {
-                    val cleanLd = ldPath.split(File.pathSeparator)
-                        .filterNot { it.contains(oldAppDir) }
-                        .joinToString(File.pathSeparator)
-                    if (cleanLd.isBlank()) {
-                        env.remove("LD_LIBRARY_PATH")
-                    } else {
-                        env["LD_LIBRARY_PATH"] = cleanLd
-                    }
-                }
-            }
+            AppImageEnvironment.clean(pb.environment())
             pb.start()
         } catch (_: Throwable) {
             try {
@@ -316,9 +301,7 @@ open class UpdateManager(
                 fallbackPb.redirectInput(ProcessBuilder.Redirect.DISCARD)
                 fallbackPb.redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 fallbackPb.redirectError(ProcessBuilder.Redirect.DISCARD)
-                fallbackPb.environment().remove("APPDIR")
-                fallbackPb.environment().remove("ARGV0")
-                fallbackPb.environment().remove("OWD")
+                AppImageEnvironment.clean(fallbackPb.environment())
                 fallbackPb.start()
             } catch (_: Throwable) {
                 // Ignore

@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -87,6 +88,7 @@ fun GameGrid(
     isLoading: Boolean,
     syncStatus: CloudSyncStatus = CloudSyncStatus.IDLE,
     onGameClicked: (GameItem) -> Unit,
+    onOpenEmulator: (EmulatorSystem) -> Unit = {},
     onSyncCategory: (() -> Unit)? = null,
     onCheckSync: (() -> Unit)? = null,
     onEditGame: (GameItem) -> Unit = {},
@@ -109,6 +111,14 @@ fun GameGrid(
                     color = EmuSyncColors.OnBackground,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (selectedEntry is EmulatorSystem) {
+                        OutlinedButton(onClick = { onOpenEmulator(selectedEntry) }) {
+                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Open Emulator")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                    }
                     // Cloud Status Indicator & Manual Sync Button
                     if (onSyncCategory != null) {
                         CloudStatusChip(

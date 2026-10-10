@@ -26,6 +26,7 @@ data class DriveFile(
 @Serializable
 data class DriveFileList(
     val files: List<DriveFile> = emptyList(),
+    @SerialName("nextPageToken") val nextPageToken: String? = null,
 )
 
 /**
@@ -91,20 +92,30 @@ class DriveSearch(private val client: HttpClient) {
         folderId: String,
     ): List<DriveFile> {
         val query = "'$folderId' in parents and trashed = false"
+        val files = mutableListOf<DriveFile>()
+        var pageToken: String? = null
 
-        val response = client.get(FILES_URL) {
-            header(HttpHeaders.Authorization, "Bearer $accessToken")
-            parameter("q", query)
-            parameter("fields", "files(id, name, modifiedTime)")
-            parameter("orderBy", "modifiedTime desc")
-        }
+        do {
+            val response = client.get(FILES_URL) {
+                header(HttpHeaders.Authorization, "Bearer $accessToken")
+                parameter("q", query)
+                parameter("fields", "nextPageToken, files(id, name, modifiedTime)")
+                parameter("orderBy", "modifiedTime desc")
+                parameter("pageSize", 1000)
+                pageToken?.let { parameter("pageToken", it) }
+            }
 
-        if (response.status != HttpStatusCode.OK) {
-            val errorBody = response.body<String>()
-            throw DriveApiException("Drive list files failed (${response.status}): $errorBody")
-        }
+            if (response.status != HttpStatusCode.OK) {
+                val errorBody = response.body<String>()
+                throw DriveApiException("Drive list files failed (${response.status}): $errorBody")
+            }
 
-        return response.body<DriveFileList>().files
+            val page = response.body<DriveFileList>()
+            files.addAll(page.files)
+            pageToken = page.nextPageToken
+        } while (!pageToken.isNullOrBlank())
+
+        return files
     }
 
     /**

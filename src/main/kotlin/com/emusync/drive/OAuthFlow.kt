@@ -166,7 +166,7 @@ class OAuthFlow(private val client: HttpClient) {
                     <h1>Authorization Successful</h1>
                     <p class="subtitle">Your Google Drive is connected.<br>You can close this tab and return to EmuSync.</p>
                     <div class="brand">🎮 EmuSync</div>
-                    <p class="countdown" id="cd">This tab will close in <strong>5</strong>s</p>
+                    <p class="countdown" id="cd">This tab will try to close in <strong>5</strong>s</p>
                 </div>
                 <script>
                     let s = 5;
@@ -174,7 +174,16 @@ class OAuthFlow(private val client: HttpClient) {
                     const t = setInterval(() => {
                         s--;
                         el.textContent = s;
-                        if (s <= 0) { clearInterval(t); window.close(); }
+                        if (s <= 0) {
+                            clearInterval(t);
+                            window.close();
+                            setTimeout(() => {
+                                if (!window.closed) {
+                                    document.querySelector('#cd').textContent =
+                                        'Your browser kept this tab open. Close it manually to return to EmuSync.';
+                                }
+                            }, 250);
+                        }
                     }, 1000);
                 </script>
             </body>
