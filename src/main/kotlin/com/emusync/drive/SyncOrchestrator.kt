@@ -41,6 +41,13 @@ class SyncOrchestrator(
     private val configManager: ConfigManager,
     private val onStatus: (AppStatus) -> Unit,
 ) {
+    private data class SaveUploadTarget(val file: File, val driveName: String?, val failureReason: String? = null)
+
+    private data class PostSyncResult(
+        val completedCount: Int,
+        val failedTargets: List<SaveUploadTarget>,
+    )
+
     private val logger = Logger.getLogger(SyncOrchestrator::class.java.name)
     private val search = DriveSearch(client)
     private val transfer = DriveTransfer(client)
@@ -856,27 +863,52 @@ class SyncOrchestrator(
         syncPaths: List<String>,
         forceUploadLocal: Boolean,
         existingToken: String?,
+        retryTargets: List<SaveUploadTarget>? = null,
+        completedBeforeRetry: Int = 0,
     ): Boolean {
         val pendingPaths = syncPaths
 
         onStatus(AppStatus.Syncing("Uploading saves for ${item.effectiveTitle}..."))
-        var completedCount = 0
+        var completedCount = completedBeforeRetry
         val failedPaths = mutableListOf<String>()
+        val failedTargets = mutableListOf<SaveUploadTarget>()
         var firstFailureReason: String? = null
         try {
             val token = existingToken ?: oauthFlow.authorize(config, configManager, allowInteractive = false)
             val cloudPath = getCloudPathSegments(item)
+            for (target in retryTargets.orEmpty()) {
+                if (!target.file.exists()) continue
+                try {
+                    val result = postSync(
+                        token = token,
+                        entry = item.entry,
+                        localSavePath = target.file,
+                        cloudPathSegments = cloudPath,
+                        forceAll = false,
+                        driveNameOverride = target.driveName,
+                    )
+                    completedCount += result.completedCount
+                    failedTargets += result.failedTargets
+                    if (firstFailureReason == null) firstFailureReason = result.failedTargets.firstNotNullOfOrNull { it.failureReason }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    failedTargets += target
+                    if (firstFailureReason == null) firstFailureReason = e.message
+                }
+            }
             for (path in pendingPaths) {
                 if (!File(path).exists()) continue
                 try {
-                    postSync(
+                    val result = postSync(
                         token = token,
                         entry = item.entry,
                         localSavePath = File(path),
                         cloudPathSegments = cloudPath,
                         forceAll = forceUploadLocal,
                     )
-                    completedCount++
+                    completedCount += result.completedCount
+                    failedTargets += result.failedTargets
+                    if (firstFailureReason == null) firstFailureReason = result.failedTargets.firstNotNullOfOrNull { it.failureReason }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     failedPaths += path
@@ -889,7 +921,7 @@ class SyncOrchestrator(
             firstFailureReason = firstFailureReason ?: e.message
         }
 
-        if (failedPaths.isEmpty()) {
+        if (failedPaths.isEmpty() && failedTargets.isEmpty()) {
             onStatus(AppStatus.Idle)
             return true
         }
@@ -901,13 +933,17 @@ class SyncOrchestrator(
                 gameName = item.effectiveTitle,
                 reason = reason,
                 completedSaveCount = completedCount,
-                pendingSaveCount = failedPaths.size,
+                pendingSaveCount = failedPaths.size + failedTargets.size,
                 onRetry = {
                     uploadAfterPlay(
                         item = item,
                         syncPaths = failedPaths,
-                        forceUploadLocal = forceUploadLocal,
+                        // Re-evaluate current timestamps before retrying. A force decision
+                        // made before the previous attempt must not overwrite a newer cloud copy.
+                        forceUploadLocal = false,
                         existingToken = null,
+                        retryTargets = failedTargets,
+                        completedBeforeRetry = completedCount,
                     )
                 },
             )
@@ -1034,23 +1070,40 @@ class SyncOrchestrator(
         localSavePath: File,
         cloudPathSegments: List<String> = listOf(entry.effectiveCloudFolder),
         forceAll: Boolean = false,
-    ) {
-        if (!localSavePath.exists()) return
+        driveNameOverride: String? = null,
+    ): PostSyncResult {
+        if (!localSavePath.exists()) return PostSyncResult(0, emptyList())
 
         val folderId = folders.ensurePath(token, cloudPathSegments)
         val cloudFiles = search.listFilesInFolder(token, folderId)
+        var completedCount = 0
+        val failedTargets = mutableListOf<SaveUploadTarget>()
 
         if (localSavePath.isDirectory) {
             val localFiles = localSavePath.walkTopDown().filter { it.isFile }.toList()
             for (localFile in localFiles) {
                 val relativePath = localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/')
                 val cloudFile = cloudFiles.find { it.name == relativePath }
-                syncSingleFilePost(token, localFile, cloudFile, folderId, relativePath, force = forceAll)
+                try {
+                    syncSingleFilePost(token, localFile, cloudFile, folderId, relativePath, force = forceAll)
+                    completedCount++
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    failedTargets += SaveUploadTarget(localFile, relativePath, e.message)
+                }
             }
         } else {
-            val cloudFile = cloudFiles.find { it.name == localSavePath.name }
-            syncSingleFilePost(token, localSavePath, cloudFile, folderId, localSavePath.name, force = forceAll)
+            val driveName = driveNameOverride ?: localSavePath.name
+            val cloudFile = cloudFiles.find { it.name == driveName }
+            try {
+                syncSingleFilePost(token, localSavePath, cloudFile, folderId, driveName, force = forceAll)
+                completedCount++
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                failedTargets += SaveUploadTarget(localSavePath, driveName, e.message)
+            }
         }
+        return PostSyncResult(completedCount, failedTargets)
     }
 
     private suspend fun syncSingleFilePost(
