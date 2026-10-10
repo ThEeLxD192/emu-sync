@@ -61,6 +61,8 @@ import com.emusync.ui.components.FilePicker
 import com.emusync.ui.components.PickerType
 import com.emusync.ui.components.loadGameCover
 import com.emusync.ui.theme.EmuSyncColors
+import com.emusync.model.SaveTarget
+import com.emusync.model.SaveTargetType
 import java.io.File
 
 /**
@@ -72,7 +74,7 @@ fun EditGameDialog(
     notice: String? = null,
     cloudRestoreFileNames: List<String> = emptyList(),
     onDismiss: () -> Unit,
-    onSave: (title: String?, savePaths: List<String>, coverPath: String?) -> Unit,
+    onSave: (title: String?, saveTargets: List<SaveTarget>, coverPath: String?) -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
     var customTitle by remember {
@@ -83,6 +85,12 @@ fun EditGameDialog(
         mutableStateOf(
             if (game.gameSpecificSavePaths.isEmpty()) listOf("")
             else game.gameSpecificSavePaths
+        )
+    }
+    var saveTypes by remember {
+        mutableStateOf(
+            if (game.gameSpecificSaveTargets.isEmpty()) listOf(SaveTargetType.FILE)
+            else game.gameSpecificSaveTargets.map { it.type }
         )
     }
     var restoreDestinationFolder by remember { mutableStateOf("") }
@@ -506,12 +514,22 @@ fun EditGameDialog(
                                 placeholder = "/home/user/saves/game.sav",
                             )
                         }
+                        TextButton(onClick = {
+                            val newTypes = saveTypes.toMutableList()
+                            newTypes[index] = if (newTypes[index] == SaveTargetType.FILE) SaveTargetType.DIRECTORY else SaveTargetType.FILE
+                            saveTypes = newTypes
+                        }) {
+                            Text(if (saveTypes[index] == SaveTargetType.FILE) "File" else "Folder")
+                        }
                         if (savePaths.size > 1) {
                             Spacer(Modifier.width(8.dp))
                             IconButton(onClick = {
                                 val newList = savePaths.toMutableList()
                                 newList.removeAt(index)
                                 savePaths = newList
+                                val newTypes = saveTypes.toMutableList()
+                                newTypes.removeAt(index)
+                                saveTypes = newTypes
                             }) {
                                 Icon(
                                     Icons.Default.Delete,
@@ -525,7 +543,10 @@ fun EditGameDialog(
 
                 if (cloudRestoreFileNames.isEmpty()) {
                     TextButton(
-                        onClick = { savePaths = savePaths + "" },
+                        onClick = {
+                            savePaths = savePaths + ""
+                            saveTypes = saveTypes + SaveTargetType.FILE
+                        },
                         modifier = Modifier.align(Alignment.Start)
                     ) {
                         Text("+ Add Another Path", color = EmuSyncColors.Primary)
@@ -545,12 +566,15 @@ fun EditGameDialog(
                     Button(
                         enabled = cloudRestoreFileNames.isEmpty() || selectedRestorePaths.isNotEmpty(),
                         onClick = {
-                            val validSavePaths = if (cloudRestoreFileNames.isNotEmpty()) selectedRestorePaths else {
-                                savePaths.map { it.trim() }.filter { it.isNotBlank() }
+                            val validSaveTargets = if (cloudRestoreFileNames.isNotEmpty()) {
+                                if (restoreWholeFolder) listOf(SaveTarget(restoreDestinationFolder.trim(), SaveTargetType.DIRECTORY))
+                                else selectedRestorePaths.map { SaveTarget(it, SaveTargetType.FILE) }
+                            } else savePaths.mapIndexedNotNull { index, path ->
+                                path.trim().takeIf { it.isNotBlank() }?.let { SaveTarget(it, saveTypes[index]) }
                             }
                             val cleanCover = coverPath.trim().takeIf { it.isNotBlank() }
                             val cleanTitle = customTitle.trim().takeIf { it.isNotBlank() }
-                            onSave(cleanTitle, validSavePaths, cleanCover)
+                            onSave(cleanTitle, validSaveTargets, cleanCover)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
                     ) {

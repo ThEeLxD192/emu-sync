@@ -5,6 +5,9 @@ import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
 import com.emusync.model.NativePCGame
+import com.emusync.model.SaveTarget
+import com.emusync.model.effectiveSaveTargets
+import com.emusync.model.effectiveSaveTargetsForRom
 import com.emusync.update.UpdateInfo
 import java.io.File
 
@@ -27,16 +30,19 @@ data class GameItem(
         }
 
     val effectiveSavePaths: List<String>
+        get() = effectiveSaveTargets.map { it.path }
+
+    val effectiveSaveTargets: List<SaveTarget>
         get() = when (entry) {
-            is NativePCGame -> entry.savePaths
+            is NativePCGame -> entry.effectiveSaveTargets()
             is EmulatorSystem -> {
                 val romName = romFile?.name
-                val romPaths = if (romName != null) entry.savePathsByRom[romName] else null
+                val romTargets = if (romName != null) entry.effectiveSaveTargetsForRom(romName) else emptyList()
                 
-                if (!romPaths.isNullOrEmpty()) {
-                    romPaths
-                } else if (entry.savePaths.isNotEmpty()) {
-                    entry.savePaths
+                if (romTargets.isNotEmpty()) {
+                    romTargets
+                } else if (entry.effectiveSaveTargets().isNotEmpty()) {
+                    entry.effectiveSaveTargets()
                 } else {
                     emptyList()
                 }
@@ -45,10 +51,13 @@ data class GameItem(
 
     /** Save paths configured specifically for this ROM, without emulator-wide fallback paths. */
     val gameSpecificSavePaths: List<String>
+        get() = gameSpecificSaveTargets.map { it.path }
+
+    val gameSpecificSaveTargets: List<SaveTarget>
         get() = when (entry) {
-            is NativePCGame -> entry.savePaths
+            is NativePCGame -> entry.effectiveSaveTargets()
             is EmulatorSystem -> romFile?.name
-                ?.let { entry.savePathsByRom[it] }
+                ?.let { entry.effectiveSaveTargetsForRom(it) }
                 .orEmpty()
         }
 

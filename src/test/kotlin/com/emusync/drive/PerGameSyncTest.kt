@@ -5,6 +5,9 @@ import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.NativePCGame
+import com.emusync.model.SaveTarget
+import com.emusync.model.SaveTargetType
+import com.emusync.model.inferLegacySaveTarget
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
 import io.ktor.client.HttpClient
@@ -485,7 +488,7 @@ class PerGameSyncTest {
             romName = "CTR.nsp",
             oldTitle = "Crash Team Racing",
             newTitle = "Crash Team Racing Nitro-Fueled",
-            localSavePaths = listOf(saveFile),
+            localSaveTargets = listOf(SaveTarget(saveFile.absolutePath, SaveTargetType.FILE)),
         )
 
         assertTrue(result)
@@ -594,7 +597,7 @@ class PerGameSyncTest {
             romName = "CTR.nsp",
             oldTitle = "Crash Team Racing",
             newTitle = "Crash Team Racing Nitro-Fueled",
-            localSavePaths = listOf(saveFile),
+            localSaveTargets = listOf(SaveTarget(saveFile.absolutePath, SaveTargetType.FILE)),
         )
 
         assertTrue(result)
@@ -701,7 +704,7 @@ class PerGameSyncTest {
                 onRequestSaveCalledCount++
                 requestedNotice = notice
                 requestedCloudFileNames = cloudFileNames
-                resolveCloudRestorePaths(destinationFolder.absolutePath, cloudFileNames)
+                resolveCloudRestorePaths(destinationFolder.absolutePath, cloudFileNames).map(::inferLegacySaveTarget)
             }
         )
 
@@ -872,7 +875,7 @@ class PerGameSyncTest {
             onRequestSaveSetup = { _, notice, _ ->
                 promptCount++
                 receivedNotice = notice
-                listOf(createdSave.absolutePath)
+                listOf(SaveTarget(createdSave.absolutePath, SaveTargetType.FILE))
             }
         )
 
