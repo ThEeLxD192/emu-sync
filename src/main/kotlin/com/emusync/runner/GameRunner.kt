@@ -4,6 +4,7 @@ import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
 import com.emusync.model.NativePCGame
 import com.emusync.steam.SteamShortcutManager
+import com.emusync.util.AppImageEnvironment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -50,6 +51,7 @@ class GameRunner {
         val workingDir = File(entry.executablePath).parentFile?.takeIf { it.exists() }
         val processBuilder = ProcessBuilder(command)
         if (workingDir != null) processBuilder.directory(workingDir)
+        AppImageEnvironment.clean(processBuilder.environment())
         processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD)
             .redirectError(ProcessBuilder.Redirect.DISCARD)
             .start()
@@ -92,6 +94,10 @@ class GameRunner {
         val pb = ProcessBuilder(command)
             .directory(workingDir)
             .inheritIO()
+
+        if (entry is EmulatorSystem) {
+            AppImageEnvironment.clean(pb.environment())
+        }
 
         val process = pb.start()
 
