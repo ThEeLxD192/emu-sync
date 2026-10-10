@@ -231,7 +231,7 @@ class SteamShortcutManagerTest {
         assertEquals("-bigpicture -fullscreen", SteamShortcutManager.detectFullscreenArgs("/usr/bin/pcsx2"))
         assertEquals("-b -e", SteamShortcutManager.detectFullscreenArgs("D:\\Dolphin\\Dolphin.exe"))
         assertEquals("--fullscreen", SteamShortcutManager.detectFullscreenArgs("ppsspp.exe"))
-        assertEquals("--fullscreen", SteamShortcutManager.detectFullscreenArgs("/opt/rpcs3/rpcs3"))
+        assertEquals("", SteamShortcutManager.detectFullscreenArgs("/opt/rpcs3/rpcs3"))
         assertEquals("-f", SteamShortcutManager.detectFullscreenArgs("C:\\RetroArch\\retroarch.exe"))
         assertEquals("-f", SteamShortcutManager.detectFullscreenArgs("/usr/bin/mgba-qt"))
         assertEquals("", SteamShortcutManager.detectFullscreenArgs("notepad.exe"))

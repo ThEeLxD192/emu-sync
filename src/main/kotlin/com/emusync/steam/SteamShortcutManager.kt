@@ -57,7 +57,6 @@ open class SteamShortcutManager(
             "pcsx2"        to "-bigpicture -fullscreen",
             "dolphin"      to "-b -e",
             "ppsspp"       to "--fullscreen",
-            "rpcs3"        to "--fullscreen",
             "retroarch"    to "-f",
             "eden"         to "-f",
             "yuzu"         to "-f",
