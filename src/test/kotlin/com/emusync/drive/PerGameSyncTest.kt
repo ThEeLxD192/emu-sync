@@ -37,13 +37,18 @@ class PerGameSyncTest {
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
 
     @Test
-    fun `unknown missing target is a file when Drive has an exact name match`(@TempDir tempDir: File) {
+    fun `unknown missing target ignores exact cloud name owned by sibling target`(@TempDir tempDir: File) {
         val missingTarget = File(tempDir, "SAVE_SLOT")
         val cloudSave = DriveFile("save-id", "SAVE_SLOT", "2026-09-25T18:00:00.000Z")
+        val siblingSave = File(tempDir, "another-directory/SAVE_SLOT")
 
         assertFalse(
             isDirectorySaveTarget(SaveTargetType.UNKNOWN, missingTarget, listOf(cloudSave)),
             "A matching Drive filename identifies a missing legacy target as a file",
+        )
+        assertTrue(
+            isDirectorySaveTarget(SaveTargetType.UNKNOWN, missingTarget, listOf(cloudSave), listOf(siblingSave)),
+            "A matching cloud file claimed by another configured target must not classify this target as a file",
         )
         assertTrue(
             isDirectorySaveTarget(SaveTargetType.UNKNOWN, missingTarget, listOf(cloudSave.copy(name = "slot/save.dat"))),
