@@ -14,6 +14,7 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -26,6 +27,7 @@ import java.io.IOException
 import java.time.Instant
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.writeFully
@@ -79,6 +81,80 @@ class DriveTransferTest {
         assertContentEquals(originalBytes, destination.readBytes())
         assertEquals(originalModifiedTime, destination.lastModified())
         assertEquals(listOf("slot.sav"), tempDir.list()?.toList())
+    }
+
+    @Test
+    fun `download fails cleanly when destination parent cannot be created`(@TempDir tempDir: File) = runTest {
+        val blockingFile = File(tempDir, "not-a-directory").apply { writeText("blocker") }
+        val destination = File(blockingFile, "saves/slot.sav")
+        val body = ByteChannel(autoFlush = true)
+        body.writeFully(byteArrayOf(1))
+        body.close()
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler {
+                    respond(
+                        content = body,
+                        headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                    )
+                }
+            }
+        }
+
+        assertThrows<DriveApiException> {
+            DriveTransfer(client).download("token", "file-id", destination)
+        }
+
+        assertFalse(destination.exists())
+        assertEquals(listOf("not-a-directory"), tempDir.list()?.toList())
+    }
+
+    @Test
+    fun `download removes temporary file and preserves existing save when stream write fails`(@TempDir tempDir: File) = runTest {
+        val parent = File(tempDir, "saves").apply { mkdirs() }
+        val destination = File(parent, "slot.sav").apply { writeText("existing save") }
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler {
+                    respond(
+                        content = ByteArray(1024) { 7 },
+                        headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                    )
+                }
+            }
+        }
+
+        assertThrows<IOException> {
+            DriveTransfer(client) { throw IOException("simulated stream write failure") }
+                .download("token", "file-id", destination)
+        }
+
+        assertEquals("existing save", destination.readText(), "Failed downloads must preserve the previous save")
+        assertEquals(listOf("slot.sav"), parent.list()?.toList(), "The partial temporary file should be removed")
+    }
+
+    @Test
+    fun `cancelled download removes temporary file and preserves existing save`(@TempDir tempDir: File) = runTest {
+        val parent = File(tempDir, "saves").apply { mkdirs() }
+        val destination = File(parent, "slot.sav").apply { writeText("existing save") }
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler {
+                    respond(
+                        content = ByteArray(1024) { 9 },
+                        headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                    )
+                }
+            }
+        }
+
+        assertThrows<CancellationException> {
+            DriveTransfer(client) { throw CancellationException("simulated download cancellation") }
+                .download("token", "file-id", destination)
+        }
+
+        assertEquals("existing save", destination.readText(), "Cancellation must preserve the previous save")
+        assertEquals(listOf("slot.sav"), parent.list()?.toList(), "Cancellation should remove the partial temporary file")
     }
 
     @Test

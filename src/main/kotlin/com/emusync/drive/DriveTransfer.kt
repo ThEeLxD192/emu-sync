@@ -99,51 +99,55 @@ class DriveTransfer(
 
         val channel = response.bodyAsChannel()
         val totalBytes = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
-        withContext(Dispatchers.IO) {
-            val parent = destination.absoluteFile.parentFile
-                ?: throw DriveApiException("Could not resolve destination directory for $destination")
-            if (!parent.exists() && !parent.mkdirs()) {
-                throw DriveApiException("Could not create destination directory: $parent")
-            }
-
-            var temporaryFile: java.nio.file.Path? = null
-            try {
-                temporaryFile = Files.createTempFile(parent.toPath(), ".${destination.name}.", ".part")
-                Files.newOutputStream(temporaryFile).use { output ->
-                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                    var transferred = 0L
-                    while (!channel.isClosedForRead) {
-                        currentCoroutineContext().ensureActive()
-                        val count = channel.readAvailable(buffer)
-                        if (count == -1) break
-                        if (count == 0) continue
-                        output.write(buffer, 0, count)
-                        transferred += count
-                        onProgress(TransferProgress(TransferProgress.Direction.DOWNLOAD, destination.name, transferred, totalBytes))
-                    }
+        try {
+            withContext(Dispatchers.IO) {
+                val parent = destination.absoluteFile.parentFile
+                    ?: throw DriveApiException("Could not resolve destination directory for $destination")
+                if (!parent.exists() && !parent.mkdirs()) {
+                    throw DriveApiException("Could not create destination directory: $parent")
                 }
+
+                var temporaryFile: java.nio.file.Path? = null
                 try {
-                    Files.move(
-                        temporaryFile,
-                        destination.toPath(),
-                        StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING,
-                    )
-                } catch (_: AtomicMoveNotSupportedException) {
-                    Files.move(temporaryFile, destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
-                }
-                temporaryFile = null
-
-                if (modifiedTime != null) {
-                    try {
-                        destination.setLastModified(Instant.parse(modifiedTime).toEpochMilli())
-                    } catch (_: Exception) {
-                        // Ignore timestamp setting failure
+                    temporaryFile = Files.createTempFile(parent.toPath(), ".${destination.name}.", ".part")
+                    Files.newOutputStream(temporaryFile).use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var transferred = 0L
+                        while (!channel.isClosedForRead) {
+                            currentCoroutineContext().ensureActive()
+                            val count = channel.readAvailable(buffer)
+                            if (count == -1) break
+                            if (count == 0) continue
+                            output.write(buffer, 0, count)
+                            transferred += count
+                            onProgress(TransferProgress(TransferProgress.Direction.DOWNLOAD, destination.name, transferred, totalBytes))
+                        }
                     }
+                    try {
+                        Files.move(
+                            temporaryFile,
+                            destination.toPath(),
+                            StandardCopyOption.ATOMIC_MOVE,
+                            StandardCopyOption.REPLACE_EXISTING,
+                        )
+                    } catch (_: AtomicMoveNotSupportedException) {
+                        Files.move(temporaryFile, destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                    }
+                    temporaryFile = null
+
+                    if (modifiedTime != null) {
+                        try {
+                            destination.setLastModified(Instant.parse(modifiedTime).toEpochMilli())
+                        } catch (_: Exception) {
+                            // Ignore timestamp setting failure
+                        }
+                    }
+                } finally {
+                    temporaryFile?.let { Files.deleteIfExists(it) }
                 }
-            } finally {
-                temporaryFile?.let { Files.deleteIfExists(it) }
             }
+        } finally {
+            channel.cancel(CancellationException("Drive response body is no longer needed"))
         }
     }
 
