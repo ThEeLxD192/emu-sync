@@ -325,6 +325,9 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                         onGameClicked = { gameItem ->
                             scope.launch { viewModel.launchGame(gameItem) }
                         },
+                        onOpenEmulator = { entry ->
+                            scope.launch { viewModel.openEmulator(entry) }
+                        },
                         onSyncCategory = {
                             uiState.selectedEntry?.let { entry ->
                                 scope.launch { viewModel.syncEntryNow(entry) }

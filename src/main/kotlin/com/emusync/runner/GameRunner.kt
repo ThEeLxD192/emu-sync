@@ -41,6 +41,20 @@ data class GameResult(
  */
 class GameRunner {
 
+    /** Opens an emulator's own interface without supplying a ROM or waiting for it to exit. */
+    suspend fun openEmulator(entry: EmulatorSystem) = withContext(Dispatchers.IO) {
+        val command = buildList {
+            add(entry.executablePath)
+            addAll(entry.arguments.filterNot { it.contains("{ROM}") })
+        }
+        val workingDir = File(entry.executablePath).parentFile?.takeIf { it.exists() }
+        val processBuilder = ProcessBuilder(command)
+        if (workingDir != null) processBuilder.directory(workingDir)
+        processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start()
+    }
+
     /**
      * Launches a game and suspends until it finishes.
      *

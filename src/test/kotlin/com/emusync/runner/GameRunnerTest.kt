@@ -6,6 +6,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.api.Assumptions.assumeFalse
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -13,6 +14,31 @@ import kotlin.test.assertTrue
 class GameRunnerTest {
 
     private val runner = GameRunner()
+
+    @Test
+    fun `openEmulator starts without rom arguments`(@TempDir tempDir: File) = runTest {
+        assumeFalse(System.getProperty("os.name", "").lowercase().contains("windows"))
+        val argsFile = File(tempDir, "args.txt")
+        val emulatorScript = File(tempDir, "emulator.sh").apply {
+            writeText("#!/bin/sh\nprintf '%s\\n' \"\$@\" > '${argsFile.absolutePath}'\n")
+            setExecutable(true)
+        }
+        val emulator = EmulatorSystem(
+            name = "Test Emulator",
+            executablePath = emulatorScript.absolutePath,
+            arguments = listOf("--gui", "--load={ROM}"),
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("bin"),
+        )
+
+        runner.openEmulator(emulator)
+        repeat(50) {
+            if (argsFile.exists()) return@repeat
+            kotlinx.coroutines.delay(20)
+        }
+
+        assertEquals("--gui", argsFile.readText().trim())
+    }
 
     @Test
     fun `should fail when EmulatorSystem is launched without romFile`() = runTest {

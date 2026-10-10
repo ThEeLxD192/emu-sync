@@ -10,6 +10,7 @@ import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.NativePCGame
 import com.emusync.model.effectiveCloudFolder
 import com.emusync.scanner.scanRoms
+import com.emusync.runner.GameRunner
 import com.emusync.steam.SteamShortcutManager
 import com.emusync.update.UpdateInfo
 import com.emusync.update.UpdateManager
@@ -31,6 +32,7 @@ class AppViewModel(
     private val steamManager: SteamShortcutManager = SteamShortcutManager(),
     private val httpClient: HttpClient = DriveClientFactory.create(),
     private val updateManager: UpdateManager = UpdateManager(),
+    private val gameRunner: GameRunner = GameRunner(),
 ) {
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
@@ -249,6 +251,15 @@ class AppViewModel(
             result.paths
         })
         checkSyncForEntry(item.entry)
+    }
+
+    /** Opens an emulator interface directly for configuration, without launching a ROM. */
+    suspend fun openEmulator(entry: EmulatorSystem) {
+        try {
+            gameRunner.openEmulator(entry)
+        } catch (e: Exception) {
+            _uiState.update { it.copy(status = AppStatus.Error("Could not open ${entry.name}: ${e.message}")) }
+        }
     }
 
     /**
