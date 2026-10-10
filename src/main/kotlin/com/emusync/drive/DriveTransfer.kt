@@ -62,17 +62,24 @@ class DriveTransfer private constructor(
     private val client: HttpClient,
     private val onProgress: (TransferProgress) -> Unit,
     private val downloadFilesUrl: String,
+    private val uploadFilesUrl: String,
 ) {
 
     constructor(
         client: HttpClient,
         onProgress: (TransferProgress) -> Unit = {},
-    ) : this(client, onProgress, DOWNLOAD_URL)
+    ) : this(client, onProgress, DOWNLOAD_URL, UPLOAD_URL)
 
     internal constructor(
         client: HttpClient,
         downloadFilesUrl: String,
-    ) : this(client, {}, downloadFilesUrl)
+    ) : this(client, {}, downloadFilesUrl, UPLOAD_URL)
+
+    internal constructor(
+        client: HttpClient,
+        downloadFilesUrl: String,
+        uploadFilesUrl: String,
+    ) : this(client, {}, downloadFilesUrl, uploadFilesUrl)
 
     companion object {
         private const val DOWNLOAD_URL = "https://www.googleapis.com/drive/v3/files"
@@ -243,7 +250,7 @@ class DriveTransfer private constructor(
             "{}"
         }
 
-        val requestUrl = if (fileId == null) UPLOAD_URL else "$UPLOAD_URL/$fileId"
+        val requestUrl = if (fileId == null) uploadFilesUrl else "$uploadFilesUrl/$fileId"
         val response = if (fileId == null) {
             client.post(requestUrl) {
                 configureResumableSession(accessToken, localFile, metadata)

@@ -3,15 +3,19 @@ package com.emusync.drive
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStreamReader
 import java.net.ServerSocket
@@ -94,22 +98,105 @@ class DriveTransferCioTest {
         }
     }
 
+    @Test
+    fun `CIO resumable upload completes when response is slow beyond configured request timeout`(@TempDir tempDir: File) = runTest {
+        val server = LocalHttpServer(connectionCount = 2) { socket ->
+            val request = socket.readRequest()
+            if (request.startsWith("POST ")) {
+                socket.respond(
+                    "HTTP/1.1 200 OK\r\nLocation: http://127.0.0.1:${socket.localPort}/session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+            } else {
+                assertTrue(request.startsWith("PUT /session "))
+                Thread.sleep(300)
+                val responseBody = "{\"id\":\"cio-upload\",\"name\":\"save.sav\",\"modifiedTime\":\"2026-03-18T12:00:00Z\"}"
+                socket.respond(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
+                        "Content-Length: ${responseBody.toByteArray(StandardCharsets.US_ASCII).size}\r\n" +
+                        "Connection: close\r\n\r\n$responseBody",
+                )
+            }
+        }
+        val client = cioClientWithShortTimeouts()
+        val file = File(tempDir, "save.sav").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+
+        try {
+            val result = DriveTransfer(
+                client,
+                server.filesUrl,
+                server.uploadFilesUrl,
+            ).upload("token", file)
+            server.awaitCompletion()
+
+            assertEquals("cio-upload", result.id)
+        } finally {
+            client.close()
+            server.close()
+        }
+    }
+
+    @Test
+    fun `CIO stalled resumable upload remains active beyond timeout and completes when server responds`(@TempDir tempDir: File) = runTest {
+        val uploadReceived = CountDownLatch(1)
+        val releaseServer = CountDownLatch(1)
+        val server = LocalHttpServer(connectionCount = 2) { socket ->
+            val request = socket.readRequest()
+            if (request.startsWith("POST ")) {
+                socket.respond(
+                    "HTTP/1.1 200 OK\r\nLocation: http://127.0.0.1:${socket.localPort}/session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+            } else {
+                assertTrue(request.startsWith("PUT /session "))
+                uploadReceived.countDown()
+                releaseServer.await(3, TimeUnit.SECONDS)
+                socket.respond(uploadSuccessResponse())
+            }
+        }
+        val client = cioClientWithShortTimeouts()
+        val file = File(tempDir, "save.sav").apply { writeText("upload contents") }
+        val upload = launch {
+            DriveTransfer(client, server.filesUrl, server.uploadFilesUrl).upload("token", file)
+        }
+
+        try {
+            assertTrue(
+                withContext(Dispatchers.IO) { uploadReceived.await(3, TimeUnit.SECONDS) },
+                "The local server should receive the resumable upload",
+            )
+            withContext(Dispatchers.IO) { Thread.sleep(300) }
+            assertFalse(upload.isCompleted, "The upload transfer timeout should not abort a stalled request prematurely")
+
+            releaseServer.countDown()
+            withContext(Dispatchers.IO) { upload.join() }
+            assertTrue(upload.isCompleted)
+            assertEquals("upload contents", file.readText())
+        } finally {
+            releaseServer.countDown()
+            client.close()
+            server.close()
+        }
+    }
+
     private fun cioClientWithShortTimeouts() = HttpClient(CIO) {
+        install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
         install(HttpTimeout) {
-            connectTimeoutMillis = 1_000
-            requestTimeoutMillis = 40
-            socketTimeoutMillis = 40
+            connectTimeoutMillis = 2_000
+            requestTimeoutMillis = 150
+            socketTimeoutMillis = 150
         }
     }
 
     private class LocalHttpServer(
+        private val connectionCount: Int = 1,
         private val respond: (Socket) -> Unit,
     ) : AutoCloseable {
         private val socket = ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
         private val failure = AtomicReference<Throwable?>()
         private val thread = Thread {
             try {
-                socket.accept().use(respond)
+                repeat(connectionCount) {
+                    socket.accept().use(respond)
+                }
             } catch (error: Throwable) {
                 if (!socket.isClosed) failure.set(error)
             }
@@ -119,6 +206,7 @@ class DriveTransferCioTest {
         }
 
         val filesUrl: String = "http://127.0.0.1:${socket.localPort}/files"
+        val uploadFilesUrl: String = "http://127.0.0.1:${socket.localPort}/upload/drive/v3/files"
 
         fun awaitCompletion() {
             thread.join(3_000)
@@ -135,5 +223,46 @@ class DriveTransferCioTest {
     private fun Socket.readRequestHeaders() {
         val reader = BufferedReader(InputStreamReader(getInputStream(), StandardCharsets.US_ASCII))
         while (reader.readLine()?.isNotEmpty() == true) Unit
+    }
+
+    private fun Socket.readRequest(): String {
+        val input = getInputStream()
+        val headerBytes = ByteArrayOutputStream()
+        var delimiterMatches = 0
+        val delimiter = byteArrayOf('\r'.code.toByte(), '\n'.code.toByte(), '\r'.code.toByte(), '\n'.code.toByte())
+        while (delimiterMatches < delimiter.size) {
+            val next = input.read()
+            if (next == -1) error("Connection closed before request headers were complete")
+            headerBytes.write(next)
+            delimiterMatches = if (next == delimiter[delimiterMatches].toInt()) {
+                delimiterMatches + 1
+            } else if (next == delimiter[0].toInt()) {
+                1
+            } else {
+                0
+            }
+        }
+        val headerLines = headerBytes.toString(StandardCharsets.US_ASCII).split("\r\n")
+        val contentLength = headerLines.drop(1)
+            .firstOrNull { it.startsWith("Content-Length:", ignoreCase = true) }
+            ?.substringAfter(':')?.trim()?.toIntOrNull() ?: 0
+        repeat(contentLength) {
+            if (input.read() == -1) error("Connection closed before request body was complete")
+        }
+        return headerLines.first()
+    }
+
+    private fun Socket.respond(response: String) {
+        getOutputStream().apply {
+            write(response.toByteArray(StandardCharsets.US_ASCII))
+            flush()
+        }
+    }
+
+    private fun uploadSuccessResponse(): String {
+        val body = "{\"id\":\"cio-upload\",\"name\":\"save.sav\",\"modifiedTime\":\"2026-03-18T12:00:00Z\"}"
+        return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
+            "Content-Length: ${body.toByteArray(StandardCharsets.US_ASCII).size}\r\n" +
+            "Connection: close\r\n\r\n$body"
     }
 }
