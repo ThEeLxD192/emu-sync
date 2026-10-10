@@ -630,6 +630,100 @@ class PerGameSyncTest {
     }
 
     @Test
+    fun `rename conflict date ignores newer in-sync file sibling excluded from directory`(@TempDir tempDir: File) = runTest {
+        val configManager = ConfigManager(File(tempDir, "config.json").absolutePath)
+        val saveDirectory = File(tempDir, "saves").apply { mkdirs() }
+        val localSave = File(saveDirectory, "slot.dat").apply { writeText("LOCAL") }
+        val directoryCloudTime = Instant.parse("2026-09-25T15:00:00Z")
+        localSave.setLastModified(directoryCloudTime.plusSeconds(30).toEpochMilli())
+        val siblingFile = File(tempDir, "SAVE_SLOT").apply { writeText("SIBLING") }
+        val siblingCloudTime = Instant.parse("2026-09-26T15:00:00Z")
+        siblingFile.setLastModified(siblingCloudTime.toEpochMilli())
+
+        val system = EmulatorSystem(
+            name = "Eden",
+            executablePath = "echo",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("nsp"),
+            group = "Switch",
+            savePaths = emptyList(),
+            savePathsByRom = emptyMap(),
+        )
+        val config = AppConfig(
+            googleDrive = GoogleDriveConfig(
+                clientId = "test-client",
+                clientSecret = "test-secret",
+                refreshToken = "test-refresh-token",
+            ),
+            entries = listOf(system),
+        )
+        configManager.save(config)
+
+        var shownCloudDate: String? = null
+        val mockClient = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    val url = request.url.toString()
+                    val q = request.url.parameters["q"] ?: ""
+                    when {
+                        url.contains("oauth2.googleapis.com/token") -> respond(
+                            content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
+                            headers = jsonHeaders,
+                        )
+                        q.contains("name = 'EmuSync'") -> respond(
+                            content = """{"files":[{"id":"root-id","name":"EmuSync"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Switch'") -> respond(
+                            content = """{"files":[{"id":"switch-id","name":"Switch"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Old Title'") -> respond(
+                            content = """{"files":[]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'New Title'") -> respond(
+                            content = """{"files":[{"id":"new-folder","name":"New Title"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("'new-folder' in parents") -> respond(
+                            content = """{"files":[{"id":"directory-save","name":"slot.dat","modifiedTime":"${directoryCloudTime}"},{"id":"sibling-save","name":"SAVE_SLOT","modifiedTime":"${siblingCloudTime}"}]}""",
+                            headers = jsonHeaders,
+                        )
+                        else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
+                    }
+                }
+            }
+        }
+
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = config,
+            configManager = configManager,
+            onStatus = { status ->
+                if (status is AppStatus.Conflict) {
+                    shownCloudDate = status.cloudDate
+                    status.onResolve(SyncDecision.DOWNLOAD_CLOUD)
+                }
+            },
+        )
+
+        val result = orchestrator.renameGameCloudData(
+            entry = system,
+            romName = "game.nsp",
+            oldTitle = "Old Title",
+            newTitle = "New Title",
+            localSaveTargets = listOf(
+                SaveTarget(saveDirectory.absolutePath, SaveTargetType.DIRECTORY),
+                SaveTarget(siblingFile.absolutePath, SaveTargetType.FILE),
+            ),
+        )
+
+        assertTrue(result)
+        assertEquals(
+            SyncOrchestrator.formatTimestamp(directoryCloudTime.toEpochMilli()),
+            shownCloudDate,
+        )
+    }
+
+    @Test
     fun `playWithSync prompts for save path before launch when cloud saves exist and downloads them to selected path`(@TempDir tempDir: File) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)

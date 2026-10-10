@@ -457,6 +457,7 @@ class SyncOrchestrator(
                     var hasConflict = false
                     var hasNewerLocal = false
                     var hasNewerCloud = false
+                    val relevantCloudFiles = mutableListOf<DriveFile>()
 
                     for (target in localSaveTargets) {
                         val savePath = File(target.path)
@@ -476,11 +477,18 @@ class SyncOrchestrator(
                                 val localF = resolveRemoteFile(savePath, cloudFile.name) ?: continue
                                 if (!localF.exists()) {
                                     hasNewerCloud = true
+                                    relevantCloudFiles += cloudFile
                                 } else {
                                     val decision = resolveConflict(localF.lastModified(), cloudFile.modifiedTime)
                                     when (decision) {
-                                        SyncDecision.CONFLICT -> hasConflict = true
-                                        SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
+                                        SyncDecision.CONFLICT -> {
+                                            hasConflict = true
+                                            relevantCloudFiles += cloudFile
+                                        }
+                                        SyncDecision.DOWNLOAD_CLOUD -> {
+                                            hasNewerCloud = true
+                                            relevantCloudFiles += cloudFile
+                                        }
                                         SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
                                         SyncDecision.IN_SYNC -> {}
                                     }
@@ -497,15 +505,22 @@ class SyncOrchestrator(
                             val localExists = savePath.exists()
                             val cloudExists = cloudFile != null
 
-                            if (!localExists && cloudExists) {
+                            if (!localExists && cloudFile != null) {
                                 hasNewerCloud = true
+                                relevantCloudFiles += cloudFile
                             } else if (localExists && !cloudExists) {
                                 hasNewerLocal = true
                             } else if (localExists && cloudFile != null) {
                                 val decision = resolveConflict(savePath.lastModified(), cloudFile.modifiedTime)
                                 when (decision) {
-                                    SyncDecision.CONFLICT -> hasConflict = true
-                                    SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
+                                    SyncDecision.CONFLICT -> {
+                                        hasConflict = true
+                                        relevantCloudFiles += cloudFile
+                                    }
+                                    SyncDecision.DOWNLOAD_CLOUD -> {
+                                        hasNewerCloud = true
+                                        relevantCloudFiles += cloudFile
+                                    }
                                     SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
                                     SyncDecision.IN_SYNC -> {}
                                 }
@@ -522,7 +537,9 @@ class SyncOrchestrator(
                             else if (path.exists()) listOf(path) else emptyList()
                         }
                         val latestLocalMs = if (allLocalFiles.isNotEmpty()) allLocalFiles.maxOf { it.lastModified() } else System.currentTimeMillis()
-                        val latestCloudMs = if (cloudFiles.isNotEmpty()) cloudFiles.maxOf { Instant.parse(it.modifiedTime).toEpochMilli() } else System.currentTimeMillis()
+                        val latestCloudMs = relevantCloudFiles.maxOfOrNull {
+                            Instant.parse(it.modifiedTime).toEpochMilli()
+                        } ?: System.currentTimeMillis()
 
                         val choice: SyncDecision = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
                             onStatus(AppStatus.Conflict(
