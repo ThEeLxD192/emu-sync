@@ -751,7 +751,7 @@ class SyncOrchestrator(
      */
     suspend fun playWithSync(
         item: GameItem,
-        onRequestSaveSetup: suspend (item: GameItem, notice: String?) -> List<String> = { _, _ -> emptyList() }
+        onRequestSaveSetup: suspend (item: GameItem, notice: String?, cloudFileNames: List<String>) -> List<String> = { _, _, _ -> emptyList() }
     ) {
         try {
             val hasDriveConfig = config.googleDrive != null
@@ -777,8 +777,8 @@ class SyncOrchestrator(
 
                         if (cloudFiles.isNotEmpty()) {
                             onStatus(AppStatus.Idle)
-                            val notice = "Cloud save data was found for this game! Please select the local file or folder where it should be downloaded before launching."
-                            val requested = onRequestSaveSetup(item, notice)
+                            val notice = "Cloud save data was found for this game. Choose one destination folder; only these listed files will be synchronized for this game."
+                            val requested = onRequestSaveSetup(item, notice, cloudFiles.map { it.name })
                             if (requested.isNotEmpty()) {
                                 currentSyncPaths = requested
                             } else {
@@ -819,7 +819,7 @@ class SyncOrchestrator(
 
             // ── Step 2.5: Ask for save paths if empty ───────────────
             if (currentSyncPaths.isEmpty() && result.exitCode == 0) {
-                currentSyncPaths = onRequestSaveSetup(item, null)
+                currentSyncPaths = onRequestSaveSetup(item, null, emptyList())
             }
 
             // ── Step 3: Post-Sync (upload local save if modified) ───

@@ -206,6 +206,7 @@ sealed interface UpdateUiState {
 data class SaveSetupRequest(
     val item: GameItem,
     val notice: String? = null,
+    val cloudFileNames: List<String> = emptyList(),
 )
 
 /**

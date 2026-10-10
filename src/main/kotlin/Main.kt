@@ -407,6 +407,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                 EditGameDialog(
                     game = request.item,
                     notice = request.notice,
+                    cloudRestoreFileNames = request.cloudFileNames,
                     onDismiss = { viewModel.completeSaveSetup(emptyList()) },
                     onSave = { newTitle, newPaths, newCoverPath ->
                         viewModel.completeSaveSetup(newPaths, newTitle, newCoverPath)

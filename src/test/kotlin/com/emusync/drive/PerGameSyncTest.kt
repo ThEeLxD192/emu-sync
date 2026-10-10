@@ -24,6 +24,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -561,7 +562,9 @@ class PerGameSyncTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
         val romFile = File(tempDir, "Crash Team Racing Nitro-Fueled.nsp").apply { writeText("ROM") }
-        val targetLocalSave = File(tempDir, "OCTANE_0.sav") // does not exist yet
+        val destinationFolder = File(tempDir, "shared-ps1-saves").apply { mkdirs() }
+        val unrelatedLocalSave = File(destinationFolder, "Other Game.mcd").apply { writeText("OTHER_GAME_DATA") }
+        val cloudModifiedTime = Instant.now().minusSeconds(120).toString()
 
         val system = EmulatorSystem(
             name = "Eden",
@@ -583,7 +586,9 @@ class PerGameSyncTest {
         )
 
         var requestedNotice: String? = null
+        var requestedCloudFileNames: List<String> = emptyList()
         var onRequestSaveCalledCount = 0
+        var uploadSessionCount = 0
 
         val mockClient = HttpClient(MockEngine) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
@@ -609,7 +614,7 @@ class PerGameSyncTest {
                         }
                         q.contains("'game-folder-id' in parents") -> {
                             respond(
-                                content = """{"files":[{"id":"cloud-file-id","name":"OCTANE_0.sav","modifiedTime":"2026-09-25T18:00:00.000Z"}]}""",
+                                content = """{"files":[{"id":"cloud-file-id-0","name":"Bugs Bunny_1.mcd","modifiedTime":"$cloudModifiedTime"},{"id":"cloud-file-id-1","name":"Bugs Bunny_2.mcd","modifiedTime":"$cloudModifiedTime"}]}""",
                                 headers = jsonHeaders,
                             )
                         }
@@ -617,11 +622,12 @@ class PerGameSyncTest {
                             respond("OCTANE_CLOUD_DATA".toByteArray(), headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"))
                         }
                         url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
+                            uploadSessionCount++
                             respond(content = "", headers = headersOf(HttpHeaders.Location, "https://uploads.example/per-game-setup"))
                         }
                         request.method.value == "PUT" -> {
                             respond(
-                                content = """{"id":"cloud-file-id","name":"OCTANE_0.sav","modifiedTime":"2026-09-25T18:00:00.000Z"}""",
+                                content = """{"id":"uploaded-file","name":"save.mcd","modifiedTime":"$cloudModifiedTime"}""",
                                 headers = jsonHeaders,
                             )
                         }
@@ -646,17 +652,21 @@ class PerGameSyncTest {
 
         orchestrator.playWithSync(
             item = gameItem,
-            onRequestSaveSetup = { _, notice ->
+            onRequestSaveSetup = { _, notice, cloudFileNames ->
                 onRequestSaveCalledCount++
                 requestedNotice = notice
-                listOf(targetLocalSave.absolutePath)
+                requestedCloudFileNames = cloudFileNames
+                resolveCloudRestorePaths(destinationFolder.absolutePath, cloudFileNames)
             }
         )
 
         assertEquals(1, onRequestSaveCalledCount, "onRequestSaveSetup should be called once before launch")
         assertTrue(requestedNotice?.contains("Cloud save data was found") == true, "Notice should inform user of cloud save found")
-        assertTrue(targetLocalSave.exists(), "Target local save should have been downloaded")
-        assertEquals("OCTANE_CLOUD_DATA", targetLocalSave.readText())
+        assertEquals(listOf("Bugs Bunny_1.mcd", "Bugs Bunny_2.mcd"), requestedCloudFileNames)
+        assertEquals("OCTANE_CLOUD_DATA", File(destinationFolder, "Bugs Bunny_1.mcd").readText())
+        assertEquals("OCTANE_CLOUD_DATA", File(destinationFolder, "Bugs Bunny_2.mcd").readText())
+        assertEquals("OTHER_GAME_DATA", unrelatedLocalSave.readText())
+        assertEquals(0, uploadSessionCount, "Unrelated files in the chosen folder must not be uploaded")
     }
 
     @Test
@@ -726,7 +736,7 @@ class PerGameSyncTest {
 
         orchestrator.playWithSync(
             item = gameItem,
-            onRequestSaveSetup = { _, _ ->
+            onRequestSaveSetup = { _, _, _ ->
                 cancelledPromptCalled = true
                 emptyList()
             }
@@ -814,7 +824,7 @@ class PerGameSyncTest {
 
         orchestrator.playWithSync(
             item = gameItem,
-            onRequestSaveSetup = { _, notice ->
+            onRequestSaveSetup = { _, notice, _ ->
                 promptCount++
                 receivedNotice = notice
                 listOf(createdSave.absolutePath)

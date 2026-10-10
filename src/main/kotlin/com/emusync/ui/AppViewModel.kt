@@ -217,10 +217,14 @@ class AppViewModel(
     /**
      * Pauses coroutine execution, asks the UI for save paths, and resumes.
      */
-    private suspend fun requestSaveSetup(item: GameItem, notice: String? = null): SaveSetupResult {
+    private suspend fun requestSaveSetup(
+        item: GameItem,
+        notice: String? = null,
+        cloudFileNames: List<String> = emptyList(),
+    ): SaveSetupResult {
         val deferred = CompletableDeferred<SaveSetupResult>()
         saveSetupDeferred = deferred
-        _uiState.update { it.copy(saveSetupRequest = SaveSetupRequest(item, notice)) }
+        _uiState.update { it.copy(saveSetupRequest = SaveSetupRequest(item, notice, cloudFileNames)) }
         return deferred.await()
     }
 
@@ -237,8 +241,8 @@ class AppViewModel(
             onStatus = { status -> setStatus(status) },
         )
 
-        orchestrator.playWithSync(item, onRequestSaveSetup = { reqItem, notice ->
-            val result = requestSaveSetup(reqItem, notice)
+        orchestrator.playWithSync(item, onRequestSaveSetup = { reqItem, notice, cloudFileNames ->
+            val result = requestSaveSetup(reqItem, notice, cloudFileNames)
             if (result.paths.isNotEmpty() || result.title != null || result.coverPath != null) {
                 editGameOverride(reqItem, result.paths, result.coverPath, result.title)
             }

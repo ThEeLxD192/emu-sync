@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,8 +54,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.emusync.ui.GameItem
+import com.emusync.drive.resolveCloudRestorePaths
 import com.emusync.model.EmulatorSystem
+import com.emusync.ui.GameItem
 import com.emusync.ui.components.FilePicker
 import com.emusync.ui.components.PickerType
 import com.emusync.ui.components.loadGameCover
@@ -67,6 +70,7 @@ import java.io.File
 fun EditGameDialog(
     game: GameItem,
     notice: String? = null,
+    cloudRestoreFileNames: List<String> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (title: String?, savePaths: List<String>, coverPath: String?) -> Unit,
 ) {
@@ -81,6 +85,8 @@ fun EditGameDialog(
             else game.gameSpecificSavePaths
         )
     }
+    var restoreDestinationFolder by remember { mutableStateOf("") }
+    var restoreWholeFolder by remember { mutableStateOf(false) }
 
     var coverPath by remember {
         mutableStateOf(game.effectiveCoverPath ?: "")
@@ -409,14 +415,16 @@ fun EditGameDialog(
 
                 // ── Save Paths Section ────────────────────────────
                 Text(
-                    text = "Save Files/Directories Paths",
+                    text = if (cloudRestoreFileNames.isNotEmpty()) "Cloud Save Destination" else "Save Files/Directories Paths",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = EmuSyncColors.OnSurface,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = if (game.entry is EmulatorSystem) {
+                    text = if (cloudRestoreFileNames.isNotEmpty()) {
+                        "Choose one folder. The cloud files below will be restored as individual files; other files in this folder will not be synced."
+                    } else if (game.entry is EmulatorSystem) {
                         "Only paths specific to this game. Emulator-wide paths are configured in the system settings."
                     } else {
                         "Specific save files or directories synchronized for this game."
@@ -426,7 +434,47 @@ fun EditGameDialog(
                 )
                 Spacer(Modifier.height(10.dp))
 
-                savePaths.forEachIndexed { index, path ->
+                if (cloudRestoreFileNames.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { restoreWholeFolder = false },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = !restoreWholeFolder, onClick = { restoreWholeFolder = false })
+                        Text("Only the cloud files listed below", color = EmuSyncColors.OnSurface)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { restoreWholeFolder = true },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = restoreWholeFolder, onClick = { restoreWholeFolder = true })
+                        Text("The entire folder", color = EmuSyncColors.OnSurface)
+                    }
+                    Text(
+                        text = if (restoreWholeFolder) {
+                            "Every file in this folder will be synchronized. Use a dedicated folder if it contains saves from other games."
+                        } else {
+                            "Only the cloud files listed below will be synchronized; other files in the folder will be left alone."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = EmuSyncColors.OnSurfaceDim,
+                        modifier = Modifier.padding(start = 8.dp, bottom = 8.dp),
+                    )
+                    EditPathField(
+                        value = restoreDestinationFolder,
+                        onValueChange = { restoreDestinationFolder = it },
+                        placeholder = "/home/user/saves/PS1",
+                        allowFileSelection = false,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    cloudRestoreFileNames.forEach { fileName ->
+                        Text(
+                            text = "• $fileName",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = EmuSyncColors.OnSurfaceDim,
+                            modifier = Modifier.padding(start = 8.dp, bottom = 3.dp),
+                        )
+                    }
+                } else savePaths.forEachIndexed { index, path ->
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -459,11 +507,13 @@ fun EditGameDialog(
                     }
                 }
 
-                TextButton(
-                    onClick = { savePaths = savePaths + "" },
-                    modifier = Modifier.align(Alignment.Start)
-                ) {
-                    Text("+ Add Another Path", color = EmuSyncColors.Primary)
+                if (cloudRestoreFileNames.isEmpty()) {
+                    TextButton(
+                        onClick = { savePaths = savePaths + "" },
+                        modifier = Modifier.align(Alignment.Start)
+                    ) {
+                        Text("+ Add Another Path", color = EmuSyncColors.Primary)
+                    }
                 }
 
                 Spacer(Modifier.height(20.dp))
@@ -478,7 +528,16 @@ fun EditGameDialog(
                     }
                     Button(
                         onClick = {
-                            val validSavePaths = savePaths.map { it.trim() }.filter { it.isNotBlank() }
+                            val validSavePaths = if (cloudRestoreFileNames.isNotEmpty()) {
+                                val destination = restoreDestinationFolder.trim()
+                                when {
+                                    destination.isBlank() -> emptyList()
+                                    restoreWholeFolder -> listOf(destination)
+                                    else -> resolveCloudRestorePaths(destination, cloudRestoreFileNames)
+                                }
+                            } else {
+                                savePaths.map { it.trim() }.filter { it.isNotBlank() }
+                            }
                             val cleanCover = coverPath.trim().takeIf { it.isNotBlank() }
                             val cleanTitle = customTitle.trim().takeIf { it.isNotBlank() }
                             onSave(cleanTitle, validSavePaths, cleanCover)
@@ -498,6 +557,7 @@ private fun EditPathField(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,
+    allowFileSelection: Boolean = true,
 ) {
     val coroutineScope = rememberCoroutineScope()
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -522,7 +582,7 @@ private fun EditPathField(
             shape = RoundedCornerShape(10.dp),
         )
         Spacer(Modifier.width(8.dp))
-        Button(
+        if (allowFileSelection) Button(
             onClick = {
                 coroutineScope.launch {
                     val result = withContext(Dispatchers.IO) {
@@ -544,7 +604,7 @@ private fun EditPathField(
         ) {
             Text("File")
         }
-        Spacer(Modifier.width(8.dp))
+        if (allowFileSelection) Spacer(Modifier.width(8.dp))
         Button(
             onClick = {
                 coroutineScope.launch {
