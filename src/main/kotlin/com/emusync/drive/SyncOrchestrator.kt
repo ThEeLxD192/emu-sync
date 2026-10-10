@@ -200,7 +200,7 @@ class SyncOrchestrator(
 
                 for (target in folderTargets) {
                     val savePath = target.file
-                    val isDirectory = target.type == SaveTargetType.DIRECTORY
+                    val isDirectory = target.type != SaveTargetType.FILE
 
                     if (isDirectory) {
                         val localFiles = if (savePath.exists() && savePath.isDirectory) {
@@ -302,7 +302,7 @@ class SyncOrchestrator(
                 for (target in folderTargets) {
                     val savePath = target.file
                     onStatus(AppStatus.Syncing("Syncing ${target.displayName}..."))
-                    val isDirectory = target.type == SaveTargetType.DIRECTORY
+                    val isDirectory = target.type != SaveTargetType.FILE
 
                     if (isDirectory) {
                         syncDirectoryManual(token, entry, savePath, folderId, cloudFiles, displayName = target.displayName)
@@ -411,7 +411,7 @@ class SyncOrchestrator(
 
                     for (target in localSaveTargets) {
                         val savePath = File(target.path)
-                        val isDirectory = target.type == SaveTargetType.DIRECTORY
+                        val isDirectory = target.type != SaveTargetType.FILE
 
                         if (isDirectory) {
                             val localDirFiles = if (savePath.exists() && savePath.isDirectory) {
@@ -462,7 +462,7 @@ class SyncOrchestrator(
                     if (hasConflict || (hasNewerLocal && hasNewerCloud)) {
                         val allLocalFiles = localSaveTargets.flatMap { target ->
                             val path = File(target.path)
-                            if (target.type == SaveTargetType.DIRECTORY && path.exists()) path.walkTopDown().filter { it.isFile }.toList()
+                            if (target.type != SaveTargetType.FILE && path.exists()) path.walkTopDown().filter { it.isFile }.toList()
                             else if (path.exists()) listOf(path) else emptyList()
                         }
                         val latestLocalMs = if (allLocalFiles.isNotEmpty()) allLocalFiles.maxOf { it.lastModified() } else System.currentTimeMillis()
@@ -483,7 +483,7 @@ class SyncOrchestrator(
                             onStatus(AppStatus.Syncing("Downloading cloud saves for $newTitle..."))
                             for (target in localSaveTargets) {
                                 val savePath = File(target.path)
-                                val isDirectory = target.type == SaveTargetType.DIRECTORY
+                                val isDirectory = target.type != SaveTargetType.FILE
                                 if (isDirectory) {
                                     for (cloudFile in cloudFiles) {
                                         val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
@@ -502,7 +502,7 @@ class SyncOrchestrator(
                             onStatus(AppStatus.Syncing("Uploading local saves for $newTitle..."))
                             for (target in localSaveTargets) {
                                 val savePath = File(target.path)
-                                if (target.type == SaveTargetType.DIRECTORY) {
+                                if (target.type != SaveTargetType.FILE) {
                                     val localFiles = savePath.walkTopDown().filter { it.isFile }.toList()
                                     for (localFile in localFiles) {
                                         val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
@@ -519,7 +519,7 @@ class SyncOrchestrator(
                         onStatus(AppStatus.Syncing("Downloading cloud saves for $newTitle..."))
                         for (target in localSaveTargets) {
                             val savePath = File(target.path)
-                            val isDirectory = target.type == SaveTargetType.DIRECTORY
+                            val isDirectory = target.type != SaveTargetType.FILE
                             if (isDirectory) {
                                 for (cloudFile in cloudFiles) {
                                     val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
@@ -538,7 +538,7 @@ class SyncOrchestrator(
                         onStatus(AppStatus.Syncing("Uploading local saves for $newTitle..."))
                         for (target in localSaveTargets) {
                             val savePath = File(target.path)
-                            if (target.type == SaveTargetType.DIRECTORY) {
+                            if (target.type != SaveTargetType.FILE) {
                                 val localFiles = savePath.walkTopDown().filter { it.isFile }.toList()
                                 for (localFile in localFiles) {
                                     val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
@@ -962,7 +962,7 @@ class SyncOrchestrator(
         val folderId = folders.ensurePath(token, cloudPathSegments)
         val cloudFiles = search.listFilesInFolder(token, folderId)
 
-        val isDirectory = targetType == SaveTargetType.DIRECTORY
+        val isDirectory = targetType != SaveTargetType.FILE
 
         if (isDirectory) {
             data class FilePair(val localFile: File, val cloudFile: DriveFile, val decision: SyncDecision)
@@ -1072,7 +1072,11 @@ class SyncOrchestrator(
         var completedCount = 0
         val failedTargets = mutableListOf<SaveUploadTarget>()
 
-        if (targetType == SaveTargetType.DIRECTORY) {
+        // Legacy paths that did not exist during config migration remain UNKNOWN until
+        // the game creates them. Resolve from the filesystem after the game exits.
+        val isDirectory = targetType == SaveTargetType.DIRECTORY ||
+            (targetType == SaveTargetType.UNKNOWN && localSavePath.isDirectory)
+        if (isDirectory) {
             val localFiles = localSavePath.walkTopDown().filter { it.isFile }.toList()
             for (localFile in localFiles) {
                 val relativePath = localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/')

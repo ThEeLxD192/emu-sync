@@ -380,7 +380,11 @@ fun AddEntryDialog(
                             newTypes[index] = if (newTypes[index] == SaveTargetType.FILE) SaveTargetType.DIRECTORY else SaveTargetType.FILE
                             saveTypes = newTypes
                         }) {
-                            Text(if (saveTypes[index] == SaveTargetType.FILE) "File" else "Folder")
+                            Text(when (saveTypes[index]) {
+                                SaveTargetType.FILE -> "File"
+                                SaveTargetType.DIRECTORY -> "Folder"
+                                SaveTargetType.UNKNOWN -> "Choose type"
+                            })
                         }
                         if (savePaths.size > 1) {
                             Spacer(Modifier.width(8.dp))

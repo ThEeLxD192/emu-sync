@@ -214,4 +214,34 @@ class ConfigManagerTest {
         val loaded = manager.load().entries.single() as NativePCGame
         assertEquals(SaveTargetType.DIRECTORY, loaded.saveTargets.single().type)
     }
+
+    @Test
+    fun `missing dotted legacy path stays unknown until created as a directory`(@TempDir tempDir: File) {
+        val dottedPath = File(tempDir, "profile.d")
+        val configFile = File(tempDir, "config.json").apply {
+            writeText(
+                """
+                {
+                  "entries": [{
+                    "type": "native",
+                    "name": "Legacy",
+                    "executablePath": "/game/start",
+                    "savePaths": [${Json.encodeToString(dottedPath.absolutePath)}]
+                  }]
+                }
+                """.trimIndent()
+            )
+        }
+        val manager = ConfigManager(configFile)
+
+        val firstLoad = manager.load().entries.single() as NativePCGame
+        assertEquals(SaveTargetType.UNKNOWN, firstLoad.saveTargets.single().type)
+
+        dottedPath.mkdirs()
+        File(dottedPath, "save.dat").writeText("save")
+
+        val secondLoad = manager.load().entries.single() as NativePCGame
+        assertEquals(SaveTargetType.DIRECTORY, secondLoad.saveTargets.single().type)
+        assertTrue(configFile.readText().contains("\"directory\""))
+    }
 }

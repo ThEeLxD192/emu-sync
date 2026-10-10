@@ -8,6 +8,8 @@ import java.io.File
 enum class SaveTargetType {
     @SerialName("file") FILE,
     @SerialName("directory") DIRECTORY,
+    /** The legacy path did not exist during migration, so its type was unknowable. */
+    @SerialName("unknown") UNKNOWN,
 }
 
 @Serializable
@@ -21,8 +23,7 @@ fun inferLegacySaveTarget(path: String): SaveTarget {
     val file = File(path)
     val type = when {
         file.exists() -> if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
-        file.extension.isNotEmpty() -> SaveTargetType.FILE
-        else -> SaveTargetType.DIRECTORY
+        else -> SaveTargetType.UNKNOWN
     }
     return SaveTarget(path, type)
 }
@@ -166,12 +167,21 @@ data class NativePCGame(
     val coverPath: String? = null,
 ) : GameEntry
 
+private fun SaveTarget.resolveUnknownTypeIfPresent(): SaveTarget {
+    if (type != SaveTargetType.UNKNOWN) return this
+    val file = File(path)
+    if (!file.exists()) return this
+    return copy(type = if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE)
+}
+
 fun GameEntry.effectiveSaveTargets(): List<SaveTarget> =
-    saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) }
+    (saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) })
+        .map(SaveTarget::resolveUnknownTypeIfPresent)
 
 fun EmulatorSystem.effectiveSaveTargetsForRom(romName: String): List<SaveTarget> =
-    saveTargetsByRom[romName]
+    saveTargetsByRom[romName]?.map(SaveTarget::resolveUnknownTypeIfPresent)
         ?: saveTargetsByRom[romName.substringBeforeLast('.', romName)]
+            ?.map(SaveTarget::resolveUnknownTypeIfPresent)
         ?: savePathsByRom[romName]?.filter { it.isNotBlank() }?.map(::inferLegacySaveTarget)
         ?: savePathsByRom[romName.substringBeforeLast('.', romName)]?.filter { it.isNotBlank() }?.map(::inferLegacySaveTarget)
         ?: emptyList()
@@ -179,8 +189,10 @@ fun EmulatorSystem.effectiveSaveTargetsForRom(romName: String): List<SaveTarget>
 /** Adds explicit types to legacy paths without changing their path values. */
 fun GameEntry.migrateLegacySaveTargets(): GameEntry = when (this) {
     is EmulatorSystem -> copy(
-        saveTargets = saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) },
+        saveTargets = (saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) })
+            .map(SaveTarget::resolveUnknownTypeIfPresent),
         saveTargetsByRom = saveTargetsByRom.toMutableMap().apply {
+            replaceAll { _, targets -> targets.map(SaveTarget::resolveUnknownTypeIfPresent) }
             savePathsByRom.forEach { (rom, paths) ->
                 if (rom !in this && paths.isNotEmpty()) {
                     this[rom] = paths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget)
@@ -189,6 +201,7 @@ fun GameEntry.migrateLegacySaveTargets(): GameEntry = when (this) {
         },
     )
     is NativePCGame -> copy(
-        saveTargets = saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) },
+        saveTargets = (saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) })
+            .map(SaveTarget::resolveUnknownTypeIfPresent),
     )
 }

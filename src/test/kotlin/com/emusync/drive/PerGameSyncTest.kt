@@ -704,7 +704,8 @@ class PerGameSyncTest {
                 onRequestSaveCalledCount++
                 requestedNotice = notice
                 requestedCloudFileNames = cloudFileNames
-                resolveCloudRestorePaths(destinationFolder.absolutePath, cloudFileNames).map(::inferLegacySaveTarget)
+                resolveCloudRestorePaths(destinationFolder.absolutePath, cloudFileNames)
+                    .map { SaveTarget(it, SaveTargetType.FILE) }
             }
         )
 
