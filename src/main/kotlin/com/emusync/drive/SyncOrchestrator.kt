@@ -715,30 +715,33 @@ class SyncOrchestrator(
         cloudFiles: List<DriveFile>,
         displayName: String = entry.name,
     ) {
-        data class FilePair(val localFile: File, val cloudFile: DriveFile, val decision: SyncDecision)
-
-        val pairs = cloudFiles.mapNotNull { cloudFile ->
-            val localFile = resolveRemoteFile(localSavePath, cloudFile.name) ?: return@mapNotNull null
-            val decision = planSyncDecision(
-                localModifiedTimeMs = localFile.takeIf { it.exists() }?.lastModified(),
-                cloudModifiedTimeIso = cloudFile.modifiedTime,
-            )
-            FilePair(localFile, cloudFile, decision)
-        }
-
         val localFiles = if (localSavePath.exists() && localSavePath.isDirectory) {
             localSavePath.walkTopDown().filter { it.isFile }.toList()
         } else {
             emptyList()
         }
 
-        val conflictingPairs = pairs.filter { it.decision == SyncDecision.CONFLICT }
-        val hasLocalOnly = localFiles.any { local ->
-            val rel = local.toRelativeString(localSavePath).replace(File.separatorChar, '/')
-            cloudFiles.none { it.name == rel } &&
-                planSyncDecision(local.lastModified(), null) == SyncDecision.UPLOAD_LOCAL
+        data class FilePair(val localFile: File, val cloudFile: DriveFile, val decision: SyncDecision)
+        val validCloudFiles = cloudFiles.filter { resolveRemoteFile(localSavePath, it.name) != null }
+        val actions = planDirectorySync(
+            localFiles = localFiles.map {
+                LocalFileState(it.toRelativeString(localSavePath).replace(File.separatorChar, '/'), it.lastModified())
+            },
+            cloudFiles = validCloudFiles.map { CloudFileState(it.id, it.name, it.modifiedTime) },
+        )
+        val cloudById = validCloudFiles.associateBy { it.id }
+        val pairs = actions.mapNotNull { action ->
+            val cloud = action.cloud?.let { cloudById[it.id] } ?: return@mapNotNull null
+            val localFile = resolveRemoteFile(localSavePath, action.relativePath) ?: return@mapNotNull null
+            FilePair(localFile, cloud, action.decision)
         }
-        val hasCloudNewer = pairs.any { it.decision == SyncDecision.DOWNLOAD_CLOUD }
+        val plannedCloudByPath = pairs.associate { pair ->
+            pair.localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/') to pair.cloudFile
+        }
+
+        val conflictingPairs = pairs.filter { it.decision == SyncDecision.CONFLICT }
+        val hasLocalOnly = actions.any { it.cloud == null && it.decision == SyncDecision.UPLOAD_LOCAL }
+        val hasCloudNewer = actions.any { it.decision == SyncDecision.DOWNLOAD_CLOUD }
 
         if (conflictingPairs.isNotEmpty() || (hasLocalOnly && hasCloudNewer)) {
             val latestLocalMs = if (localFiles.isNotEmpty()) localFiles.maxOf { it.lastModified() } else System.currentTimeMillis()
@@ -765,7 +768,7 @@ class SyncOrchestrator(
             } else if (choice == SyncDecision.UPLOAD_LOCAL) {
                 for (localFile in localFiles) {
                     val relativePath = localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/')
-                    val cloudFile = cloudFiles.find { it.name == relativePath }
+                    val cloudFile = plannedCloudByPath[relativePath]
                     syncSingleFilePost(token, localFile, cloudFile, folderId, relativePath, force = true)
                 }
             }
@@ -778,7 +781,7 @@ class SyncOrchestrator(
             }
             for (localFile in localFiles) {
                 val relativePath = localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/')
-                val cloudFile = cloudFiles.find { it.name == relativePath }
+                val cloudFile = plannedCloudByPath[relativePath]
                 syncSingleFilePost(token, localFile, cloudFile, folderId, relativePath, force = false)
             }
         }
