@@ -918,6 +918,7 @@ class SyncOrchestrator(
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             failedPaths += pendingPaths.filterNot { it in failedPaths }
+            failedTargets += retryTargets.orEmpty().filterNot { it in failedTargets }
             firstFailureReason = firstFailureReason ?: e.message
         }
 

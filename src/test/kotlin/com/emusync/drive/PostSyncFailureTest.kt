@@ -130,6 +130,7 @@ class PostSyncFailureTest {
         var firstUpdates = 0
         var secondUpdates = 0
         var failSecondUpdate = true
+        var failTokenRefresh = false
         val client = HttpClient(MockEngine) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
             engine {
@@ -137,9 +138,11 @@ class PostSyncFailureTest {
                     val url = request.url.toString()
                     val query = request.url.parameters["q"].orEmpty()
                     when {
+                        url.contains("oauth2.googleapis.com/token") && failTokenRefresh -> respond(
+                            "offline", HttpStatusCode.InternalServerError,
+                        )
                         url.contains("oauth2.googleapis.com/token") -> respond(
-                            """{"access_token":"token","expires_in":3600,"token_type":"Bearer"}""",
-                            headers = jsonHeaders,
+                            """{"access_token":"token","expires_in":3600,"token_type":"Bearer"}""", headers = jsonHeaders,
                         )
                         query.contains("name = 'EmuSync'") -> respond("""{"files":[{"id":"root","name":"EmuSync"}]}""", headers = jsonHeaders)
                         query.contains("name = 'Tests'") -> respond("""{"files":[{"id":"group","name":"Tests"}]}""", headers = jsonHeaders)
@@ -188,8 +191,19 @@ class PostSyncFailureTest {
         assertEquals(1, firstUpdates)
         assertEquals(1, secondUpdates)
 
-        failSecondUpdate = false
+        failTokenRefresh = true
         failure.onRetry()
+
+        val authorizationFailure = assertIs<AppStatus.PostSyncFailed>(statuses.last())
+        assertTrue(authorizationFailure.reason.contains("500"))
+        assertEquals(1, authorizationFailure.completedSaveCount)
+        assertEquals(1, authorizationFailure.pendingSaveCount)
+        assertEquals(1, firstUpdates)
+        assertEquals(1, secondUpdates)
+
+        failTokenRefresh = false
+        failSecondUpdate = false
+        authorizationFailure.onRetry()
 
         assertEquals(AppStatus.Idle, statuses.last())
         assertEquals(1, firstUpdates, "Retry must not force-update the file that already succeeded")
