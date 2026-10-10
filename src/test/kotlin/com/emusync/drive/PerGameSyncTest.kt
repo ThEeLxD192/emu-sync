@@ -849,6 +849,102 @@ class PerGameSyncTest {
     }
 
     @Test
+    fun `rename downloads nested directory saves to their relative local paths`(@TempDir tempDir: File) = runTest {
+        val configManager = ConfigManager(File(tempDir, "config.json").absolutePath)
+        val saveDirectory = File(tempDir, "saves").apply { mkdirs() }
+        val downloadedContents = mapOf(
+            "cloud-save-1" to "SLOT_ONE_SAVE",
+            "cloud-save-2" to "SLOT_TWO_SETTINGS",
+        )
+        val relativePaths = mapOf(
+            "cloud-save-1" to "profiles/slot1/save.dat",
+            "cloud-save-2" to "profiles/slot2/settings.json",
+        )
+        val cloudModifiedTime = "2026-09-25T15:00:00.000Z"
+
+        val system = EmulatorSystem(
+            name = "Eden",
+            executablePath = "echo",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("nsp"),
+            group = "Switch",
+            savePaths = emptyList(),
+            savePathsByRom = emptyMap(),
+        )
+        val config = AppConfig(
+            googleDrive = GoogleDriveConfig(
+                clientId = "test-client",
+                clientSecret = "test-secret",
+                refreshToken = "test-refresh-token",
+            ),
+            entries = listOf(system),
+        )
+        configManager.save(config)
+
+        val mockClient = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    val url = request.url.toString()
+                    val q = request.url.parameters["q"] ?: ""
+                    when {
+                        url.contains("oauth2.googleapis.com/token") -> respond(
+                            content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
+                            headers = jsonHeaders,
+                        )
+                        q.contains("name = 'EmuSync'") -> respond(
+                            content = """{"files":[{"id":"root-id","name":"EmuSync"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Switch'") -> respond(
+                            content = """{"files":[{"id":"switch-id","name":"Switch"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'Old Title'") -> respond(
+                            content = """{"files":[]}""", headers = jsonHeaders,
+                        )
+                        q.contains("name = 'New Title'") -> respond(
+                            content = """{"files":[{"id":"new-folder","name":"New Title"}]}""", headers = jsonHeaders,
+                        )
+                        q.contains("'new-folder' in parents") -> respond(
+                            content = """{"files":[{"id":"cloud-save-1","name":"profiles/slot1/save.dat","modifiedTime":"$cloudModifiedTime"},{"id":"cloud-save-2","name":"profiles/slot2/settings.json","modifiedTime":"$cloudModifiedTime"}]}""",
+                            headers = jsonHeaders,
+                        )
+                        request.url.parameters["alt"] == "media" -> {
+                            val fileId = request.url.segments.last()
+                            respond(
+                                downloadedContents.getValue(fileId).toByteArray(),
+                                headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
+                            )
+                        }
+                        else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
+                    }
+                }
+            }
+        }
+
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        val result = orchestrator.renameGameCloudData(
+            entry = system,
+            romName = "game.nsp",
+            oldTitle = "Old Title",
+            newTitle = "New Title",
+            localSaveTargets = listOf(SaveTarget(saveDirectory.absolutePath, SaveTargetType.DIRECTORY)),
+        )
+
+        assertTrue(result)
+        for ((fileId, relativePath) in relativePaths) {
+            assertEquals(downloadedContents.getValue(fileId), File(saveDirectory, relativePath).readText())
+        }
+        assertFalse(File(saveDirectory, "save.dat").exists())
+        assertFalse(File(saveDirectory, "settings.json").exists())
+    }
+
+    @Test
     fun `playWithSync prompts for save path before launch when cloud saves exist and downloads them to selected path`(@TempDir tempDir: File) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
