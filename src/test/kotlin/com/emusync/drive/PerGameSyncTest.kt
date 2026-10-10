@@ -635,7 +635,8 @@ class PerGameSyncTest {
         val saveDirectory = File(tempDir, "saves").apply { mkdirs() }
         val localSave = File(saveDirectory, "slot.dat").apply { writeText("LOCAL") }
         val directoryCloudTime = Instant.parse("2026-09-25T15:00:00Z")
-        localSave.setLastModified(directoryCloudTime.plusSeconds(30).toEpochMilli())
+        val localConflictTime = directoryCloudTime.plusSeconds(30)
+        localSave.setLastModified(localConflictTime.toEpochMilli())
         val siblingFile = File(tempDir, "SAVE_SLOT").apply { writeText("SIBLING") }
         val siblingCloudTime = Instant.parse("2026-09-26T15:00:00Z")
         siblingFile.setLastModified(siblingCloudTime.toEpochMilli())
@@ -659,6 +660,7 @@ class PerGameSyncTest {
         )
         configManager.save(config)
 
+        var shownLocalDate: String? = null
         var shownCloudDate: String? = null
         val mockClient = HttpClient(MockEngine) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
@@ -699,6 +701,7 @@ class PerGameSyncTest {
             configManager = configManager,
             onStatus = { status ->
                 if (status is AppStatus.Conflict) {
+                    shownLocalDate = status.localDate
                     shownCloudDate = status.cloudDate
                     status.onResolve(SyncDecision.DOWNLOAD_CLOUD)
                 }
@@ -717,6 +720,10 @@ class PerGameSyncTest {
         )
 
         assertTrue(result)
+        assertEquals(
+            SyncOrchestrator.formatTimestamp(localConflictTime.toEpochMilli()),
+            shownLocalDate,
+        )
         assertEquals(
             SyncOrchestrator.formatTimestamp(directoryCloudTime.toEpochMilli()),
             shownCloudDate,

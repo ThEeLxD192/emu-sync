@@ -458,6 +458,7 @@ class SyncOrchestrator(
                     var hasNewerLocal = false
                     var hasNewerCloud = false
                     val relevantCloudFiles = mutableListOf<DriveFile>()
+                    val relevantLocalFiles = mutableListOf<File>()
 
                     for (target in localSaveTargets) {
                         val savePath = File(target.path)
@@ -484,12 +485,17 @@ class SyncOrchestrator(
                                         SyncDecision.CONFLICT -> {
                                             hasConflict = true
                                             relevantCloudFiles += cloudFile
+                                            relevantLocalFiles += localF
                                         }
                                         SyncDecision.DOWNLOAD_CLOUD -> {
                                             hasNewerCloud = true
                                             relevantCloudFiles += cloudFile
+                                            relevantLocalFiles += localF
                                         }
-                                        SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
+                                        SyncDecision.UPLOAD_LOCAL -> {
+                                            hasNewerLocal = true
+                                            relevantLocalFiles += localF
+                                        }
                                         SyncDecision.IN_SYNC -> {}
                                     }
                                 }
@@ -498,6 +504,7 @@ class SyncOrchestrator(
                                 val rel = localF.toRelativeString(savePath).replace(File.separatorChar, '/')
                                 if (targetCloudFiles.none { it.name == rel }) {
                                     hasNewerLocal = true
+                                    relevantLocalFiles += localF
                                 }
                             }
                         } else {
@@ -510,18 +517,24 @@ class SyncOrchestrator(
                                 relevantCloudFiles += cloudFile
                             } else if (localExists && !cloudExists) {
                                 hasNewerLocal = true
+                                relevantLocalFiles += savePath
                             } else if (localExists && cloudFile != null) {
                                 val decision = resolveConflict(savePath.lastModified(), cloudFile.modifiedTime)
                                 when (decision) {
                                     SyncDecision.CONFLICT -> {
                                         hasConflict = true
                                         relevantCloudFiles += cloudFile
+                                        relevantLocalFiles += savePath
                                     }
                                     SyncDecision.DOWNLOAD_CLOUD -> {
                                         hasNewerCloud = true
                                         relevantCloudFiles += cloudFile
+                                        relevantLocalFiles += savePath
                                     }
-                                    SyncDecision.UPLOAD_LOCAL -> hasNewerLocal = true
+                                    SyncDecision.UPLOAD_LOCAL -> {
+                                        hasNewerLocal = true
+                                        relevantLocalFiles += savePath
+                                    }
                                     SyncDecision.IN_SYNC -> {}
                                 }
                             }
@@ -529,14 +542,8 @@ class SyncOrchestrator(
                     }
 
                     if (hasConflict || (hasNewerLocal && hasNewerCloud)) {
-                        val allLocalFiles = localSaveTargets.flatMap { target ->
-                            val path = File(target.path)
-                            if (isDirectorySaveTarget(
-                                    target.type, path, cloudFiles, knownFileSiblingNames,
-                                ) && path.exists()) path.walkTopDown().filter { it.isFile }.toList()
-                            else if (path.exists()) listOf(path) else emptyList()
-                        }
-                        val latestLocalMs = if (allLocalFiles.isNotEmpty()) allLocalFiles.maxOf { it.lastModified() } else System.currentTimeMillis()
+                        val latestLocalMs = relevantLocalFiles.maxOfOrNull { it.lastModified() }
+                            ?: System.currentTimeMillis()
                         val latestCloudMs = relevantCloudFiles.maxOfOrNull {
                             Instant.parse(it.modifiedTime).toEpochMilli()
                         } ?: System.currentTimeMillis()
