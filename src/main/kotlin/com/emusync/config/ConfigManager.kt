@@ -4,6 +4,13 @@ import com.emusync.model.AppConfig
 import com.emusync.model.migrateLegacySaveTargets
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.nio.channels.FileChannel
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
+import java.nio.file.attribute.PosixFilePermission
 
 /**
  * Manages loading and providing access to the application configuration.
@@ -19,7 +26,8 @@ import java.io.File
  * ```
  */
 class ConfigManager(
-    val configFile: File = resolveDefaultConfigFile()
+    val configFile: File = resolveDefaultConfigFile(),
+    private val beforeReplace: (Path) -> Unit = {},
 ) {
     /** Secondary constructor accepting a file path string. */
     constructor(configPath: String) : this(File(configPath))
@@ -72,9 +80,51 @@ class ConfigManager(
      * Automatically creates parent directories if they do not exist.
      */
     fun save(config: AppConfig) {
-        configFile.parentFile?.mkdirs()
+        val absoluteFile = configFile.absoluteFile
+        val parent = absoluteFile.parentFile
+            ?: throw IllegalStateException("Could not resolve configuration directory")
+        if (!parent.exists() && !parent.mkdirs()) {
+            throw IllegalStateException("Could not create configuration directory: $parent")
+        }
         val content = json.encodeToString(AppConfig.serializer(), config)
-        configFile.writeText(content)
+        var temporary: Path? = null
+        try {
+            temporary = Files.createTempFile(parent.toPath(), ".${configFile.name}.", ".tmp")
+            Files.writeString(
+                temporary,
+                content,
+                StandardOpenOption.WRITE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+            )
+            restrictToCurrentUser(temporary)
+            FileChannel.open(temporary, StandardOpenOption.WRITE).use { it.force(true) }
+            beforeReplace(temporary)
+            try {
+                Files.move(
+                    temporary,
+                    absoluteFile.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temporary, absoluteFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+            temporary = null
+            restrictToCurrentUser(absoluteFile.toPath())
+        } finally {
+            temporary?.let { Files.deleteIfExists(it) }
+        }
+    }
+
+    private fun restrictToCurrentUser(path: Path) {
+        try {
+            Files.setPosixFilePermissions(
+                path,
+                setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
+            )
+        } catch (_: UnsupportedOperationException) {
+            // Windows applies ACLs rather than POSIX modes; the user's config directory is used there.
+        }
     }
 
     companion object {

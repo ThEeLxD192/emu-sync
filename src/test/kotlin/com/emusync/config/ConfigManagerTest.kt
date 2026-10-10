@@ -11,7 +11,11 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermission
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class ConfigManagerTest {
@@ -278,5 +282,33 @@ class ConfigManagerTest {
             secondLoad.saveTargetsByRom[rom.name]?.single()?.type,
         )
         assertTrue(configFile.readText().contains("\"directory\""))
+    }
+
+    @Test
+    fun `interrupted save preserves last valid configuration`(@TempDir tempDir: File) {
+        val configFile = File(tempDir, "config.json")
+        val original = AppConfig(entries = listOf(NativePCGame("Original", "/game/start", savePaths = listOf("/save.dat"))))
+        ConfigManager(configFile).save(original)
+        val interruptedManager = ConfigManager(configFile) { throw IOException("simulated power loss") }
+
+        assertFailsWith<IOException> {
+            interruptedManager.save(AppConfig(entries = emptyList()))
+        }
+
+        assertEquals("Original", (ConfigManager(configFile).load().entries.single() as NativePCGame).name)
+        assertEquals(listOf("config.json"), tempDir.list()?.toList())
+    }
+
+    @Test
+    fun `saved configuration is private on POSIX systems`(@TempDir tempDir: File) {
+        val configFile = File(tempDir, "config.json")
+        ConfigManager(configFile).save(AppConfig())
+
+        if (configFile.toPath().fileSystem.supportedFileAttributeViews().contains("posix")) {
+            assertEquals(
+                setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
+                Files.getPosixFilePermissions(configFile.toPath()),
+            )
+        }
     }
 }

@@ -88,6 +88,16 @@ You can configure Google Drive credentials directly inside the app by clicking *
 6. Copy the **Client ID** and **Client Secret** into your `config.json`.
 7. Launch EmuSync and click **"Connect Drive"** to authenticate via browser.
 
+EmuSync intentionally requests the limited `drive.file` scope. It can discover and
+synchronize files created or explicitly managed by EmuSync, but it cannot browse or
+import arbitrary files uploaded manually or created by another application. Expanding
+that access would require a dedicated Google Picker flow and a separate permission review.
+
+The OAuth client secret and refresh token are stored in `config.json` so portable installs
+continue to work. EmuSync writes this file atomically and restricts it to the current user
+(`0600`) on POSIX systems. Treat the file as sensitive: do not publish it, attach it to bug
+reports, or commit it to source control.
+
 ---
 
 ### Building & Running
