@@ -42,6 +42,11 @@ data class GameResult(
  */
 class GameRunner {
 
+    private data class LaunchRequest(
+        val process: Process? = null,
+        val desktopHandoffSucceeded: Boolean = false,
+    )
+
     /** Opens an emulator's own interface without supplying a ROM or waiting for it to exit. */
     suspend fun openEmulator(entry: EmulatorSystem) = withContext(Dispatchers.IO) {
         val command = buildList {
@@ -137,7 +142,12 @@ class GameRunner {
 
         // Step 3: Wait for a newly-created game/emulator process to appear and exit
         return if (processName != null) {
-            waitForExternalProcess(processName, existingMatches, launchRequest = launchRequest)
+            waitForExternalProcess(
+                processName,
+                existingMatches,
+                launchRequest = launchRequest?.process,
+                launchHandoffSucceeded = launchRequest?.desktopHandoffSucceeded == true,
+            )
         } else {
             // Fallback: wait a reasonable time if we can't detect the process
             delay(5000)
@@ -148,18 +158,20 @@ class GameRunner {
     /**
      * Launches a steam:// URI in a cross-platform manner.
      */
-    private fun launchSteamUri(uri: String): Process? {
+    private fun launchSteamUri(uri: String): LaunchRequest? {
         val os = System.getProperty("os.name", "").lowercase()
         try {
-            return if (os.contains("win")) {
+            val process = if (os.contains("win")) {
                 ProcessBuilder("cmd", "/c", "start", uri).start()
             } else {
                 ProcessBuilder("steam", uri).start()
             }
+            return LaunchRequest(process = process)
         } catch (_: Exception) {
             try {
                 if (java.awt.Desktop.isDesktopSupported() && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.BROWSE)) {
                     java.awt.Desktop.getDesktop().browse(java.net.URI(uri))
+                    return LaunchRequest(desktopHandoffSucceeded = true)
                 }
             } catch (_: Exception) {
                 // Ignore fallback failure
@@ -238,6 +250,7 @@ class GameRunner {
         processName: String,
         existingProcessIds: Set<Long> = emptySet(),
         launchRequest: Process? = null,
+        launchHandoffSucceeded: Boolean = false,
         appearanceTimeoutMs: Long = 60_000L,
         pollIntervalMs: Long = 1_000L,
         exitPollIntervalMs: Long = 2_000L,
@@ -257,24 +270,31 @@ class GameRunner {
                 break
             }
 
+            val launchExitCode = if (launchRequest?.isAlive == false) {
+                runCatching { launchRequest.exitValue() }.getOrNull()
+            } else {
+                null
+            }
             if (launchRequest?.isAlive == false) {
-                val launchExitCode = runCatching { launchRequest.exitValue() }.getOrNull()
                 when {
                     launchExitCode == null -> Unit
                     launchExitCode != 0 -> break
-                    else -> {
-                        val now = System.currentTimeMillis()
-                        val confirmedAt = successfulLaunchRequestAt ?: now.also { successfulLaunchRequestAt = it }
-                        if (now - confirmedAt >= reuseConfirmationDelayMs) {
-                            val reusedMatches = matchingProcessIds(processName).intersect(existingProcessIds)
-                            if (reusedMatches.isNotEmpty()) {
-                                trackedProcessIds += reusedMatches
-                                appeared = true
-                                break
-                            }
-                        }
+                }
+            }
+
+            if (launchHandoffSucceeded || launchExitCode == 0) {
+                val now = System.currentTimeMillis()
+                val confirmedAt = successfulLaunchRequestAt ?: now.also { successfulLaunchRequestAt = it }
+                if (now - confirmedAt >= reuseConfirmationDelayMs) {
+                    val reusedMatches = matchingProcessIds(processName).intersect(existingProcessIds)
+                    if (reusedMatches.isNotEmpty()) {
+                        trackedProcessIds += reusedMatches
+                        appeared = true
+                        break
                     }
                 }
+            } else {
+                successfulLaunchRequestAt = null
             }
 
             // If Steam is compiling Vulkan shaders in the background, reset timeout window

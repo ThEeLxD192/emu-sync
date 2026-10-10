@@ -226,6 +226,45 @@ class GameRunnerTest {
     }
 
     @Test
+    fun `successful desktop handoff can confirm a reused process`(@TempDir tempDir: File) = runTest {
+        assumeFalse(System.getProperty("os.name", "").lowercase().contains("windows"))
+        val gameScript = File(tempDir, "desktop_handoff_game.sh").apply {
+            writeText("#!/bin/sh\nsleep \"\$1\"\n")
+            setExecutable(true)
+        }
+        val existingGame = ProcessBuilder(gameScript.absolutePath, "1.2").start()
+
+        try {
+            var existingProcessIds = emptySet<Long>()
+            for (attempt in 0 until 50) {
+                existingProcessIds = runner.matchingProcessIds(gameScript.name)
+                if (existingProcessIds.isNotEmpty()) break
+                kotlinx.coroutines.delay(10)
+            }
+            assertTrue(existingProcessIds.isNotEmpty(), "The existing game process should be detectable")
+
+            val started = System.currentTimeMillis()
+            val launched = runner.waitForExternalProcess(
+                processName = gameScript.name,
+                existingProcessIds = existingProcessIds,
+                launchHandoffSucceeded = true,
+                appearanceTimeoutMs = 3_000L,
+                pollIntervalMs = 10L,
+                exitPollIntervalMs = 10L,
+                reuseConfirmationDelayMs = 100L,
+            )
+            val elapsed = System.currentTimeMillis() - started
+
+            assertTrue(launched, "A successful desktop URI handoff should permit reuse tracking")
+            assertTrue(elapsed >= 800, "Runner should wait for the reused game to exit (elapsed: ${elapsed}ms)")
+            assertTrue(!existingGame.isAlive)
+        } finally {
+            existingGame.destroyForcibly()
+            existingGame.waitFor()
+        }
+    }
+
+    @Test
     fun `failed launch request does not treat an existing process as a launched game`(@TempDir tempDir: File) = runTest {
         assumeFalse(System.getProperty("os.name", "").lowercase().contains("windows"))
         val gameScript = File(tempDir, "unrelated_game.sh").apply {
