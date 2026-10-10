@@ -932,14 +932,18 @@ class SyncOrchestrator(
                 is NativePCGame -> entry.steamAppId
             }
             val result = runner.launch(item.entry, item.romFile, steamAppId)
+            if (result.exitCode != 0) {
+                onStatus(AppStatus.Error("${item.effectiveTitle} did not start or its process could not be tracked. Cloud upload was not attempted."))
+                return
+            }
 
             // ── Step 2.5: Ask for save paths if empty ───────────────
-            if (currentSyncTargets.isEmpty() && result.exitCode == 0) {
+            if (currentSyncTargets.isEmpty()) {
                 currentSyncTargets = onRequestSaveSetup(item, null, emptyList())
             }
 
             // ── Step 3: Post-Sync (upload local save if modified) ───
-            if (hasDriveConfig && result.exitCode == 0) {
+            if (hasDriveConfig) {
                 val uploaded = uploadAfterPlay(
                     item = item,
                     syncTargets = currentSyncTargets,

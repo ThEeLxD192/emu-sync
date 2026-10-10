@@ -154,6 +154,38 @@ class GameRunnerTest {
     }
 
     @Test
+    fun `existing process with the same name does not delay newly launched game`(@TempDir tempDir: File) = runTest {
+        assumeFalse(System.getProperty("os.name", "").lowercase().contains("windows"))
+        val gameScript = File(tempDir, "tracked_game.sh").apply {
+            writeText("#!/bin/sh\nsleep \"\$1\"\n")
+            setExecutable(true)
+        }
+        val decoy = ProcessBuilder(gameScript.absolutePath, "6").start()
+        val launcher = File(tempDir, "launcher.sh").apply {
+            writeText("#!/bin/sh\n\"${gameScript.absolutePath}\" 1 &\nexit 0\n")
+            setExecutable(true)
+        }
+        val game = NativePCGame(
+            name = "Tracked Game",
+            executablePath = launcher.absolutePath,
+            waitForProcess = gameScript.name,
+        )
+
+        try {
+            val started = System.currentTimeMillis()
+            val result = runner.launch(game)
+            val elapsed = System.currentTimeMillis() - started
+
+            assertEquals(0, result.exitCode)
+            assertTrue(elapsed < 5_000, "Runner waited for the pre-existing decoy process ($elapsed ms)")
+            assertTrue(decoy.isAlive, "The decoy should still be alive when tracking completes")
+        } finally {
+            decoy.destroyForcibly()
+            decoy.waitFor()
+        }
+    }
+
+    @Test
     fun `isSteamShaderCompiling should detect fossilize_replay active state`(@TempDir tempDir: File) {
         assertEquals(false, runner.isSteamShaderCompiling())
 
