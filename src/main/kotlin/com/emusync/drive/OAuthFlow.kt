@@ -486,9 +486,11 @@ class OAuthFlow(private val client: HttpClient) {
         return query.split("&").mapNotNull { parameter ->
             val separator = parameter.indexOf('=')
             if (separator <= 0) return@mapNotNull null
-            val key = URLDecoder.decode(parameter.substring(0, separator), "UTF-8")
-            val value = URLDecoder.decode(parameter.substring(separator + 1), "UTF-8")
-            key to value
+            runCatching {
+                val key = URLDecoder.decode(parameter.substring(0, separator), "UTF-8")
+                val value = URLDecoder.decode(parameter.substring(separator + 1), "UTF-8")
+                key to value
+            }.getOrNull()
         }.toMap()
     }
 

@@ -81,6 +81,9 @@ class OAuthFlowTest {
             assertEquals(400, requestStatus("${baseUrl}?state=expected&code="))
             assertTrue(results.isEmpty())
 
+            assertEquals(400, requestStatus(baseUrl, "state=%ZZ"))
+            assertTrue(results.isEmpty())
+
             assertEquals(200, requestStatus("${baseUrl}?state=expected&code=valid-code"))
             assertTrue(callbackReceived.await(1, TimeUnit.SECONDS))
             assertEquals(1, results.size)
@@ -92,6 +95,15 @@ class OAuthFlowTest {
 
     private fun requestStatus(url: String): Int {
         val connection = URI(url).toURL().openConnection() as HttpURLConnection
+        return requestStatus(connection)
+    }
+
+    private fun requestStatus(baseUrl: String, rawQuery: String): Int {
+        val connection = URL(URI(baseUrl).toURL(), "?$rawQuery").openConnection() as HttpURLConnection
+        return requestStatus(connection)
+    }
+
+    private fun requestStatus(connection: HttpURLConnection): Int {
         return try {
             connection.requestMethod = "GET"
             connection.responseCode
