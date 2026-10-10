@@ -324,7 +324,12 @@ class AppViewModel(
             is EmulatorSystem -> {
                 val romName = gameItem.romFile?.name ?: return
                 val newSaveOverrides = entry.savePathsByRom.toMutableMap()
-                newSaveOverrides[romName] = newPaths
+                val cleanSavePaths = newPaths.map { it.trim() }.filter { it.isNotBlank() }
+                if (cleanSavePaths.isEmpty()) {
+                    newSaveOverrides.remove(romName)
+                } else {
+                    newSaveOverrides[romName] = cleanSavePaths
+                }
 
                 val newCoverOverrides = entry.coverPathByRom.toMutableMap()
                 if (newCoverPath != null) {

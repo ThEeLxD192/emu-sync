@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.emusync.ui.GameItem
+import com.emusync.model.EmulatorSystem
 import com.emusync.ui.components.FilePicker
 import com.emusync.ui.components.PickerType
 import com.emusync.ui.components.loadGameCover
@@ -76,8 +77,8 @@ fun EditGameDialog(
 
     var savePaths by remember {
         mutableStateOf(
-            if (game.effectiveSavePaths.isEmpty()) listOf("")
-            else game.effectiveSavePaths
+            if (game.gameSpecificSavePaths.isEmpty()) listOf("")
+            else game.gameSpecificSavePaths
         )
     }
 
@@ -415,7 +416,11 @@ fun EditGameDialog(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Specific save files or directories synchronized for this game.",
+                    text = if (game.entry is EmulatorSystem) {
+                        "Only paths specific to this game. Emulator-wide paths are configured in the system settings."
+                    } else {
+                        "Specific save files or directories synchronized for this game."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = EmuSyncColors.OnSurfaceDim,
                 )

@@ -43,6 +43,15 @@ data class GameItem(
             }
         }
 
+    /** Save paths configured specifically for this ROM, without emulator-wide fallback paths. */
+    val gameSpecificSavePaths: List<String>
+        get() = when (entry) {
+            is NativePCGame -> entry.savePaths
+            is EmulatorSystem -> romFile?.name
+                ?.let { entry.savePathsByRom[it] }
+                .orEmpty()
+        }
+
     val effectiveCoverPath: String?
         get() = when (entry) {
             is NativePCGame -> entry.coverPath?.takeIf { it.isNotBlank() }

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -280,6 +281,37 @@ class AppViewModelTest {
         val clearedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
         assertNotNull(clearedSystem)
         kotlin.test.assertNull(clearedSystem.coverPathByRom["zelda.gba"])
+    }
+
+    @Test
+    fun `clearing game save paths removes override and preserves global fallback`(@TempDir tempDir: File) = runTest {
+        val configManager = ConfigManager(File(tempDir, "config.json").absolutePath)
+        val system = EmulatorSystem(
+            name = "PS2",
+            executablePath = "pcsx2",
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("iso"),
+            savePaths = listOf("/mnt/Juegos/Saves/PS2"),
+            savePathsByRom = mapOf("Black.iso" to listOf("/mnt/Juegos/Saves/PS2")),
+        )
+        configManager.save(AppConfig(entries = listOf(system)))
+        val viewModel = AppViewModel(configManager = configManager, httpClient = createMockHttpClient())
+        viewModel.loadConfig()
+
+        val romFile = File(tempDir, "Black.iso").apply { createNewFile() }
+        val gameItem = GameItem(name = "Black", entry = system, romFile = romFile)
+        assertEquals(listOf("/mnt/Juegos/Saves/PS2"), gameItem.effectiveSavePaths)
+        assertEquals(listOf("/mnt/Juegos/Saves/PS2"), gameItem.gameSpecificSavePaths)
+
+        viewModel.editGameOverride(gameItem, newPaths = emptyList())
+
+        val updatedSystem = viewModel.uiState.value.config?.entries?.first() as EmulatorSystem
+        assertEquals(listOf("/mnt/Juegos/Saves/PS2"), updatedSystem.savePaths)
+        assertFalse(updatedSystem.savePathsByRom.containsKey("Black.iso"))
+
+        val updatedItem = gameItem.copy(entry = updatedSystem)
+        assertEquals(emptyList(), updatedItem.gameSpecificSavePaths)
+        assertEquals(listOf("/mnt/Juegos/Saves/PS2"), updatedItem.effectiveSavePaths)
     }
 
     @Test
