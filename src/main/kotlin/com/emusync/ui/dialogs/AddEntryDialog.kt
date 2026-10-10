@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.emusync.util.ArgumentsCodec
 import androidx.compose.ui.window.Dialog
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
@@ -95,8 +96,8 @@ fun AddEntryDialog(
     var arguments by remember {
         mutableStateOf(
             when (initialEntry) {
-                is EmulatorSystem -> initialEntry.arguments.joinToString(" ")
-                is NativePCGame -> initialEntry.arguments.joinToString(" ")
+                is EmulatorSystem -> ArgumentsCodec.format(initialEntry.arguments)
+                is NativePCGame -> ArgumentsCodec.format(initialEntry.arguments)
                 else -> if (entryType == EntryType.EMULATOR) "{ROM}" else ""
             }
         )
@@ -267,10 +268,16 @@ fun AddEntryDialog(
 
                 // ── Arguments ───────────────────────────────────────
                 FormField(
-                    label = "Arguments (space-separated)",
+                    label = "Arguments (quote values that contain spaces)",
                     value = arguments,
                     onValueChange = { arguments = it },
                     placeholder = if (entryType == EntryType.EMULATOR) "{ROM} --fullscreen" else "--fullscreen --no-intro",
+                )
+                Text(
+                    text = "Example: --profile \"My Profile\" keeps My Profile as one argument.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = EmuSyncColors.OnSurfaceDim,
+                    modifier = Modifier.padding(top = 4.dp, start = 4.dp)
                 )
                 if (entryType == EntryType.EMULATOR) {
                     Text(
@@ -639,8 +646,7 @@ private fun validateAndBuild(
     val validSavePaths = savePaths.map { it.trim() }.filter { it.isNotBlank() }
     if (type == EntryType.NATIVE && validSavePaths.isEmpty()) return null
 
-    val argList = if (arguments.isBlank()) emptyList()
-    else arguments.split(" ").map { it.trim() }.filter { it.isNotBlank() }
+    val argList = ArgumentsCodec.parse(arguments) ?: return null
 
     return when (type) {
         EntryType.EMULATOR -> {
