@@ -4,6 +4,8 @@ import com.emusync.config.ConfigManager
 import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
+import com.emusync.model.SaveTarget
+import com.emusync.model.SaveTargetType
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
 import io.ktor.client.HttpClient
@@ -108,6 +110,101 @@ class PostSyncFailureTest {
         assertEquals(2, successfulUploads)
         assertEquals("LOCAL SAVE", save.readText())
         assertEquals("SECOND SAVE", secondSave.readText())
+        assertEquals(1, statuses.count { it == AppStatus.Playing }, "Retry must not launch the game again")
+    }
+
+    @Test
+    fun `retry retries transient upload while keeping name collision blocked`(@TempDir tempDir: File) = runTest {
+        val rom = File(tempDir, "Game.rom").apply { writeText("ROM") }
+        val saveDirectory = File(tempDir, "saves/SAVE_SLOT").apply { mkdirs() }
+        val collidingDirectorySave = File(saveDirectory, "SAVE_SLOT").apply { writeText("DIRECTORY SAVE") }
+        val siblingFile = File(tempDir, "other/SAVE_SLOT")
+        val transientSave = File(tempDir, "retry.dat").apply { writeText("RETRY SAVE") }
+        val entry = EmulatorSystem(
+            name = "Test emulator",
+            executablePath = "echo",
+            arguments = listOf("{ROM}"),
+            romsDirectory = tempDir.absolutePath,
+            extensions = listOf("rom"),
+            group = "Tests",
+            saveTargetsByRom = mapOf(rom.name to listOf(
+                SaveTarget(saveDirectory.absolutePath, SaveTargetType.DIRECTORY),
+                SaveTarget(siblingFile.absolutePath, SaveTargetType.FILE),
+                SaveTarget(transientSave.absolutePath, SaveTargetType.FILE),
+            )),
+        )
+        val config = AppConfig(
+            googleDrive = GoogleDriveConfig("client", "secret", "refresh"),
+            entries = listOf(entry),
+        )
+        val configManager = ConfigManager(File(tempDir, "config.json").absolutePath).apply { save(config) }
+        var uploadInitiations = 0
+        var successfulUploads = 0
+        var failFirstUpload = true
+        val client = HttpClient(MockEngine) {
+            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            engine {
+                addHandler { request ->
+                    val url = request.url.toString()
+                    val query = request.url.parameters["q"].orEmpty()
+                    when {
+                        url.contains("oauth2.googleapis.com/token") -> respond(
+                            """{"access_token":"token","expires_in":3600,"token_type":"Bearer"}""",
+                            headers = jsonHeaders,
+                        )
+                        query.contains("name = 'EmuSync'") -> respond("""{"files":[{"id":"root","name":"EmuSync"}]}""", headers = jsonHeaders)
+                        query.contains("name = 'Tests'") -> respond("""{"files":[{"id":"group","name":"Tests"}]}""", headers = jsonHeaders)
+                        query.contains("name = 'Game'") -> respond("""{"files":[{"id":"game","name":"Game"}]}""", headers = jsonHeaders)
+                        url.contains("sibling-id") && request.method == HttpMethod.Get -> respond(
+                            "SIBLING CLOUD SAVE", HttpStatusCode.OK,
+                        )
+                        query.contains("in parents and trashed = false") -> respond(
+                            """{"files":[{"id":"sibling-id","name":"SAVE_SLOT","modifiedTime":"2020-01-01T00:00:00Z"}]}""",
+                            headers = jsonHeaders,
+                        )
+                        url.contains("upload/drive/v3/files") -> {
+                            uploadInitiations++
+                            if (failFirstUpload) {
+                                failFirstUpload = false
+                                respond("offline", HttpStatusCode.InternalServerError)
+                            } else {
+                                respond("", headers = headersOf(HttpHeaders.Location, "https://uploads.example/retry"))
+                            }
+                        }
+                        url.contains("uploads.example/retry") -> {
+                            successfulUploads++
+                            respond(
+                                """{"id":"retry-id","name":"retry.dat","modifiedTime":"2026-10-09T12:00:00Z"}""",
+                                headers = jsonHeaders,
+                            )
+                        }
+                        else -> error("Unexpected request: ${request.method.value} $url")
+                    }
+                }
+            }
+        }
+        val statuses = mutableListOf<AppStatus>()
+        val orchestrator = SyncOrchestrator(client, config, configManager, statuses::add)
+
+        orchestrator.playWithSync(GameItem("Game", entry, rom))
+
+        val initialFailure = assertIs<AppStatus.PostSyncFailed>(statuses.last())
+        assertTrue(initialFailure.reason.contains("500"))
+        assertTrue(initialFailure.reason.contains("conflicts with another configured file target"))
+        assertEquals(2, initialFailure.pendingSaveCount)
+        assertEquals("SIBLING CLOUD SAVE", siblingFile.readText())
+        assertEquals("DIRECTORY SAVE", collidingDirectorySave.readText())
+        assertEquals(1, uploadInitiations)
+        assertEquals(0, successfulUploads)
+
+        initialFailure.onRetry()
+
+        val blockedError = assertIs<AppStatus.Error>(statuses.last())
+        assertTrue(blockedError.message.contains("conflicts with another configured file target"))
+        assertEquals(2, uploadInitiations, "Retry should attempt only the transient upload once more")
+        assertEquals(1, successfulUploads)
+        assertEquals("SIBLING CLOUD SAVE", siblingFile.readText())
+        assertEquals("DIRECTORY SAVE", collidingDirectorySave.readText())
         assertEquals(1, statuses.count { it == AppStatus.Playing }, "Retry must not launch the game again")
     }
 

@@ -244,4 +244,39 @@ class ConfigManagerTest {
         assertEquals(SaveTargetType.DIRECTORY, secondLoad.saveTargets.single().type)
         assertTrue(configFile.readText().contains("\"directory\""))
     }
+
+    @Test
+    fun `missing legacy per ROM paths migrate and resolve after creation`(@TempDir tempDir: File) {
+        val rom = File(tempDir, "Game.rom")
+        val dottedDirectory = File(tempDir, "profile.d")
+        val configFile = File(tempDir, "config.json")
+        val manager = ConfigManager(configFile)
+        manager.save(
+            AppConfig(entries = listOf(
+                EmulatorSystem(
+                    name = "Legacy emulator",
+                    executablePath = "/emulator",
+                    romsDirectory = tempDir.absolutePath,
+                    extensions = listOf("rom"),
+                    savePathsByRom = mapOf(rom.name to listOf(dottedDirectory.absolutePath)),
+                ),
+            )),
+        )
+
+        val firstLoad = manager.load().entries.single() as EmulatorSystem
+        assertEquals(
+            SaveTargetType.UNKNOWN,
+            firstLoad.saveTargetsByRom[rom.name]?.single()?.type,
+        )
+
+        dottedDirectory.mkdirs()
+        File(dottedDirectory, "save.dat").writeText("save")
+
+        val secondLoad = manager.load().entries.single() as EmulatorSystem
+        assertEquals(
+            SaveTargetType.DIRECTORY,
+            secondLoad.saveTargetsByRom[rom.name]?.single()?.type,
+        )
+        assertTrue(configFile.readText().contains("\"directory\""))
+    }
 }
