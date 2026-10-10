@@ -4,6 +4,7 @@ import com.emusync.config.ConfigManager
 import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.NativePCGame
+import com.emusync.model.inferLegacySaveTarget
 import com.emusync.model.effectiveCloudFolder
 import com.emusync.steam.SteamShortcutManager
 import io.ktor.client.HttpClient
@@ -263,7 +264,7 @@ class AppViewModelTest {
 
         viewModel.editGameOverride(
             gameItem = gameItem,
-            newPaths = listOf("/path/to/zelda.sav"),
+            newTargets = listOf(inferLegacySaveTarget("/path/to/zelda.sav")),
             newCoverPath = "/path/to/zelda_box.png"
         )
 
@@ -275,7 +276,7 @@ class AppViewModelTest {
         // Now clear the custom cover
         viewModel.editGameOverride(
             gameItem = gameItem.copy(entry = updatedSystem),
-            newPaths = listOf("/path/to/zelda.sav"),
+            newTargets = listOf(inferLegacySaveTarget("/path/to/zelda.sav")),
             newCoverPath = ""
         )
         val clearedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
@@ -303,7 +304,7 @@ class AppViewModelTest {
         assertEquals(listOf("/mnt/Juegos/Saves/PS2"), gameItem.effectiveSavePaths)
         assertEquals(listOf("/mnt/Juegos/Saves/PS2"), gameItem.gameSpecificSavePaths)
 
-        viewModel.editGameOverride(gameItem, newPaths = emptyList())
+        viewModel.editGameOverride(gameItem, newTargets = emptyList())
 
         val updatedSystem = viewModel.uiState.value.config?.entries?.first() as EmulatorSystem
         assertEquals(listOf("/mnt/Juegos/Saves/PS2"), updatedSystem.savePaths)
@@ -342,7 +343,7 @@ class AppViewModelTest {
         // Set custom title override
         viewModel.editGameOverride(
             gameItem = gameItem,
-            newPaths = emptyList(),
+            newTargets = emptyList(),
             newCoverPath = null,
             newTitle = "Zelda: Minish Cap (Custom)"
         )
@@ -357,7 +358,7 @@ class AppViewModelTest {
         // Clear custom title override
         viewModel.editGameOverride(
             gameItem = updatedGameItem,
-            newPaths = emptyList(),
+            newTargets = emptyList(),
             newCoverPath = null,
             newTitle = ""
         )
@@ -389,7 +390,7 @@ class AppViewModelTest {
 
         viewModel.editGameOverride(
             gameItem = gameItem,
-            newPaths = listOf("/new/save.dat"),
+            newTargets = listOf(inferLegacySaveTarget("/new/save.dat")),
             newCoverPath = "/images/portal.png"
         )
 

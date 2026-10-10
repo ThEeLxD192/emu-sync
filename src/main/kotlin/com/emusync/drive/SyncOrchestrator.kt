@@ -6,6 +6,11 @@ import com.emusync.model.GameEntry
 import com.emusync.model.effectiveCloudFolder
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.NativePCGame
+import com.emusync.model.SaveTargetType
+import com.emusync.model.SaveTarget as ConfiguredSaveTarget
+import com.emusync.model.effectiveSaveTargets
+import com.emusync.model.effectiveSaveTargetsForRom
+import com.emusync.model.inferLegacySaveTarget
 import com.emusync.runner.GameRunner
 import com.emusync.ui.AppStatus
 import com.emusync.ui.CloudSyncStatus
@@ -49,6 +54,7 @@ class SyncOrchestrator(
 
     data class SaveTarget(
         val file: File,
+        val type: SaveTargetType,
         val cloudPathSegments: List<String>,
         val displayName: String,
     )
@@ -65,14 +71,12 @@ class SyncOrchestrator(
         val baseFolder = entry.effectiveCloudFolder
         return when (entry) {
             is EmulatorSystem -> {
-                val globalPaths = entry.savePaths
-                    .filter { it.isNotBlank() }
-                    .map(::normalizeSavePath)
+                val globalPaths = entry.effectiveSaveTargets()
+                    .map { normalizeSavePath(it.path) }
                     .toSet()
                 val romPaths = romName?.let { name ->
-                    entry.savePathsByRom[name]
-                        ?: if (name.contains('.')) entry.savePathsByRom[name.substringBeforeLast('.')] else null
-                }.orEmpty().filter { it.isNotBlank() }
+                    entry.effectiveSaveTargetsForRom(name).map { it.path }
+                }.orEmpty()
                 val hasDistinctRomPath = romPaths.any { normalizeSavePath(it) !in globalPaths }
 
                 // A configured global save path uses the emulator folder unless this ROM has
@@ -107,27 +111,28 @@ class SyncOrchestrator(
         return when (entry) {
             is NativePCGame -> {
                 val cloudPath = getCloudPathSegments(entry)
-                entry.savePaths.filter { it.isNotBlank() }.map {
-                    SaveTarget(File(it), cloudPath, entry.name)
+                entry.effectiveSaveTargets().map {
+                    SaveTarget(File(it.path), it.type, cloudPath, entry.name)
                 }
             }
             is EmulatorSystem -> {
                 val targets = mutableListOf<SaveTarget>()
 
                 // 1. Global emulator save paths (if any)
-                if (entry.savePaths.isNotEmpty()) {
+                if (entry.effectiveSaveTargets().isNotEmpty()) {
                     val globalPath = listOf(entry.effectiveCloudFolder)
-                    for (path in entry.savePaths.filter { it.isNotBlank() }) {
-                        targets.add(SaveTarget(File(path), globalPath, entry.name))
+                    for (target in entry.effectiveSaveTargets()) {
+                        targets.add(SaveTarget(File(target.path), target.type, globalPath, entry.name))
                     }
                 }
 
                 // 2. Per-ROM save paths
-                for ((romName, paths) in entry.savePathsByRom) {
+                val romNames = entry.saveTargetsByRom.keys + entry.savePathsByRom.keys
+                for (romName in romNames) {
                     val title = entry.getEffectiveTitle(romName, romName)
                     val romCloudPath = listOf(entry.effectiveCloudFolder, sanitizeCloudFolderName(title))
-                    for (path in paths.filter { it.isNotBlank() }) {
-                        targets.add(SaveTarget(File(path), romCloudPath, title))
+                    for (target in entry.effectiveSaveTargetsForRom(romName)) {
+                        targets.add(SaveTarget(File(target.path), target.type, romCloudPath, title))
                     }
                 }
 
@@ -182,13 +187,7 @@ class SyncOrchestrator(
 
                 for (target in folderTargets) {
                     val savePath = target.file
-                    val isDirectory = when {
-                        savePath.exists() -> savePath.isDirectory
-                        savePath.extension.isNotEmpty() -> false
-                        cloudFiles.isEmpty() -> false
-                        cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
-                        else -> true
-                    }
+                    val isDirectory = target.type == SaveTargetType.DIRECTORY
 
                     if (isDirectory) {
                         val localFiles = if (savePath.exists() && savePath.isDirectory) {
@@ -290,13 +289,7 @@ class SyncOrchestrator(
                 for (target in folderTargets) {
                     val savePath = target.file
                     onStatus(AppStatus.Syncing("Syncing ${target.displayName}..."))
-                    val isDirectory = when {
-                        savePath.exists() -> savePath.isDirectory
-                        savePath.extension.isNotEmpty() -> false
-                        cloudFiles.isEmpty() -> false
-                        cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
-                        else -> true
-                    }
+                    val isDirectory = target.type == SaveTargetType.DIRECTORY
 
                     if (isDirectory) {
                         syncDirectoryManual(token, entry, savePath, folderId, cloudFiles, displayName = target.displayName)
@@ -329,7 +322,7 @@ class SyncOrchestrator(
         romName: String?,
         oldTitle: String,
         newTitle: String,
-        localSavePaths: List<File>,
+        localSaveTargets: List<ConfiguredSaveTarget>,
     ): Boolean {
         val oldCloudPath = getCloudPathSegments(entry, romName, oldTitle)
         val newCloudPath = getCloudPathSegments(entry, romName, newTitle)
@@ -403,14 +396,9 @@ class SyncOrchestrator(
                     var hasNewerLocal = false
                     var hasNewerCloud = false
 
-                    for (savePath in localSavePaths) {
-                        val isDirectory = when {
-                            savePath.exists() -> savePath.isDirectory
-                            savePath.extension.isNotEmpty() -> false
-                            cloudFiles.isEmpty() -> false
-                            cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
-                            else -> true
-                        }
+                    for (target in localSaveTargets) {
+                        val savePath = File(target.path)
+                        val isDirectory = target.type == SaveTargetType.DIRECTORY
 
                         if (isDirectory) {
                             val localDirFiles = if (savePath.exists() && savePath.isDirectory) {
@@ -459,8 +447,10 @@ class SyncOrchestrator(
                     }
 
                     if (hasConflict || (hasNewerLocal && hasNewerCloud)) {
-                        val allLocalFiles = localSavePaths.flatMap { p ->
-                            if (p.isDirectory) p.walkTopDown().filter { it.isFile }.toList() else if (p.exists()) listOf(p) else emptyList()
+                        val allLocalFiles = localSaveTargets.flatMap { target ->
+                            val path = File(target.path)
+                            if (target.type == SaveTargetType.DIRECTORY && path.exists()) path.walkTopDown().filter { it.isFile }.toList()
+                            else if (path.exists()) listOf(path) else emptyList()
                         }
                         val latestLocalMs = if (allLocalFiles.isNotEmpty()) allLocalFiles.maxOf { it.lastModified() } else System.currentTimeMillis()
                         val latestCloudMs = if (cloudFiles.isNotEmpty()) cloudFiles.maxOf { Instant.parse(it.modifiedTime).toEpochMilli() } else System.currentTimeMillis()
@@ -478,14 +468,9 @@ class SyncOrchestrator(
 
                         if (choice == SyncDecision.DOWNLOAD_CLOUD) {
                             onStatus(AppStatus.Syncing("Downloading cloud saves for $newTitle..."))
-                            for (savePath in localSavePaths) {
-                                val isDirectory = when {
-                                    savePath.exists() -> savePath.isDirectory
-                                    savePath.extension.isNotEmpty() -> false
-                                    cloudFiles.isEmpty() -> false
-                                    cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
-                                    else -> true
-                                }
+                            for (target in localSaveTargets) {
+                                val savePath = File(target.path)
+                                val isDirectory = target.type == SaveTargetType.DIRECTORY
                                 if (isDirectory) {
                                     for (cloudFile in cloudFiles) {
                                         val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
@@ -502,8 +487,9 @@ class SyncOrchestrator(
                             }
                         } else if (choice == SyncDecision.UPLOAD_LOCAL) {
                             onStatus(AppStatus.Syncing("Uploading local saves for $newTitle..."))
-                            for (savePath in localSavePaths) {
-                                if (savePath.isDirectory) {
+                            for (target in localSaveTargets) {
+                                val savePath = File(target.path)
+                                if (target.type == SaveTargetType.DIRECTORY) {
                                     val localFiles = savePath.walkTopDown().filter { it.isFile }.toList()
                                     for (localFile in localFiles) {
                                         val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
@@ -518,14 +504,9 @@ class SyncOrchestrator(
                         }
                     } else if (hasNewerCloud && !hasNewerLocal) {
                         onStatus(AppStatus.Syncing("Downloading cloud saves for $newTitle..."))
-                        for (savePath in localSavePaths) {
-                            val isDirectory = when {
-                                savePath.exists() -> savePath.isDirectory
-                                savePath.extension.isNotEmpty() -> false
-                                cloudFiles.isEmpty() -> false
-                                cloudFiles.size == 1 && cloudFiles[0].name == savePath.name -> false
-                                else -> true
-                            }
+                        for (target in localSaveTargets) {
+                            val savePath = File(target.path)
+                            val isDirectory = target.type == SaveTargetType.DIRECTORY
                             if (isDirectory) {
                                 for (cloudFile in cloudFiles) {
                                     val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
@@ -542,8 +523,9 @@ class SyncOrchestrator(
                         }
                     } else if (hasNewerLocal && !hasNewerCloud) {
                         onStatus(AppStatus.Syncing("Uploading local saves for $newTitle..."))
-                        for (savePath in localSavePaths) {
-                            if (savePath.isDirectory) {
+                        for (target in localSaveTargets) {
+                            val savePath = File(target.path)
+                            if (target.type == SaveTargetType.DIRECTORY) {
                                 val localFiles = savePath.walkTopDown().filter { it.isFile }.toList()
                                 for (localFile in localFiles) {
                                     val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
@@ -761,13 +743,13 @@ class SyncOrchestrator(
      */
     suspend fun playWithSync(
         item: GameItem,
-        onRequestSaveSetup: suspend (item: GameItem, notice: String?, cloudFileNames: List<String>) -> List<String> = { _, _, _ -> emptyList() }
+        onRequestSaveSetup: suspend (item: GameItem, notice: String?, cloudFileNames: List<String>) -> List<ConfiguredSaveTarget> = { _, _, _ -> emptyList() }
     ) {
         try {
             val hasDriveConfig = config.googleDrive != null
             var cachedToken: String? = null
             var forceUploadLocal = false
-            var currentSyncPaths = item.effectiveSavePaths
+            var currentSyncTargets = item.effectiveSaveTargets
             val cloudPath = getCloudPathSegments(item)
 
             // ── Step 1: Pre-Sync (download cloud save if newer) ─────
@@ -777,7 +759,7 @@ class SyncOrchestrator(
                     cachedToken = oauthFlow.authorize(config, configManager, allowInteractive = false)
 
                     // Case 1: If game has no save paths configured locally, check if cloud saves exist on Drive!
-                    if (currentSyncPaths.isEmpty()) {
+                    if (currentSyncTargets.isEmpty()) {
                         val cloudFolderId = folders.findPath(cachedToken, cloudPath)
                         val cloudFiles = if (cloudFolderId != null) {
                             search.listFilesInFolder(cachedToken, cloudFolderId)
@@ -790,7 +772,7 @@ class SyncOrchestrator(
                             val notice = "Cloud save data was found for this game. Choose one destination folder; only these listed files will be synchronized for this game."
                             val requested = onRequestSaveSetup(item, notice, cloudFiles.map { it.name })
                             if (requested.isNotEmpty()) {
-                                currentSyncPaths = requested
+                                currentSyncTargets = requested
                             } else {
                                 // User cancelled save setup prior to launch; abort launch to prevent playing without cloud saves.
                                 return
@@ -798,14 +780,15 @@ class SyncOrchestrator(
                         }
                     }
 
-                    if (currentSyncPaths.isNotEmpty()) {
+                    if (currentSyncTargets.isNotEmpty()) {
                         onStatus(AppStatus.Syncing("Syncing saves for ${item.effectiveTitle}..."))
-                        for (pathStr in currentSyncPaths) {
-                            val saveFile = File(pathStr)
+                        for (target in currentSyncTargets) {
+                            val saveFile = File(target.path)
                             val decision = preSync(
                                 token = cachedToken,
                                 entry = item.entry,
                                 localSavePath = saveFile,
+                                targetType = target.type,
                                 cloudPathSegments = cloudPath,
                                 displayName = item.effectiveTitle,
                             )
@@ -828,15 +811,15 @@ class SyncOrchestrator(
             val result = runner.launch(item.entry, item.romFile, steamAppId)
 
             // ── Step 2.5: Ask for save paths if empty ───────────────
-            if (currentSyncPaths.isEmpty() && result.exitCode == 0) {
-                currentSyncPaths = onRequestSaveSetup(item, null, emptyList())
+            if (currentSyncTargets.isEmpty() && result.exitCode == 0) {
+                currentSyncTargets = onRequestSaveSetup(item, null, emptyList())
             }
 
             // ── Step 3: Post-Sync (upload local save if modified) ───
             if (hasDriveConfig && result.exitCode == 0) {
                 val uploaded = uploadAfterPlay(
                     item = item,
-                    syncPaths = currentSyncPaths,
+                    syncTargets = currentSyncTargets,
                     forceUploadLocal = forceUploadLocal,
                     existingToken = cachedToken,
                 )
@@ -852,7 +835,7 @@ class SyncOrchestrator(
 
     private suspend fun uploadAfterPlay(
         item: GameItem,
-        syncPaths: List<String>,
+        syncTargets: List<com.emusync.model.SaveTarget>,
         forceUploadLocal: Boolean,
         existingToken: String?,
     ): Boolean {
@@ -860,13 +843,14 @@ class SyncOrchestrator(
             onStatus(AppStatus.Syncing("Uploading save for ${item.effectiveTitle}..."))
             val token = existingToken ?: oauthFlow.authorize(config, configManager, allowInteractive = false)
             val cloudPath = getCloudPathSegments(item)
-            for (path in syncPaths) {
-                val saveFile = File(path)
+            for (target in syncTargets) {
+                val saveFile = File(target.path)
                 if (saveFile.exists()) {
                     postSync(
                         token = token,
                         entry = item.entry,
                         localSavePath = saveFile,
+                        targetType = target.type,
                         cloudPathSegments = cloudPath,
                         forceAll = forceUploadLocal,
                     )
@@ -884,7 +868,7 @@ class SyncOrchestrator(
                     onRetry = {
                         uploadAfterPlay(
                             item = item,
-                            syncPaths = syncPaths,
+                            syncTargets = syncTargets,
                             forceUploadLocal = forceUploadLocal,
                             existingToken = null,
                         )
@@ -903,19 +887,14 @@ class SyncOrchestrator(
         token: String,
         entry: GameEntry,
         localSavePath: File,
+        targetType: SaveTargetType,
         cloudPathSegments: List<String> = listOf(entry.effectiveCloudFolder),
         displayName: String = entry.name,
     ): SyncDecision? {
         val folderId = folders.ensurePath(token, cloudPathSegments)
         val cloudFiles = search.listFilesInFolder(token, folderId)
 
-        val isDirectory = when {
-            localSavePath.exists() -> localSavePath.isDirectory
-            localSavePath.extension.isNotEmpty() -> false
-            cloudFiles.isEmpty() -> false
-            cloudFiles.size == 1 && cloudFiles[0].name == localSavePath.name -> false
-            else -> true
-        }
+        val isDirectory = targetType == SaveTargetType.DIRECTORY
 
         if (isDirectory) {
             data class FilePair(val localFile: File, val cloudFile: DriveFile, val decision: SyncDecision)
@@ -1012,6 +991,7 @@ class SyncOrchestrator(
         token: String,
         entry: GameEntry,
         localSavePath: File,
+        targetType: SaveTargetType,
         cloudPathSegments: List<String> = listOf(entry.effectiveCloudFolder),
         forceAll: Boolean = false,
     ) {
@@ -1020,7 +1000,7 @@ class SyncOrchestrator(
         val folderId = folders.ensurePath(token, cloudPathSegments)
         val cloudFiles = search.listFilesInFolder(token, folderId)
 
-        if (localSavePath.isDirectory) {
+        if (targetType == SaveTargetType.DIRECTORY) {
             val localFiles = localSavePath.walkTopDown().filter { it.isFile }.toList()
             for (localFile in localFiles) {
                 val relativePath = localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/')

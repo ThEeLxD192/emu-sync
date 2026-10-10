@@ -49,6 +49,9 @@ import androidx.compose.ui.window.Dialog
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
 import com.emusync.model.NativePCGame
+import com.emusync.model.SaveTarget
+import com.emusync.model.SaveTargetType
+import com.emusync.model.effectiveSaveTargets
 import com.emusync.steam.SteamShortcutManager
 import com.emusync.ui.components.FilePicker
 import com.emusync.ui.components.PickerType
@@ -106,8 +109,14 @@ fun AddEntryDialog(
     }
     var savePaths by remember {
         mutableStateOf(
-            if (initialEntry != null && initialEntry.savePaths.isNotEmpty()) initialEntry.savePaths
+            if (initialEntry != null && initialEntry.effectiveSaveTargets().isNotEmpty()) initialEntry.effectiveSaveTargets().map { it.path }
             else listOf("")
+        )
+    }
+    var saveTypes by remember {
+        mutableStateOf(
+            if (initialEntry != null && initialEntry.effectiveSaveTargets().isNotEmpty()) initialEntry.effectiveSaveTargets().map { it.type }
+            else listOf(SaveTargetType.FILE)
         )
     }
     var waitForProcess by remember {
@@ -366,12 +375,22 @@ fun AddEntryDialog(
                                 pickerType = PickerType.ANY,
                             )
                         }
+                        TextButton(onClick = {
+                            val newTypes = saveTypes.toMutableList()
+                            newTypes[index] = if (newTypes[index] == SaveTargetType.FILE) SaveTargetType.DIRECTORY else SaveTargetType.FILE
+                            saveTypes = newTypes
+                        }) {
+                            Text(if (saveTypes[index] == SaveTargetType.FILE) "File" else "Folder")
+                        }
                         if (savePaths.size > 1) {
                             Spacer(Modifier.width(8.dp))
                             IconButton(onClick = {
                                 val newList = savePaths.toMutableList()
                                 newList.removeAt(index)
                                 savePaths = newList
+                                val newTypes = saveTypes.toMutableList()
+                                newTypes.removeAt(index)
+                                saveTypes = newTypes
                             }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Remove Path", tint = EmuSyncColors.Error)
                             }
@@ -380,7 +399,10 @@ fun AddEntryDialog(
                 }
                 
                 TextButton(
-                    onClick = { savePaths = savePaths + "" },
+                    onClick = {
+                        savePaths = savePaths + ""
+                        saveTypes = saveTypes + SaveTargetType.FILE
+                    },
                     modifier = Modifier.align(Alignment.Start)
                 ) {
                     Text("+ Add Another Path", color = EmuSyncColors.Primary)
@@ -409,6 +431,9 @@ fun AddEntryDialog(
                     Button(
                         onClick = {
                             val validSavePaths = savePaths.map { it.trim() }.filter { it.isNotBlank() }
+                            val validSaveTargets = savePaths.mapIndexedNotNull { index, path ->
+                                path.trim().takeIf { it.isNotBlank() }?.let { SaveTarget(it, saveTypes[index]) }
+                            }
                             val entry = validateAndBuild(
                                 type = entryType,
                                 name = name.trim(),
@@ -417,6 +442,7 @@ fun AddEntryDialog(
                                 romsDirectory = romsDirectory.trim(),
                                 extensions = extensions.trim(),
                                 savePaths = validSavePaths,
+                                saveTargets = validSaveTargets,
                                 waitForProcess = waitForProcess.trim(),
                                 fullscreenArgs = fullscreenArgs.trim(),
                                 coversDirectory = coversDirectory.trim(),
@@ -432,6 +458,7 @@ fun AddEntryDialog(
                                         steamAppId = initialEntry?.steamAppId,
                                         steamProcessName = (initialEntry as? EmulatorSystem)?.steamProcessName,
                                         savePathsByRom = (initialEntry as? EmulatorSystem)?.savePathsByRom ?: emptyMap(),
+                                        saveTargetsByRom = (initialEntry as? EmulatorSystem)?.saveTargetsByRom ?: emptyMap(),
                                         coverPathByRom = (initialEntry as? EmulatorSystem)?.coverPathByRom ?: emptyMap(),
                                         titleByRom = (initialEntry as? EmulatorSystem)?.titleByRom ?: emptyMap(),
                                     )
@@ -595,6 +622,7 @@ private fun validateAndBuild(
     romsDirectory: String,
     extensions: String,
     savePaths: List<String>,
+    saveTargets: List<SaveTarget> = savePaths.map { com.emusync.model.inferLegacySaveTarget(it) },
     waitForProcess: String,
     fullscreenArgs: String,
     coversDirectory: String = "",
@@ -622,6 +650,7 @@ private fun validateAndBuild(
                 romsDirectory = romsDirectory,
                 extensions = extList,
                 savePaths = validSavePaths,
+                saveTargets = saveTargets,
                 group = group.trim().takeIf { it.isNotBlank() },
                 cloudFolder = cloudFolder.trim().takeIf { it.isNotBlank() },
                 fullscreenArgs = fullscreenArgs.trim().takeIf { it.isNotBlank() },
@@ -634,6 +663,7 @@ private fun validateAndBuild(
                 executablePath = executablePath,
                 arguments = argList,
                 savePaths = validSavePaths,
+                saveTargets = saveTargets,
                 waitForProcess = waitForProcess.takeIf { it.isNotBlank() },
                 group = group.trim().takeIf { it.isNotBlank() },
                 cloudFolder = cloudFolder.trim().takeIf { it.isNotBlank() },
