@@ -218,6 +218,97 @@ class DriveTransferCioTest {
         }
     }
 
+    @Test
+    fun `CIO resumable upload sends multiple chunks and follows range acknowledgements`(@TempDir tempDir: File) = runTest {
+        val chunkSize = 8 * 1024 * 1024
+        val totalSize = chunkSize + 17
+        val contentRanges = mutableListOf<String?>()
+        val server = LocalHttpServer(connectionCount = 3) { socket ->
+            val request = socket.readRequest()
+            when {
+                request.line.startsWith("POST ") -> socket.respond(
+                    "HTTP/1.1 200 OK\r\nLocation: http://127.0.0.1:${socket.localPort}/multi-session\r\n" +
+                        "Content-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                request.line.startsWith("PUT /multi-session ") -> {
+                    val range = request.headers["content-range"]
+                    contentRanges += range
+                    if (contentRanges.size == 1) {
+                        assertEquals("bytes 0-${chunkSize - 1}/$totalSize", range)
+                        socket.respond(
+                            "HTTP/1.1 308 Resume Incomplete\r\nRange: bytes=0-${chunkSize - 1}\r\n" +
+                                "Content-Length: 0\r\nConnection: close\r\n\r\n",
+                        )
+                    } else {
+                        assertEquals("bytes $chunkSize-${totalSize - 1}/$totalSize", range)
+                        socket.respond(uploadSuccessResponse())
+                    }
+                }
+                else -> error("Unexpected request: ${request.line}")
+            }
+        }
+        val client = cioClientWithShortTimeouts()
+        val file = File(tempDir, "multi-chunk.sav").apply { writeBytes(ByteArray(totalSize) { it.toByte() }) }
+
+        try {
+            val result = DriveTransfer(client, server.filesUrl, server.uploadFilesUrl).upload("token", file)
+            server.awaitCompletion()
+
+            assertEquals("cio-upload", result.id)
+            assertEquals(
+                listOf<String?>(
+                    "bytes 0-${chunkSize - 1}/$totalSize",
+                    "bytes $chunkSize-${totalSize - 1}/$totalSize",
+                ),
+                contentRanges,
+            )
+        } finally {
+            client.close()
+            server.close()
+        }
+    }
+
+    @Test
+    fun `CIO resumable upload restarts once after session expiry`(@TempDir tempDir: File) = runTest {
+        var sessionCount = 0
+        val uploadPaths = mutableListOf<String>()
+        val server = LocalHttpServer(connectionCount = 4) { socket ->
+            val request = socket.readRequest()
+            when {
+                request.line.startsWith("POST ") -> {
+                    sessionCount++
+                    socket.respond(
+                        "HTTP/1.1 200 OK\r\nLocation: http://127.0.0.1:${socket.localPort}/session-$sessionCount\r\n" +
+                            "Content-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                }
+                request.line.startsWith("PUT /session-1 ") -> {
+                    uploadPaths += request.line
+                    socket.respond("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                }
+                request.line.startsWith("PUT /session-2 ") -> {
+                    uploadPaths += request.line
+                    socket.respond(uploadSuccessResponse())
+                }
+                else -> error("Unexpected request: ${request.line}")
+            }
+        }
+        val client = cioClientWithShortTimeouts()
+        val file = File(tempDir, "expired-session.sav").apply { writeText("save") }
+
+        try {
+            val result = DriveTransfer(client, server.filesUrl, server.uploadFilesUrl).upload("token", file)
+            server.awaitCompletion()
+
+            assertEquals("cio-upload", result.id)
+            assertEquals(2, sessionCount)
+            assertEquals(listOf("PUT /session-1 HTTP/1.1", "PUT /session-2 HTTP/1.1"), uploadPaths)
+        } finally {
+            client.close()
+            server.close()
+        }
+    }
+
     private fun cioClientWithShortTimeouts() = HttpClient(CIO) {
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
         install(HttpTimeout) {
@@ -291,8 +382,12 @@ class DriveTransferCioTest {
             if (separator < 0) null else line.substring(0, separator).lowercase() to line.substring(separator + 1).trim()
         }.toMap()
         val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
-        repeat(contentLength) {
-            if (input.read() == -1) error("Connection closed before request body was complete")
+        var remaining = contentLength
+        val bodyBuffer = ByteArray(16 * 1024)
+        while (remaining > 0) {
+            val read = input.read(bodyBuffer, 0, minOf(bodyBuffer.size, remaining))
+            if (read == -1) error("Connection closed before request body was complete")
+            remaining -= read
         }
         return LocalRequest(headerLines.first(), headers)
     }
