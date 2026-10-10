@@ -94,6 +94,8 @@ fun StatusOverlay(
         is AppStatus.PostSyncFailed -> PostSyncFailedDialog(
             gameName = status.gameName,
             reason = status.reason,
+            completedSaveCount = status.completedSaveCount,
+            pendingSaveCount = status.pendingSaveCount,
             onRetry = { coroutineScope.launch { status.onRetry() } },
             onDismiss = { onDismissError?.invoke() },
         )
@@ -111,6 +113,8 @@ fun StatusOverlay(
 private fun PostSyncFailedDialog(
     gameName: String,
     reason: String,
+    completedSaveCount: Int,
+    pendingSaveCount: Int,
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -139,7 +143,16 @@ private fun PostSyncFailedDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "$gameName closed normally, but Google Drive was not updated.\n\n$reason",
+                    text = buildString {
+                        append("$gameName closed normally. ")
+                        if (completedSaveCount == 0) {
+                            append("Google Drive was not updated.")
+                        } else {
+                            append("$completedSaveCount save(s) synced successfully; ")
+                            append("$pendingSaveCount save(s) still need to be uploaded.")
+                        }
+                        append("\n\n$reason")
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = EmuSyncColors.OnSurface,
                     textAlign = TextAlign.Center,

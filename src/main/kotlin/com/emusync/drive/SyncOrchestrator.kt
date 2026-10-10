@@ -11,6 +11,7 @@ import com.emusync.ui.AppStatus
 import com.emusync.ui.CloudSyncStatus
 import com.emusync.ui.GameItem
 import io.ktor.client.HttpClient
+import kotlinx.coroutines.CancellationException
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -856,43 +857,62 @@ class SyncOrchestrator(
         forceUploadLocal: Boolean,
         existingToken: String?,
     ): Boolean {
-        return try {
-            onStatus(AppStatus.Syncing("Uploading save for ${item.effectiveTitle}..."))
+        val pendingPaths = syncPaths
+
+        onStatus(AppStatus.Syncing("Uploading saves for ${item.effectiveTitle}..."))
+        var completedCount = 0
+        val failedPaths = mutableListOf<String>()
+        var firstFailureReason: String? = null
+        try {
             val token = existingToken ?: oauthFlow.authorize(config, configManager, allowInteractive = false)
             val cloudPath = getCloudPathSegments(item)
-            for (path in syncPaths) {
-                val saveFile = File(path)
-                if (saveFile.exists()) {
+            for (path in pendingPaths) {
+                if (!File(path).exists()) continue
+                try {
                     postSync(
                         token = token,
                         entry = item.entry,
-                        localSavePath = saveFile,
+                        localSavePath = File(path),
                         cloudPathSegments = cloudPath,
                         forceAll = forceUploadLocal,
                     )
+                    completedCount++
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    failedPaths += path
+                    if (firstFailureReason == null) firstFailureReason = e.message
                 }
             }
-            onStatus(AppStatus.Idle)
-            true
         } catch (e: Exception) {
-            val reason = e.message?.takeIf { it.isNotBlank() } ?: "Unknown Drive error"
-            logger.log(Level.WARNING, "Post-game Drive sync failed for {0}: {1}", arrayOf(item.effectiveTitle, reason))
-            onStatus(
-                AppStatus.PostSyncFailed(
-                    gameName = item.effectiveTitle,
-                    reason = reason,
-                    onRetry = {
-                        uploadAfterPlay(
-                            item = item,
-                            syncPaths = syncPaths,
-                            forceUploadLocal = forceUploadLocal,
-                            existingToken = null,
-                        )
-                    },
-                )
-            )
-            false
+            if (e is CancellationException) throw e
+            failedPaths += pendingPaths.filterNot { it in failedPaths }
+            firstFailureReason = firstFailureReason ?: e.message
         }
+
+        if (failedPaths.isEmpty()) {
+            onStatus(AppStatus.Idle)
+            return true
+        }
+
+        val reason = firstFailureReason?.takeIf { it.isNotBlank() } ?: "Unknown Drive error"
+        logger.log(Level.WARNING, "Post-game Drive sync failed for {0}: {1}", arrayOf(item.effectiveTitle, reason))
+        onStatus(
+            AppStatus.PostSyncFailed(
+                gameName = item.effectiveTitle,
+                reason = reason,
+                completedSaveCount = completedCount,
+                pendingSaveCount = failedPaths.size,
+                onRetry = {
+                    uploadAfterPlay(
+                        item = item,
+                        syncPaths = failedPaths,
+                        forceUploadLocal = forceUploadLocal,
+                        existingToken = null,
+                    )
+                },
+            )
+        )
+        return false
     }
 
     /**

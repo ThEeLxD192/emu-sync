@@ -27,9 +27,10 @@ class PostSyncFailureTest {
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
 
     @Test
-    fun `failed post game upload remains visible and can be retried without launching game`(@TempDir tempDir: File) = runTest {
+    fun `partial post game upload reports successes and retries only failed saves`(@TempDir tempDir: File) = runTest {
         val rom = File(tempDir, "Game.rom").apply { writeText("ROM") }
         val save = File(tempDir, "save.dat").apply { writeText("LOCAL SAVE") }
+        val secondSave = File(tempDir, "second.dat").apply { writeText("SECOND SAVE") }
         val entry = EmulatorSystem(
             name = "Test emulator",
             executablePath = "echo",
@@ -37,7 +38,7 @@ class PostSyncFailureTest {
             romsDirectory = tempDir.absolutePath,
             extensions = listOf("rom"),
             group = "Tests",
-            savePathsByRom = mapOf(rom.name to listOf(save.absolutePath)),
+            savePathsByRom = mapOf(rom.name to listOf(save.absolutePath, secondSave.absolutePath)),
         )
         val config = AppConfig(
             googleDrive = GoogleDriveConfig("client", "secret", "refresh"),
@@ -46,7 +47,7 @@ class PostSyncFailureTest {
         val configManager = ConfigManager(File(tempDir, "config.json").absolutePath)
         configManager.save(config)
 
-        var failUpload = true
+        var uploadInitiations = 0
         var successfulUploads = 0
         val client = HttpClient(MockEngine) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
@@ -63,11 +64,14 @@ class PostSyncFailureTest {
                         query.contains("name = 'Tests'") -> respond("""{"files":[{"id":"group","name":"Tests"}]}""", headers = jsonHeaders)
                         query.contains("name = 'Game'") -> respond("""{"files":[{"id":"game","name":"Game"}]}""", headers = jsonHeaders)
                         query.contains("in parents and trashed = false") -> respond("""{"files":[]}""", headers = jsonHeaders)
-                        url.contains("upload/drive/v3/files") && failUpload -> respond("offline", HttpStatusCode.InternalServerError)
-                        url.contains("upload/drive/v3/files") -> respond(
-                            "",
-                            headers = headersOf(HttpHeaders.Location, "https://uploads.example/session"),
-                        )
+                        url.contains("upload/drive/v3/files") -> {
+                            uploadInitiations++
+                            if (uploadInitiations == 2) {
+                                respond("offline", HttpStatusCode.InternalServerError)
+                            } else {
+                                respond("", headers = headersOf(HttpHeaders.Location, "https://uploads.example/session"))
+                            }
+                        }
                         url.contains("uploads.example/session") -> {
                             successfulUploads++
                             respond(
@@ -87,12 +91,14 @@ class PostSyncFailureTest {
 
         val failure = assertIs<AppStatus.PostSyncFailed>(statuses.last())
         assertTrue(failure.reason.contains("500"))
-        assertEquals(0, successfulUploads)
+        assertEquals(1, failure.completedSaveCount)
+        assertEquals(1, failure.pendingSaveCount)
+        assertEquals(1, successfulUploads)
 
-        failUpload = false
         failure.onRetry()
 
         assertEquals(AppStatus.Idle, statuses.last())
-        assertEquals(1, successfulUploads)
+        assertEquals(3, uploadInitiations)
+        assertEquals(2, successfulUploads)
     }
 }

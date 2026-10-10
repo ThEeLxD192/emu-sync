@@ -172,6 +172,8 @@ sealed interface AppStatus {
     data class PostSyncFailed(
         val gameName: String,
         val reason: String,
+        val completedSaveCount: Int,
+        val pendingSaveCount: Int,
         val onRetry: suspend () -> Unit,
     ) : AppStatus
     data class Conflict(
