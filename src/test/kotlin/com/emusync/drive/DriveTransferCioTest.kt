@@ -136,7 +136,7 @@ class DriveTransferCioTest {
     }
 
     @Test
-    fun `CIO stalled resumable upload remains active beyond timeout and completes when server responds`(@TempDir tempDir: File) = runTest {
+    fun `CIO caller cancellation interrupts stalled resumable upload`(@TempDir tempDir: File) = runTest {
         val uploadReceived = CountDownLatch(1)
         val releaseServer = CountDownLatch(1)
         val server = LocalHttpServer(connectionCount = 2) { socket ->
@@ -149,7 +149,6 @@ class DriveTransferCioTest {
                 assertTrue(request.startsWith("PUT /session "))
                 uploadReceived.countDown()
                 releaseServer.await(3, TimeUnit.SECONDS)
-                socket.respond(uploadSuccessResponse())
             }
         }
         val client = cioClientWithShortTimeouts()
@@ -164,11 +163,12 @@ class DriveTransferCioTest {
                 "The local server should receive the resumable upload",
             )
             withContext(Dispatchers.IO) { Thread.sleep(300) }
-            assertFalse(upload.isCompleted, "The upload transfer timeout should not abort a stalled request prematurely")
+            assertFalse(upload.isCompleted, "The stalled upload should remain active until its caller cancels it")
 
-            releaseServer.countDown()
-            withContext(Dispatchers.IO) { upload.join() }
-            assertTrue(upload.isCompleted)
+            withContext(Dispatchers.IO) {
+                withTimeout(2_000) { upload.cancelAndJoin() }
+            }
+            assertTrue(upload.isCancelled)
             assertEquals("upload contents", file.readText())
         } finally {
             releaseServer.countDown()
@@ -259,10 +259,4 @@ class DriveTransferCioTest {
         }
     }
 
-    private fun uploadSuccessResponse(): String {
-        val body = "{\"id\":\"cio-upload\",\"name\":\"save.sav\",\"modifiedTime\":\"2026-03-18T12:00:00Z\"}"
-        return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
-            "Content-Length: ${body.toByteArray(StandardCharsets.US_ASCII).size}\r\n" +
-            "Connection: close\r\n\r\n$body"
-    }
 }
