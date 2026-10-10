@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +55,7 @@ import androidx.compose.ui.window.Dialog
 import com.emusync.drive.SyncDecision
 import com.emusync.ui.AppStatus
 import com.emusync.ui.theme.EmuSyncColors
+import kotlinx.coroutines.launch
 
 /**
  * Full-screen overlay showing the current sync/game status.
@@ -64,6 +66,7 @@ fun StatusOverlay(
     status: AppStatus,
     onDismissError: (() -> Unit)? = null,
 ) {
+    val coroutineScope = rememberCoroutineScope()
     when (status) {
         is AppStatus.Syncing -> StatusDialog(
             icon = Icons.Default.CloudSync,
@@ -88,6 +91,12 @@ fun StatusOverlay(
             message = status.message,
             onDismiss = { onDismissError?.invoke() }
         )
+        is AppStatus.PostSyncFailed -> PostSyncFailedDialog(
+            gameName = status.gameName,
+            reason = status.reason,
+            onRetry = { coroutineScope.launch { status.onRetry() } },
+            onDismiss = { onDismissError?.invoke() },
+        )
         is AppStatus.Conflict -> ConflictDialog(
             gameName = status.gameName,
             localDate = status.localDate,
@@ -95,6 +104,58 @@ fun StatusOverlay(
             onResolve = status.onResolve,
         )
         is AppStatus.Idle -> { /* no overlay */ }
+    }
+}
+
+@Composable
+private fun PostSyncFailedDialog(
+    gameName: String,
+    reason: String,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = {}) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = EmuSyncColors.Surface,
+            border = BorderStroke(1.dp, EmuSyncColors.Error.copy(alpha = 0.5f)),
+        ) {
+            Column(
+                modifier = Modifier.padding(28.dp).widthIn(min = 320.dp, max = 460.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(
+                    Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = EmuSyncColors.Error,
+                    modifier = Modifier.size(48.dp),
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = "Save kept locally",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = EmuSyncColors.Error,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "$gameName closed normally, but Google Drive was not updated.\n\n$reason",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = EmuSyncColors.OnSurface,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(20.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(onClick = onDismiss) { Text("Keep local") }
+                    Button(
+                        onClick = onRetry,
+                        colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
+                    ) {
+                        Text("Retry upload")
+                    }
+                }
+            }
+        }
     }
 }
 

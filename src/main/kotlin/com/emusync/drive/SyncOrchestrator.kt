@@ -15,6 +15,8 @@ import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.logging.Level
+import java.util.logging.Logger
 
 /**
  * Orchestrates the full game lifecycle and standalone save sync:
@@ -38,6 +40,7 @@ class SyncOrchestrator(
     private val configManager: ConfigManager,
     private val onStatus: (AppStatus) -> Unit,
 ) {
+    private val logger = Logger.getLogger(SyncOrchestrator::class.java.name)
     private val search = DriveSearch(client)
     private val transfer = DriveTransfer(client)
     private val folders = DriveFolders(client)
@@ -830,30 +833,65 @@ class SyncOrchestrator(
             }
 
             // ── Step 3: Post-Sync (upload local save if modified) ───
-            if (hasDriveConfig && cachedToken != null && result.exitCode == 0) {
-                try {
-                    onStatus(AppStatus.Syncing("Uploading save for ${item.effectiveTitle}..."))
-                    val postCloudPath = getCloudPathSegments(item)
-                    for (pathStr in currentSyncPaths) {
-                        val saveFile = File(pathStr)
-                        if (saveFile.exists()) {
-                            postSync(
-                                token = cachedToken,
-                                entry = item.entry,
-                                localSavePath = saveFile,
-                                cloudPathSegments = postCloudPath,
-                                forceAll = forceUploadLocal,
-                            )
-                        }
-                    }
-                } catch (_: Exception) {
-                }
+            if (hasDriveConfig && result.exitCode == 0) {
+                val uploaded = uploadAfterPlay(
+                    item = item,
+                    syncPaths = currentSyncPaths,
+                    forceUploadLocal = forceUploadLocal,
+                    existingToken = cachedToken,
+                )
+                if (!uploaded) return
             }
 
             onStatus(AppStatus.Idle)
 
         } catch (e: Exception) {
             onStatus(AppStatus.Error("Error: ${e.message}"))
+        }
+    }
+
+    private suspend fun uploadAfterPlay(
+        item: GameItem,
+        syncPaths: List<String>,
+        forceUploadLocal: Boolean,
+        existingToken: String?,
+    ): Boolean {
+        return try {
+            onStatus(AppStatus.Syncing("Uploading save for ${item.effectiveTitle}..."))
+            val token = existingToken ?: oauthFlow.authorize(config, configManager, allowInteractive = false)
+            val cloudPath = getCloudPathSegments(item)
+            for (path in syncPaths) {
+                val saveFile = File(path)
+                if (saveFile.exists()) {
+                    postSync(
+                        token = token,
+                        entry = item.entry,
+                        localSavePath = saveFile,
+                        cloudPathSegments = cloudPath,
+                        forceAll = forceUploadLocal,
+                    )
+                }
+            }
+            onStatus(AppStatus.Idle)
+            true
+        } catch (e: Exception) {
+            val reason = e.message?.takeIf { it.isNotBlank() } ?: "Unknown Drive error"
+            logger.log(Level.WARNING, "Post-game Drive sync failed for {0}: {1}", arrayOf(item.effectiveTitle, reason))
+            onStatus(
+                AppStatus.PostSyncFailed(
+                    gameName = item.effectiveTitle,
+                    reason = reason,
+                    onRetry = {
+                        uploadAfterPlay(
+                            item = item,
+                            syncPaths = syncPaths,
+                            forceUploadLocal = forceUploadLocal,
+                            existingToken = null,
+                        )
+                    },
+                )
+            )
+            false
         }
     }
 
