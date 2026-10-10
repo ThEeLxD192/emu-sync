@@ -66,6 +66,18 @@ class SyncConflictTest {
     }
 
     @Test
+    fun `fractional timestamps beyond threshold are not truncated`() {
+        assertEquals(
+            SyncDecision.CONFLICT,
+            resolveConflict(baseTime.plusMillis(5_001), baseTime, conflictThresholdSeconds = 5L),
+        )
+        assertEquals(
+            SyncDecision.DOWNLOAD_CLOUD,
+            resolveConflict(baseTime, baseTime.plusMillis(5_900), conflictThresholdSeconds = 5L),
+        )
+    }
+
+    @Test
     fun `convenience overload with epoch millis and ISO string works correctly`() {
         val decision = resolveConflict(
             localModifiedTimeMs = baseTime.toEpochMilli(),

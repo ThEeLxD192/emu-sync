@@ -42,6 +42,11 @@ data class GameResult(
  */
 class GameRunner {
 
+    private data class LaunchRequest(
+        val process: Process? = null,
+        val desktopHandoffSucceeded: Boolean = false,
+    )
+
     /** Opens an emulator's own interface without supplying a ROM or waiting for it to exit. */
     suspend fun openEmulator(entry: EmulatorSystem) = withContext(Dispatchers.IO) {
         val command = buildList {
@@ -88,6 +93,8 @@ class GameRunner {
     private suspend fun launchDirect(entry: GameEntry, romFile: File?): Boolean {
         val command = buildCommand(entry, romFile)
         val workingDir = resolveWorkingDirectory(entry, romFile)
+        val waitForProcess = (entry as? NativePCGame)?.waitForProcess
+        val existingMatches = waitForProcess?.let(::matchingProcessIds).orEmpty()
 
         check(command.isNotEmpty()) { "Command list must not be empty" }
 
@@ -103,8 +110,8 @@ class GameRunner {
 
         // If it's a native game with a process-wait, we ignore the initial process exit
         // and instead poll for the named process.
-        return if (entry is NativePCGame && entry.waitForProcess != null) {
-            waitForExternalProcess(entry.waitForProcess)
+        return if (waitForProcess != null) {
+            waitForExternalProcess(waitForProcess, existingMatches, launchRequest = process)
         } else {
             process.waitFor() == 0
         }
@@ -129,12 +136,18 @@ class GameRunner {
         // Non-Steam shortcuts use a 64-bit Game ID: (unsigned_appid << 32) | 0x02000000
         val unsignedAppId = appId.toUInt().toLong()
         val gameId = (unsignedAppId shl 32) or 0x02000000L
-        launchSteamUri("steam://rungameid/$gameId")
-
-        // Step 3: Wait for the game/emulator process to appear and exit
         val processName = resolveProcessName(entry)
+        val existingMatches = processName?.let(::matchingProcessIds).orEmpty()
+        val launchRequest = launchSteamUri("steam://rungameid/$gameId")
+
+        // Step 3: Wait for a newly-created game/emulator process to appear and exit
         return if (processName != null) {
-            waitForExternalProcess(processName)
+            waitForExternalProcess(
+                processName,
+                existingMatches,
+                launchRequest = launchRequest?.process,
+                launchHandoffSucceeded = launchRequest?.desktopHandoffSucceeded == true,
+            )
         } else {
             // Fallback: wait a reasonable time if we can't detect the process
             delay(5000)
@@ -145,23 +158,26 @@ class GameRunner {
     /**
      * Launches a steam:// URI in a cross-platform manner.
      */
-    private fun launchSteamUri(uri: String) {
+    private fun launchSteamUri(uri: String): LaunchRequest? {
         val os = System.getProperty("os.name", "").lowercase()
         try {
-            if (os.contains("win")) {
+            val process = if (os.contains("win")) {
                 ProcessBuilder("cmd", "/c", "start", uri).start()
             } else {
                 ProcessBuilder("steam", uri).start()
             }
+            return LaunchRequest(process = process)
         } catch (_: Exception) {
             try {
                 if (java.awt.Desktop.isDesktopSupported() && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.BROWSE)) {
                     java.awt.Desktop.getDesktop().browse(java.net.URI(uri))
+                    return LaunchRequest(desktopHandoffSucceeded = true)
                 }
             } catch (_: Exception) {
                 // Ignore fallback failure
             }
         }
+        return null
     }
 
     /**
@@ -230,16 +246,55 @@ class GameRunner {
      *
      * @return true if the process appeared and then finished, false if it never appeared within the timeout.
      */
-    private suspend fun waitForExternalProcess(processName: String): Boolean = withContext(Dispatchers.IO) {
+    internal suspend fun waitForExternalProcess(
+        processName: String,
+        existingProcessIds: Set<Long> = emptySet(),
+        launchRequest: Process? = null,
+        launchHandoffSucceeded: Boolean = false,
+        appearanceTimeoutMs: Long = 60_000L,
+        pollIntervalMs: Long = 1_000L,
+        exitPollIntervalMs: Long = 2_000L,
+        reuseConfirmationDelayMs: Long = 1_000L,
+    ): Boolean = withContext(Dispatchers.IO) {
         // Step 1: Wait for appearance (base timeout 60s, dynamically extended while Steam shaders compile)
+        val trackedProcessIds = mutableSetOf<Long>()
         var appeared = false
         var appearanceStart = System.currentTimeMillis()
-        val timeoutMs = 60_000L
+        var successfulLaunchRequestAt: Long? = null
 
-        while (System.currentTimeMillis() - appearanceStart < timeoutMs) {
-            if (isProcessRunning(processName)) {
+        while (System.currentTimeMillis() - appearanceStart < appearanceTimeoutMs) {
+            val newMatches = matchingProcessIds(processName) - existingProcessIds
+            if (newMatches.isNotEmpty()) {
+                trackedProcessIds += newMatches
                 appeared = true
                 break
+            }
+
+            val launchExitCode = if (launchRequest?.isAlive == false) {
+                runCatching { launchRequest.exitValue() }.getOrNull()
+            } else {
+                null
+            }
+            if (launchRequest?.isAlive == false) {
+                when {
+                    launchExitCode == null -> Unit
+                    launchExitCode != 0 -> break
+                }
+            }
+
+            if (launchHandoffSucceeded || launchExitCode == 0) {
+                val now = System.currentTimeMillis()
+                val confirmedAt = successfulLaunchRequestAt ?: now.also { successfulLaunchRequestAt = it }
+                if (now - confirmedAt >= reuseConfirmationDelayMs) {
+                    val reusedMatches = matchingProcessIds(processName).intersect(existingProcessIds)
+                    if (reusedMatches.isNotEmpty()) {
+                        trackedProcessIds += reusedMatches
+                        appeared = true
+                        break
+                    }
+                }
+            } else {
+                successfulLaunchRequestAt = null
             }
 
             // If Steam is compiling Vulkan shaders in the background, reset timeout window
@@ -247,13 +302,19 @@ class GameRunner {
                 appearanceStart = System.currentTimeMillis()
             }
 
-            kotlinx.coroutines.delay(1000)
+            kotlinx.coroutines.delay(pollIntervalMs)
         }
 
         // Step 2: Wait for disappearance (indefinite, only if the process appeared)
-        if (appeared) {
-            while (isProcessRunning(processName)) {
-                kotlinx.coroutines.delay(2000)
+        if (trackedProcessIds.isNotEmpty()) {
+            while (true) {
+                val activeMatches = matchingProcessIds(processName).filterTo(mutableSetOf()) {
+                    it !in existingProcessIds || it in trackedProcessIds
+                }
+                trackedProcessIds += activeMatches
+                trackedProcessIds.removeIf { pid -> ProcessHandle.of(pid).map { it.isAlive }.orElse(false).not() }
+                if (trackedProcessIds.isEmpty()) break
+                kotlinx.coroutines.delay(exitPollIntervalMs)
             }
         }
         appeared
@@ -275,47 +336,40 @@ class GameRunner {
     internal fun isProcessRunning(name: String): Boolean {
         val cleanName = name.trim().removeSurrounding("\"")
         if (cleanName.isBlank()) return false
-        val nameWithoutExt = File(cleanName).nameWithoutExtension
-
-        // 1. Cross-platform JVM ProcessHandle API
         try {
-            val matched = ProcessHandle.allProcesses().anyMatch { handle ->
-                if (!handle.isAlive) return@anyMatch false
-                val info = handle.info()
-
-                val cmd = info.command().orElse(null)
-                if (!cmd.isNullOrBlank()) {
-                    val exeFile = File(cmd)
-                    val exeName = exeFile.name
-                    val exeNameNoExt = exeFile.nameWithoutExtension
-
-                    if (exeName.equals(cleanName, ignoreCase = true) ||
-                        exeNameNoExt.equals(cleanName, ignoreCase = true) ||
-                        exeNameNoExt.equals(nameWithoutExt, ignoreCase = true) ||
-                        exeFile.absolutePath.contains(cleanName, ignoreCase = true)
-                    ) {
-                        return@anyMatch true
-                    }
-                }
-
-                val cmdLine = info.commandLine().orElse(null)
-                if (!cmdLine.isNullOrBlank()) {
-                    if (cmdLine.contains(cleanName, ignoreCase = true) ||
-                        cmdLine.contains(nameWithoutExt, ignoreCase = true)
-                    ) {
-                        return@anyMatch true
-                    }
-                }
-
-                false
-            }
-            if (matched) return true
+            return matchingProcessIds(cleanName).isNotEmpty()
         } catch (_: Exception) {
             // Proceed to fallback
         }
 
         // 2. OS-specific fallback CLI tools
         return fallbackProcessCheck(cleanName)
+    }
+
+    internal fun matchingProcessIds(name: String): Set<Long> {
+        val cleanName = File(name.trim().removeSurrounding("\"")).name
+        if (cleanName.isBlank()) return emptySet()
+        val targetWithoutExtension = File(cleanName).nameWithoutExtension
+
+        return ProcessHandle.allProcesses().filter { it.isAlive && processMatches(it, cleanName, targetWithoutExtension) }
+            .map { it.pid() }
+            .toList()
+            .toSet()
+    }
+
+    private fun processMatches(handle: ProcessHandle, targetName: String, targetWithoutExtension: String): Boolean {
+        val info = handle.info()
+        val commandName = info.command().orElse(null)?.let { File(it).name }
+        if (commandName != null && (
+                commandName.equals(targetName, ignoreCase = true) ||
+                File(commandName).nameWithoutExtension.equals(targetWithoutExtension, ignoreCase = true)
+            )) return true
+
+        return info.arguments().orElse(emptyArray()).any { argument ->
+            val argumentName = File(argument.trim().removeSurrounding("\"")).name
+            argumentName.equals(targetName, ignoreCase = true) ||
+                File(argumentName).nameWithoutExtension.equals(targetWithoutExtension, ignoreCase = true)
+        }
     }
 
     private fun fallbackProcessCheck(cleanName: String): Boolean {
@@ -329,7 +383,7 @@ class GameRunner {
                 process.waitFor()
                 output.contains(targetExe, ignoreCase = true)
             } else {
-                val process = ProcessBuilder("pgrep", "-f", cleanName).start()
+                val process = ProcessBuilder("pgrep", "-x", File(cleanName).nameWithoutExtension).start()
                 process.waitFor() == 0
             }
         } catch (_: Exception) {
