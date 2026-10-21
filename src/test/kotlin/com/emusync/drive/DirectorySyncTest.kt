@@ -939,4 +939,53 @@ class DirectorySyncTest {
         val status = orchestrator.checkEntrySyncStatus(entry)
         assertEquals(CloudSyncStatus.IN_SYNC, status)
     }
+
+    @Test
+    fun `save target configured as FILE uploads directory contents if physical target is a directory`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+        val localSaveDir = File(tempDir, "CUSA13795").apply { mkdirs() }
+        val saveSubDir = File(localSaveDir, "savedata0").apply { mkdirs() }
+        val localFile = File(saveSubDir, "save.dat").apply {
+            writeText("LOCAL_SAVE_DATA")
+            setLastModified(Instant.parse("2026-03-01T12:00:00Z").toEpochMilli())
+        }
+        val entry = NativePCGame(
+            name = "Crash Team Racing",
+            executablePath = "sacredfire",
+            saveTargets = listOf(SaveTarget(localSaveDir.absolutePath, SaveTargetType.FILE)),
+        )
+        val config = driveConfig().copy(entries = listOf(entry))
+        configManager.save(config)
+
+        val expectedDriveTimestamp = "2026-06-01T15:00:00.000Z"
+        val mockClient = createMockDriveClient(
+            cloudFiles = emptyList(),
+            uploadResponseModTime = expectedDriveTimestamp,
+        )
+        val orchestrator = SyncOrchestrator(
+            client = mockClient,
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        val success = orchestrator.syncEntry(entry)
+        assertTrue(success)
+
+        val expectedEpochMs = Instant.parse(expectedDriveTimestamp).toEpochMilli()
+        assertEquals(expectedEpochMs, localFile.lastModified())
+
+        val postUploadClient = createMockDriveClient(
+            cloudFiles = listOf("savedata0/save.dat" to expectedDriveTimestamp),
+        )
+        val postUploadOrchestrator = SyncOrchestrator(
+            client = postUploadClient,
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+        val status = postUploadOrchestrator.checkEntrySyncStatus(entry)
+        assertEquals(CloudSyncStatus.IN_SYNC, status)
+    }
 }

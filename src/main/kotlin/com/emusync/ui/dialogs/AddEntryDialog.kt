@@ -57,6 +57,7 @@ import com.emusync.steam.SteamShortcutManager
 import com.emusync.ui.components.FilePicker
 import com.emusync.ui.components.PickerType
 import com.emusync.ui.theme.EmuSyncColors
+import java.io.File
 
 /**
  * Entry type selector for the add dialog.
@@ -374,6 +375,17 @@ fun AddEntryDialog(
                                     val newList = savePaths.toMutableList()
                                     newList[index] = newVal
                                     savePaths = newList
+                                    val file = File(newVal.trim())
+                                    if (file.exists()) {
+                                        val newTypes = saveTypes.toMutableList()
+                                        newTypes[index] = if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
+                                        saveTypes = newTypes
+                                    }
+                                },
+                                onTypeChange = { newType ->
+                                    val newTypes = saveTypes.toMutableList()
+                                    newTypes[index] = newType
+                                    saveTypes = newTypes
                                 },
                                 placeholder = if (entryType == EntryType.EMULATOR)
                                     "/home/user/emulator/memcards/Mcd001.ps2"
@@ -443,7 +455,14 @@ fun AddEntryDialog(
                         onClick = {
                             val validSavePaths = savePaths.map { it.trim() }.filter { it.isNotBlank() }
                             val validSaveTargets = savePaths.mapIndexedNotNull { index, path ->
-                                path.trim().takeIf { it.isNotBlank() }?.let { SaveTarget(it, saveTypes[index]) }
+                                path.trim().takeIf { it.isNotBlank() }?.let { trimmed ->
+                                    val file = File(trimmed)
+                                    val actualType = when {
+                                        file.exists() -> if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
+                                        else -> saveTypes.getOrElse(index) { SaveTargetType.FILE }
+                                    }
+                                    SaveTarget(trimmed, actualType)
+                                }
                             }
                             val entry = validateAndBuild(
                                 type = entryType,
@@ -538,7 +557,8 @@ private fun PathField(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,
-    pickerType: PickerType
+    pickerType: PickerType,
+    onTypeChange: ((SaveTargetType) -> Unit)? = null,
 ) {
     val coroutineScope = rememberCoroutineScope()
     Column {
@@ -583,7 +603,10 @@ private fun PathField(
                                     type = PickerType.FILE
                                 )
                             }
-                            if (result != null) onValueChange(result)
+                            if (result != null) {
+                                onValueChange(result)
+                                onTypeChange?.invoke(SaveTargetType.FILE)
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
@@ -608,7 +631,10 @@ private fun PathField(
                                     type = PickerType.DIRECTORY
                                 )
                             }
-                            if (result != null) onValueChange(result)
+                            if (result != null) {
+                                onValueChange(result)
+                                onTypeChange?.invoke(SaveTargetType.DIRECTORY)
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(

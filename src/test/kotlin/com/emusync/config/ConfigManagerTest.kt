@@ -311,4 +311,33 @@ class ConfigManagerTest {
             )
         }
     }
+
+    @Test
+    fun `existing directory target misconfigured as FILE resolves to DIRECTORY on load`(@TempDir tempDir: File) {
+        val saveDir = File(tempDir, "CUSA13795").apply { mkdirs() }
+        File(saveDir, "save.dat").writeText("data")
+        val configFile = File(tempDir, "config.json").apply {
+            writeText(
+                """
+                {
+                  "entries": [{
+                    "type": "native",
+                    "name": "Crash Team Racing",
+                    "executablePath": "/game/start",
+                    "savePaths": [${Json.encodeToString(saveDir.absolutePath)}],
+                    "saveTargets": [{
+                      "path": ${Json.encodeToString(saveDir.absolutePath)},
+                      "type": "file"
+                    }]
+                  }]
+                }
+                """.trimIndent()
+            )
+        }
+        val manager = ConfigManager(configFile)
+        val loaded = manager.load().entries.single() as NativePCGame
+
+        assertEquals(SaveTargetType.DIRECTORY, loaded.saveTargets.single().type)
+        assertTrue(configFile.readText().contains("\"directory\""))
+    }
 }

@@ -168,10 +168,14 @@ data class NativePCGame(
 ) : GameEntry
 
 private fun SaveTarget.resolveUnknownTypeIfPresent(): SaveTarget {
-    if (type != SaveTargetType.UNKNOWN) return this
     val file = File(path)
     if (!file.exists()) return this
-    return copy(type = if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE)
+    val actualType = if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
+    return if (type == SaveTargetType.UNKNOWN || (type == SaveTargetType.FILE && file.isDirectory) || (type == SaveTargetType.DIRECTORY && file.isFile)) {
+        copy(type = actualType)
+    } else {
+        this
+    }
 }
 
 fun GameEntry.effectiveSaveTargets(): List<SaveTarget> =

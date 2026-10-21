@@ -29,13 +29,14 @@ internal fun isDirectorySaveTarget(
     path: File,
     cloudFiles: List<DriveFile>,
     knownFileSiblingNames: Set<String> = emptySet(),
-): Boolean = when (type) {
-    SaveTargetType.DIRECTORY -> true
-    SaveTargetType.FILE -> false
-    SaveTargetType.UNKNOWN -> if (path.exists()) {
-        path.isDirectory
-    } else {
-        cloudFiles.none { cloudFile ->
+): Boolean {
+    if (path.exists()) {
+        return path.isDirectory
+    }
+    return when (type) {
+        SaveTargetType.DIRECTORY -> true
+        SaveTargetType.FILE -> false
+        SaveTargetType.UNKNOWN -> cloudFiles.none { cloudFile ->
             cloudFile.name == path.name && cloudFile.name !in knownFileSiblingNames
         }
     }
@@ -1224,8 +1225,7 @@ class SyncOrchestrator(
 
         // Legacy paths that did not exist during config migration remain UNKNOWN until
         // the game creates them. Resolve from the filesystem after the game exits.
-        val isDirectory = targetType == SaveTargetType.DIRECTORY ||
-            (targetType == SaveTargetType.UNKNOWN && localSavePath.isDirectory)
+        val isDirectory = isDirectorySaveTarget(targetType, localSavePath, cloudFiles, knownFileSiblingNames)
         if (isDirectory) {
             val localFiles = localSavePath.walkTopDown().filter { it.isFile }.toList()
             for (localFile in localFiles) {
