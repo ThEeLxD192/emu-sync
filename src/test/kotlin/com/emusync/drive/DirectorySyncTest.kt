@@ -988,4 +988,88 @@ class DirectorySyncTest {
         val status = postUploadOrchestrator.checkEntrySyncStatus(entry)
         assertEquals(CloudSyncStatus.IN_SYNC, status)
     }
+
+    @Test
+    fun `multiple directory targets isolate files and maintain in sync status`(@TempDir tempDir: File) = runTest {
+        val configFile = File(tempDir, "config.json")
+        val configManager = ConfigManager(configFile.absolutePath)
+
+        val saveDir1 = File(tempDir, "Saves/savedata/1/CUSA13795").apply { mkdirs() }
+        val saveSubDir = File(saveDir1, "savedata0").apply { mkdirs() }
+        val time1 = "2026-03-01T12:00:00.000Z"
+        val saveFile = File(saveSubDir, "SYS-DATA.sav").apply {
+            writeText("SAVEDATA")
+            setLastModified(Instant.parse(time1).toEpochMilli())
+        }
+
+        val saveDir2 = File(tempDir, "Saves/trophies/CUSA13795").apply { mkdirs() }
+        val time2 = "2026-03-01T12:05:00.000Z"
+        val trophyFile = File(saveDir2, "unlocked.txt").apply {
+            writeText("TROPHIES")
+            setLastModified(Instant.parse(time2).toEpochMilli())
+        }
+
+        val entry = NativePCGame(
+            name = "Crash Team Racing",
+            executablePath = "echo",
+            saveTargets = listOf(
+                SaveTarget(saveDir1.absolutePath, SaveTargetType.DIRECTORY),
+                SaveTarget(saveDir2.absolutePath, SaveTargetType.DIRECTORY),
+            ),
+        )
+        val config = driveConfig().copy(entries = listOf(entry))
+        configManager.save(config)
+
+        val cloudFiles = listOf(
+            "savedata0/SYS-DATA.sav" to time1,
+            "unlocked.txt" to time2,
+        )
+        val cloudContents = mapOf(
+            "file-0" to "SAVEDATA".toByteArray(),
+            "file-1" to "TROPHIES".toByteArray(),
+        )
+
+        val client = createMockDriveClient(cloudFiles, cloudContents)
+        val orchestrator = SyncOrchestrator(
+            client = client,
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        // 1. Initially both targets match the cloud files. Should be IN_SYNC.
+        val initialStatus = orchestrator.checkEntrySyncStatus(entry)
+        assertEquals(CloudSyncStatus.IN_SYNC, initialStatus)
+
+        // 2. Perform manual sync. Ensure neither directory downloads the other's files!
+        val syncResult = orchestrator.syncEntry(entry)
+        assertTrue(syncResult)
+        assertFalse(File(saveDir1, "unlocked.txt").exists(), "Dir 1 should not download Dir 2's unlocked.txt")
+        assertFalse(File(saveDir2, "savedata0/SYS-DATA.sav").exists(), "Dir 2 should not download Dir 1's savedata0")
+
+        // 3. User plays game and only Dir 1 is updated with a newer timestamp:
+        val time3 = "2026-03-01T13:00:00.000Z"
+        saveFile.writeText("SAVEDATA_NEW")
+        saveFile.setLastModified(Instant.parse(time3).toEpochMilli())
+
+        // Drive is updated for Dir 1:
+        val updatedCloudFiles = listOf(
+            "savedata0/SYS-DATA.sav" to time3,
+            "unlocked.txt" to time2,
+        )
+        val updatedClient = createMockDriveClient(updatedCloudFiles, cloudContents)
+        val updatedOrchestrator = SyncOrchestrator(
+            client = updatedClient,
+            config = config,
+            configManager = configManager,
+            onStatus = {},
+        )
+
+        // Now Dir 1 matches time3 on Drive, Dir 2 matches time2 on Drive.
+        // It must be IN_SYNC, NOT falsely reported as OUT_OF_SYNC because of Dir 2!
+        val postGameStatus = updatedOrchestrator.checkEntrySyncStatus(entry)
+        assertEquals(CloudSyncStatus.IN_SYNC, postGameStatus)
+        assertFalse(File(saveDir2, "savedata0/SYS-DATA.sav").exists(), "Dir 2 must still not contain savedata0")
+    }
 }
+
