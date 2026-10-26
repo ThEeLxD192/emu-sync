@@ -55,14 +55,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.emusync.drive.resolveCloudRestorePaths
+import com.emusync.drive.resolveCloudRestoreTargets
+import com.emusync.drive.remotePathSegments
 import com.emusync.model.EmulatorSystem
 import com.emusync.ui.GameItem
 import com.emusync.ui.components.FilePicker
+import com.emusync.ui.components.CloudPathField
 import com.emusync.ui.components.PickerType
 import com.emusync.ui.components.loadGameCover
 import com.emusync.ui.theme.EmuSyncColors
 import com.emusync.model.SaveTarget
 import com.emusync.model.SaveTargetType
+import com.emusync.model.scopeNewSaveTargets
 import java.io.File
 
 /**
@@ -92,6 +96,9 @@ fun EditGameDialog(
             if (game.gameSpecificSaveTargets.isEmpty()) listOf(SaveTargetType.FILE)
             else game.gameSpecificSaveTargets.map { it.type }
         )
+    }
+    var saveCloudPaths by remember {
+        mutableStateOf(game.gameSpecificSaveTargets.map { it.cloudPath.orEmpty() }.ifEmpty { listOf("") })
     }
     var restoreDestinationFolder by remember { mutableStateOf("") }
     var restoreWholeFolder by remember { mutableStateOf(false) }
@@ -545,6 +552,7 @@ fun EditGameDialog(
                                 val newTypes = saveTypes.toMutableList()
                                 newTypes.removeAt(index)
                                 saveTypes = newTypes
+                                saveCloudPaths = saveCloudPaths.toMutableList().apply { removeAt(index) }
                             }) {
                                 Icon(
                                     Icons.Default.Delete,
@@ -554,6 +562,12 @@ fun EditGameDialog(
                             }
                         }
                     }
+                    CloudPathField(
+                        value = saveCloudPaths.getOrElse(index) { "" },
+                        onValueChange = { value -> saveCloudPaths = saveCloudPaths.toMutableList().apply { set(index, value) } },
+                        type = saveTypes[index],
+                    )
+                    Spacer(Modifier.height(8.dp))
                 }
 
                 if (cloudRestoreFileNames.isEmpty()) {
@@ -561,6 +575,7 @@ fun EditGameDialog(
                         onClick = {
                             savePaths = savePaths + ""
                             saveTypes = saveTypes + SaveTargetType.FILE
+                            saveCloudPaths = saveCloudPaths + ""
                         },
                         modifier = Modifier.align(Alignment.Start)
                     ) {
@@ -579,11 +594,12 @@ fun EditGameDialog(
                         Text("Cancel")
                     }
                     Button(
-                        enabled = cloudRestoreFileNames.isEmpty() || selectedRestorePaths.isNotEmpty(),
+                        enabled = (cloudRestoreFileNames.isEmpty() || selectedRestorePaths.isNotEmpty()) &&
+                            saveCloudPaths.all { it.isBlank() || remotePathSegments(it.trim()) != null },
                         onClick = {
                             val validSaveTargets = if (cloudRestoreFileNames.isNotEmpty()) {
                                 if (restoreWholeFolder) listOf(SaveTarget(restoreDestinationFolder.trim(), SaveTargetType.DIRECTORY))
-                                else selectedRestorePaths.map { SaveTarget(it, SaveTargetType.FILE) }
+                                else resolveCloudRestoreTargets(restoreDestinationFolder.trim(), cloudRestoreFileNames)
                             } else savePaths.mapIndexedNotNull { index, path ->
                                 path.trim().takeIf { it.isNotBlank() }?.let { trimmed ->
                                     val file = File(trimmed)
@@ -591,12 +607,15 @@ fun EditGameDialog(
                                         file.exists() -> if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
                                         else -> saveTypes.getOrElse(index) { SaveTargetType.FILE }
                                     }
-                                    SaveTarget(trimmed, actualType)
+                                    SaveTarget(trimmed, actualType, saveCloudPaths.getOrElse(index) { "" }.trim().ifBlank { null })
                                 }
                             }
                             val cleanCover = coverPath.trim().takeIf { it.isNotBlank() }
                             val cleanTitle = customTitle.trim().takeIf { it.isNotBlank() }
-                            onSave(cleanTitle, validSaveTargets, cleanCover)
+                            val targets = if (cloudRestoreFileNames.isEmpty() && game.gameSpecificSaveTargets.isEmpty()) {
+                                scopeNewSaveTargets(validSaveTargets)
+                            } else validSaveTargets
+                            onSave(cleanTitle, targets, cleanCover)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
                     ) {

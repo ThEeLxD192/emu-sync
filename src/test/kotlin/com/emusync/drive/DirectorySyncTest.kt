@@ -174,6 +174,19 @@ class DirectorySyncTest {
                     val url = request.url.toString()
                     val q = request.url.parameters["q"] ?: ""
                     when {
+                        request.url.encodedPath.startsWith("/drive/v2/files/") -> {
+                            val id = request.url.segments.last()
+                            val (name, date) = cloudFiles.first { it.first == id }.second
+                            respond(Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile(id, name,
+                                date, "\"old\"", "1")), headers = jsonHeaders)
+                        }
+                        request.url.encodedPath.startsWith("/upload/drive/v2/files/") -> {
+                            val id = request.url.segments.last()
+                            val name = cloudFiles.first { it.first == id }.second.first
+                            uploadRequests += "PUT:$id"
+                            respond(Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile(id, name,
+                                "2026-10-09T15:00:00.000Z", "\"new\"", "2")), headers = jsonHeaders)
+                        }
                         url.contains("oauth2.googleapis.com/token") -> respond(
                             content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
                             headers = jsonHeaders,
@@ -197,7 +210,7 @@ class DirectorySyncTest {
                         q.contains("'game-id' in parents") -> {
                             val filesJson = cloudFiles.joinToString(",") { (id, details) ->
                                 val (name, modifiedTime) = details
-                                """{"id":"$id","name":"$name","modifiedTime":"$modifiedTime"}"""
+                                """{"id":"$id","name":"$name","modifiedTime":"$modifiedTime","version":"1"}"""
                             }
                             respond(content = """{"files":[$filesJson]}""", headers = jsonHeaders)
                         }
@@ -258,7 +271,7 @@ class DirectorySyncTest {
         assertEquals("CLOUD_OPTIONS", File(saveDirectory, "profiles/slot2/options.ini").readText())
         assertEquals("CREATED_DURING_PLAY", File(saveDirectory, "profiles/new-slot/new.sav").readText())
         assertEquals(
-            setOf("PATCH:cloud-initial", "POST:profiles/new-slot/new.sav"),
+            setOf("PUT:cloud-initial", "POST:profiles/new-slot/new.sav"),
             uploadRequests.toSet(),
             "Post-sync should update and create files using relative paths from the UNKNOWN directory target",
         )
@@ -367,6 +380,14 @@ class DirectorySyncTest {
                     val url = request.url.toString()
                     val q = request.url.parameters["q"] ?: ""
                     when {
+                        request.url.encodedPath.startsWith("/drive/v2/files/") -> respond(
+                            Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile("legacy-save-id",
+                                "SAVE_SLOT", cloudModifiedTime, "\"old\"", "1")), headers = jsonHeaders)
+                        request.url.encodedPath.startsWith("/upload/drive/v2/files/") -> {
+                            uploadRequests += "PUT:legacy-save-id"
+                            respond(Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile("legacy-save-id",
+                                "SAVE_SLOT", "2026-10-09T15:00:00.000Z", "\"new\"", "2")), headers = jsonHeaders)
+                        }
                         url.contains("oauth2.googleapis.com/token") -> respond(
                             content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
                             headers = jsonHeaders,
@@ -385,7 +406,7 @@ class DirectorySyncTest {
                             headers = headersOf(HttpHeaders.ContentType, "application/octet-stream"),
                         )
                         q.contains("'game-id' in parents") -> respond(
-                            content = """{"files":[{"id":"legacy-save-id","name":"SAVE_SLOT","modifiedTime":"$cloudModifiedTime"}]}""",
+                            content = """{"files":[{"id":"legacy-save-id","name":"SAVE_SLOT","modifiedTime":"$cloudModifiedTime","version":"1"}]}""",
                             headers = jsonHeaders,
                         )
                         url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
@@ -434,7 +455,7 @@ class DirectorySyncTest {
 
         assertTrue(sawRestoredFileBeforePlay, "The exact cloud match should be restored as a file before launch")
         assertEquals("UPDATED_DURING_PLAY", legacySave.readText())
-        assertEquals(setOf("PATCH:legacy-save-id"), uploadRequests.toSet())
+        assertEquals(setOf("PUT:legacy-save-id"), uploadRequests.toSet())
     }
 
     private fun createMockDriveClient(
@@ -453,6 +474,21 @@ class DirectorySyncTest {
                     val url = request.url.toString()
                     val q = request.url.parameters["q"] ?: ""
                     when {
+                        request.url.encodedPath.startsWith("/drive/v2/files/") -> {
+                            val id = request.url.segments.last()
+                            val index = id.removePrefix("file-").toInt()
+                            val (name, date) = cloudFiles[index]
+                            respond(Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile(id, name, date,
+                                "\"observed\"", sha256Checksum = sha256(fileContents[id] ?: "DUMMY".toByteArray()))), headers = jsonHeaders)
+                        }
+                        request.url.encodedPath.startsWith("/upload/drive/v2/files/") -> {
+                            val id = request.url.segments.last()
+                            val name = cloudFiles[id.removePrefix("file-").toInt()].first
+                            onUpdate(id)
+                            onWrite()
+                            respond(Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile(id, name,
+                                uploadResponseModTime)), headers = jsonHeaders)
+                        }
                         // OAuth token refresh
                         url.contains("oauth2.googleapis.com/token") -> {
                             respond(
@@ -502,7 +538,7 @@ class DirectorySyncTest {
                         // List files in folder
                         q.contains("in parents and trashed = false") -> {
                             val filesJson = cloudFiles.mapIndexed { idx, (name, modTime) ->
-                                """{"id":"file-$idx","name":"$name","modifiedTime":"$modTime"}"""
+                                """{"id":"file-$idx","name":"$name","modifiedTime":"$modTime","sha256Checksum":"${sha256(fileContents["file-$idx"] ?: "DUMMY".toByteArray())}"}"""
                             }.joinToString(",")
                             respond(
                                 content = """{"files":[$filesJson]}""",
@@ -567,7 +603,7 @@ class DirectorySyncTest {
     }
 
     @Test
-    fun `checkEntrySyncStatus should return IN_SYNC when local and cloud timestamps match within threshold`(@TempDir tempDir: File) = runTest {
+    fun `checkEntrySyncStatus should return IN_SYNC when content hashes match`(@TempDir tempDir: File) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
 
@@ -597,7 +633,8 @@ class DirectorySyncTest {
         configManager.save(config)
 
         val mockClient = createMockDriveClient(
-            cloudFiles = listOf("BLUS30481/PARAM.SFO" to nowIso)
+            cloudFiles = listOf("BLUS30481/PARAM.SFO" to nowIso),
+            fileContents = mapOf("file-0" to "PARAM_DATA".toByteArray()),
         )
 
         val orchestrator = SyncOrchestrator(
@@ -849,6 +886,7 @@ class DirectorySyncTest {
 
         val postUploadClient = createMockDriveClient(
             cloudFiles = listOf("BLUS30481/PARAM.SFO" to expectedDriveTimestamp),
+            fileContents = mapOf("file-0" to "LOCAL_CONTENT".toByteArray()),
         )
         val postUploadOrchestrator = SyncOrchestrator(
             client = postUploadClient,
@@ -978,6 +1016,7 @@ class DirectorySyncTest {
 
         val postUploadClient = createMockDriveClient(
             cloudFiles = listOf("savedata0/save.dat" to expectedDriveTimestamp),
+            fileContents = mapOf("file-0" to "LOCAL_SAVE_DATA".toByteArray()),
         )
         val postUploadOrchestrator = SyncOrchestrator(
             client = postUploadClient,
@@ -1057,7 +1096,7 @@ class DirectorySyncTest {
             "savedata0/SYS-DATA.sav" to time3,
             "unlocked.txt" to time2,
         )
-        val updatedClient = createMockDriveClient(updatedCloudFiles, cloudContents)
+        val updatedClient = createMockDriveClient(updatedCloudFiles, cloudContents + ("file-0" to "SAVEDATA_NEW".toByteArray()))
         val updatedOrchestrator = SyncOrchestrator(
             client = updatedClient,
             config = config,

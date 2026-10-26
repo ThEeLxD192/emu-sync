@@ -32,9 +32,11 @@ class GameRunnerTest {
         )
 
         runner.openEmulator(emulator)
-        repeat(50) {
-            if (argsFile.exists()) return@repeat
-            kotlinx.coroutines.delay(20)
+        // A real child process needs wall-clock time; runTest's virtual delays do not wait for it.
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            kotlinx.coroutines.withTimeout(3_000) {
+                while (!argsFile.exists()) kotlinx.coroutines.delay(20)
+            }
         }
 
         assertEquals("--gui", argsFile.readText().trim())
@@ -328,5 +330,21 @@ class GameRunnerTest {
             process.destroyForcibly()
             process.waitFor()
         }
+    }
+
+    @Test
+    fun `direct launch preserves quoted fullscreen arguments and expands inline ROM placeholder`(@TempDir directory: File) = runTest {
+        assumeFalse(System.getProperty("os.name").lowercase().contains("windows"))
+        val output = File(directory, "args.bin")
+        val executable = File(directory, "emulator.sh").apply {
+            writeText("#!/bin/sh\nprintf '%s\\0' \"\$@\" > ${com.emusync.util.shellArgument(output.path)}\n")
+            setExecutable(true)
+        }
+        val rom = File(directory, "game with spaces.rom").apply { writeText("ROM") }
+        val entry = EmulatorSystem("Test", executable.path, romsDirectory = directory.path, extensions = listOf("rom"),
+            fullscreenArgs = "--label \"value with spaces\"", arguments = listOf("--load={ROM}"))
+        assertEquals(0, runner.launch(entry, rom).exitCode)
+        assertEquals(listOf("--label", "value with spaces", "--load=${rom.path}"),
+            output.readBytes().decodeToString().split('\u0000').dropLast(1))
     }
 }

@@ -46,7 +46,7 @@ class SteamShortcutManagerTest {
         val shortcut = manager.registerEntry(entry)
         assertNotNull(shortcut)
         assertEquals("[EmuSync] Game Boy Advance", shortcut.appName)
-        assertTrue(shortcut.exe.endsWith("launch_game_boy_advance.sh\""))
+        assertTrue(shortcut.exe.endsWith("launch_${manager.launcherKey(entry.name)}.sh\""))
         assertEquals("", shortcut.launchOptions)
 
         val loaded = manager.loadShortcuts()
@@ -55,12 +55,12 @@ class SteamShortcutManagerTest {
 
         // Verify Linux launcher script
         val launcherDir = File(tempDir, "launchers")
-        val script = File(launcherDir, "launch_game_boy_advance.sh")
+        val script = File(launcherDir, "launch_${manager.launcherKey(entry.name)}.sh")
         assertTrue(script.exists())
         val content = script.readText()
         assertTrue(content.startsWith("#!/bin/bash"))
-        assertTrue(content.contains("FULLSCREEN_ARGS=\"-f\""))
-        assertTrue(content.contains("exec \"/usr/bin/mgba-qt\" \$FULLSCREEN_ARGS \"\$ROM_PATH\""))
+        assertTrue(content.contains("FULLSCREEN_ARGS=(\"-f\")"))
+        assertTrue(content.contains("exec \"/usr/bin/mgba-qt\" \"\${FULLSCREEN_ARGS[@]}\" \"\${ROM_PATH}\""))
     }
 
     @Test
@@ -77,25 +77,14 @@ class SteamShortcutManagerTest {
         val shortcut = manager.registerEntry(entry)
         assertNotNull(shortcut)
         assertEquals("[EmuSync] Game Boy Advance", shortcut.appName)
-        // On Windows, exe should be cmd.exe and launchOptions points to .bat
-        assertTrue(shortcut.exe.lowercase().contains("cmd.exe"))
-        assertTrue(shortcut.launchOptions.startsWith("/c \"\""))
-        assertTrue(shortcut.launchOptions.endsWith("launch_game_boy_advance.bat\"\""))
+        assertTrue(shortcut.exe.lowercase().contains("powershell.exe"))
+        assertTrue(shortcut.launchOptions.contains("-EncodedCommand "))
         assertEquals("C:\\Emulators\\mGBA", shortcut.startDir)
-
-        // Verify Windows batch launcher script
-        val launcherDir = File(tempDir, "launchers")
-        val batScript = File(launcherDir, "launch_game_boy_advance.bat")
-        assertTrue(batScript.exists())
+        val batScript = manager.createWindowsWrapperScript(entry)
         val content = batScript.readText()
-
         assertTrue(content.startsWith("@echo off"))
-        assertTrue(content.contains(":: Launcher for: Game Boy Advance"))
-        assertTrue(content.contains("set \"SIGNAL_FILE="))
-        assertTrue(content.contains(".current_rom_game_boy_advance\""))
-        assertTrue(content.contains("set /p ROM_PATH=<\"%SIGNAL_FILE%\""))
-        assertTrue(content.contains("if not exist \"%ROM_PATH%\""))
-        assertTrue(content.contains("start \"\" /wait \"C:\\Emulators\\mGBA\\mgba.exe\" -f \"%ROM_PATH%\""))
+        assertTrue(content.contains("setlocal DisableDelayedExpansion"))
+        assertTrue(content.contains("-EncodedCommand "))
         assertTrue(content.contains("exit /b %ERRORLEVEL%"))
         assertTrue(content.contains("\r\n"), "Batch file must use CRLF line endings")
     }

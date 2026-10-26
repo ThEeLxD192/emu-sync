@@ -18,7 +18,12 @@ data class DriveFile(
     val id: String,
     val name: String,
     @SerialName("modifiedTime") val modifiedTime: String,  // ISO 8601 e.g. "2024-01-15T10:30:00.000Z"
-)
+    val mimeType: String? = null,
+    val sha256Checksum: String? = null,
+    val version: String? = null,
+) {
+    val isFolder: Boolean get() = mimeType == "application/vnd.google-apps.folder"
+}
 
 /**
  * Google Drive Files.list API response.
@@ -66,7 +71,7 @@ class DriveSearch(private val client: HttpClient) {
         val response = client.get(FILES_URL) {
             header(HttpHeaders.Authorization, "Bearer $accessToken")
             parameter("q", query)
-            parameter("fields", "files(id, name, modifiedTime)")
+            parameter("fields", "files(id, name, modifiedTime, sha256Checksum, version)")
             parameter("orderBy", "modifiedTime desc")
             parameter("pageSize", "1")
         }
@@ -90,6 +95,12 @@ class DriveSearch(private val client: HttpClient) {
     suspend fun listFilesInFolder(
         accessToken: String,
         folderId: String,
+    ): List<DriveFile> = listChildrenInFolder(accessToken, folderId).filterNot { it.isFolder }
+
+    /** Lists files and folders for migrations without treating folders as save files. */
+    suspend fun listChildrenInFolder(
+        accessToken: String,
+        folderId: String,
     ): List<DriveFile> {
         val query = "'$folderId' in parents and trashed = false"
         val files = mutableListOf<DriveFile>()
@@ -99,7 +110,7 @@ class DriveSearch(private val client: HttpClient) {
             val response = client.get(FILES_URL) {
                 header(HttpHeaders.Authorization, "Bearer $accessToken")
                 parameter("q", query)
-                parameter("fields", "nextPageToken, files(id, name, modifiedTime)")
+                parameter("fields", "nextPageToken, files(id, name, modifiedTime, mimeType, sha256Checksum, version)")
                 parameter("orderBy", "modifiedTime desc")
                 parameter("pageSize", 1000)
                 pageToken?.let { parameter("pageToken", it) }
@@ -129,7 +140,7 @@ class DriveSearch(private val client: HttpClient) {
     suspend fun getById(accessToken: String, fileId: String): DriveFile {
         val response = client.get("$FILES_URL/$fileId") {
             header(HttpHeaders.Authorization, "Bearer $accessToken")
-            parameter("fields", "id, name, modifiedTime")
+            parameter("fields", "id, name, modifiedTime, sha256Checksum, version")
         }
 
         if (response.status != HttpStatusCode.OK) {

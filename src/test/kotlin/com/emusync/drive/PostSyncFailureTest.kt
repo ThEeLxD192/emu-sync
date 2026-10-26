@@ -235,6 +235,12 @@ class PostSyncFailureTest {
             entries = listOf(entry),
         )
         val configManager = ConfigManager(File(tempDir, "config.json").absolutePath).apply { save(config) }
+        // Both files previously agreed with Drive. Local progress was made offline.
+        val history = SyncHistoryStore(configManager.configFile)
+        for ((file, id) in listOf(firstSave to "first-id", secondSave to "second-id")) {
+            history.record(history.key(file, "game", file.name), sha256("ORIGINAL".toByteArray()),
+                DriveFile(id, file.name, "2020-01-01T00:00:00Z"))
+        }
         var firstCloudTime = "2020-01-01T00:00:00Z"
         var secondCloudTime = "2020-01-01T00:00:00Z"
         var firstUpdates = 0
@@ -248,6 +254,24 @@ class PostSyncFailureTest {
                     val url = request.url.toString()
                     val query = request.url.parameters["q"].orEmpty()
                     when {
+                        request.url.encodedPath.startsWith("/drive/v2/files/") -> {
+                            val first = request.url.segments.last() == "first-id"
+                            val id = if (first) "first-id" else "second-id"
+                            val date = if (first) firstCloudTime else secondCloudTime
+                            respond(Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile(id,
+                                if (first) "first.dat" else "second.dat", date, "\"$date\"", date)), headers = jsonHeaders)
+                        }
+                        request.url.encodedPath.startsWith("/upload/drive/v2/files/") -> {
+                            val first = request.url.segments.last() == "first-id"
+                            if (first) firstUpdates++ else secondUpdates++
+                            if (!first && failSecondUpdate) respond("offline", HttpStatusCode.InternalServerError)
+                            else {
+                                if (first) firstCloudTime = "2027-01-01T00:00:00Z"
+                                respond(Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile(
+                                    if (first) "first-id" else "second-id", if (first) "first.dat" else "second.dat",
+                                    "2026-10-09T12:00:00Z", "\"new\"", "2026-10-09T12:00:00Z")), headers = jsonHeaders)
+                            }
+                        }
                         url.contains("www.googleapis.com/drive/v3/files/second-id") && request.method == HttpMethod.Get -> respond(
                             "NEWER CLOUD SECOND", HttpStatusCode.OK,
                         )
@@ -261,7 +285,7 @@ class PostSyncFailureTest {
                         query.contains("name = 'Tests'") -> respond("""{"files":[{"id":"group","name":"Tests"}]}""", headers = jsonHeaders)
                         query.contains("name = 'Game'") -> respond("""{"files":[{"id":"game","name":"Game"}]}""", headers = jsonHeaders)
                         query.contains("in parents and trashed = false") -> respond(
-                            """{"files":[{"id":"first-id","name":"first.dat","modifiedTime":"$firstCloudTime"},{"id":"second-id","name":"second.dat","modifiedTime":"$secondCloudTime"}]}""",
+                            """{"files":[{"id":"first-id","name":"first.dat","modifiedTime":"$firstCloudTime","version":"$firstCloudTime"},{"id":"second-id","name":"second.dat","modifiedTime":"$secondCloudTime","version":"$secondCloudTime"}]}""",
                             headers = jsonHeaders,
                         )
                         url.contains("upload/drive/v3/files/first-id") -> {

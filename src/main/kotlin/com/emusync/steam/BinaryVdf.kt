@@ -3,6 +3,12 @@ package com.emusync.steam
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.StandardCopyOption
+import java.nio.channels.FileChannel
+import java.nio.file.StandardOpenOption
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -31,6 +37,7 @@ data class SteamShortcut(
     val flatpakAppID: String = "",
     val sortAs: String = "",
     val tags: Map<String, String> = emptyMap(),
+    internal val extraFields: Map<String, Any> = emptyMap(),
 )
 
 /**
@@ -59,6 +66,10 @@ data class SteamShortcut(
  * ```
  */
 object BinaryVdf {
+
+    private val KNOWN_FIELDS = setOf("appid", "AppName", "appname", "Exe", "exe", "StartDir", "startdir",
+        "icon", "ShortcutPath", "LaunchOptions", "IsHidden", "AllowDesktopConfig", "AllowOverlay", "OpenVR",
+        "Devkit", "DevkitGameID", "DevkitOverrideAppID", "LastPlayTime", "FlatpakAppID", "sortas", "tags")
 
     private const val TYPE_OBJECT: Int = 0x00
     private const val TYPE_STRING: Int = 0x01
@@ -91,7 +102,8 @@ object BinaryVdf {
         // Read each shortcut entry (sub-objects named "0", "1", "2", ...)
         while (true) {
             val type = stream.read()
-            if (type == TYPE_END || type == -1) break
+            require(type != -1) { "Truncated VDF root object" }
+            if (type == TYPE_END) break
             require(type == TYPE_OBJECT) { "Expected object (0x00) or end (0x08), got 0x${type.toString(16)}" }
 
             // Index name ("0", "1", ...) — we don't use it, just consume
@@ -112,7 +124,9 @@ object BinaryVdf {
      * @param file The target `shortcuts.vdf` file.
      * @param shortcuts All shortcuts to write.
      */
-    fun write(file: File, shortcuts: List<SteamShortcut>) {
+    fun write(file: File, shortcuts: List<SteamShortcut>) = write(file, shortcuts) {}
+
+    internal fun write(file: File, shortcuts: List<SteamShortcut>, beforeReplace: (Path) -> Unit) {
         val output = ByteArrayOutputStream()
 
         // Root object "shortcuts"
@@ -130,8 +144,19 @@ object BinaryVdf {
         output.write(TYPE_END) // end of "shortcuts"
         output.write(TYPE_END) // file-level terminator (required by Steam)
 
-        file.parentFile?.mkdirs()
-        file.writeBytes(output.toByteArray())
+        val parent = file.absoluteFile.parentFile.toPath()
+        Files.createDirectories(parent)
+        val staged = Files.createTempFile(parent, ".${file.name}.", ".tmp")
+        try {
+            Files.write(staged, output.toByteArray())
+            FileChannel.open(staged, StandardOpenOption.WRITE).use { it.force(true) }
+            beforeReplace(staged)
+            try {
+                Files.move(staged, file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(staged, file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally { Files.deleteIfExists(staged) }
     }
 
     // ── Reading helpers ──────────────────────────────────────────────
@@ -141,13 +166,15 @@ object BinaryVdf {
      * Returns a map of field names to values (String, Int, or nested Map).
      */
     @Suppress("UNCHECKED_CAST")
-    private fun readObjectFields(stream: ByteArrayInputStream): Map<String, Any> {
+    private fun readObjectFields(stream: ByteArrayInputStream, depth: Int = 0): Map<String, Any> {
+        require(depth <= 64) { "VDF objects are nested too deeply" }
         val fields = mutableMapOf<String, Any>()
 
         while (true) {
             val type = stream.read()
             when (type) {
-                TYPE_END, -1 -> return fields
+                TYPE_END -> return fields
+                -1 -> error("Truncated VDF object")
                 TYPE_STRING -> {
                     val key = readNullTermString(stream)
                     val value = readNullTermString(stream)
@@ -160,7 +187,7 @@ object BinaryVdf {
                 }
                 TYPE_OBJECT -> {
                     val key = readNullTermString(stream)
-                    val subFields = readObjectFields(stream)
+                    val subFields = readObjectFields(stream, depth + 1)
                     fields[key] = subFields
                 }
                 else -> error("Unknown VDF type marker: 0x${type.toString(16)}")
@@ -173,7 +200,8 @@ object BinaryVdf {
         val buffer = ByteArrayOutputStream()
         while (true) {
             val b = stream.read()
-            if (b == 0x00 || b == -1) break
+            require(b != -1) { "Truncated VDF string" }
+            if (b == 0x00) break
             buffer.write(b)
         }
         return buffer.toString(Charsets.UTF_8.name())
@@ -181,8 +209,8 @@ object BinaryVdf {
 
     /** Reads a 4-byte little-endian Int32. */
     private fun readInt32LE(stream: ByteArrayInputStream): Int {
-        val bytes = ByteArray(4)
-        stream.read(bytes)
+        val bytes = stream.readNBytes(4)
+        require(bytes.size == 4) { "Truncated VDF integer" }
         return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).int
     }
 
@@ -215,6 +243,24 @@ object BinaryVdf {
             writeStringField(output, key, value)
         }
         output.write(TYPE_END) // end of tags
+        shortcut.extraFields.forEach { (key, value) -> writeExtraField(output, key, value) }
+    }
+
+    private fun writeExtraField(output: ByteArrayOutputStream, key: String, value: Any) {
+        when (value) {
+            is String -> writeStringField(output, key, value)
+            is Int -> writeInt32Field(output, key, value)
+            is Map<*, *> -> {
+                output.write(TYPE_OBJECT)
+                writeNullTermString(output, key)
+                value.forEach { (childKey, childValue) ->
+                    require(childKey is String && childValue != null) { "Invalid VDF field" }
+                    writeExtraField(output, childKey, childValue)
+                }
+                output.write(TYPE_END)
+            }
+            else -> error("Unsupported VDF field value: $key")
+        }
     }
 
     /** Writes a string field: 0x01 + key\0 + value\0 */
@@ -234,6 +280,7 @@ object BinaryVdf {
 
     /** Writes a null-terminated UTF-8 string. */
     private fun writeNullTermString(output: ByteArrayOutputStream, value: String) {
+        require('\u0000' !in value) { "VDF strings cannot contain NUL" }
         output.write(value.toByteArray(Charsets.UTF_8))
         output.write(0x00)
     }
@@ -262,6 +309,7 @@ object BinaryVdf {
             flatpakAppID = (fields["FlatpakAppID"] as? String) ?: "",
             sortAs = (fields["sortas"] as? String) ?: "",
             tags = (fields["tags"] as? Map<String, String>) ?: emptyMap(),
+            extraFields = fields.filterKeys { it !in KNOWN_FIELDS },
         )
     }
 }

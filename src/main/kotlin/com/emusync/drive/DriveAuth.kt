@@ -7,6 +7,9 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.parameters
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Token response from the refresh flow (no refresh_token included).
@@ -106,7 +109,8 @@ class DriveAuth(private val client: HttpClient) {
 
         if (response.status != HttpStatusCode.OK) {
             val errorBody = response.body<String>()
-            throw DriveApiException("Token refresh failed (${response.status}): $errorBody")
+            val errorCode = runCatching { Json.parseToJsonElement(errorBody).jsonObject["error"]?.jsonPrimitive?.content }.getOrNull()
+            throw DriveApiException("Token refresh failed (${response.status}): $errorBody", errorCode = errorCode)
         }
 
         return response.body<TokenResponse>()
@@ -116,5 +120,5 @@ class DriveAuth(private val client: HttpClient) {
 /**
  * Exception for Google Drive API errors.
  */
-class DriveApiException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class DriveApiException(message: String, cause: Throwable? = null, val errorCode: String? = null) : Exception(message, cause)
 

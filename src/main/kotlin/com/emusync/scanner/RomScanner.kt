@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
 import java.io.File
+import java.io.IOException
+import java.nio.file.Path
 
 /**
  * Data class representing a discovered ROM file.
@@ -40,12 +42,14 @@ suspend fun scanRoms(
     }
 
     // Normalize extensions to lowercase
-    val allowedExtensions = extensions.map { it.lowercase() }.toSet()
+    val allowedExtensions = extensions.map { it.trim().removePrefix(".").lowercase() }.filter { it.isNotEmpty() }.toSet()
+    if (allowedExtensions.isEmpty()) return@withContext emptyList()
 
     // Signature files that indicate the current directory is a self-contained game
     val signatureFiles = setOf("ps3_disc", "eboot", "app", "main")
 
     val result = mutableListOf<RomFile>()
+    val visited = mutableSetOf<Path>()
     
     // Use ArrayDeque as a queue for breadth-first search
     val directoriesToScan = ArrayDeque<File>()
@@ -55,6 +59,9 @@ suspend fun scanRoms(
         ensureActive() 
 
         val currentDir = directoriesToScan.removeFirst()
+        // Resolve aliases before descending so symlinks cannot create cycles or duplicate games.
+        val realPath = try { currentDir.toPath().toRealPath() } catch (_: IOException) { continue }
+        if (!visited.add(realPath)) continue
         val children = currentDir.listFiles() ?: continue
 
         var isGameFolder = false

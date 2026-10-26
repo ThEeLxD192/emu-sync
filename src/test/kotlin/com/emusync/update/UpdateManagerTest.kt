@@ -332,7 +332,7 @@ class UpdateManagerTest {
         val downloadedUpdate = File(tempDir, "update.AppImage").apply { writeText("V2") }
 
         var linuxUpdateCalled = false
-        val manager = object : UpdateManager() {
+        val manager = object : UpdateManager(exitApplication = {}) {
             override fun isWindows() = false
             override fun applyLinuxUpdateAndRestart(downloadedFile: File, launcher: (String) -> Unit): Boolean {
                 linuxUpdateCalled = true

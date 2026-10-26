@@ -64,6 +64,7 @@ internal fun isDirectorySaveTarget(
     path: File,
     cloudFiles: List<DriveFile>,
     reservedSiblingNames: Set<String> = emptySet(),
+    cloudName: String? = null,
 ): Boolean {
     if (path.exists()) {
         return path.isDirectory
@@ -72,7 +73,7 @@ internal fun isDirectorySaveTarget(
         SaveTargetType.DIRECTORY -> true
         SaveTargetType.FILE -> false
         SaveTargetType.UNKNOWN -> cloudFiles.none { cloudFile ->
-            cloudFile.name == path.name && cloudFile.name !in reservedSiblingNames
+            cloudFile.name == (cloudName ?: path.name) && cloudFile.name !in reservedSiblingNames
         }
     }
 }
@@ -134,6 +135,8 @@ class SyncOrchestrator(
         onStatus(AppStatus.Syncing("$verb ${progress.fileName}$suffix"))
     }
     private val folders = DriveFolders(client)
+    private val trackedSync = TrackedFileSync(transfer, SyncHistoryStore(configManager.configFile))
+    private val folderMigrator = CloudFolderMigrator(folders, search)
     private val oauthFlow = OAuthFlow(client)
     private val runner = GameRunner()
 
@@ -142,7 +145,10 @@ class SyncOrchestrator(
         val type: SaveTargetType,
         val cloudPathSegments: List<String>,
         val displayName: String,
-    )
+        val cloudPath: String? = null,
+    ) {
+        fun configured() = ConfiguredSaveTarget(file.path, type, cloudPath)
+    }
 
     fun sanitizeCloudFolderName(name: String): String {
         return name
@@ -157,12 +163,12 @@ class SyncOrchestrator(
         return when (entry) {
             is EmulatorSystem -> {
                 val globalPaths = entry.effectiveSaveTargets()
-                    .map { normalizeSavePath(it.path) }
+                    .map { normalizeSavePath(it.path) to it.cloudPath }
                     .toSet()
                 val romPaths = romName?.let { name ->
-                    entry.effectiveSaveTargetsForRom(name).map { it.path }
+                    entry.effectiveSaveTargetsForRom(name)
                 }.orEmpty()
-                val hasDistinctRomPath = romPaths.any { normalizeSavePath(it) !in globalPaths }
+                val hasDistinctRomPath = romPaths.any { (normalizeSavePath(it.path) to it.cloudPath) !in globalPaths }
 
                 // A configured global save path uses the emulator folder unless this ROM has
                 // a real, distinct path of its own. Empty or copied global-path entries are
@@ -197,7 +203,7 @@ class SyncOrchestrator(
             is NativePCGame -> {
                 val cloudPath = getCloudPathSegments(entry)
                 entry.effectiveSaveTargets().map {
-                    SaveTarget(File(it.path), it.type, cloudPath, entry.name)
+                    SaveTarget(File(it.path), it.type, cloudPath, entry.name, it.cloudPath)
                 }
             }
             is EmulatorSystem -> {
@@ -207,7 +213,7 @@ class SyncOrchestrator(
                 if (entry.effectiveSaveTargets().isNotEmpty()) {
                     val globalPath = listOf(entry.effectiveCloudFolder)
                     for (target in entry.effectiveSaveTargets()) {
-                        targets.add(SaveTarget(File(target.path), target.type, globalPath, entry.name))
+                        targets.add(SaveTarget(File(target.path), target.type, globalPath, entry.name, target.cloudPath))
                     }
                 }
 
@@ -217,11 +223,11 @@ class SyncOrchestrator(
                     val title = entry.getEffectiveTitle(romName, romName)
                     val romCloudPath = listOf(entry.effectiveCloudFolder, sanitizeCloudFolderName(title))
                     for (target in entry.effectiveSaveTargetsForRom(romName)) {
-                        targets.add(SaveTarget(File(target.path), target.type, romCloudPath, title))
+                        targets.add(SaveTarget(File(target.path), target.type, romCloudPath, title, target.cloudPath))
                     }
                 }
 
-                targets.distinctBy { it.file.absolutePath }
+                targets.distinctBy { it.file.absolutePath to it.cloudPath }
             }
         }
     }
@@ -259,29 +265,24 @@ class SyncOrchestrator(
             val targetsByFolder = targets.groupBy { it.cloudPathSegments }
 
             for ((cloudPath, folderTargets) in targetsByFolder) {
-                val folderId = try {
-                    folders.findPath(token, cloudPath)
-                } catch (_: Exception) {
-                    null
-                }
+                val folderId = folders.findPath(token, cloudPath)
                 val cloudFiles = if (folderId != null) {
-                    search.listFilesInFolder(token, folderId)
+                    canonicalCloudFiles(search.listFilesInFolder(token, folderId))
                 } else {
                     emptyList()
                 }
 
-                val targetPairs = folderTargets.map { it.file to it.type }
+                val configuredTargets = folderTargets.map { it.configured() }
+                validateSaveTargetMappings(configuredTargets, cloudFiles)
 
                 for (target in folderTargets) {
                     val savePath = target.file
-                    val reservedSiblingNames = getSiblingReservedNames(savePath, targetPairs)
-                    val isDirectory = isDirectorySaveTarget(
-                        target.type, savePath, cloudFiles, reservedSiblingNames,
-                    )
+                    val reservedSiblingNames = reservedCloudNames(target.configured(), configuredTargets, cloudFiles)
+                    val isDirectory = target.configured().isDirectory(cloudFiles, configuredTargets)
 
                     if (isDirectory) {
                         val targetCloudFiles = cloudFilesForSaveTarget(
-                            target.type, savePath, cloudFiles, reservedSiblingNames,
+                            target.type, savePath, projectDirectoryFiles(cloudFiles, target.cloudPath), reservedSiblingNames,
                         )
                         val localFiles = if (savePath.exists() && savePath.isDirectory) {
                             savePath.walkTopDown().filter { it.isFile }.toList()
@@ -294,10 +295,8 @@ class SyncOrchestrator(
 
                         for (cloudFile in targetCloudFiles) {
                             val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
-                            val decision = planSyncDecision(
-                                localModifiedTimeMs = localFile.takeIf { it.exists() }?.lastModified(),
-                                cloudModifiedTimeIso = cloudFile.modifiedTime,
-                            )
+                            val decision = trackedSync.plan(localFile, cloudFile, folderId.orEmpty(),
+                                directoryCloudName(target.cloudPath, cloudFile.name))
                             when (decision) {
                                 SyncDecision.DOWNLOAD_CLOUD -> hasNewerCloud = true
                                 SyncDecision.CONFLICT -> hasConflict = true
@@ -310,20 +309,15 @@ class SyncOrchestrator(
                             val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
                             if (relPath in reservedSiblingNames) continue
                             if (targetCloudFiles.none { it.name == relPath }) {
-                                if (planSyncDecision(localFile.lastModified(), null) == SyncDecision.UPLOAD_LOCAL) {
-                                    hasNewerLocal = true
-                                }
+                                hasNewerLocal = true
                             }
                         }
                     } else {
-                        val cloudFile = cloudFiles.find { it.name == savePath.name }
+                        val cloudFile = cloudFiles.find { it.name == fileCloudName(target.configured()) }
                         val localExists = savePath.exists()
                         val cloudExists = cloudFile != null
 
-                        val decision = planSyncDecision(
-                            localModifiedTimeMs = savePath.takeIf { localExists }?.lastModified(),
-                            cloudModifiedTimeIso = cloudFile?.modifiedTime,
-                        )
+                        val decision = trackedSync.plan(savePath, cloudFile, folderId.orEmpty(), fileCloudName(target.configured()))
                         if (decision == SyncDecision.IN_SYNC && !localExists && !cloudExists) continue
                         anyFileChecked = true
 
@@ -344,6 +338,7 @@ class SyncOrchestrator(
                 else -> CloudSyncStatus.IN_SYNC
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             CloudSyncStatus.ERROR
         }
     }
@@ -378,28 +373,29 @@ class SyncOrchestrator(
 
             for ((cloudPath, folderTargets) in targetsByFolder) {
                 val folderId = folders.ensurePath(token, cloudPath)
-                val cloudFiles = search.listFilesInFolder(token, folderId)
-                val targetPairs = folderTargets.map { it.file to it.type }
+                val cloudFiles = canonicalCloudFiles(search.listFilesInFolder(token, folderId))
+                val configuredTargets = folderTargets.map { it.configured() }
+                validateSaveTargetMappings(configuredTargets, cloudFiles)
 
                 for (target in folderTargets) {
                     val savePath = target.file
                     onStatus(AppStatus.Syncing("Syncing ${target.displayName}..."))
-                    val reservedSiblingNames = getSiblingReservedNames(savePath, targetPairs)
-                    val isDirectory = isDirectorySaveTarget(
-                        target.type, savePath, cloudFiles, reservedSiblingNames,
-                    )
+                    val reservedSiblingNames = reservedCloudNames(target.configured(), configuredTargets, cloudFiles)
+                    val isDirectory = target.configured().isDirectory(cloudFiles, configuredTargets)
 
                     if (isDirectory) {
                         val targetCloudFiles = cloudFilesForSaveTarget(
-                            target.type, savePath, cloudFiles, reservedSiblingNames,
+                            target.type, savePath, projectDirectoryFiles(cloudFiles, target.cloudPath), reservedSiblingNames,
                         )
                         syncDirectoryManual(
                             token, entry, savePath, folderId, targetCloudFiles,
                             displayName = target.displayName,
                             reservedSiblingNames = reservedSiblingNames,
+                            cloudPrefix = target.cloudPath,
                         )
                     } else {
-                        syncFileManual(token, entry, savePath, folderId, cloudFiles, displayName = target.displayName)
+                        syncFileManual(token, entry, savePath, folderId, cloudFiles, displayName = target.displayName,
+                            driveName = fileCloudName(target.configured()))
                     }
                 }
             }
@@ -407,6 +403,7 @@ class SyncOrchestrator(
             onStatus(AppStatus.Idle)
             true
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             onStatus(AppStatus.Error("Sync error: ${e.message}"))
             false
         }
@@ -417,8 +414,8 @@ class SyncOrchestrator(
      *
      * 1. If old folder exists and new folder does not: renames/moves the old folder to the new name.
      * 2. If new folder already exists (e.g. from another device):
-     *    - Moves non-conflicting files from old folder to new folder.
-     *    - Deletes old folder.
+     *    - Refuses duplicate names and moves non-conflicting files with rollback on failure.
+     *    - Keeps the old folder as a recovery location.
      *    - Performs conflict check between local save files and cloud saves in new folder.
      *    - Prompts user with [AppStatus.Conflict] if needed so they decide local vs cloud.
      */
@@ -442,6 +439,7 @@ class SyncOrchestrator(
             val token = try {
                 oauthFlow.authorize(config, configManager, allowInteractive = false)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 onStatus(AppStatus.Error("Drive authentication failed: ${e.message}"))
                 return false
             }
@@ -453,22 +451,7 @@ class SyncOrchestrator(
                 // Case 1: Old folder exists, but new folder does NOT exist yet -> Rename old folder!
                 oldFolderId != null && newFolderId == null -> {
                     onStatus(AppStatus.Syncing("Renaming cloud folder to $newTitle..."))
-                    val oldParentSegments = oldCloudPath.dropLast(1)
-                    val newParentSegments = newCloudPath.dropLast(1)
-
-                    if (oldParentSegments == newParentSegments) {
-                        folders.renameFolder(token, oldFolderId, newCloudPath.last())
-                    } else {
-                        val newParentId = folders.ensurePath(token, newParentSegments)
-                        val oldParentId = folders.findPath(token, oldParentSegments)
-                        folders.renameFolder(
-                            accessToken = token,
-                            folderId = oldFolderId,
-                            newName = newCloudPath.last(),
-                            addParentId = newParentId,
-                            removeParentId = oldParentId,
-                        )
-                    }
+                    folderMigrator.migrate(token, oldCloudPath, newCloudPath)
                     onStatus(AppStatus.Idle)
                     true
                 }
@@ -477,234 +460,26 @@ class SyncOrchestrator(
                 newFolderId != null -> {
                     onStatus(AppStatus.Syncing("Checking cloud files in $newTitle..."))
 
-                    // If old folder also existed, move non-conflicting files over and delete old folder
+                    // Preflight duplicates before moving anything or changing local saves.
                     if (oldFolderId != null && oldFolderId != newFolderId) {
-                        val oldFiles = search.listFilesInFolder(token, oldFolderId)
-                        val newFiles = search.listFilesInFolder(token, newFolderId)
-
-                        for (file in oldFiles) {
-                            if (newFiles.none { it.name == file.name }) {
-                                try {
-                                    folders.moveFile(token, file.id, addParentId = newFolderId, removeParentId = oldFolderId)
-                                } catch (_: Exception) {}
-                            }
-                        }
-                        try {
-                            folders.deleteFolder(token, oldFolderId)
-                        } catch (_: Exception) {}
+                        folderMigrator.migrate(token, oldCloudPath, newCloudPath)
                     }
 
                     // Now check conflict between local save paths and newFolderId
                     val cloudFiles = search.listFilesInFolder(token, newFolderId)
-                    val targetPairs = localSaveTargets.map { File(it.path) to it.type }
-
-                    var hasConflict = false
-                    var hasNewerLocal = false
-                    var hasNewerCloud = false
-                    val relevantCloudFiles = mutableListOf<DriveFile>()
-                    val relevantLocalFiles = mutableListOf<File>()
+                    validateSaveTargetMappings(localSaveTargets, cloudFiles)
 
                     for (target in localSaveTargets) {
                         val savePath = File(target.path)
-                        val reservedSiblingNames = getSiblingReservedNames(savePath, targetPairs)
-                        val isDirectory = isDirectorySaveTarget(
-                            target.type, savePath, cloudFiles, reservedSiblingNames,
-                        )
-
-                        if (isDirectory) {
-                            val targetCloudFiles = cloudFilesForSaveTarget(
-                                target.type, savePath, cloudFiles, reservedSiblingNames,
-                            )
-                            val localDirFiles = if (savePath.exists() && savePath.isDirectory) {
-                                savePath.walkTopDown().filter {
-                                    it.isFile && it.toRelativeString(savePath).replace(File.separatorChar, '/') !in reservedSiblingNames
-                                }.toList()
-                            } else emptyList()
-
-                            for (cloudFile in targetCloudFiles) {
-                                val localF = resolveRemoteFile(savePath, cloudFile.name) ?: continue
-                                if (!localF.exists()) {
-                                    hasNewerCloud = true
-                                    relevantCloudFiles += cloudFile
-                                } else {
-                                    val decision = resolveConflict(localF.lastModified(), cloudFile.modifiedTime)
-                                    when (decision) {
-                                        SyncDecision.CONFLICT -> {
-                                            hasConflict = true
-                                            relevantCloudFiles += cloudFile
-                                            relevantLocalFiles += localF
-                                        }
-                                        SyncDecision.DOWNLOAD_CLOUD -> {
-                                            hasNewerCloud = true
-                                            relevantCloudFiles += cloudFile
-                                            relevantLocalFiles += localF
-                                        }
-                                        SyncDecision.UPLOAD_LOCAL -> {
-                                            hasNewerLocal = true
-                                            relevantLocalFiles += localF
-                                        }
-                                        SyncDecision.IN_SYNC -> {}
-                                    }
-                                }
-                            }
-                            for (localF in localDirFiles) {
-                                val rel = localF.toRelativeString(savePath).replace(File.separatorChar, '/')
-                                if (rel in reservedSiblingNames) continue
-                                if (targetCloudFiles.none { it.name == rel }) {
-                                    hasNewerLocal = true
-                                    relevantLocalFiles += localF
-                                }
-                            }
+                        val reserved = reservedCloudNames(target, localSaveTargets, cloudFiles)
+                        if (target.isDirectory(cloudFiles, localSaveTargets)) {
+                            syncDirectoryManual(token, entry, savePath, newFolderId,
+                                cloudFilesForSaveTarget(target.type, savePath,
+                                    projectDirectoryFiles(cloudFiles, target.cloudPath), reserved),
+                                newTitle, reserved, target.cloudPath)
                         } else {
-                            val cloudFile = cloudFiles.find { it.name == savePath.name }
-                            val localExists = savePath.exists()
-                            val cloudExists = cloudFile != null
-
-                            if (!localExists && cloudFile != null) {
-                                hasNewerCloud = true
-                                relevantCloudFiles += cloudFile
-                            } else if (localExists && !cloudExists) {
-                                hasNewerLocal = true
-                                relevantLocalFiles += savePath
-                            } else if (localExists && cloudFile != null) {
-                                val decision = resolveConflict(savePath.lastModified(), cloudFile.modifiedTime)
-                                when (decision) {
-                                    SyncDecision.CONFLICT -> {
-                                        hasConflict = true
-                                        relevantCloudFiles += cloudFile
-                                        relevantLocalFiles += savePath
-                                    }
-                                    SyncDecision.DOWNLOAD_CLOUD -> {
-                                        hasNewerCloud = true
-                                        relevantCloudFiles += cloudFile
-                                        relevantLocalFiles += savePath
-                                    }
-                                    SyncDecision.UPLOAD_LOCAL -> {
-                                        hasNewerLocal = true
-                                        relevantLocalFiles += savePath
-                                    }
-                                    SyncDecision.IN_SYNC -> {}
-                                }
-                            }
-                        }
-                    }
-
-                    if (hasConflict || (hasNewerLocal && hasNewerCloud)) {
-                        val latestLocalMs = relevantLocalFiles.maxOfOrNull { it.lastModified() }
-                            ?: System.currentTimeMillis()
-                        val latestCloudMs = relevantCloudFiles.maxOfOrNull {
-                            Instant.parse(it.modifiedTime).toEpochMilli()
-                        } ?: System.currentTimeMillis()
-
-                        val choice: SyncDecision = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                            onStatus(AppStatus.Conflict(
-                                localDate = formatTimestamp(latestLocalMs),
-                                cloudDate = formatTimestamp(latestCloudMs),
-                                gameName = newTitle,
-                                onResolve = { userChoice ->
-                                    if (continuation.isActive) continuation.resumeWith(Result.success(userChoice))
-                                }
-                            ))
-                        }
-
-                        if (choice == SyncDecision.DOWNLOAD_CLOUD) {
-                            onStatus(AppStatus.Syncing("Downloading cloud saves for $newTitle..."))
-                            for (target in localSaveTargets) {
-                                val savePath = File(target.path)
-                                val reservedSiblingNames = getSiblingReservedNames(savePath, targetPairs)
-                                val isDirectory = isDirectorySaveTarget(
-                                    target.type, savePath, cloudFiles, reservedSiblingNames,
-                                )
-                                if (isDirectory) {
-                                    val targetCloudFiles = cloudFilesForSaveTarget(
-                                        target.type, savePath, cloudFiles, reservedSiblingNames,
-                                    )
-                                    for (cloudFile in targetCloudFiles) {
-                                        val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
-                                        localFile.parentFile?.mkdirs()
-                                        transfer.download(token, cloudFile.id, localFile, cloudFile.modifiedTime)
-                                    }
-                                } else {
-                                    val cloudFile = cloudFiles.find { it.name == savePath.name }
-                                    if (cloudFile != null) {
-                                        savePath.parentFile?.mkdirs()
-                                        transfer.download(token, cloudFile.id, savePath, cloudFile.modifiedTime)
-                                    }
-                                }
-                            }
-                        } else if (choice == SyncDecision.UPLOAD_LOCAL) {
-                            onStatus(AppStatus.Syncing("Uploading local saves for $newTitle..."))
-                            for (target in localSaveTargets) {
-                                val savePath = File(target.path)
-                                val reservedSiblingNames = getSiblingReservedNames(savePath, targetPairs)
-                                if (isDirectorySaveTarget(
-                                        target.type, savePath, cloudFiles, reservedSiblingNames,
-                                    )) {
-                                    val targetCloudFiles = cloudFilesForSaveTarget(
-                                        target.type, savePath, cloudFiles, reservedSiblingNames,
-                                    )
-                                    val localFiles = savePath.walkTopDown().filter {
-                                        it.isFile && it.toRelativeString(savePath).replace(File.separatorChar, '/') !in reservedSiblingNames
-                                    }.toList()
-                                    for (localFile in localFiles) {
-                                        val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
-                                        val cloudFile = targetCloudFiles.find { it.name == relPath }
-                                        syncSingleFilePost(token, localFile, cloudFile, newFolderId, relPath, force = true)
-                                    }
-                                } else if (savePath.exists()) {
-                                    val cloudFile = cloudFiles.find { it.name == savePath.name }
-                                    syncSingleFilePost(token, savePath, cloudFile, newFolderId, savePath.name, force = true)
-                                }
-                            }
-                        }
-                    } else if (hasNewerCloud && !hasNewerLocal) {
-                        onStatus(AppStatus.Syncing("Downloading cloud saves for $newTitle..."))
-                        for (target in localSaveTargets) {
-                            val savePath = File(target.path)
-                            val reservedSiblingNames = getSiblingReservedNames(savePath, targetPairs)
-                            val isDirectory = isDirectorySaveTarget(
-                                target.type, savePath, cloudFiles, reservedSiblingNames,
-                            )
-                            if (isDirectory) {
-                                val targetCloudFiles = cloudFilesForSaveTarget(
-                                    target.type, savePath, cloudFiles, reservedSiblingNames,
-                                )
-                                for (cloudFile in targetCloudFiles) {
-                                    val localFile = resolveRemoteFile(savePath, cloudFile.name) ?: continue
-                                    localFile.parentFile?.mkdirs()
-                                    transfer.download(token, cloudFile.id, localFile, cloudFile.modifiedTime)
-                                }
-                            } else {
-                                val cloudFile = cloudFiles.find { it.name == savePath.name }
-                                if (cloudFile != null) {
-                                    savePath.parentFile?.mkdirs()
-                                    transfer.download(token, cloudFile.id, savePath, cloudFile.modifiedTime)
-                                }
-                            }
-                        }
-                    } else if (hasNewerLocal && !hasNewerCloud) {
-                        onStatus(AppStatus.Syncing("Uploading local saves for $newTitle..."))
-                        for (target in localSaveTargets) {
-                            val savePath = File(target.path)
-                            val reservedSiblingNames = getSiblingReservedNames(savePath, targetPairs)
-                            if (isDirectorySaveTarget(
-                                    target.type, savePath, cloudFiles, reservedSiblingNames,
-                                )) {
-                                val targetCloudFiles = cloudFilesForSaveTarget(
-                                    target.type, savePath, cloudFiles, reservedSiblingNames,
-                                )
-                                val localFiles = savePath.walkTopDown().filter {
-                                    it.isFile && it.toRelativeString(savePath).replace(File.separatorChar, '/') !in reservedSiblingNames
-                                }.toList()
-                                for (localFile in localFiles) {
-                                    val relPath = localFile.toRelativeString(savePath).replace(File.separatorChar, '/')
-                                    val cloudFile = targetCloudFiles.find { it.name == relPath }
-                                    syncSingleFilePost(token, localFile, cloudFile, newFolderId, relPath, force = false)
-                                }
-                            } else if (savePath.exists()) {
-                                val cloudFile = cloudFiles.find { it.name == savePath.name }
-                                syncSingleFilePost(token, savePath, cloudFile, newFolderId, savePath.name, force = false)
-                            }
+                            syncFileManual(token, entry, savePath, newFolderId, cloudFiles,
+                                newTitle, fileCloudName(target))
                         }
                     }
 
@@ -719,39 +494,53 @@ class SyncOrchestrator(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             onStatus(AppStatus.Error("Cloud rename error: ${e.message}"))
             false
         }
     }
 
-    suspend fun renameEntryCloudFolder(
-        oldCloudFolder: String,
-        newCloudFolder: String,
+    /** Migrates only this entry's folder, using the configuration before the edit. */
+    suspend fun renameEntryCloudData(
+        oldEntry: GameEntry,
+        newEntry: GameEntry,
     ): Boolean {
-        if (oldCloudFolder == newCloudFolder) return true
+        fun entryPath(entry: GameEntry): List<String> = when (entry) {
+            is NativePCGame -> getCloudPathSegments(entry)
+            is EmulatorSystem -> listOf(entry.effectiveCloudFolder)
+        }
+        val oldPath = entryPath(oldEntry)
+        val newPath = entryPath(newEntry)
+        if (oldPath == newPath) return true
+
+        val entryIndex = config.entries.indexOfFirst { it === oldEntry }
+            .takeIf { it >= 0 } ?: config.entries.indexOf(oldEntry)
+        val shared = config.entries.filterIndexed { index, _ -> index != entryIndex }.any { other ->
+            entryPath(other) == oldPath ||
+                (oldPath.size == 1 && other.effectiveCloudFolder == oldPath.first()) ||
+                getSaveTargets(other).any { it.cloudPathSegments == oldPath }
+        }
+        if (shared) {
+            onStatus(AppStatus.Error(
+                "The cloud folder '${oldPath.joinToString("/")}' is shared with another entry. " +
+                    "Keep the existing cloud folder when editing this entry to protect their saves.",
+            ))
+            return false
+        }
+
         val driveConfig = config.googleDrive ?: return true
         if (driveConfig.refreshToken.isNullOrBlank()) return true
 
         return try {
+            onStatus(AppStatus.Syncing("Moving cloud saves for ${newEntry.name}..."))
             val token = oauthFlow.authorize(config, configManager, allowInteractive = false)
-            val oldFolderId = folders.findPath(token, listOf(oldCloudFolder))
-            val newFolderId = folders.findPath(token, listOf(newCloudFolder))
-
-            if (oldFolderId != null && newFolderId == null) {
-                folders.renameFolder(token, oldFolderId, newCloudFolder)
-            } else if (oldFolderId != null && newFolderId != null) {
-                val subFiles = search.listFilesInFolder(token, oldFolderId)
-                for (file in subFiles) {
-                    try {
-                        folders.moveFile(token, file.id, addParentId = newFolderId, removeParentId = oldFolderId)
-                    } catch (_: Exception) {}
-                }
-                try {
-                    folders.deleteFolder(token, oldFolderId)
-                } catch (_: Exception) {}
-            }
+            folderMigrator.migrate(token, oldPath, newPath)
+            onStatus(AppStatus.Idle)
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            logger.log(Level.WARNING, "Cloud entry migration failed", e)
+            onStatus(AppStatus.Error("Cloud rename error: ${e.message}"))
             false
         }
     }
@@ -764,77 +553,37 @@ class SyncOrchestrator(
         cloudFiles: List<DriveFile>,
         displayName: String = entry.name,
         reservedSiblingNames: Set<String> = emptySet(),
+        cloudPrefix: String? = null,
+        beforePlay: Boolean = false,
     ) {
-        val localFiles = if (localSavePath.exists() && localSavePath.isDirectory) {
-            localSavePath.walkTopDown().filter {
-                it.isFile && it.toRelativeString(localSavePath).replace(File.separatorChar, '/') !in reservedSiblingNames
-            }.toList()
-        } else {
-            emptyList()
+        val localFiles = if (localSavePath.isDirectory) localSavePath.walkTopDown().filter {
+            it.isFile && it.toRelativeString(localSavePath).replace(File.separatorChar, '/') !in reservedSiblingNames
+        }.associateBy { it.toRelativeString(localSavePath).replace(File.separatorChar, '/') } else emptyMap()
+        val remoteFiles = canonicalCloudFiles(cloudFiles)
+            .filter { resolveRemoteFile(localSavePath, it.name) != null }.associateBy { it.name }
+        data class Action(val local: File, val remote: DriveFile?, val name: String, val decision: SyncDecision)
+        val actions = (localFiles.keys + remoteFiles.keys).sorted().map { name ->
+            val local = localFiles[name] ?: resolveRemoteFile(localSavePath, name)!!
+            val remote = remoteFiles[name]
+            val remoteName = directoryCloudName(cloudPrefix, name)
+            Action(local, remote, remoteName, trackedSync.plan(local, remote, folderId, remoteName))
         }
-
-        data class FilePair(val localFile: File, val cloudFile: DriveFile, val decision: SyncDecision)
-        val validCloudFiles = cloudFiles.filter { resolveRemoteFile(localSavePath, it.name) != null }
-        val actions = planDirectorySync(
-            localFiles = localFiles.map {
-                LocalFileState(it.toRelativeString(localSavePath).replace(File.separatorChar, '/'), it.lastModified())
-            },
-            cloudFiles = validCloudFiles.map { CloudFileState(it.id, it.name, it.modifiedTime) },
-        )
-        val cloudById = validCloudFiles.associateBy { it.id }
-        val pairs = actions.mapNotNull { action ->
-            val cloud = action.cloud?.let { cloudById[it.id] } ?: return@mapNotNull null
-            val localFile = resolveRemoteFile(localSavePath, action.relativePath) ?: return@mapNotNull null
-            FilePair(localFile, cloud, action.decision)
-        }
-        val plannedCloudByPath = pairs.associate { pair ->
-            pair.localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/') to pair.cloudFile
-        }
-
-        val conflictingPairs = pairs.filter { it.decision == SyncDecision.CONFLICT }
-        val hasLocalOnly = actions.any { it.cloud == null && it.decision == SyncDecision.UPLOAD_LOCAL }
-        val hasCloudNewer = actions.any { it.decision == SyncDecision.DOWNLOAD_CLOUD }
-
-        if (conflictingPairs.isNotEmpty() || (hasLocalOnly && hasCloudNewer)) {
-            val latestLocalMs = if (localFiles.isNotEmpty()) localFiles.maxOf { it.lastModified() } else System.currentTimeMillis()
-            val latestCloudMs = if (cloudFiles.isNotEmpty()) cloudFiles.maxOf { Instant.parse(it.modifiedTime).toEpochMilli() } else System.currentTimeMillis()
-
-            val choice: SyncDecision = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                onStatus(AppStatus.Conflict(
-                    localDate = formatTimestamp(latestLocalMs),
-                    cloudDate = formatTimestamp(latestCloudMs),
-                    gameName = displayName,
-                    onResolve = { userChoice ->
-                        if (continuation.isActive) {
-                            continuation.resumeWith(Result.success(userChoice))
-                        }
-                    }
-                ))
+        val conflict = actions.firstOrNull { it.decision == SyncDecision.CONFLICT }
+        val mixed = actions.any { it.decision == SyncDecision.UPLOAD_LOCAL } &&
+            actions.any { it.decision == SyncDecision.DOWNLOAD_CLOUD }
+        val choice = if (conflict != null || mixed) {
+            val representative = conflict ?: actions.first { it.remote != null }
+            requestFileConflict(representative.local, representative.remote!!, displayName)
+        } else null
+        for (action in actions) {
+            val decision = when {
+                action.decision == SyncDecision.IN_SYNC -> SyncDecision.IN_SYNC
+                choice == SyncDecision.DOWNLOAD_CLOUD -> if (action.remote != null) choice else null
+                choice == SyncDecision.UPLOAD_LOCAL -> if (action.local.isFile) choice else null
+                else -> action.decision
             }
-
-            if (choice == SyncDecision.DOWNLOAD_CLOUD) {
-                for (pair in pairs) {
-                    pair.localFile.parentFile?.mkdirs()
-                    transfer.download(token, pair.cloudFile.id, pair.localFile, pair.cloudFile.modifiedTime)
-                }
-            } else if (choice == SyncDecision.UPLOAD_LOCAL) {
-                for (localFile in localFiles) {
-                    val relativePath = localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/')
-                    val cloudFile = plannedCloudByPath[relativePath]
-                    syncSingleFilePost(token, localFile, cloudFile, folderId, relativePath, force = true)
-                }
-            }
-        } else {
-            for (pair in pairs) {
-                if (pair.decision == SyncDecision.DOWNLOAD_CLOUD) {
-                    pair.localFile.parentFile?.mkdirs()
-                    transfer.download(token, pair.cloudFile.id, pair.localFile, pair.cloudFile.modifiedTime)
-                }
-            }
-            for (localFile in localFiles) {
-                val relativePath = localFile.toRelativeString(localSavePath).replace(File.separatorChar, '/')
-                val cloudFile = plannedCloudByPath[relativePath]
-                syncSingleFilePost(token, localFile, cloudFile, folderId, relativePath, force = false)
+            if (decision != null && !(beforePlay && choice == null && decision == SyncDecision.UPLOAD_LOCAL)) {
+                applyFileDecision(token, action.local, action.remote, folderId, action.name, decision)
             }
         }
     }
@@ -846,67 +595,37 @@ class SyncOrchestrator(
         folderId: String,
         cloudFiles: List<DriveFile>,
         displayName: String = entry.name,
+        driveName: String = localSavePath.name,
+        beforePlay: Boolean = false,
     ) {
-        val cloudFile = cloudFiles.find { it.name == localSavePath.name }
-
-        val localExists = localSavePath.exists()
-        val decision = planSyncDecision(
-            localModifiedTimeMs = localSavePath.takeIf { localExists }?.lastModified(),
-            cloudModifiedTimeIso = cloudFile?.modifiedTime,
-        )
-
-        when (decision) {
-            SyncDecision.IN_SYNC -> Unit
-            SyncDecision.DOWNLOAD_CLOUD -> {
-                val remote = cloudFile ?: return
-                localSavePath.parentFile?.mkdirs()
-                transfer.download(token, remote.id, localSavePath, remote.modifiedTime)
-            }
-            SyncDecision.UPLOAD_LOCAL -> {
-                if (!localExists) return
-                val result = transfer.upload(
-                    token,
-                    localSavePath,
-                    driveName = localSavePath.name,
-                    parentFolderId = folderId,
-                )
-                setLocalModifiedTime(localSavePath, result.modifiedTime)
-            }
-            SyncDecision.CONFLICT -> {
-                val remote = cloudFile ?: return
-                val localDate = formatTimestamp(localSavePath.lastModified())
-                val cloudDate = formatTimestamp(Instant.parse(remote.modifiedTime).toEpochMilli())
-
-                val choice: SyncDecision = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                    onStatus(AppStatus.Conflict(
-                        localDate = localDate,
-                        cloudDate = cloudDate,
-                        gameName = displayName,
-                        onResolve = { userChoice ->
-                            if (continuation.isActive) {
-                                continuation.resumeWith(Result.success(userChoice))
-                            }
-                        }
-                    ))
-                }
-
-                when (choice) {
-                    SyncDecision.DOWNLOAD_CLOUD -> transfer.download(token, remote.id, localSavePath, remote.modifiedTime)
-                    SyncDecision.UPLOAD_LOCAL -> {
-                        val result = transfer.update(token, remote.id, localSavePath)
-                        setLocalModifiedTime(localSavePath, result.modifiedTime)
-                    }
-                    else -> Unit
-                }
-            }
+        val remote = canonicalCloudFiles(cloudFiles).find { it.name == driveName }
+        val decision = trackedSync.plan(localSavePath, remote, folderId, driveName)
+        val choice = if (decision == SyncDecision.CONFLICT && remote != null) {
+            requestFileConflict(localSavePath, remote, displayName)
+        } else decision
+        if (!(beforePlay && decision == SyncDecision.UPLOAD_LOCAL)) {
+            applyFileDecision(token, localSavePath, remote, folderId, driveName, choice)
         }
     }
 
-    private fun setLocalModifiedTime(file: File, modifiedTime: String) {
-        try {
-            file.setLastModified(Instant.parse(modifiedTime).toEpochMilli())
-        } catch (_: Exception) {
-            // Drive may return a timestamp format the local filesystem cannot apply.
+    private suspend fun requestFileConflict(local: File, remote: DriveFile, displayName: String): SyncDecision =
+        kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            onStatus(AppStatus.Conflict(
+                localDate = formatTimestamp(local.lastModified()),
+                cloudDate = formatTimestamp(Instant.parse(remote.modifiedTime).toEpochMilli()),
+                gameName = displayName,
+                onResolve = { choice -> if (continuation.isActive) continuation.resumeWith(Result.success(choice)) },
+            ))
+        }
+
+    private suspend fun applyFileDecision(
+        token: String, local: File, remote: DriveFile?, folderId: String, driveName: String, decision: SyncDecision,
+    ) {
+        when (decision) {
+            SyncDecision.DOWNLOAD_CLOUD -> remote?.let { trackedSync.download(token, it, local, folderId, driveName) }
+            SyncDecision.UPLOAD_LOCAL -> if (local.isFile) trackedSync.upload(token, local, remote, folderId, driveName)
+            SyncDecision.IN_SYNC -> if (local.isFile && remote != null) trackedSync.remember(local, remote, folderId, driveName)
+            SyncDecision.CONFLICT -> error("A conflict must be resolved before applying a save")
         }
     }
 
@@ -918,26 +637,26 @@ class SyncOrchestrator(
      */
     suspend fun playWithSync(
         item: GameItem,
+        resolveConfiguredItem: (GameItem) -> GameItem = { it },
         onRequestSaveSetup: suspend (item: GameItem, notice: String?, cloudFileNames: List<String>) -> List<ConfiguredSaveTarget> = { _, _, _ -> emptyList() }
     ) {
         try {
             val hasDriveConfig = config.googleDrive != null
-            var cachedToken: String? = null
-            var forceUploadLocal = false
-            var currentSyncTargets = item.effectiveSaveTargets
-            val cloudPath = getCloudPathSegments(item)
+            var currentItem = item
+            var currentSyncTargets = currentItem.effectiveSaveTargets
+            var cloudPath = getCloudPathSegments(currentItem)
 
             // ── Step 1: Pre-Sync (download cloud save if newer) ─────
             if (hasDriveConfig) {
                 try {
                     onStatus(AppStatus.Syncing("Checking cloud saves..."))
-                    cachedToken = oauthFlow.authorize(config, configManager, allowInteractive = false)
+                    val token = oauthFlow.authorize(config, configManager, allowInteractive = false)
 
                     // Case 1: If game has no save paths configured locally, check if cloud saves exist on Drive!
                     if (currentSyncTargets.isEmpty()) {
-                        val cloudFolderId = folders.findPath(cachedToken, cloudPath)
+                        val cloudFolderId = folders.findPath(token, cloudPath)
                         val cloudFiles = if (cloudFolderId != null) {
-                            search.listFilesInFolder(cachedToken, cloudFolderId)
+                            search.listFilesInFolder(token, cloudFolderId)
                         } else {
                             emptyList()
                         }
@@ -945,9 +664,11 @@ class SyncOrchestrator(
                         if (cloudFiles.isNotEmpty()) {
                             onStatus(AppStatus.Idle)
                             val notice = "Cloud save data was found for this game. Choose one destination folder; only these listed files will be synchronized for this game."
-                            val requested = onRequestSaveSetup(item, notice, cloudFiles.map { it.name })
+                            val requested = onRequestSaveSetup(currentItem, notice, cloudFiles.map { it.name })
                             if (requested.isNotEmpty()) {
                                 currentSyncTargets = requested
+                                currentItem = resolveConfiguredItem(currentItem)
+                                cloudPath = getCloudPathSegments(currentItem)
                             } else {
                                 // User cancelled save setup prior to launch; abort launch to prevent playing without cloud saves.
                                 return
@@ -956,54 +677,53 @@ class SyncOrchestrator(
                     }
 
                     if (currentSyncTargets.isNotEmpty()) {
-                        onStatus(AppStatus.Syncing("Syncing saves for ${item.effectiveTitle}..."))
-                        val targetPairs = currentSyncTargets.map { File(it.path) to it.type }
+                        onStatus(AppStatus.Syncing("Syncing saves for ${currentItem.effectiveTitle}..."))
+                        val folderId = folders.ensurePath(token, cloudPath)
+                        val cloudFiles = canonicalCloudFiles(search.listFilesInFolder(token, folderId))
+                        validateSaveTargetMappings(currentSyncTargets, cloudFiles)
                         for (target in currentSyncTargets) {
                             val saveFile = File(target.path)
-                            val reservedSiblingNames = getSiblingReservedNames(saveFile, targetPairs)
-                            val decision = preSync(
-                                token = cachedToken,
-                                entry = item.entry,
+                            val reservedSiblingNames = reservedCloudNames(target, currentSyncTargets, cloudFiles)
+                            preSync(
+                                token = token,
+                                entry = currentItem.entry,
                                 localSavePath = saveFile,
                                 targetType = target.type,
                                 cloudPathSegments = cloudPath,
-                                displayName = item.effectiveTitle,
+                                displayName = currentItem.effectiveTitle,
                                 reservedSiblingNames = reservedSiblingNames,
+                                cloudPath = target.cloudPath,
                             )
-                            if (decision == SyncDecision.UPLOAD_LOCAL) {
-                                forceUploadLocal = true
-                            }
                         }
                     }
-                } catch (_: Exception) {
-                    cachedToken = null
+                } catch (e: Exception) {
+                    if (e is CancellationException || e is SaveTargetMappingException || e is SaveSyncException) throw e
                 }
             }
 
             // ── Step 2: Play ────────────────────────────────────────
             onStatus(AppStatus.Playing)
-            val steamAppId = when (val entry = item.entry) {
+            val steamAppId = when (val entry = currentItem.entry) {
                 is EmulatorSystem -> entry.steamAppId
                 is NativePCGame -> entry.steamAppId
             }
-            val result = runner.launch(item.entry, item.romFile, steamAppId)
+            val result = runner.launch(currentItem.entry, currentItem.romFile, steamAppId)
             if (result.exitCode != 0) {
-                onStatus(AppStatus.Error("${item.effectiveTitle} did not start or its process could not be tracked. Cloud upload was not attempted."))
+                onStatus(AppStatus.Error("${currentItem.effectiveTitle} did not start or its process could not be tracked. Cloud upload was not attempted."))
                 return
             }
 
             // ── Step 2.5: Ask for save paths if empty ───────────────
             if (currentSyncTargets.isEmpty()) {
-                currentSyncTargets = onRequestSaveSetup(item, null, emptyList())
+                currentSyncTargets = onRequestSaveSetup(currentItem, null, emptyList())
+                currentItem = resolveConfiguredItem(currentItem)
             }
 
             // ── Step 3: Post-Sync (upload local save if modified) ───
             if (hasDriveConfig) {
                 val uploaded = uploadAfterPlay(
-                    item = item,
+                    item = currentItem,
                     syncTargets = currentSyncTargets,
-                    forceUploadLocal = forceUploadLocal,
-                    existingToken = cachedToken,
                 )
                 if (!uploaded) return
             }
@@ -1011,6 +731,7 @@ class SyncOrchestrator(
             onStatus(AppStatus.Idle)
 
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             onStatus(AppStatus.Error("Error: ${e.message}"))
         }
     }
@@ -1018,12 +739,10 @@ class SyncOrchestrator(
     private suspend fun uploadAfterPlay(
         item: GameItem,
         syncTargets: List<ConfiguredSaveTarget>,
-        forceUploadLocal: Boolean,
-        existingToken: String?,
         retryTargets: List<SaveUploadTarget>? = null,
         completedBeforeRetry: Int = 0,
-        isRetry: Boolean = false,
         blockedFailuresBeforeRetry: List<String> = emptyList(),
+        mappingTargets: List<ConfiguredSaveTarget> = syncTargets,
     ): Boolean {
         onStatus(AppStatus.Syncing("Uploading saves for ${item.effectiveTitle}..."))
         var completedCount = completedBeforeRetry
@@ -1032,8 +751,12 @@ class SyncOrchestrator(
         val blockedReasons = blockedFailuresBeforeRetry.toMutableList()
         var firstFailureReason: String? = null
         try {
-            val token = existingToken ?: oauthFlow.authorize(config, configManager, allowInteractive = false)
+            // Games can outlive an access token. Always authorize again before post-play uploads.
+            val token = oauthFlow.authorize(config, configManager, allowInteractive = false)
             val cloudPath = getCloudPathSegments(item)
+            val folderId = folders.ensurePath(token, cloudPath)
+            val cloudFiles = canonicalCloudFiles(search.listFilesInFolder(token, folderId))
+            validateSaveTargetMappings(mappingTargets, cloudFiles)
             for (target in retryTargets.orEmpty()) {
                 if (!target.file.exists()) continue
                 try {
@@ -1043,9 +766,7 @@ class SyncOrchestrator(
                         localSavePath = target.file,
                         targetType = target.type,
                         cloudPathSegments = cloudPath,
-                        forceAll = false,
                         driveNameOverride = target.driveName,
-                        resolveCloudNewer = isRetry,
                         knownFileSiblingNames = target.reservedDriveNames,
                     )
                     completedCount += result.completedCount
@@ -1060,14 +781,11 @@ class SyncOrchestrator(
                     if (firstFailureReason == null) firstFailureReason = e.message
                 }
             }
-            val targetPairs = syncTargets.map { File(it.path) to it.type }
             for (target in syncTargets) {
                 val saveFile = File(target.path)
                 if (!saveFile.exists()) continue
-                val knownFileSiblingNames = syncTargets
-                    .filter { it.type == SaveTargetType.FILE && it.path != target.path }
-                    .mapTo(mutableSetOf()) { File(it.path).name }
-                val reservedSiblingNames = getSiblingReservedNames(saveFile, targetPairs)
+                val knownFileSiblingNames = fileSiblingCloudNames(target, mappingTargets, cloudFiles)
+                val reservedSiblingNames = reservedCloudNames(target, mappingTargets, cloudFiles)
                 try {
                     val result = postSync(
                         token = token,
@@ -1075,10 +793,9 @@ class SyncOrchestrator(
                         localSavePath = saveFile,
                         targetType = target.type,
                         cloudPathSegments = cloudPath,
-                        forceAll = forceUploadLocal,
-                        resolveCloudNewer = isRetry,
                         knownFileSiblingNames = knownFileSiblingNames,
                         reservedSiblingNames = reservedSiblingNames,
+                        cloudPath = target.cloudPath,
                     )
                     completedCount += result.completedCount
                     failedFileTargets += result.failedTargets
@@ -1094,6 +811,10 @@ class SyncOrchestrator(
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
+            if (e is SaveTargetMappingException) {
+                onStatus(AppStatus.Error(e.message ?: "Invalid save mapping"))
+                return false
+            }
             failedConfiguredTargets += syncTargets.filterNot { it in failedConfiguredTargets }
             failedFileTargets += retryTargets.orEmpty().filterNot { it in failedFileTargets }
             firstFailureReason = firstFailureReason ?: e.message
@@ -1124,12 +845,10 @@ class SyncOrchestrator(
                     uploadAfterPlay(
                         item = item,
                         syncTargets = failedConfiguredTargets,
-                        forceUploadLocal = false,
-                        existingToken = null,
                         retryTargets = failedFileTargets,
                         completedBeforeRetry = completedCount,
-                        isRetry = true,
                         blockedFailuresBeforeRetry = distinctBlockedReasons,
+                        mappingTargets = mappingTargets,
                     )
                 },
             )
@@ -1137,10 +856,7 @@ class SyncOrchestrator(
         return false
     }
 
-    /**
-     * Pre-Sync: Check cloud save timestamp vs local. Download if cloud is newer.
-     * Returns the user's resolution decision if a conflict was resolved, or null.
-     */
+    /** Establish a common save before launch, including explicit conflict resolutions. */
     private suspend fun preSync(
         token: String,
         entry: GameEntry,
@@ -1149,100 +865,22 @@ class SyncOrchestrator(
         cloudPathSegments: List<String> = listOf(entry.effectiveCloudFolder),
         displayName: String = entry.name,
         reservedSiblingNames: Set<String> = emptySet(),
-    ): SyncDecision? {
+        cloudPath: String? = null,
+    ) {
         val folderId = folders.ensurePath(token, cloudPathSegments)
-        val cloudFiles = search.listFilesInFolder(token, folderId)
-
-        val isDirectory = isDirectorySaveTarget(targetType, localSavePath, cloudFiles, reservedSiblingNames)
-
-        if (isDirectory) {
-            val directoryCloudFiles = cloudFilesForSaveTarget(
-                targetType, localSavePath, cloudFiles, reservedSiblingNames,
-            )
-            data class FilePair(val localFile: File, val cloudFile: DriveFile, val decision: SyncDecision)
-
-            val pairs = directoryCloudFiles.mapNotNull { cloudFile ->
-                val localFile = resolveRemoteFile(localSavePath, cloudFile.name) ?: return@mapNotNull null
-                val decision = planSyncDecision(
-                    localModifiedTimeMs = localFile.takeIf { it.exists() }?.lastModified(),
-                    cloudModifiedTimeIso = cloudFile.modifiedTime,
-                )
-                FilePair(localFile, cloudFile, decision)
-            }
-
-            val conflictingPairs = pairs.filter { it.decision == SyncDecision.CONFLICT }
-
-            if (conflictingPairs.isNotEmpty()) {
-                val latestLocalMs = conflictingPairs.maxOf { it.localFile.lastModified() }
-                val latestCloudMs = conflictingPairs.maxOf { Instant.parse(it.cloudFile.modifiedTime).toEpochMilli() }
-
-                val choice: SyncDecision = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                    onStatus(AppStatus.Conflict(
-                        localDate = formatTimestamp(latestLocalMs),
-                        cloudDate = formatTimestamp(latestCloudMs),
-                        gameName = displayName,
-                        onResolve = { userChoice ->
-                            if (continuation.isActive) {
-                                continuation.resumeWith(Result.success(userChoice))
-                            }
-                        }
-                    ))
-                }
-
-                if (choice == SyncDecision.DOWNLOAD_CLOUD) {
-                    for (pair in pairs) {
-                        pair.localFile.parentFile?.mkdirs()
-                        transfer.download(token, pair.cloudFile.id, pair.localFile, pair.cloudFile.modifiedTime)
-                    }
-                }
-                return choice
+        val cloudFiles = canonicalCloudFiles(search.listFilesInFolder(token, folderId))
+        try {
+            if (isDirectorySaveTarget(targetType, localSavePath, cloudFiles, reservedSiblingNames, cloudName = cloudPath)) {
+                syncDirectoryManual(token, entry, localSavePath, folderId,
+                    cloudFilesForSaveTarget(targetType, localSavePath,
+                        projectDirectoryFiles(cloudFiles, cloudPath), reservedSiblingNames),
+                    displayName, reservedSiblingNames, cloudPath, beforePlay = true)
             } else {
-                for (pair in pairs) {
-                    if (pair.decision == SyncDecision.DOWNLOAD_CLOUD) {
-                        pair.localFile.parentFile?.mkdirs()
-                        transfer.download(token, pair.cloudFile.id, pair.localFile, pair.cloudFile.modifiedTime)
-                    }
-                }
-                return null
+                syncFileManual(token, entry, localSavePath, folderId, cloudFiles, displayName, cloudPath ?: localSavePath.name, beforePlay = true)
             }
-        } else {
-            val cloudFile = cloudFiles.find { it.name == localSavePath.name } ?: return null
-            val plannedDecision = planSyncDecision(
-                localModifiedTimeMs = localSavePath.takeIf { it.exists() }?.lastModified(),
-                cloudModifiedTimeIso = cloudFile.modifiedTime,
-            )
-
-            when (plannedDecision) {
-                SyncDecision.DOWNLOAD_CLOUD -> {
-                    localSavePath.parentFile?.mkdirs()
-                    transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
-                    return null
-                }
-                SyncDecision.UPLOAD_LOCAL, SyncDecision.IN_SYNC -> {
-                    return null
-                }
-                SyncDecision.CONFLICT -> {
-                    val localDate = formatTimestamp(localSavePath.lastModified())
-                    val cloudDate = formatTimestamp(Instant.parse(cloudFile.modifiedTime).toEpochMilli())
-
-                    val choice: SyncDecision = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                        onStatus(AppStatus.Conflict(
-                            localDate = localDate,
-                            cloudDate = cloudDate,
-                            gameName = displayName,
-                            onResolve = { userChoice ->
-                                if (continuation.isActive) {
-                                    continuation.resumeWith(Result.success(userChoice))
-                                }
-                            }
-                        ))
-                    }
-                    if (choice == SyncDecision.DOWNLOAD_CLOUD) {
-                        transfer.download(token, cloudFile.id, localSavePath, cloudFile.modifiedTime)
-                    }
-                    return choice
-                }
-            }
+        } catch (failure: Exception) {
+            if (failure is CancellationException || failure is SaveSyncException || failure is SaveTargetMappingException) throw failure
+            throw SaveSyncException("Could not finish preparing saves for $displayName. Retry synchronization before playing.", failure)
         }
     }
 
@@ -1255,15 +893,14 @@ class SyncOrchestrator(
         localSavePath: File,
         targetType: SaveTargetType,
         cloudPathSegments: List<String> = listOf(entry.effectiveCloudFolder),
-        forceAll: Boolean = false,
         driveNameOverride: String? = null,
-        resolveCloudNewer: Boolean = false,
         knownFileSiblingNames: Set<String> = emptySet(),
         reservedSiblingNames: Set<String> = emptySet(),
+        cloudPath: String? = null,
     ): PostSyncResult {
         if (!localSavePath.exists()) return PostSyncResult(0, emptyList())
 
-        val driveName = driveNameOverride ?: localSavePath.name
+        val driveName = driveNameOverride ?: cloudPath ?: localSavePath.name
         if (targetType == SaveTargetType.FILE && driveName in knownFileSiblingNames) {
             return PostSyncResult(
                 0,
@@ -1273,7 +910,7 @@ class SyncOrchestrator(
         }
 
         val folderId = folders.ensurePath(token, cloudPathSegments)
-        val cloudFiles = search.listFilesInFolder(token, folderId)
+        val rawCloudFiles = canonicalCloudFiles(search.listFilesInFolder(token, folderId))
         var completedCount = 0
         val failedTargets = mutableListOf<SaveUploadTarget>()
         val blockedReasons = mutableListOf<String>()
@@ -1282,7 +919,8 @@ class SyncOrchestrator(
 
         // Legacy paths that did not exist during config migration remain UNKNOWN until
         // the game creates them. Resolve from the filesystem after the game exits.
-        val isDirectory = isDirectorySaveTarget(targetType, localSavePath, cloudFiles, allReservedNames)
+        val isDirectory = isDirectorySaveTarget(targetType, localSavePath, rawCloudFiles, allReservedNames, cloudName = cloudPath)
+        val cloudFiles = if (isDirectory) projectDirectoryFiles(rawCloudFiles, cloudPath) else rawCloudFiles
         if (isDirectory) {
             val localFiles = localSavePath.walkTopDown().filter { it.isFile }.toList()
             for (localFile in localFiles) {
@@ -1297,16 +935,15 @@ class SyncOrchestrator(
                 val cloudFile = cloudFiles.find { it.name == relativePath }
                 try {
                     syncSingleFilePost(
-                        token, localFile, cloudFile, folderId, relativePath,
-                        force = forceAll,
-                        resolveCloudNewer = resolveCloudNewer,
+                        token, localFile, cloudFile, folderId, directoryCloudName(cloudPath, relativePath),
                         displayName = entry.name,
                     )
                     completedCount++
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     failedTargets += SaveUploadTarget(
-                        localFile, SaveTargetType.FILE, relativePath, e.message, allReservedNames,
+                        localFile, SaveTargetType.FILE, directoryCloudName(cloudPath, relativePath), e.message,
+                        allReservedNames.mapTo(mutableSetOf()) { directoryCloudName(cloudPath, it) },
                     )
                 }
             }
@@ -1315,8 +952,6 @@ class SyncOrchestrator(
             try {
                 syncSingleFilePost(
                     token, localSavePath, cloudFile, folderId, driveName,
-                    force = forceAll,
-                    resolveCloudNewer = resolveCloudNewer,
                     displayName = entry.name,
                 )
                 completedCount++
@@ -1336,53 +971,13 @@ class SyncOrchestrator(
         cloudFile: DriveFile?,
         parentFolderId: String,
         driveName: String,
-        force: Boolean = false,
-        resolveCloudNewer: Boolean = false,
         displayName: String = driveName,
     ) {
-        if (cloudFile != null) {
-            val decision = planSyncDecision(
-                localModifiedTimeMs = localFile.lastModified(),
-                cloudModifiedTimeIso = cloudFile.modifiedTime,
-                localNewerAction = LocalNewerAction.UPLOAD,
-            )
-
-            when {
-                force || decision == SyncDecision.UPLOAD_LOCAL -> {
-                    val res = transfer.update(token, cloudFile.id, localFile)
-                    try {
-                        localFile.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
-                    } catch (_: Exception) {
-                    }
-                }
-                decision == SyncDecision.DOWNLOAD_CLOUD && resolveCloudNewer -> {
-                    val selectedDecision = kotlinx.coroutines.suspendCancellableCoroutine<SyncDecision> { continuation ->
-                        onStatus(AppStatus.Conflict(
-                            localDate = formatTimestamp(localFile.lastModified()),
-                            cloudDate = formatTimestamp(Instant.parse(cloudFile.modifiedTime).toEpochMilli()),
-                            gameName = displayName,
-                            onResolve = { choice ->
-                                if (continuation.isActive) continuation.resumeWith(Result.success(choice))
-                            },
-                        ))
-                    }
-                    when (selectedDecision) {
-                        SyncDecision.UPLOAD_LOCAL -> {
-                            val res = transfer.update(token, cloudFile.id, localFile)
-                            runCatching { localFile.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli()) }
-                        }
-                        SyncDecision.DOWNLOAD_CLOUD -> transfer.download(token, cloudFile.id, localFile, cloudFile.modifiedTime)
-                        else -> Unit
-                    }
-                }
-            }
-        } else {
-            val res = transfer.upload(token, localFile, driveName = driveName, parentFolderId = parentFolderId)
-            try {
-                localFile.setLastModified(Instant.parse(res.modifiedTime).toEpochMilli())
-            } catch (_: Exception) {
-            }
-        }
+        val decision = trackedSync.plan(localFile, cloudFile, parentFolderId, driveName)
+        val choice = if (decision == SyncDecision.CONFLICT && cloudFile != null) {
+            requestFileConflict(localFile, cloudFile, displayName)
+        } else decision
+        applyFileDecision(token, localFile, cloudFile, parentFolderId, driveName, choice)
     }
 
     companion object {

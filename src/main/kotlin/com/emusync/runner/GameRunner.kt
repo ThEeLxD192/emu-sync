@@ -5,6 +5,7 @@ import com.emusync.model.GameEntry
 import com.emusync.model.NativePCGame
 import com.emusync.steam.SteamShortcutManager
 import com.emusync.util.AppImageEnvironment
+import com.emusync.util.ArgumentsCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -210,10 +211,10 @@ class GameRunner {
                     // Add fullscreen/Big Picture flags to bypass Qt windowed GUI
                     val fsArgs = SteamShortcutManager.resolveFullscreenArgs(entry)
                     if (fsArgs.isNotBlank()) {
-                        fsArgs.split(" ").filter { it.isNotBlank() }.forEach { add(it) }
+                        addAll(requireNotNull(ArgumentsCodec.parse(fsArgs)) { "Fullscreen arguments contain unmatched quotes" })
                     }
                     entry.arguments.forEach { arg ->
-                        add(if (arg == "{ROM}") romFile.absolutePath else arg)
+                        add(arg.replace("{ROM}", romFile.absolutePath))
                     }
                 }
             }

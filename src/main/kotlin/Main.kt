@@ -32,6 +32,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -96,6 +97,7 @@ fun main() {
             state = windowState,
         ) {
             val viewModel = remember { AppViewModel(ConfigManager()) }
+            DisposableEffect(viewModel) { onDispose { viewModel.close() } }
 
             // Load config on first composition
             LaunchedEffect(Unit) {
@@ -411,9 +413,9 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                     game = request.item,
                     notice = request.notice,
                     cloudRestoreFileNames = request.cloudFileNames,
-                    onDismiss = { viewModel.completeSaveSetup(emptyList()) },
+                    onDismiss = { viewModel.completeSaveSetup(emptyList(), request = request) },
                     onSave = { newTitle, newTargets, newCoverPath ->
-                        viewModel.completeSaveSetup(newTargets, newTitle, newCoverPath)
+                        viewModel.completeSaveSetup(newTargets, newTitle, newCoverPath, request)
                     }
                 )
             }
@@ -478,7 +480,7 @@ private fun loadAppIcon(): Painter? {
     return try {
         val stream = Thread.currentThread().contextClassLoader.getResourceAsStream("icon.png")
             ?: object {}.javaClass.getResourceAsStream("/icon.png")
-        val bytes = stream?.readAllBytes() ?: return null
+        val bytes = stream?.use { it.readAllBytes() } ?: return null
         val imageBitmap = Image.makeFromEncoded(bytes).toComposeImageBitmap()
         BitmapPainter(imageBitmap)
     } catch (_: Throwable) {

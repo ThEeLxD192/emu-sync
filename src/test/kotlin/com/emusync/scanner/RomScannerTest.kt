@@ -52,4 +52,25 @@ class RomScannerTest {
         val result = scanRoms(tempDir.absolutePath, emptyList())
         assertTrue(result.isEmpty())
     }
+
+    @Test
+    fun `symlink cycles and aliases do not duplicate games or recurse indefinitely`(@TempDir directory: File) = runTest {
+        val games = File(directory, "games").apply { mkdirs() }
+        File(games, "game.gba").writeText("ROM")
+        try {
+            java.nio.file.Files.createSymbolicLink(File(games, "loop").toPath(), directory.toPath())
+            java.nio.file.Files.createSymbolicLink(File(directory, "alias").toPath(), games.toPath())
+        } catch (failure: Exception) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false, "Symbolic links are unavailable: ${failure.message}")
+        }
+        val roms = scanRoms(directory.path, listOf("gba"))
+        assertEquals(1, roms.size)
+        assertEquals("game", roms.single().name)
+    }
+
+    @Test
+    fun `extensions accept whitespace dots and mixed case`(@TempDir directory: File) = runTest {
+        File(directory, "game.GBA").writeText("ROM")
+        assertEquals(1, scanRoms(directory.path, listOf(" .gBa ")).size)
+    }
 }

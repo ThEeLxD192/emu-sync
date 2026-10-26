@@ -1,11 +1,20 @@
 package com.emusync.drive
 
+import com.emusync.model.SaveTarget
+import com.emusync.model.SaveTargetType
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 
-private val WINDOWS_ABSOLUTE_PATH = Regex("^[A-Za-z]:[\\\\/].*")
+private val WINDOWS_DRIVE_PATH = Regex("^[A-Za-z]:.*")
+
+internal fun remotePathSegments(remoteName: String): List<String>? {
+    if (remoteName.isBlank() || remoteName != remoteName.trim() || '\u0000' in remoteName) return null
+    if (remoteName.startsWith('/') || remoteName.startsWith('\\') || WINDOWS_DRIVE_PATH.matches(remoteName)) return null
+    val segments = remoteName.split(Regex("[/\\\\]"), limit = 0)
+    return segments.takeIf { it.isNotEmpty() && it.none { segment -> segment.isBlank() || segment == "." || segment == ".." } }
+}
 
 /**
  * Resolves a Drive file name below [destinationRoot].
@@ -14,13 +23,7 @@ private val WINDOWS_ABSOLUTE_PATH = Regex("^[A-Za-z]:[\\\\/].*")
  * name created on another operating system cannot escape the save directory.
  */
 fun resolveRemoteFile(destinationRoot: File, remoteName: String): File? {
-    if (remoteName.isBlank() || remoteName != remoteName.trim()) return null
-    if (remoteName.startsWith('/') || remoteName.startsWith('\\') || WINDOWS_ABSOLUTE_PATH.matches(remoteName)) {
-        return null
-    }
-
-    val segments = remoteName.split(Regex("[/\\\\]"), limit = 0)
-    if (segments.isEmpty() || segments.any { it.isBlank() || it == "." || it == ".." }) return null
+    val segments = remotePathSegments(remoteName) ?: return null
 
     // Preserve the selected path's spelling. On Windows, toRealPath() can expand an
     // 8.3 path (for example RUNNER~1) and break callers' path comparisons.
@@ -55,9 +58,16 @@ fun resolveRemoteFile(destinationRoot: File, remoteName: String): File? {
 
 /** Resolves a selected restore folder to individual local paths for the cloud files. */
 fun resolveCloudRestorePaths(destinationFolder: String, cloudFileNames: List<String>): List<String> {
+    return resolveCloudRestoreTargets(destinationFolder, cloudFileNames).map { it.path }.distinct()
+}
+
+/** Keeps each exact Drive name, including its nested path, when restoring individual files. */
+fun resolveCloudRestoreTargets(destinationFolder: String, cloudFileNames: List<String>): List<SaveTarget> {
     if (destinationFolder.isBlank()) return emptyList()
 
     return cloudFileNames.mapNotNull { cloudName ->
-        resolveRemoteFile(File(destinationFolder), cloudName)?.absolutePath
+        resolveRemoteFile(File(destinationFolder), cloudName)?.let { local ->
+            SaveTarget(local.absolutePath, SaveTargetType.FILE, cloudPath = cloudName)
+        }
     }.distinct()
 }

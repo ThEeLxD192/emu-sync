@@ -234,6 +234,7 @@ data class AppUiState(
     val gameItems: List<GameItem> = emptyList(),
     val status: AppStatus = AppStatus.Idle,
     val isLoading: Boolean = false,
+    val isOperationInProgress: Boolean = false,
     val saveSetupRequest: SaveSetupRequest? = null,
     val entrySyncStatus: Map<String, CloudSyncStatus> = emptyMap(),
     val updateState: UpdateUiState = UpdateUiState.Idle,

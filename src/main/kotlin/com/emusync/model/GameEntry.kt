@@ -16,7 +16,25 @@ enum class SaveTargetType {
 data class SaveTarget(
     val path: String,
     val type: SaveTargetType,
+    /** File name or directory prefix within the game's cloud saves; null keeps the legacy layout. */
+    val cloudPath: String? = null,
 )
+
+/** Gives newly configured directory roots distinct, portable cloud paths. */
+fun scopeNewSaveTargets(targets: List<SaveTarget>): List<SaveTarget> {
+    if (targets.count { it.type == SaveTargetType.DIRECTORY } < 2) return targets
+    val used = targets.mapNotNull { it.cloudPath }.toMutableSet()
+    var next = 1
+    return targets.map { target ->
+        if (target.type != SaveTargetType.DIRECTORY || !target.cloudPath.isNullOrBlank()) target
+        else {
+            var prefix: String
+            do { prefix = "save-target-${next++}" } while (used.any { it == prefix || it.startsWith("$prefix/") || prefix.startsWith("$it/") })
+            used += prefix
+            target.copy(cloudPath = prefix)
+        }
+    }
+}
 
 /** Used only while migrating legacy string-only save paths. */
 fun inferLegacySaveTarget(path: String): SaveTarget {
@@ -169,12 +187,13 @@ data class NativePCGame(
 
 private fun SaveTarget.resolveUnknownTypeIfPresent(): SaveTarget {
     val file = File(path)
-    if (!file.exists()) return this
+    val normalized = if (cloudPath != null && cloudPath.isBlank()) copy(cloudPath = null) else this
+    if (!file.exists()) return normalized
     val actualType = if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
     return if (type == SaveTargetType.UNKNOWN || (type == SaveTargetType.FILE && file.isDirectory) || (type == SaveTargetType.DIRECTORY && file.isFile)) {
-        copy(type = actualType)
+        normalized.copy(type = actualType)
     } else {
-        this
+        normalized
     }
 }
 

@@ -31,3 +31,10 @@ Thumbs.db
 shortcuts.vdf.bak
 hs_err_pid*
 replay_pid*
+
+# Local synchronization history and recovery saves
+*.sync-state.json
+*.sync-backups/
+
+# Local audit notes
+/AUDIT_STATUS.md

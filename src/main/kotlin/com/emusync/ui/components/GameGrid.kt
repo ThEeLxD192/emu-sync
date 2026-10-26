@@ -53,6 +53,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,21 +62,18 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
 import com.emusync.ui.CloudSyncStatus
 import com.emusync.ui.GameItem
 import com.emusync.ui.theme.EmuSyncColors
-import org.jetbrains.skia.Image
-import java.io.File
-import java.util.Collections
-import javax.imageio.ImageIO
 
 /**
  * Main content area displaying games as cards in an adaptive grid.
@@ -341,34 +339,6 @@ private fun CloudStatusChip(
     }
 }
 
-private val coverCache = Collections.synchronizedMap(
-    object : LinkedHashMap<String, ImageBitmap>(32, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>?): Boolean {
-            return size > 100
-        }
-    }
-)
-
-internal fun loadGameCover(file: File?): ImageBitmap? {
-    if (file == null || !file.exists() || !file.isFile) return null
-    val path = file.absolutePath
-    coverCache[path]?.let { return it }
-    return try {
-        val bytes = file.readBytes()
-        val bitmap = Image.makeFromEncoded(bytes).toComposeImageBitmap()
-        coverCache[path] = bitmap
-        bitmap
-    } catch (_: Throwable) {
-        try {
-            val bitmap = ImageIO.read(file)?.toComposeImageBitmap()
-            if (bitmap != null) coverCache[path] = bitmap
-            bitmap
-        } catch (_: Throwable) {
-            null
-        }
-    }
-}
-
 @Composable
 private fun GameCard(
     item: GameItem,
@@ -378,9 +348,9 @@ private fun GameCard(
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
 
-    val coverBitmap = remember(item.coverFile?.absolutePath) {
-        loadGameCover(item.coverFile)
-    }
+    val coverBitmap = produceState<ImageBitmap?>(initialValue = null, key1 = item) {
+        value = withContext(Dispatchers.IO) { loadGameCover(item.coverFile) }
+    }.value
 
     val cardColor by animateColorAsState(
         if (isHovered) EmuSyncColors.CardHover else EmuSyncColors.SurfaceVariant

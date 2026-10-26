@@ -3,6 +3,7 @@ package com.emusync.drive
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.io.TempDir
+import com.emusync.model.SaveTargetType
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -11,6 +12,31 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SaveRestorePathsTest {
+    @Test
+    fun `nested restore targets retain their exact remote keys`(@TempDir tempDir: File) {
+        val targets = resolveCloudRestoreTargets(tempDir.path, listOf("profiles/one/save.dat", "profiles/two/save.dat"))
+
+        assertEquals(listOf("profiles/one/save.dat", "profiles/two/save.dat"), targets.map { it.cloudPath })
+        assertEquals(listOf(File(tempDir, "profiles/one/save.dat").path, File(tempDir, "profiles/two/save.dat").path), targets.map { it.path })
+        assertTrue(targets.all { it.type == SaveTargetType.FILE })
+    }
+
+    @Test
+    fun `different remote names resolving to one local file are rejected before restoration`(@TempDir tempDir: File) {
+        val targets = resolveCloudRestoreTargets(tempDir.path, listOf("slot/save.dat", "slot\\save.dat"))
+
+        kotlin.test.assertFailsWith<SaveTargetMappingException> { validateSaveTargetMappings(targets, emptyList()) }
+        assertTrue(tempDir.list().isNullOrEmpty())
+    }
+
+    @Test
+    fun `remote file cannot also become a parent directory`(@TempDir tempDir: File) {
+        val targets = resolveCloudRestoreTargets(tempDir.path, listOf("slot", "slot/save.dat"))
+
+        kotlin.test.assertFailsWith<SaveTargetMappingException> { validateSaveTargetMappings(targets, emptyList()) }
+        assertTrue(tempDir.list().isNullOrEmpty())
+    }
+
     @Test
     fun `restore paths are empty until a destination is selected`() {
         assertEquals(emptyList(), resolveCloudRestorePaths("", listOf("save.mcd")))
@@ -51,6 +77,8 @@ class SaveRestorePathsTest {
             "/tmp/outside.sav",
             "\\\\server\\share\\outside.sav",
             "C:\\outside.sav",
+            "C:outside.sav",
+            "slot\u0000/save.sav",
             "folder//save.sav",
             "folder\\\\save.sav",
             "./save.sav",

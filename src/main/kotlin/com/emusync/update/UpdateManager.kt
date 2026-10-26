@@ -18,6 +18,9 @@ import io.ktor.http.contentLength
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -25,7 +28,11 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.StandardCopyOption
+import java.util.logging.Level
+import java.util.logging.Logger
 import kotlin.system.exitProcess
 
 @Serializable
@@ -67,8 +74,14 @@ open class UpdateManager(
             socketTimeoutMillis = 60_000
             requestTimeoutMillis = null
         }
-    }
-) {
+    },
+    private val exitApplication: (Int) -> Unit = ::exitProcess,
+) : AutoCloseable {
+    override fun close() = client.close()
+
+    private val appImageInstaller = AppImageInstaller()
+    private val logger = Logger.getLogger(UpdateManager::class.java.name)
+
     /**
      * Indicates whether the host OS is Windows.
      * Can be overridden in tests to simulate Windows environment.
@@ -119,7 +132,9 @@ open class UpdateManager(
                 assetSize = asset.size,
                 assetName = asset.name,
             )
-        } catch (_: Throwable) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
             null
         }
     }
@@ -132,12 +147,12 @@ open class UpdateManager(
         destinationFile: File,
         onProgress: (Float) -> Unit,
     ): Result<Unit> = withContext(Dispatchers.IO) {
+        var staged: Path? = null
+        var channel: ByteReadChannel? = null
         try {
-            destinationFile.parentFile?.mkdirs()
-            if (destinationFile.exists()) {
-                destinationFile.delete()
-            }
-
+            val parent = destinationFile.absoluteFile.parentFile
+            Files.createDirectories(parent.toPath())
+            staged = Files.createTempFile(parent.toPath(), ".${destinationFile.name}.", ".part")
             val response: HttpResponse = client.get(downloadUrl) {
                 header(HttpHeaders.UserAgent, "EmuSync-Desktop-App")
                 timeout {
@@ -145,37 +160,47 @@ open class UpdateManager(
                     socketTimeoutMillis = 60_000
                 }
             }
-
             if (response.status != HttpStatusCode.OK) {
                 return@withContext Result.failure(
-                    IllegalStateException("HTTP ${response.status.value} ${response.status.description}")
-                )
+                    IllegalStateException("HTTP ${response.status.value} ${response.status.description}"))
             }
-
-            val totalBytes = response.contentLength() ?: -1L
-            val channel: ByteReadChannel = response.body()
+            val totalBytes = response.contentLength()
+            val body: ByteReadChannel = response.body()
+            channel = body
             var bytesRead = 0L
-
-            destinationFile.outputStream().use { output ->
+            Files.newOutputStream(staged).use { output ->
                 val buffer = ByteArray(64 * 1024)
-                while (!channel.isClosedForRead) {
-                    val read = channel.readAvailable(buffer, 0, buffer.size)
-                    if (read <= 0) break
+                while (!body.isClosedForRead) {
+                    currentCoroutineContext().ensureActive()
+                    val read = body.readAvailable(buffer, 0, buffer.size)
+                    if (read < 0) break
+                    if (read == 0) continue
                     output.write(buffer, 0, read)
                     bytesRead += read
-
-                    if (totalBytes > 0) {
-                        val progress = (bytesRead.toFloat() / totalBytes).coerceIn(0f, 1f)
-                        onProgress(progress)
+                    if (totalBytes != null && totalBytes > 0) {
+                        onProgress((bytesRead.toFloat() / totalBytes).coerceIn(0f, 1f))
                     }
                 }
             }
+            check(bytesRead > 0) { "The downloaded update is empty" }
+            check(totalBytes == null || bytesRead == totalBytes) { "The downloaded update is incomplete: expected $totalBytes bytes, received $bytesRead" }
+            currentCoroutineContext().ensureActive()
+            staged.toFile().setExecutable(true, false)
+            try {
+                Files.move(staged, destinationFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(staged, destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+            staged = null
             onProgress(1f)
-            destinationFile.setExecutable(true, false)
             Result.success(Unit)
-        } catch (e: Throwable) {
-            destinationFile.delete()
-            Result.failure(e)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Result.failure(failure)
+        } finally {
+            channel?.cancel(CancellationException("Update response is no longer needed"))
+            staged?.let { Files.deleteIfExists(it) }
         }
     }
 
@@ -187,11 +212,13 @@ open class UpdateManager(
     open fun applyUpdateAndRestart(downloadedFile: File): Boolean {
         if (!downloadedFile.exists()) return false
 
-        return if (isWindows()) {
+        val applied = if (isWindows()) {
             applyWindowsUpdateAndRestart(downloadedFile)
         } else {
             applyLinuxUpdateAndRestart(downloadedFile)
         }
+        if (applied) exitApplication(0)
+        return applied
     }
 
     /**
@@ -201,7 +228,6 @@ open class UpdateManager(
         downloadedFile: File,
         launcher: (List<String>) -> Unit = { cmd ->
             ProcessBuilder(cmd).start()
-            exitProcess(0)
         }
     ): Boolean {
         return try {
@@ -239,76 +265,27 @@ open class UpdateManager(
 
     /**
      * Replaces the running [target] AppImage with [source].
-     * Handles both same-filesystem atomic moves and cross-device moves.
-     * Prevents ETXTBSY on Linux by moving the active binary aside before copying.
+     * Stages the download on the destination filesystem before replacing the active binary.
      */
     internal fun replaceAppImageFile(source: File, target: File) {
-        source.setExecutable(true, false)
-        try {
-            Files.move(
-                source.toPath(),
-                target.toPath(),
-                StandardCopyOption.REPLACE_EXISTING,
-                StandardCopyOption.ATOMIC_MOVE
-            )
-        } catch (_: Throwable) {
-            val backup = File(target.parentFile, ".${target.name}.old.${System.currentTimeMillis()}")
-            val renamed = target.renameTo(backup)
-            try {
-                Files.copy(
-                    source.toPath(),
-                    target.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING
-                )
-            } finally {
-                source.delete()
-                if (renamed) {
-                    backup.deleteOnExit()
-                    backup.delete()
-                }
-            }
-        }
-        target.setExecutable(true, false)
+        appImageInstaller.replace(source, target)
     }
 
     /**
-     * Default launcher for Linux that launches the updated AppImage detached.
+     * Starts the updated AppImage with independent standard streams.
      * In Steam Deck Game Mode, Steam manages the process tree; exiting cleanly lets
      * the user relaunch the updated app from Steam without leaving ghost processes.
+     * Application exit is handled after installation by [applyUpdateAndRestart].
      */
     open fun defaultLinuxLauncher(path: String) {
-        if (isSteamGameMode()) {
-            exitProcess(0)
-            return
-        }
+        if (isSteamGameMode()) return
 
-        try {
-            val pb = ProcessBuilder(
-                "sh", "-c",
-                """(sleep 0.5 && (exec nohup "$1" || exec "$1")) >/dev/null 2>&1 &""",
-                "_",
-                path
-            )
-            pb.redirectInput(ProcessBuilder.Redirect.DISCARD)
-            pb.redirectOutput(ProcessBuilder.Redirect.DISCARD)
-            pb.redirectError(ProcessBuilder.Redirect.DISCARD)
-
-            AppImageEnvironment.clean(pb.environment())
-            pb.start()
-        } catch (_: Throwable) {
-            try {
-                val fallbackPb = ProcessBuilder(path)
-                fallbackPb.redirectInput(ProcessBuilder.Redirect.DISCARD)
-                fallbackPb.redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                fallbackPb.redirectError(ProcessBuilder.Redirect.DISCARD)
-                AppImageEnvironment.clean(fallbackPb.environment())
-                fallbackPb.start()
-            } catch (_: Throwable) {
-                // Ignore
-            }
-        } finally {
-            exitProcess(0)
-        }
+        val builder = ProcessBuilder(path)
+            .redirectInput(File("/dev/null"))
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+        AppImageEnvironment.clean(builder.environment())
+        builder.start()
     }
 
     /**
@@ -323,12 +300,12 @@ open class UpdateManager(
         if (!currentAppImage.exists() || !downloadedFile.exists()) return false
 
         return try {
-            replaceAppImageFile(downloadedFile, currentAppImage)
-
-            // Launch the updated AppImage in a separate detached process
-            launcher(currentAppImage.absolutePath)
+            appImageInstaller.replace(downloadedFile, currentAppImage) {
+                launcher(currentAppImage.absolutePath)
+            }
             true
-        } catch (_: Throwable) {
+        } catch (failure: Exception) {
+            logger.log(Level.WARNING, "Could not install or launch the updated AppImage at $currentAppImagePath", failure)
             false
         }
     }

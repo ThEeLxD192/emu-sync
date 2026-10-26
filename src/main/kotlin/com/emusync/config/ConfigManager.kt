@@ -1,6 +1,7 @@
 package com.emusync.config
 
 import com.emusync.model.AppConfig
+import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.migrateLegacySaveTargets
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -11,6 +12,11 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermission
+import java.util.concurrent.ConcurrentHashMap
+
+internal data class GoogleDriveSnapshot(val credentials: GoogleDriveConfig?, val revision: Long)
+
+private class ConfigState(var driveRevision: Long = 0L)
 
 /**
  * Manages loading and providing access to the application configuration.
@@ -29,6 +35,7 @@ class ConfigManager(
     val configFile: File = resolveDefaultConfigFile(),
     private val beforeReplace: (Path) -> Unit = {},
 ) {
+    private val state = configStates.computeIfAbsent(configFile.absoluteFile.normalize().path) { ConfigState() }
     /** Secondary constructor accepting a file path string. */
     constructor(configPath: String) : this(File(configPath))
 
@@ -58,12 +65,12 @@ class ConfigManager(
      * @throws IllegalArgumentException if file does not exist and [autoCreate] is false.
      * @throws kotlinx.serialization.SerializationException if the JSON structure is invalid.
      */
-    fun load(autoCreate: Boolean = true): AppConfig {
+    fun load(autoCreate: Boolean = true): AppConfig = synchronized(state) {
         if (!configFile.exists() || configFile.length() == 0L) {
             if (autoCreate) {
                 val defaultConfig = createDefaultConfig()
                 save(defaultConfig)
-                return defaultConfig
+                return@synchronized defaultConfig
             } else {
                 throw IllegalArgumentException("Configuration file not found: ${configFile.absolutePath}")
             }
@@ -72,14 +79,14 @@ class ConfigManager(
         val decoded = json.decodeFromString<AppConfig>(content)
         val migrated = decoded.copy(entries = decoded.entries.map { it.migrateLegacySaveTargets() })
         if (migrated != decoded) save(migrated)
-        return migrated
+        migrated
     }
 
     /**
      * Serializes the given [AppConfig] back to JSON and writes it to [configFile].
      * Automatically creates parent directories if they do not exist.
      */
-    fun save(config: AppConfig) {
+    fun save(config: AppConfig): Unit = synchronized(state) {
         val absoluteFile = configFile.absoluteFile
         val parent = absoluteFile.parentFile
             ?: throw IllegalStateException("Could not resolve configuration directory")
@@ -116,6 +123,41 @@ class ConfigManager(
         }
     }
 
+    /** Applies a change to the current file while serializing other in-process updates. */
+    fun update(transform: (AppConfig) -> AppConfig): AppConfig = synchronized(state) {
+        val current = load()
+        val updated = transform(current)
+        if (updated != current) save(updated)
+        updated
+    }
+
+    /** Explicit connection actions also invalidate authorizations already in flight. */
+    fun updateGoogleDrive(transform: (GoogleDriveConfig?) -> GoogleDriveConfig?): AppConfig = synchronized(state) {
+        val updated = update { it.copy(googleDrive = transform(it.googleDrive)) }
+        state.driveRevision++
+        updated
+    }
+
+    internal fun snapshotGoogleDrive(fallback: AppConfig): GoogleDriveSnapshot = synchronized(state) {
+        val current = if (configFile.exists()) load(autoCreate = false) else fallback
+        GoogleDriveSnapshot(current.googleDrive, state.driveRevision)
+    }
+
+    /** A late OAuth result cannot overwrite a newer connection or unrelated configuration. */
+    internal fun compareAndSetGoogleDrive(
+        expected: GoogleDriveSnapshot,
+        credentials: GoogleDriveConfig?,
+        fallback: AppConfig,
+    ): Boolean = synchronized(state) {
+        val current = if (configFile.exists()) load(autoCreate = false) else fallback
+        if (expected.revision != state.driveRevision || current.googleDrive != expected.credentials) return@synchronized false
+        if (current.googleDrive != credentials) {
+            save(current.copy(googleDrive = credentials))
+            state.driveRevision++
+        }
+        true
+    }
+
     private fun restrictToCurrentUser(path: Path) {
         try {
             Files.setPosixFilePermissions(
@@ -128,6 +170,7 @@ class ConfigManager(
     }
 
     companion object {
+        private val configStates = ConcurrentHashMap<String, ConfigState>()
         /**
          * Returns a basic, minimal [AppConfig] with empty entries and no Google Drive credentials.
          */

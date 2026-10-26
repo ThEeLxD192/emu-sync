@@ -625,7 +625,7 @@ class PerGameSyncTest {
         )
 
         assertTrue(result)
-        assertEquals("old-ctr-id", deletedOldFolderId)
+        assertEquals(null, deletedOldFolderId, "The source folder must remain available for recovery")
         assertEquals("DOWNLOADED_FROM_CLOUD", saveFile.readText())
     }
 
@@ -686,7 +686,7 @@ class PerGameSyncTest {
                             content = """{"files":[{"id":"new-folder","name":"New Title"}]}""", headers = jsonHeaders,
                         )
                         q.contains("'new-folder' in parents") -> respond(
-                            content = """{"files":[{"id":"directory-save","name":"slot.dat","modifiedTime":"${directoryCloudTime}"},{"id":"sibling-save","name":"SAVE_SLOT","modifiedTime":"${siblingCloudTime}"}]}""",
+                            content = """{"files":[{"id":"directory-save","name":"slot.dat","modifiedTime":"${directoryCloudTime}"},{"id":"sibling-save","name":"SAVE_SLOT","modifiedTime":"${siblingCloudTime}","sha256Checksum":"${sha256("SIBLING".toByteArray())}"}]}""",
                             headers = jsonHeaders,
                         )
                         else -> respond(content = """{"files":[]}""", headers = jsonHeaders)
@@ -774,6 +774,14 @@ class PerGameSyncTest {
                     val url = request.url.toString()
                     val q = request.url.parameters["q"] ?: ""
                     when {
+                        request.url.encodedPath.startsWith("/drive/v2/files/") -> respond(
+                            Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile("existing-save-id",
+                                "profiles/slot1/save.dat", cloudModifiedTime, "\"old\"", "1")), headers = jsonHeaders)
+                        request.url.encodedPath.startsWith("/upload/drive/v2/files/") -> {
+                            uploadOperations += "PUT:existing-save-id"
+                            respond(Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile("existing-save-id",
+                                "profiles/slot1/save.dat", "2026-10-09T15:00:00.000Z", "\"new\"", "2")), headers = jsonHeaders)
+                        }
                         url.contains("oauth2.googleapis.com/token") -> respond(
                             content = """{"access_token":"mock-token","expires_in":3600,"token_type":"Bearer"}""",
                             headers = jsonHeaders,
@@ -791,7 +799,7 @@ class PerGameSyncTest {
                             content = """{"files":[{"id":"new-folder","name":"New Title"}]}""", headers = jsonHeaders,
                         )
                         q.contains("'new-folder' in parents") -> respond(
-                            content = """{"files":[{"id":"existing-save-id","name":"profiles/slot1/save.dat","modifiedTime":"$cloudModifiedTime"}]}""",
+                            content = """{"files":[{"id":"existing-save-id","name":"profiles/slot1/save.dat","modifiedTime":"$cloudModifiedTime","version":"1"}]}""",
                             headers = jsonHeaders,
                         )
                         url.contains("upload/drive/v3/files") && request.method.value in setOf("POST", "PATCH") -> {
@@ -843,7 +851,7 @@ class PerGameSyncTest {
         assertTrue(existingNestedSave.exists())
         assertTrue(newNestedSave.exists())
         assertEquals(
-            setOf("PATCH:existing-save-id", "POST:profiles/slot2/settings.json"),
+            setOf("PUT:existing-save-id", "POST:profiles/slot2/settings.json"),
             uploadOperations.toSet(),
         )
     }

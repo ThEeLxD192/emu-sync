@@ -40,6 +40,8 @@ data class DriveUploadResponse(
     val id: String,
     val name: String,
     @SerialName("modifiedTime") val modifiedTime: String,
+    val sha256Checksum: String? = null,
+    val version: String? = null,
 )
 
 /**
@@ -85,7 +87,7 @@ class DriveTransfer private constructor(
         private const val DOWNLOAD_URL = "https://www.googleapis.com/drive/v3/files"
         private const val UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
         private const val UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024
-        private const val UPLOAD_FIELDS = "id, name, modifiedTime"
+        private const val UPLOAD_FIELDS = "id, name, modifiedTime, sha256Checksum, version"
         private const val MAX_UPLOAD_RECOVERIES = 3
     }
 
@@ -103,6 +105,7 @@ class DriveTransfer private constructor(
         fileId: String,
         destination: File,
         modifiedTime: String? = null,
+        progressFileName: String = destination.name,
     ) {
         val response = client.get("$downloadFilesUrl/$fileId") {
             header(HttpHeaders.Authorization, "Bearer $accessToken")
@@ -138,7 +141,7 @@ class DriveTransfer private constructor(
                             if (count == 0) continue
                             output.write(buffer, 0, count)
                             transferred += count
-                            onProgress(TransferProgress(TransferProgress.Direction.DOWNLOAD, destination.name, transferred, totalBytes))
+                            onProgress(TransferProgress(TransferProgress.Direction.DOWNLOAD, progressFileName, transferred, totalBytes))
                         }
                     }
                     try {
@@ -192,6 +195,9 @@ class DriveTransfer private constructor(
             parentFolderId = parentFolderId,
         )
     }
+
+    internal suspend fun updateIfUnchanged(accessToken: String, observed: DriveFile, localFile: File, remoteName: String): DriveUploadResponse =
+        DriveConditionalUpdate(client, onProgress).update(accessToken, observed, localFile, remoteName)
 
     /**
      * Updates an existing file on Google Drive with new content.

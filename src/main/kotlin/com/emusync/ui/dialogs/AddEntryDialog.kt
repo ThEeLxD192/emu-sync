@@ -52,6 +52,9 @@ import com.emusync.model.GameEntry
 import com.emusync.model.NativePCGame
 import com.emusync.model.SaveTarget
 import com.emusync.model.SaveTargetType
+import com.emusync.model.scopeNewSaveTargets
+import com.emusync.drive.remotePathSegments
+import com.emusync.ui.components.CloudPathField
 import com.emusync.model.effectiveSaveTargets
 import com.emusync.steam.SteamShortcutManager
 import com.emusync.ui.components.FilePicker
@@ -120,6 +123,9 @@ fun AddEntryDialog(
             if (initialEntry != null && initialEntry.effectiveSaveTargets().isNotEmpty()) initialEntry.effectiveSaveTargets().map { it.type }
             else listOf(SaveTargetType.FILE)
         )
+    }
+    var saveCloudPaths by remember {
+        mutableStateOf(initialEntry?.effectiveSaveTargets()?.map { it.cloudPath.orEmpty() }?.ifEmpty { listOf("") } ?: listOf(""))
     }
     var waitForProcess by remember {
         mutableStateOf((initialEntry as? NativePCGame)?.waitForProcess ?: "")
@@ -414,17 +420,25 @@ fun AddEntryDialog(
                                 val newTypes = saveTypes.toMutableList()
                                 newTypes.removeAt(index)
                                 saveTypes = newTypes
+                                saveCloudPaths = saveCloudPaths.toMutableList().apply { removeAt(index) }
                             }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Remove Path", tint = EmuSyncColors.Error)
                             }
                         }
                     }
+                    CloudPathField(
+                        value = saveCloudPaths.getOrElse(index) { "" },
+                        onValueChange = { value -> saveCloudPaths = saveCloudPaths.toMutableList().apply { set(index, value) } },
+                        type = saveTypes[index],
+                    )
+                    Spacer(Modifier.height(8.dp))
                 }
                 
                 TextButton(
                     onClick = {
                         savePaths = savePaths + ""
                         saveTypes = saveTypes + SaveTargetType.FILE
+                        saveCloudPaths = saveCloudPaths + ""
                     },
                     modifier = Modifier.align(Alignment.Start)
                 ) {
@@ -454,16 +468,23 @@ fun AddEntryDialog(
                     Button(
                         onClick = {
                             val validSavePaths = savePaths.map { it.trim() }.filter { it.isNotBlank() }
-                            val validSaveTargets = savePaths.mapIndexedNotNull { index, path ->
+                            val rawSaveTargets = savePaths.mapIndexedNotNull { index, path ->
                                 path.trim().takeIf { it.isNotBlank() }?.let { trimmed ->
                                     val file = File(trimmed)
                                     val actualType = when {
                                         file.exists() -> if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
                                         else -> saveTypes.getOrElse(index) { SaveTargetType.FILE }
                                     }
-                                    SaveTarget(trimmed, actualType)
+                                    SaveTarget(trimmed, actualType, saveCloudPaths.getOrElse(index) { "" }.trim().ifBlank { null })
                                 }
                             }
+                            if (rawSaveTargets.any { it.cloudPath?.let { path -> remotePathSegments(path) == null } == true }) {
+                                errorMessage = "Cloud paths must be relative and cannot contain '..'."
+                                return@Button
+                            }
+                            val validSaveTargets = if (initialEntry?.effectiveSaveTargets().isNullOrEmpty()) {
+                                scopeNewSaveTargets(rawSaveTargets)
+                            } else rawSaveTargets
                             val entry = validateAndBuild(
                                 type = entryType,
                                 name = name.trim(),

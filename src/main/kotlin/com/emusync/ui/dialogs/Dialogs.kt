@@ -377,6 +377,13 @@ private fun ConflictDialog(
                         color = EmuSyncColors.OnSurfaceDim,
                     )
 
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "Both copies changed, or their shared history could not be verified. Choose which progress to keep. Restoring from the cloud preserves a local recovery copy.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = EmuSyncColors.OnSurfaceDim,
+                    )
+
                     Spacer(Modifier.height(20.dp))
 
                     Row(

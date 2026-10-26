@@ -4,20 +4,21 @@ import com.emusync.config.ConfigManager
 import com.emusync.drive.DriveClientFactory
 import com.emusync.drive.OAuthFlow
 import com.emusync.drive.SyncOrchestrator
+import com.emusync.drive.SaveTargetMappingException
 import com.emusync.model.EmulatorSystem
+import com.emusync.model.AppConfig
 import com.emusync.model.GameEntry
 import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.NativePCGame
 import com.emusync.model.SaveTarget
 import com.emusync.model.effectiveSaveTargets
 import com.emusync.model.effectiveCloudFolder
-import com.emusync.scanner.scanRoms
 import com.emusync.runner.GameRunner
 import com.emusync.steam.SteamShortcutManager
 import com.emusync.update.UpdateInfo
 import com.emusync.update.UpdateManager
 import io.ktor.client.HttpClient
-import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,7 +36,9 @@ class AppViewModel(
     private val httpClient: HttpClient = DriveClientFactory.create(),
     private val updateManager: UpdateManager = UpdateManager(),
     private val gameRunner: GameRunner = GameRunner(),
-) {
+    private val oauthFlow: OAuthFlow = OAuthFlow(httpClient),
+    private val loadGames: suspend (GameEntry) -> List<GameItem> = ::loadLibraryGames,
+) : AutoCloseable {
     private val _uiState = MutableStateFlow(AppUiState())
     val uiState: StateFlow<AppUiState> = _uiState.asStateFlow()
 
@@ -45,18 +48,26 @@ class AppViewModel(
         val coverPath: String? = null,
     )
 
-    private var saveSetupDeferred: CompletableDeferred<SaveSetupResult>? = null
+    private val updates = UpdateController(_uiState, updateManager)
+    private val operations = LibraryOperationCoordinator(_uiState)
+    private val library = LibraryController(_uiState, configManager, httpClient, operations, loadGames,
+        ::refreshStoredConnection) { item, result ->
+        if (!editGameOverrideInternal(item, result.targets, result.coverPath, result.title)) {
+            throw SaveTargetMappingException("Could not apply the save setup. Resolve the configuration error before playing.")
+        }
+    }
 
     /**
      * Loads the config.json and populates the initial state.
      * Auto-syncs steamAppId with Steam's shortcuts.vdf to ensure 100% consistency.
      */
     suspend fun loadConfig() {
+        if (operations.isBusy) return
         try {
             _uiState.update { it.copy(status = AppStatus.Loading) }
             val cfg = configManager.load()
 
-            val steamShortcuts = steamManager.loadShortcuts()
+            val steamShortcuts = steamManager.migrateLegacyLaunchers(cfg.entries)
             var configChanged = false
             val synchronizedEntries = cfg.entries.map { entry ->
                 val matchingShortcut = steamShortcuts.find { it.appName == "[EmuSync] ${entry.name}" }
@@ -78,9 +89,7 @@ class AppViewModel(
             }
 
             val finalConfig = if (configChanged) {
-                val updated = cfg.copy(entries = synchronizedEntries)
-                configManager.save(updated)
-                updated
+                configManager.update { it.copy(entries = synchronizedEntries) }
             } else {
                 cfg
             }
@@ -90,94 +99,16 @@ class AppViewModel(
             // Auto-select the first entry
             finalConfig.entries.firstOrNull()?.let { selectEntry(it) }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             _uiState.update { it.copy(status = AppStatus.Error("Failed to load config: ${e.message}")) }
         }
     }
 
-    /**
-     * Selects a category from the sidebar and loads its games.
-     */
-    suspend fun selectEntry(entry: GameEntry) {
-        val hasDriveLinked = _uiState.value.config?.googleDrive?.refreshToken?.isNotBlank() == true
-        val initialStatus = if (hasDriveLinked) CloudSyncStatus.CHECKING else CloudSyncStatus.NOT_CONFIGURED
-        _uiState.update {
-            it.copy(
-                isLoading = true,
-                selectedEntry = entry,
-                entrySyncStatus = it.entrySyncStatus + (entry.name to initialStatus),
-            )
-        }
-        val items = when (entry) {
-            is EmulatorSystem -> {
-                val roms = scanRoms(entry.romsDirectory, entry.extensions)
-                roms.map { rom ->
-                    GameItem(
-                        name = rom.name,
-                        entry = entry,
-                        romFile = rom.file,
-                    )
-                }
-            }
-            is NativePCGame -> {
-                listOf(
-                    GameItem(
-                        name = entry.name,
-                        entry = entry,
-                        romFile = null,
-                    )
-                )
-            }
-        }
-        _uiState.update { it.copy(isLoading = false, gameItems = items) }
+    suspend fun selectEntry(entry: GameEntry) = library.selectEntry(entry)
 
-        // Trigger background sync check if Google Drive is linked
-        if (hasDriveLinked) {
-            checkSyncForEntry(entry)
-        }
-    }
+    suspend fun checkSyncForEntry(entry: GameEntry) = library.checkSyncForEntry(entry)
 
-    /**
-     * Checks the cloud sync status of a specific entry without launching any game.
-     */
-    suspend fun checkSyncForEntry(entry: GameEntry) {
-        val cfg = _uiState.value.config ?: return
-        if (cfg.googleDrive == null || cfg.googleDrive.refreshToken.isNullOrBlank()) {
-            _uiState.update { it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to CloudSyncStatus.NOT_CONFIGURED)) }
-            return
-        }
-
-        _uiState.update { it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to CloudSyncStatus.CHECKING)) }
-        val orchestrator = SyncOrchestrator(
-            client = httpClient,
-            config = cfg,
-            configManager = configManager,
-            onStatus = { /* silent during check */ },
-        )
-        val status = orchestrator.checkEntrySyncStatus(entry)
-        _uiState.update { it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to status)) }
-    }
-
-    /**
-     * Triggers manual synchronization for an entry without launching any game.
-     */
-    suspend fun syncEntryNow(entry: GameEntry) {
-        val cfg = _uiState.value.config ?: return
-        _uiState.update { it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to CloudSyncStatus.SYNCING)) }
-
-        val orchestrator = SyncOrchestrator(
-            client = httpClient,
-            config = cfg,
-            configManager = configManager,
-            onStatus = { setStatus(it) },
-        )
-
-        val success = orchestrator.syncEntry(entry)
-        if (success) {
-            _uiState.update { it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to CloudSyncStatus.IN_SYNC)) }
-        } else {
-            checkSyncForEntry(entry)
-        }
-    }
+    suspend fun syncEntryNow(entry: GameEntry) = library.syncEntryNow(entry)
 
     /**
      * Reorders entries in the list and persists the new order to config.json.
@@ -192,8 +123,11 @@ class AppViewModel(
         val movedItem = currentEntries.removeAt(fromIndex)
         currentEntries.add(toIndex, movedItem)
 
-        val updatedConfig = cfg.copy(entries = currentEntries)
-        configManager.save(updatedConfig)
+        val updatedConfig = configManager.update { current ->
+            val byName = current.entries.associateBy { it.name }
+            val ordered = currentEntries.mapNotNull { byName[it.name] }
+            current.copy(entries = ordered + current.entries.filter { candidate -> ordered.none { it.name == candidate.name } })
+        }
         _uiState.update { it.copy(config = updatedConfig) }
     }
 
@@ -204,63 +138,28 @@ class AppViewModel(
         val cfg = _uiState.value.config ?: return
         if (cfg.entries == newEntries) return
 
-        val updatedConfig = cfg.copy(entries = newEntries)
-        configManager.save(updatedConfig)
+        val updatedConfig = configManager.update { current ->
+            val byName = current.entries.associateBy { it.name }
+            val ordered = newEntries.mapNotNull { byName[it.name] }.distinctBy { it.name }
+            current.copy(entries = ordered + current.entries.filter { candidate -> ordered.none { it.name == candidate.name } })
+        }
         _uiState.update { it.copy(config = updatedConfig) }
     }
 
-    /**
-     * Completes a pending save setup request from the UI.
-     */
-    fun completeSaveSetup(targets: List<SaveTarget>, title: String? = null, coverPath: String? = null) {
-        saveSetupDeferred?.complete(SaveSetupResult(targets, title, coverPath))
-        saveSetupDeferred = null
-        _uiState.update { it.copy(saveSetupRequest = null) }
-    }
+    fun completeSaveSetup(targets: List<SaveTarget>, title: String? = null, coverPath: String? = null,
+        request: SaveSetupRequest? = null) = library.completeSaveSetup(targets, title, coverPath, request)
 
-    /**
-     * Pauses coroutine execution, asks the UI for save paths, and resumes.
-     */
-    private suspend fun requestSaveSetup(
-        item: GameItem,
-        notice: String? = null,
-        cloudFileNames: List<String> = emptyList(),
-    ): SaveSetupResult {
-        val deferred = CompletableDeferred<SaveSetupResult>()
-        saveSetupDeferred = deferred
-        _uiState.update { it.copy(saveSetupRequest = SaveSetupRequest(item, notice, cloudFileNames)) }
-        return deferred.await()
-    }
-
-    /**
-     * Launches a game with the full Pre-Sync → Play → Post-Sync flow.
-     */
-    suspend fun launchGame(item: GameItem) {
-        val cfg = _uiState.value.config ?: return
-
-        val orchestrator = SyncOrchestrator(
-            client = httpClient,
-            config = cfg,
-            configManager = configManager,
-            onStatus = { status -> setStatus(status) },
-        )
-
-        orchestrator.playWithSync(item, onRequestSaveSetup = { reqItem, notice, cloudFileNames ->
-            val result = requestSaveSetup(reqItem, notice, cloudFileNames)
-            if (result.targets.isNotEmpty() || result.title != null || result.coverPath != null) {
-                editGameOverride(reqItem, result.targets, result.coverPath, result.title)
-            }
-            result.targets
-        })
-        checkSyncForEntry(item.entry)
-    }
+    suspend fun launchGame(item: GameItem) = library.launchGame(item)
 
     /** Opens an emulator interface directly for configuration, without launching a ROM. */
     suspend fun openEmulator(entry: EmulatorSystem) {
-        try {
-            gameRunner.openEmulator(entry)
-        } catch (e: Exception) {
-            _uiState.update { it.copy(status = AppStatus.Error("Could not open ${entry.name}: ${e.message}")) }
+        operations.runIfIdle {
+            try {
+                gameRunner.openEmulator(entry)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                _uiState.update { it.copy(status = AppStatus.Error("Could not open ${entry.name}: ${e.message}")) }
+            }
         }
     }
 
@@ -268,9 +167,12 @@ class AppViewModel(
      * Adds a new entry to config.json and selects it.
      */
     suspend fun addEntry(entry: GameEntry) {
-        val cfg = _uiState.value.config ?: return
-        val updatedConfig = cfg.copy(entries = cfg.entries + entry)
-        configManager.save(updatedConfig)
+        if (_uiState.value.config == null) return
+        if (entry.name.isBlank() || _uiState.value.config?.entries?.any { it.name == entry.name } == true) {
+            setStatus(AppStatus.Error("Choose a non-empty category name that is not already in use."))
+            return
+        }
+        val updatedConfig = configManager.update { it.copy(entries = it.entries + entry) }
         _uiState.update { it.copy(config = updatedConfig) }
         selectEntry(entry)
     }
@@ -278,49 +180,75 @@ class AppViewModel(
     /**
      * Edits an existing entry in config.json.
      */
-    suspend fun editEntry(oldEntry: GameEntry, newEntry: GameEntry) {
-        val cfg = _uiState.value.config ?: return
-        val newEntries = cfg.entries.map { if (it === oldEntry || it.name == oldEntry.name) newEntry else it }
-        val updatedConfig = cfg.copy(entries = newEntries)
-        configManager.save(updatedConfig)
+    suspend fun editEntry(oldEntry: GameEntry, newEntry: GameEntry): Boolean =
+        operations.runIfIdle { editEntryInternal(oldEntry, newEntry) } ?: false
+
+    private suspend fun editEntryInternal(oldEntry: GameEntry, newEntry: GameEntry): Boolean {
+        val cfg = _uiState.value.config ?: return false
+        if (cfg.entries.none { it.name == oldEntry.name }) return false
+        if (newEntry.name.isBlank() || cfg.entries.any { it.name != oldEntry.name && it.name == newEntry.name }) {
+            setStatus(AppStatus.Error("Choose a non-empty category name that is not already in use."))
+            return false
+        }
+        val otherEntries = cfg.entries.filterNot { it === oldEntry || it.name == oldEntry.name }
+        val sourceUsesRoot = oldEntry is EmulatorSystem ||
+            (oldEntry is NativePCGame && (oldEntry.group == null || oldEntry.cloudFolder != null))
+        // Regrouping a shared root is a display edit; keep its existing save location.
+        val editedEntry = if (
+            sourceUsesRoot && newEntry.cloudFolder.isNullOrBlank() &&
+            oldEntry.effectiveCloudFolder != newEntry.effectiveCloudFolder &&
+            otherEntries.any { it.effectiveCloudFolder == oldEntry.effectiveCloudFolder }
+        ) {
+            when (newEntry) {
+                is EmulatorSystem -> newEntry.copy(cloudFolder = oldEntry.effectiveCloudFolder)
+                is NativePCGame -> newEntry.copy(cloudFolder = oldEntry.effectiveCloudFolder)
+            }
+        } else newEntry
+
+        if (cfg.googleDrive != null) {
+            val orchestrator = SyncOrchestrator(
+                client = httpClient,
+                config = cfg,
+                configManager = configManager,
+                onStatus = ::setStatus,
+            )
+            if (!orchestrator.renameEntryCloudData(oldEntry, editedEntry)) return false
+        }
+
+        // Migration suspends for network I/O; retain unrelated edits made while it was running.
+        val updatedConfig = configManager.update { current ->
+            current.copy(entries = current.entries.map { if (it.name == oldEntry.name) editedEntry else it })
+        }
         _uiState.update { it.copy(config = updatedConfig) }
         if (_uiState.value.selectedEntry === oldEntry || _uiState.value.selectedEntry?.name == oldEntry.name) {
-            selectEntry(newEntry)
+            selectEntry(editedEntry)
         }
 
         // Regenerate the Steam wrapper script if paths changed
-        if (newEntry is EmulatorSystem && newEntry.steamAppId != null) {
+        if (editedEntry.steamAppId != null) {
             try {
-                steamManager.registerEntry(newEntry)
-            } catch (_: Exception) { /* best-effort */ }
+                steamManager.registerEntry(editedEntry)
+            } catch (failure: Exception) {
+                if (failure is CancellationException) throw failure
+            }
         }
 
-        // If the entry's effective cloud folder changed (e.g. grouped under Switch), rename/move in Drive
-        if (oldEntry.effectiveCloudFolder != newEntry.effectiveCloudFolder && cfg.googleDrive != null) {
-            val orchestrator = SyncOrchestrator(
-                client = httpClient,
-                config = updatedConfig,
-                configManager = configManager,
-                onStatus = { status -> _uiState.update { it.copy(status = status) } },
-            )
-            orchestrator.renameEntryCloudFolder(
-                oldCloudFolder = oldEntry.effectiveCloudFolder,
-                newCloudFolder = newEntry.effectiveCloudFolder,
-            )
-        }
+        return true
     }
 
     /**
      * Deletes an entry from config.json.
      */
     suspend fun deleteEntry(entry: GameEntry) {
-        val cfg = _uiState.value.config ?: return
-        val newEntries = cfg.entries.filter { it !== entry && it.name != entry.name }
-        val updatedConfig = cfg.copy(entries = newEntries)
-        configManager.save(updatedConfig)
+        operations.runIfIdle { deleteEntryInternal(entry) }
+    }
+
+    private fun deleteEntryInternal(entry: GameEntry) {
+        if (_uiState.value.config == null) return
+        val updatedConfig = configManager.update { current -> current.copy(entries = current.entries.filter { it.name != entry.name }) }
         _uiState.update { it.copy(config = updatedConfig) }
         if (_uiState.value.selectedEntry === entry || _uiState.value.selectedEntry?.name == entry.name) {
-            _uiState.update { it.copy(selectedEntry = null, gameItems = emptyList()) }
+            library.clearSelection()
         }
     }
 
@@ -333,14 +261,24 @@ class AppViewModel(
         newCoverPath: String? = null,
         newTitle: String? = null,
     ) {
-        val oldTitle = gameItem.effectiveTitle
+        operations.runIfIdle { editGameOverrideInternal(gameItem, newTargets, newCoverPath, newTitle) }
+    }
+
+    private suspend fun editGameOverrideInternal(
+        gameItem: GameItem,
+        newTargets: List<SaveTarget>,
+        newCoverPath: String? = null,
+        newTitle: String? = null,
+    ): Boolean {
+        val latestEntry = _uiState.value.config?.entries?.find { it.name == gameItem.entry.name } ?: return false
+        val currentGame = gameItem.copy(entry = latestEntry)
+        val oldTitle = currentGame.effectiveTitle
         val newPaths = newTargets.map { it.path }
         val cleanTitle = newTitle?.trim()?.takeIf { it.isNotBlank() }
-        val hasRenamed = cleanTitle != null && cleanTitle != oldTitle
 
-        val newEntry: GameEntry = when (val entry = gameItem.entry) {
+        val newEntry: GameEntry = when (val entry = currentGame.entry) {
             is EmulatorSystem -> {
-                val romName = gameItem.romFile?.name ?: return
+                val romName = currentGame.romFile?.name ?: return false
                 val newSaveOverrides = entry.savePathsByRom.toMutableMap()
                 val newTargetOverrides = entry.saveTargetsByRom.toMutableMap()
                 val cleanSavePaths = newPaths.map { it.trim() }.filter { it.isNotBlank() }
@@ -388,35 +326,38 @@ class AppViewModel(
             }
         }
 
-        editEntry(gameItem.entry, newEntry)
-
-        if (hasRenamed) {
+        val newEffectiveTitle = currentGame.copy(entry = newEntry).effectiveTitle
+        // Migrate before persisting the title so a blocked merge keeps the old mapping.
+        // Native game renames migrate their complete path in editEntry instead.
+        if (newEffectiveTitle != oldTitle && newEntry is EmulatorSystem) {
             val cfg = _uiState.value.config
             if (cfg?.googleDrive != null) {
                 val orchestrator = SyncOrchestrator(
                     client = httpClient,
                     config = cfg,
                     configManager = configManager,
-                    onStatus = { status -> _uiState.update { it.copy(status = status) } },
+                    onStatus = ::setStatus,
                 )
-                val saveTargets = newTargets.ifEmpty { gameItem.effectiveSaveTargets }
-                val romName = gameItem.romFile?.name ?: gameItem.name
-                orchestrator.renameGameCloudData(
+                val saveTargets = newTargets.ifEmpty { currentGame.effectiveSaveTargets }
+                val romName = currentGame.romFile?.name ?: currentGame.name
+                val migrated = orchestrator.renameGameCloudData(
                     entry = newEntry,
                     romName = romName,
                     oldTitle = oldTitle,
-                    newTitle = cleanTitle!!,
+                    newTitle = newEffectiveTitle,
                     localSaveTargets = saveTargets,
                 )
+                if (!migrated) return false
             }
         }
+        return editEntryInternal(currentGame.entry, newEntry)
     }
 
     /**
      * Updates the app status.
      */
     fun setStatus(status: AppStatus) {
-        _uiState.update { it.copy(status = status) }
+        library.publishStatus(status)
     }
 
     // ── Steam Shortcut Management ────────────────────────────────
@@ -434,26 +375,31 @@ class AppViewModel(
     /**
      * Registers a [GameEntry] as a Non-Steam Game shortcut in Steam.
      */
-    suspend fun registerInSteam(entry: GameEntry): String {
-        return try {
+    suspend fun registerInSteam(entry: GameEntry): String = operations.runIfIdle {
+        try {
             val shortcut = steamManager.registerEntry(entry)
 
             val updatedEntry = when (entry) {
                 is EmulatorSystem -> entry.copy(steamAppId = shortcut.appId)
                 is NativePCGame -> entry.copy(steamAppId = shortcut.appId)
             }
-            editEntry(entry, updatedEntry)
+            editEntryInternal(entry, updatedEntry)
 
             "\"${entry.name}\" registered in Steam! Restart Steam to see it in your library."
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             "Failed to register in Steam: ${e.message}"
         }
-    }
+    } ?: "Wait for the current game or synchronization to finish."
 
     /**
      * Removes a [GameEntry] from Steam shortcuts and clears its steamAppId.
      */
     suspend fun unregisterFromSteam(entry: GameEntry) {
+        operations.runIfIdle { unregisterFromSteamInternal(entry) }
+    }
+
+    private suspend fun unregisterFromSteamInternal(entry: GameEntry) {
         try {
             steamManager.unregisterEntry(entry)
 
@@ -461,8 +407,9 @@ class AppViewModel(
                 is EmulatorSystem -> entry.copy(steamAppId = null)
                 is NativePCGame -> entry.copy(steamAppId = null)
             }
-            editEntry(entry, updatedEntry)
+            editEntryInternal(entry, updatedEntry)
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             _uiState.update { it.copy(status = AppStatus.Error("Failed to unregister from Steam: ${e.message}")) }
         }
     }
@@ -477,21 +424,21 @@ class AppViewModel(
      * If [connectNow] is true, immediately triggers the browser OAuth login.
      */
     suspend fun setupGoogleDrive(clientId: String, clientSecret: String, connectNow: Boolean = true): String {
-        val cfg = _uiState.value.config ?: return "No config loaded"
+        if (_uiState.value.config == null) return "No config loaded"
         val trimmedId = clientId.trim()
         val trimmedSecret = clientSecret.trim()
         if (trimmedId.isBlank() || trimmedSecret.isBlank()) {
             return "Client ID and Client Secret cannot be blank."
         }
 
-        val updatedDrive = GoogleDriveConfig(
-            clientId = trimmedId,
-            clientSecret = trimmedSecret,
-            refreshToken = cfg.googleDrive?.refreshToken,
-        )
-        val updatedConfig = cfg.copy(googleDrive = updatedDrive)
-        configManager.save(updatedConfig)
-        _uiState.update { it.copy(config = updatedConfig) }
+        val updatedConfig = configManager.updateGoogleDrive { current ->
+            GoogleDriveConfig(
+                clientId = trimmedId,
+                clientSecret = trimmedSecret,
+                refreshToken = current?.refreshToken?.takeIf { current.clientId == trimmedId && current.clientSecret == trimmedSecret },
+            )
+        }
+        publishConnection(updatedConfig)
 
         return if (connectNow) {
             loginGoogleDrive()
@@ -505,10 +452,9 @@ class AppViewModel(
      */
     suspend fun unlinkGoogleDrive(): String {
         val cfg = _uiState.value.config ?: return "No config loaded"
-        val driveConfig = cfg.googleDrive ?: return "Google Drive is not configured."
-        val updatedConfig = cfg.copy(googleDrive = driveConfig.copy(refreshToken = null))
-        configManager.save(updatedConfig)
-        _uiState.update { it.copy(config = updatedConfig) }
+        if (cfg.googleDrive == null) return "Google Drive is not configured."
+        val updatedConfig = configManager.updateGoogleDrive { it?.copy(refreshToken = null) }
+        publishConnection(updatedConfig)
         return "Google Drive disconnected."
     }
 
@@ -521,27 +467,31 @@ class AppViewModel(
         if (cfg.googleDrive == null) return "Missing googleDrive configuration in config.json"
 
         return try {
-            val flow = OAuthFlow(httpClient)
-            flow.authorize(cfg, configManager, allowInteractive = true)
+            oauthFlow.authorize(cfg, configManager, allowInteractive = true)
             val freshConfig = configManager.load()
-            _uiState.update { it.copy(config = freshConfig) }
+            publishConnection(freshConfig)
+            _uiState.value.selectedEntry?.let { checkSyncForEntry(it) }
             "Google Drive successfully connected!"
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            refreshStoredConnection()
             "Google Drive login failed: ${e.message}"
         }
     }
 
+    private fun publishConnection(config: AppConfig) {
+        val status = if (config.googleDrive?.refreshToken.isNullOrBlank()) CloudSyncStatus.NOT_CONFIGURED else CloudSyncStatus.IDLE
+        _uiState.update { it.copy(config = config, entrySyncStatus = config.entries.associate { entry -> entry.name to status }) }
+    }
+
+    private fun refreshStoredConnection() {
+        val current = configManager.load()
+        if (current.googleDrive != _uiState.value.config?.googleDrive) publishConnection(current)
+    }
+
     // ── In-App Updates ───────────────────────────────────────────
 
-    suspend fun checkForUpdates(manual: Boolean = false) {
-        _uiState.update { it.copy(updateState = UpdateUiState.Checking) }
-        val info = updateManager.checkForUpdates()
-        if (info != null) {
-            _uiState.update { it.copy(updateState = UpdateUiState.Available(info), showUpdateDialog = manual) }
-        } else {
-            _uiState.update { it.copy(updateState = UpdateUiState.Idle) }
-        }
-    }
+    suspend fun checkForUpdates(manual: Boolean = false) = updates.checkForUpdates(manual)
 
     fun dismissUpdateDialog() {
         _uiState.update { it.copy(showUpdateDialog = false) }
@@ -551,62 +501,17 @@ class AppViewModel(
         _uiState.update { it.copy(showUpdateDialog = true) }
     }
 
-    suspend fun downloadAndApplyUpdate(info: UpdateInfo) {
-        _uiState.update { it.copy(updateState = UpdateUiState.Downloading(0f, info)) }
+    suspend fun downloadAndApplyUpdate(info: UpdateInfo) = updates.download(info)
 
-        val isWindows = System.getProperty("os.name", "").lowercase().contains("windows")
-        val ext = File(info.assetName).extension.ifBlank { if (isWindows) "msi" else "AppImage" }
-
-        val targetDir = if (!isWindows) {
-            val currentAppImagePath = System.getenv("APPIMAGE")
-            if (currentAppImagePath != null) {
-                val appImageFile = File(currentAppImagePath)
-                if (appImageFile.parentFile?.canWrite() == true) appImageFile.parentFile else File(System.getProperty("java.io.tmpdir"))
-            } else {
-                File(System.getProperty("java.io.tmpdir"))
-            }
-        } else {
-            File(System.getProperty("java.io.tmpdir"))
-        }
-        val prefix = if (isWindows) "EmuSync-Setup-${info.version}" else ".EmuSync-update-${System.currentTimeMillis()}"
-        val tempFile = File(targetDir, "$prefix.$ext")
-
-        val result = updateManager.downloadUpdate(info.downloadUrl, tempFile) { progress ->
-            _uiState.update { it.copy(updateState = UpdateUiState.Downloading(progress, info)) }
-        }
-
-        result.fold(
-            onSuccess = {
-                _uiState.update {
-                    it.copy(
-                        updateState = UpdateUiState.ReadyToRestart(
-                            downloadedFile = tempFile,
-                            isSteamGameMode = updateManager.isSteamGameMode(),
-                        )
-                    )
-                }
-            },
-            onFailure = { error ->
-                _uiState.update { it.copy(updateState = UpdateUiState.Error("Failed to download update: ${error.message ?: "Connection error"}")) }
-            }
-        )
-    }
-
-    fun restartApp(file: File): Boolean {
-        val success = updateManager.applyUpdateAndRestart(file)
-        if (!success) {
-            _uiState.update {
-                it.copy(
-                    updateState = UpdateUiState.Error(
-                        "Could not restart automatically. The update file is saved at: ${file.absolutePath}"
-                    )
-                )
-            }
-        }
-        return success
-    }
+    fun restartApp(file: File): Boolean = updates.restart(file)
 
     fun clearStatus() {
+        if (operations.isBusy) return
         _uiState.update { it.copy(status = AppStatus.Idle) }
     }
+    override fun close() {
+        httpClient.close()
+        updateManager.close()
+    }
+
 }

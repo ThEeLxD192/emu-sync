@@ -15,6 +15,19 @@ import kotlin.test.assertEquals
 class DriveSearchTest {
 
     @Test
+    fun `save listings exclude folders while migration listings include them`() = runTest {
+        MigrationDrive().use { drive ->
+            drive.folder("entry", "Console")
+            drive.folder("game", "Game", "entry")
+            drive.file("save", "global.sav", "entry")
+            val search = DriveSearch(drive.client)
+
+            assertEquals(listOf("save"), search.listFilesInFolder("token", "entry").map { it.id })
+            assertEquals(setOf("game", "save"), search.listChildrenInFolder("token", "entry").map { it.id }.toSet())
+        }
+    }
+
+    @Test
     fun `listFilesInFolder follows next page tokens and combines results`() = runTest {
         val pageTokens = mutableListOf<String?>()
         val client = HttpClient(MockEngine) {

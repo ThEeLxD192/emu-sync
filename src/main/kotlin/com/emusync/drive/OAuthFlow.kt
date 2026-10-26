@@ -7,8 +7,10 @@ import com.sun.net.httpserver.HttpServer
 import com.sun.net.httpserver.HttpHandler
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.awt.Desktop
 import java.io.IOException
 import java.net.InetAddress
@@ -40,7 +42,10 @@ import kotlin.coroutines.resumeWithException
  * val accessToken = flow.authorize(config, configManager)
  * ```
  */
-class OAuthFlow(private val client: HttpClient) {
+class OAuthFlow(
+    private val client: HttpClient,
+    private val authorizationCodeProvider: (suspend (String) -> String)? = null,
+) {
 
     companion object {
         private const val AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -339,6 +344,15 @@ class OAuthFlow(private val client: HttpClient) {
             "Missing 'googleDrive' section in config.json. " +
             "Please add clientId and clientSecret from Google Cloud Console."
         }
+        var expected = configManager.snapshotGoogleDrive(config)
+        fun requireCurrentConnection() {
+            if (configManager.snapshotGoogleDrive(config) != expected) {
+                throw DriveApiException("The Google Drive connection changed during authorization. Connect again to continue.")
+            }
+        }
+        if (expected.credentials != driveConfig) {
+            throw DriveApiException("The Google Drive connection changed. Start synchronization again.")
+        }
 
         val auth = DriveAuth(client)
 
@@ -350,16 +364,19 @@ class OAuthFlow(private val client: HttpClient) {
                     clientSecret = driveConfig.clientSecret,
                     refreshToken = driveConfig.refreshToken,
                 )
+                requireCurrentConnection()
                 return tokenResponse.accessToken
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                requireCurrentConnection()
                 val message = e.message ?: ""
-                if ("invalid_grant" in message) {
+                if (e is DriveApiException && e.errorCode == "invalid_grant") {
                     // Refresh token expired or revoked (common in Google "Testing" mode).
                     // Clear the bad token.
-                    val clearedConfig = config.copy(
-                        googleDrive = driveConfig.copy(refreshToken = null),
-                    )
-                    configManager.save(clearedConfig)
+                    if (!configManager.compareAndSetGoogleDrive(expected, driveConfig.copy(refreshToken = null), config)) {
+                        throw DriveApiException("The Google Drive connection changed during authorization. Connect again to continue.")
+                    }
+                    expected = expected.copy(credentials = driveConfig.copy(refreshToken = null), revision = expected.revision + 1)
                 } else {
                     // Network failure, DNS resolution failure, socket timeout (offline mode)
                     throw DriveApiException("Drive offline or unreachable: $message", e)
@@ -373,7 +390,11 @@ class OAuthFlow(private val client: HttpClient) {
         }
 
         // Slow path: first-time authorization via loopback with timeout
-        val code = startLoopbackAndGetCode(driveConfig.clientId)
+        requireCurrentConnection()
+        val code = withTimeoutOrNull(60_000) {
+            authorizationCodeProvider?.invoke(driveConfig.clientId) ?: startLoopbackAndGetCode(driveConfig.clientId)
+        } ?: throw DriveApiException("Google Drive authorization timed out. Try connecting again.")
+        requireCurrentConnection()
 
         val tokens = auth.exchangeCodeForTokens(
             clientId = driveConfig.clientId,
@@ -383,23 +404,22 @@ class OAuthFlow(private val client: HttpClient) {
         )
 
         // Persist the refresh token so we don't need to re-authorize next time
-        val updatedConfig = config.copy(
-            googleDrive = driveConfig.copy(refreshToken = tokens.refreshToken),
-        )
-        configManager.save(updatedConfig)
+        if (!configManager.compareAndSetGoogleDrive(expected, driveConfig.copy(refreshToken = tokens.refreshToken), config)) {
+            throw DriveApiException("The Google Drive connection changed during authorization. Connect again to continue.")
+        }
 
         return tokens.accessToken
     }
 
     /**
      * Starts a local HTTP server, opens the browser to Google's consent page,
-     * and suspends until the authorization code is received (with 60s timeout).
+     * and suspends until the authorization code is received. [authorize] supplies the timeout.
      */
-    private suspend fun startLoopbackAndGetCode(clientId: String): String = kotlinx.coroutines.withTimeout(60_000) {
+    private suspend fun startLoopbackAndGetCode(clientId: String): String {
         val state = generateState()
         val authUrl = buildAuthUrl(clientId, state)
 
-        return@withTimeout suspendCancellableCoroutine { continuation ->
+        return suspendCancellableCoroutine { continuation ->
             val server = try {
                 HttpServer.create(loopbackAddress(), 0)
             } catch (e: IOException) {
