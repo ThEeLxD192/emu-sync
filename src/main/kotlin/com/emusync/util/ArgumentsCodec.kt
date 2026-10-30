@@ -5,7 +5,7 @@ object ArgumentsCodec {
     fun format(arguments: List<String>): String =
         arguments.joinToString(" ") { argument ->
             if (
-                argument.isEmpty() || argument.any { it.isWhitespace() || it == '"' || it == '\\' }
+                argument.isEmpty() || argument.any { it.isWhitespace() || isQuoteOrBackslash(it) }
             ) {
                 "\"${argument.replace("\\", "\\\\").replace("\"", "\\\"")}\""
             } else {
@@ -24,7 +24,7 @@ object ArgumentsCodec {
         for (char in text) {
             when {
                 escaped -> {
-                    if (char != '\\' && char != '"') current.append('\\')
+                    if (!isQuoteOrBackslash(char)) current.append('\\')
                     current.append(char)
                     escaped = false
                 }
@@ -51,4 +51,6 @@ object ArgumentsCodec {
         if (tokenStarted) result += current.toString()
         return result
     }
+
+    private fun isQuoteOrBackslash(char: Char): Boolean = char == '"' || char == '\\'
 }
