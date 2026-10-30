@@ -135,4 +135,50 @@ class GameTitleUtilsTest {
             ),
         )
     }
+
+    @Test
+    fun `title lookup preserves exact then stem then normalized priority and ignores blank values`() {
+        val emulator =
+            EmulatorSystem(
+                name = "SNES",
+                executablePath = "/bin/snes9x",
+                romsDirectory = "/roms/snes",
+                extensions = listOf("sfc"),
+                titleByRom =
+                    linkedMapOf(
+                        "Super_Mario_World_[U].sfc" to " Normalized title ",
+                        "Super Mario World" to " Stem title ",
+                        "Super Mario World.sfc" to " Exact title ",
+                    ),
+            )
+
+        assertEquals("Exact title", emulator.getEffectiveTitle("Super Mario World.sfc"))
+        val withoutExact =
+            emulator.copy(titleByRom = emulator.titleByRom + ("Super Mario World.sfc" to "  "))
+        assertEquals("Stem title", withoutExact.getEffectiveTitle("Super Mario World.sfc"))
+        val withoutStem =
+            withoutExact.copy(titleByRom = withoutExact.titleByRom + ("Super Mario World" to "\t"))
+        assertEquals("Normalized title", withoutStem.getEffectiveTitle("Super Mario World.sfc"))
+    }
+
+    @Test
+    fun `normalized title lookup preserves first nonblank matching entry`() {
+        val emulator =
+            EmulatorSystem(
+                name = "SNES",
+                executablePath = "/bin/snes9x",
+                romsDirectory = "/roms/snes",
+                extensions = listOf("sfc"),
+                titleByRom =
+                    linkedMapOf(
+                        "Super Mario World (USA).sfc" to " ",
+                        "Super_Mario_World_[U].sfc" to " First title ",
+                        "Super Mario World (Europe).sfc" to "Second title",
+                        "[!].sfc" to "Empty normalized key",
+                    ),
+            )
+
+        assertEquals("First title", emulator.getEffectiveTitle("Super Mario World.sfc"))
+        assertEquals("Fallback", emulator.getEffectiveTitle("!!!.sfc", "Fallback (USA).sfc"))
+    }
 }

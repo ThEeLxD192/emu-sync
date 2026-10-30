@@ -109,10 +109,27 @@ val GameEntry.effectiveCloudFolder: String
 /**
  * An emulator-based system.
  *
+ * @property name Display name of the emulator system.
  * @property executablePath Absolute path to the emulator's executable.
  * @property arguments List of arguments. Use `{ROM}` as a wildcard for the selected ROM.
  * @property romsDirectory Absolute path to the directory containing ROM files.
  * @property extensions Allowed file extensions (without dots), e.g. ["gba", "gbc"].
+ * @property savePaths Legacy global save paths, used when [saveTargets] is empty.
+ * @property saveTargets Typed global save locations shared by the system's ROMs.
+ * @property savePathsByRom Legacy per-ROM save paths, keyed by filename or filename stem.
+ * @property saveTargetsByRom Typed per-ROM save locations, preferred over legacy paths.
+ * @property coverPathByRom Custom cover paths keyed by ROM filename.
+ * @property titleByRom Custom display titles keyed by ROM filename or matching title.
+ * @property group Optional library group and default cloud folder.
+ * @property cloudFolder Explicit cloud folder override; blank values fall back to [group] or
+ *   [name].
+ * @property driveFileId Optional ID of an already-uploaded save in Google Drive.
+ * @property steamAppId Optional Steam shortcut ID.
+ * @property steamProcessName Process to track when Steam launches the emulator; null uses its
+ *   executable name.
+ * @property fullscreenArgs Fullscreen flags; null enables detection and an empty string disables
+ *   them.
+ * @property coversDirectory Optional directory containing cover images.
  */
 @Serializable
 @SerialName("emulator")
@@ -152,40 +169,42 @@ data class EmulatorSystem(
      * 4. Falls back to [cleanGameTitle] on the provided [fallback].
      */
     fun getEffectiveTitle(romName: String, fallback: String = romName): String {
-        titleByRom[romName]
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?.let {
-                return it
-            }
-
         val nameWithoutExt =
-            if (romName.contains('.')) java.io.File(romName).nameWithoutExtension else romName
-        titleByRom[nameWithoutExt]
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?.let {
-                return it
-            }
+            if (romName.contains('.')) File(romName).nameWithoutExtension else romName
+        return titleByRom[romName]?.trim()?.takeIf { it.isNotBlank() }
+            ?: titleByRom[nameWithoutExt]?.trim()?.takeIf { it.isNotBlank() }
+            ?: findNormalizedTitle(romName)
+            ?: cleanGameTitle(fallback)
+    }
 
+    private fun findNormalizedTitle(romName: String): String? {
         val targetKey = normalizeGameKey(romName)
-        if (targetKey.isNotBlank()) {
-            for ((key, title) in titleByRom) {
-                if (title.isNotBlank() && normalizeGameKey(key) == targetKey) {
-                    return title.trim()
+        return if (targetKey.isBlank()) null
+        else
+            titleByRom.entries
+                .firstOrNull { (key, title) ->
+                    title.isNotBlank() && normalizeGameKey(key) == targetKey
                 }
-            }
-        }
-
-        return cleanGameTitle(fallback)
+                ?.value
+                ?.trim()
     }
 }
 
 /**
  * A native PC game or decompiled port.
  *
+ * @property name Display name of the game.
  * @property executablePath Absolute path to the game's executable.
  * @property arguments Optional CLI arguments passed to the executable.
+ * @property savePaths Legacy save paths, used when [saveTargets] is empty.
+ * @property saveTargets Typed save locations for the game.
+ * @property waitForProcess Optional process name to track after the launcher exits.
+ * @property group Optional library group and default cloud folder.
+ * @property cloudFolder Explicit cloud folder override; blank values fall back to [group] or
+ *   [name].
+ * @property driveFileId Optional ID of an already-uploaded save in Google Drive.
+ * @property steamAppId Optional Steam shortcut ID.
+ * @property coverPath Optional custom cover image path.
  */
 @Serializable
 @SerialName("native")
@@ -209,11 +228,13 @@ private fun SaveTarget.resolveUnknownTypeIfPresent(): SaveTarget {
     val normalized = if (cloudPath != null && cloudPath.isBlank()) copy(cloudPath = null) else this
     if (!file.exists()) return normalized
     val actualType = if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
-    return if (
-        type == SaveTargetType.UNKNOWN ||
-            (type == SaveTargetType.FILE && file.isDirectory) ||
-            (type == SaveTargetType.DIRECTORY && file.isFile)
-    ) {
+    val needsTypeUpdate =
+        when (type) {
+            SaveTargetType.UNKNOWN -> true
+            SaveTargetType.FILE -> file.isDirectory
+            SaveTargetType.DIRECTORY -> file.isFile
+        }
+    return if (needsTypeUpdate) {
         normalized.copy(type = actualType)
     } else {
         normalized
@@ -226,15 +247,15 @@ fun GameEntry.effectiveSaveTargets(): List<SaveTarget> =
     )
 
 fun EmulatorSystem.effectiveSaveTargetsForRom(romName: String): List<SaveTarget> =
-    saveTargetsByRom[romName]?.map(SaveTarget::resolveUnknownTypeIfPresent)
-        ?: saveTargetsByRom[romName.substringBeforeLast('.', romName)]?.map(
-            SaveTarget::resolveUnknownTypeIfPresent
-        )
-        ?: savePathsByRom[romName]?.filter { it.isNotBlank() }?.map(::inferLegacySaveTarget)
-        ?: savePathsByRom[romName.substringBeforeLast('.', romName)]
-            ?.filter { it.isNotBlank() }
-            ?.map(::inferLegacySaveTarget)
-        ?: emptyList()
+    (saveTargetsByRom[romName]?.map(SaveTarget::resolveUnknownTypeIfPresent)
+            ?: saveTargetsByRom[romName.substringBeforeLast('.', romName)]?.map(
+                SaveTarget::resolveUnknownTypeIfPresent
+            )
+            ?: savePathsByRom[romName]?.filter { it.isNotBlank() }?.map(::inferLegacySaveTarget)
+            ?: savePathsByRom[romName.substringBeforeLast('.', romName)]
+                ?.filter { it.isNotBlank() }
+                ?.map(::inferLegacySaveTarget))
+        .orEmpty()
 
 /** Adds explicit types to legacy paths without changing their path values. */
 fun GameEntry.migrateLegacySaveTargets(): GameEntry =
