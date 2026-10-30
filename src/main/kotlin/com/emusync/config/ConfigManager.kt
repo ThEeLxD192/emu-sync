@@ -12,6 +12,7 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermission
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 internal data class GoogleDriveSnapshot(val credentials: GoogleDriveConfig?, val revision: Long)
@@ -71,15 +72,12 @@ class ConfigManager(
     fun load(autoCreate: Boolean = true): AppConfig =
         synchronized(state) {
             if (!configFile.exists() || configFile.length() == 0L) {
-                if (autoCreate) {
-                    val defaultConfig = createDefaultConfig()
-                    save(defaultConfig)
-                    return@synchronized defaultConfig
-                } else {
-                    throw IllegalArgumentException(
-                        "Configuration file not found: ${configFile.absolutePath}"
-                    )
+                require(autoCreate) {
+                    "Configuration file not found: ${configFile.absolutePath}"
                 }
+                val defaultConfig = createDefaultConfig()
+                save(defaultConfig)
+                return@synchronized defaultConfig
             }
             val content = configFile.readText()
             val decoded = json.decodeFromString<AppConfig>(content)
@@ -97,12 +95,13 @@ class ConfigManager(
         synchronized(state) {
             val absoluteFile = configFile.absoluteFile
             val parent =
-                absoluteFile.parentFile
-                    ?: throw IllegalStateException("Could not resolve configuration directory")
-            if (!parent.exists() && !parent.mkdirs()) {
-                throw IllegalStateException("Could not create configuration directory: $parent")
+                checkNotNull(absoluteFile.parentFile) {
+                    "Could not resolve configuration directory"
+                }
+            check(parent.exists() || parent.mkdirs()) {
+                "Could not create configuration directory: $parent"
             }
-            val content = json.encodeToString(AppConfig.serializer(), config)
+            val content = json.encodeToString(config)
             var temporary: Path? = null
             try {
                 temporary = Files.createTempFile(parent.toPath(), ".${configFile.name}.", ".tmp")
@@ -227,35 +226,21 @@ class ConfigManager(
                 customPath?.takeIf { it.isNotBlank() }
                     ?: propertyProvider("emusync.config.path")?.takeIf { it.isNotBlank() }
                     ?: envProvider("EMUSYNC_CONFIG")?.takeIf { it.isNotBlank() }
-            if (explicit != null) {
-                return File(explicit)
-            }
+            return explicit?.let(::File)
+                ?: findAppImageConfig(envProvider("APPIMAGE"))
+                ?: File(workingDir, "config.json").takeIf {
+                    it.exists() && (it.canWrite() || workingDir.canWrite())
+                }
+                ?: getDefaultPlatformConfigFile(envProvider, propertyProvider)
+        }
 
-            // 2. Co-located portable config:
-            // a) If running as an AppImage on Linux, check if config.json exists in the same folder
-            // as the AppImage
-            val appImagePath = envProvider("APPIMAGE")?.takeIf { it.isNotBlank() }
-            if (appImagePath != null) {
-                val appImageDir = File(appImagePath).parentFile
-                if (appImageDir != null) {
-                    val appImageConfig = File(appImageDir, "config.json")
-                    if (
-                        appImageConfig.exists() &&
-                            (appImageConfig.canWrite() || appImageDir.canWrite())
-                    ) {
-                        return appImageConfig
-                    }
+        private fun findAppImageConfig(appImagePath: String?): File? {
+            val directory = appImagePath?.takeIf { it.isNotBlank() }?.let(::File)?.parentFile
+            return directory?.let { parent ->
+                File(parent, "config.json").takeIf {
+                    it.exists() && (it.canWrite() || parent.canWrite())
                 }
             }
-
-            // b) Check if config.json exists in working directory and is writable
-            val localConfig = File(workingDir, "config.json")
-            if (localConfig.exists() && (localConfig.canWrite() || workingDir.canWrite())) {
-                return localConfig
-            }
-
-            // 3. Fallback to platform-standard user config directory
-            return getDefaultPlatformConfigFile(envProvider, propertyProvider)
         }
 
         /**
@@ -268,8 +253,8 @@ class ConfigManager(
             envProvider: (String) -> String? = { System.getenv(it) },
             propertyProvider: (String) -> String? = { System.getProperty(it) },
         ): File {
-            val osName = propertyProvider("os.name")?.lowercase() ?: ""
-            val userHome = propertyProvider("user.home") ?: ""
+            val osName = propertyProvider("os.name")?.lowercase().orEmpty()
+            val userHome = propertyProvider("user.home").orEmpty()
 
             return when {
                 osName.contains("windows") -> {

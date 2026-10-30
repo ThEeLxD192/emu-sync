@@ -12,6 +12,7 @@ import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
@@ -19,6 +20,39 @@ import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 
 class ConfigManagerTest {
+
+    @Test
+    fun `empty configuration with automatic creation disabled preserves the file`(
+        @TempDir directory: File
+    ) {
+        val configFile = File(directory, "config.json").apply { createNewFile() }
+        val exception =
+            assertFailsWith<IllegalArgumentException> {
+                ConfigManager(configFile).load(autoCreate = false)
+            }
+
+        assertEquals("Configuration file not found: ${configFile.absolutePath}", exception.message)
+        assertEquals("", configFile.readText())
+    }
+
+    @Test
+    fun `save reports failed parent creation without modifying existing files`(
+        @TempDir directory: File
+    ) {
+        val blocker = File(directory, "blocker").apply { writeText("original") }
+        val configFile = File(blocker, "nested/config.json")
+        val exception =
+            assertFailsWith<IllegalStateException> {
+                ConfigManager(configFile).save(AppConfig())
+            }
+
+        assertEquals(
+            "Could not create configuration directory: ${configFile.absoluteFile.parentFile}",
+            exception.message,
+        )
+        assertEquals("original", blocker.readText())
+        assertFalse(configFile.exists())
+    }
 
     @Test
     fun `should serialize and deserialize polymorphic entries correctly`(@TempDir tempDir: File) {
