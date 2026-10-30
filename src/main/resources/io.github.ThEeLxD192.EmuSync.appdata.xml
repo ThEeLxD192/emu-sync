@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ThEeLxD192.EmuSync</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>EmuSync</name>
+  <summary>Launch games and synchronize emulator saves with Google Drive</summary>
+  <description>
+    <p>EmuSync is a desktop game launcher and save synchronization manager for
+    emulators and native PC games. Organize your library, play offline, and
+    synchronize progress between devices using your Google Drive account.</p>
+    <p>Resolve conflicting saves, recover local backups, and add games to Steam
+    for access from Big Picture mode or Steam Deck.</p>
+  </description>
+  <launchable type="desktop-id">io.github.ThEeLxD192.EmuSync.desktop</launchable>
+  <url type="homepage">https://github.com/ThEeLxD192/emu-sync</url>
+  <url type="bugtracker">https://github.com/ThEeLxD192/emu-sync/issues</url>
+  <provides>
+    <binary>EmuSync</binary>
+  </provides>
+  <categories>
+    <category>Game</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+</component>

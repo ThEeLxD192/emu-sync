@@ -14,6 +14,9 @@ services:
       - ./build:/app/build
       # Persistent Gradle cache for faster incremental builds
       - gradle-cache:/root/.gradle
+      # Preserve project state, including configuration cache, across containers
+      - gradle-project-cache:/app/.gradle
 
 volumes:
   gradle-cache:
+  gradle-project-cache:

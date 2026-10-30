@@ -354,7 +354,9 @@ class DriveTransferCioTest {
 
     private fun Socket.readRequestHeaders() {
         val reader = BufferedReader(InputStreamReader(getInputStream(), StandardCharsets.US_ASCII))
-        while (reader.readLine()?.isNotEmpty() == true) Unit
+        while (reader.readLine()?.isNotEmpty() == true) {
+            // Consume all request headers before reading the body.
+        }
     }
 
     private data class LocalRequest(val line: String, val headers: Map<String, String>)

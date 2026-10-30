@@ -178,7 +178,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                         } else {
                             OutlinedButton(
                                 onClick = {
-                                    if (googleDrive?.clientId.isNullOrBlank() || googleDrive?.clientSecret.isNullOrBlank()) {
+                                    if (googleDrive?.clientId.isNullOrBlank() || googleDrive.clientSecret.isNullOrBlank()) {
                                         showDriveSetupDialog = true
                                     } else {
                                         scope.launch {

@@ -206,7 +206,7 @@ class DriveFoldersTest {
         )
 
         assertNotNull(patchUrl)
-        org.junit.jupiter.api.Assertions.assertTrue(patchUrl!!.contains("files/folder-123"))
+        org.junit.jupiter.api.Assertions.assertTrue(patchUrl.contains("files/folder-123"))
         assertEquals("parent-new", addParentsParam)
         assertEquals("parent-old", removeParentsParam)
     }

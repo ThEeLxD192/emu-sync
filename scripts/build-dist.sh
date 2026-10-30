@@ -10,6 +10,7 @@ echo "=========================================="
 echo "  2. Generating EmuSync AppImage...       "
 echo "=========================================="
 APP_DIR="/tmp/EmuSync.AppDir"
+APP_ID="io.github.ThEeLxD192.EmuSync"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR"
 
@@ -27,7 +28,7 @@ chmod +x "$APP_DIR/AppRun"
 # Copy application icons and desktop metadata
 cp src/main/resources/icon.png "$APP_DIR/icon.png"
 cp src/main/resources/icon.png "$APP_DIR/EmuSync.png"
-cat << 'EOF' > "$APP_DIR/EmuSync.desktop"
+cat << 'EOF' > "$APP_DIR/$APP_ID.desktop"
 [Desktop Entry]
 Type=Application
 Name=EmuSync
@@ -37,7 +38,15 @@ Icon=EmuSync
 Categories=Game;
 Terminal=false
 EOF
-chmod +x "$APP_DIR/EmuSync.desktop"
+chmod +x "$APP_DIR/$APP_ID.desktop"
+
+# Include AppStream metadata and the desktop entry in their standard locations.
+mkdir -p "$APP_DIR/usr/share/metainfo" "$APP_DIR/usr/share/applications" \
+    "$APP_DIR/usr/share/pixmaps"
+cp "src/main/resources/$APP_ID.appdata.xml" "$APP_DIR/usr/share/metainfo/"
+cp "$APP_DIR/$APP_ID.desktop" "$APP_DIR/usr/share/applications/"
+cp src/main/resources/icon.png "$APP_DIR/usr/share/pixmaps/EmuSync.png"
+appstreamcli validate --no-net "$APP_DIR/usr/share/metainfo/$APP_ID.appdata.xml"
 
 # Package AppImage with appimagetool into /out (mapped to root directory)
 TARGET_APPIMAGE="/out/EmuSync-x86_64.AppImage"

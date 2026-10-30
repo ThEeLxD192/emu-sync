@@ -23,7 +23,7 @@ A modern, offline-first save synchronization manager and universal launcher for 
 - **HTTP Engine**: Ktor Client with CIO engine, OAuth 2.0 loopback flow, and resilient timeout handling.
 - **Auto-Update Engine**: GitHub Releases API integration with atomic AppImage swap and restart.
 - **Steam Integration**: Binary VDF parser/serializer for Steam's `shortcuts.vdf` and launcher shell scripts.
-- **Build System**: Gradle 8.11 with Java 21 LTS runtime and AppImage packaging toolchain.
+- **Build System**: Gradle 9.8.2 with Java 25 LTS runtime and AppImage packaging toolchain.
 
 ---
 
@@ -31,7 +31,7 @@ A modern, offline-first save synchronization manager and universal launcher for 
 
 ### Prerequisites
 
-- **Java 21+** (Eclipse Temurin recommended) or **Docker**
+- **JDK 25** (Eclipse Temurin recommended) or **Docker**. Compilation, tests and packaging use the Java 25 toolchain; set `JAVA_HOME` to your JDK 25 installation for local builds.
 - **Linux x86_64** (SteamOS, Ubuntu, Arch, Fedora, Debian) or **Windows 10/11 x86_64**
 
 ---

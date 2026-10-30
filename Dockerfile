@@ -1,5 +1,5 @@
-# Official Eclipse Temurin image with Java 21 (LTS) on Ubuntu Jammy
-FROM eclipse-temurin:21-jdk-jammy
+# Official Eclipse Temurin image with Java 25 (LTS) on Ubuntu Jammy
+FROM eclipse-temurin:25-jdk-jammy
 
 # Install required system tools for Compose Desktop packaging and AppImage generation
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     file \
     wget \
     curl \
+    appstream \
+    gnupg \
     libasound2 \
     libgl1-mesa-glx \
     libx11-6 \

@@ -64,10 +64,10 @@ class AppViewModelTest {
 
         val state = viewModel.uiState.value
         assertNotNull(state.config)
-        assertEquals(2, state.config!!.entries.size)
+        assertEquals(2, state.config.entries.size)
 
         assertNotNull(state.selectedEntry)
-        assertEquals("GBA", state.selectedEntry!!.name)
+        assertEquals("GBA", state.selectedEntry.name)
 
         assertEquals(1, state.gameItems.size)
         assertEquals("zelda", state.gameItems[0].name)
@@ -164,7 +164,7 @@ class AppViewModelTest {
         val state = viewModel.uiState.value
         assertEquals(AppStatus.Idle, state.status)
         assertNotNull(state.config)
-        assertEquals(emptyList(), state.config!!.entries)
+        assertEquals(emptyList(), state.config.entries)
         assertTrue(missingConfigFile.exists())
     }
 

@@ -1,14 +1,18 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
-val ktorVersion: String by project
-val serializationVersion: String by project
-val coroutinesVersion: String by project
+val ktorVersion = providers.gradleProperty("ktorVersion").get()
+val serializationVersion = providers.gradleProperty("serializationVersion").get()
+val coroutinesVersion = providers.gradleProperty("coroutinesVersion").get()
 
 plugins {
     kotlin("jvm")
     kotlin("plugin.serialization")
     id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+kotlin {
+    jvmToolchain(25)
 }
 
 dependencies {
@@ -32,12 +36,14 @@ dependencies {
     // Test dependencies
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:$coroutinesVersion")
     testImplementation("io.ktor:ktor-client-mock:$ktorVersion")
 }
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
     testLogging {
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
@@ -46,6 +52,10 @@ tasks.withType<Test> {
 compose.desktop {
     application {
         mainClass = "MainKt"
+        jvmArgs += "--enable-native-access=ALL-UNNAMED"
+        javaHome = javaToolchains.launcherFor {
+            languageVersion.set(JavaLanguageVersion.of(25))
+        }.get().metadata.installationPath.asFile.absolutePath
 
         buildTypes.release.proguard {
             isEnabled.set(false)

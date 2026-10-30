@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.URI
-import java.net.URL
+import java.net.Socket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
@@ -99,8 +99,18 @@ class OAuthFlowTest {
     }
 
     private fun requestStatus(baseUrl: String, rawQuery: String): Int {
-        val connection = URL(URI(baseUrl).toURL(), "?$rawQuery").openConnection() as HttpURLConnection
-        return requestStatus(connection)
+        // Send malformed percent escapes unchanged so the server handles the invalid request.
+        val uri = URI(baseUrl)
+        return Socket().use { socket ->
+            socket.connect(InetSocketAddress(uri.host, uri.port), 3_000)
+            socket.soTimeout = 3_000
+            val writer = socket.getOutputStream().bufferedWriter(Charsets.US_ASCII)
+            writer.write("GET ${uri.rawPath}?$rawQuery HTTP/1.1\r\n")
+            writer.write("Host: ${uri.host}:${uri.port}\r\nConnection: close\r\n\r\n")
+            writer.flush()
+            val statusLine = requireNotNull(socket.getInputStream().bufferedReader().readLine())
+            statusLine.split(' ')[1].toInt()
+        }
     }
 
     private fun requestStatus(connection: HttpURLConnection): Int {
