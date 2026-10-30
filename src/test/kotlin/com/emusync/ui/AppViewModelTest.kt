@@ -4,20 +4,20 @@ import com.emusync.config.ConfigManager
 import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.NativePCGame
-import com.emusync.model.inferLegacySaveTarget
 import com.emusync.model.effectiveCloudFolder
+import com.emusync.model.inferLegacySaveTarget
 import com.emusync.steam.SteamShortcutManager
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respondOk
-import kotlinx.coroutines.test.runTest
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 
 class AppViewModelTest {
 
@@ -30,65 +30,71 @@ class AppViewModelTest {
     }
 
     @Test
-    fun `should load config and auto-select first entry in uiState`(@TempDir tempDir: File) = runTest {
-        val configFile = File(tempDir, "config.json")
-        val configManager = ConfigManager(configFile.absolutePath)
+    fun `should load config and auto-select first entry in uiState`(@TempDir tempDir: File) =
+        runTest {
+            val configFile = File(tempDir, "config.json")
+            val configManager = ConfigManager(configFile.absolutePath)
 
-        val initialConfig = AppConfig(
-            entries = listOf(
-                EmulatorSystem(
-                    name = "GBA",
-                    executablePath = "mgba",
-                    romsDirectory = tempDir.absolutePath,
-                    extensions = listOf("gba"),
-                ),
-                NativePCGame(
-                    name = "Spelunky",
-                    executablePath = "spelunky",
-                    savePaths = emptyList(),
+            val initialConfig =
+                AppConfig(
+                    entries =
+                        listOf(
+                            EmulatorSystem(
+                                name = "GBA",
+                                executablePath = "mgba",
+                                romsDirectory = tempDir.absolutePath,
+                                extensions = listOf("gba"),
+                            ),
+                            NativePCGame(
+                                name = "Spelunky",
+                                executablePath = "spelunky",
+                                savePaths = emptyList(),
+                            ),
+                        )
                 )
-            )
-        )
-        configManager.save(initialConfig)
+            configManager.save(initialConfig)
 
-        // Create dummy ROM for GBA
-        File(tempDir, "zelda.gba").createNewFile()
+            // Create dummy ROM for GBA
+            File(tempDir, "zelda.gba").createNewFile()
 
-        val viewModel = AppViewModel(
-            configManager = configManager,
-            steamManager = SteamShortcutManager(),
-            httpClient = createMockHttpClient(),
-        )
+            val viewModel =
+                AppViewModel(
+                    configManager = configManager,
+                    steamManager = SteamShortcutManager(),
+                    httpClient = createMockHttpClient(),
+                )
 
-        viewModel.loadConfig()
+            viewModel.loadConfig()
 
-        val state = viewModel.uiState.value
-        assertNotNull(state.config)
-        assertEquals(2, state.config.entries.size)
+            val state = viewModel.uiState.value
+            assertNotNull(state.config)
+            assertEquals(2, state.config.entries.size)
 
-        assertNotNull(state.selectedEntry)
-        assertEquals("GBA", state.selectedEntry.name)
+            assertNotNull(state.selectedEntry)
+            assertEquals("GBA", state.selectedEntry.name)
 
-        assertEquals(1, state.gameItems.size)
-        assertEquals("zelda", state.gameItems[0].name)
-    }
+            assertEquals(1, state.gameItems.size)
+            assertEquals("zelda", state.gameItems[0].name)
+        }
 
     @Test
     fun `should select native game entry and update uiState`(@TempDir tempDir: File) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
 
-        val nativeGame = NativePCGame(
-            name = "Celeste",
-            executablePath = "celeste",
-            savePaths = listOf("/saves/celeste.sav"),
-        )
+        val nativeGame =
+            NativePCGame(
+                name = "Celeste",
+                executablePath = "celeste",
+                savePaths = listOf("/saves/celeste.sav"),
+            )
         configManager.save(AppConfig(entries = listOf(nativeGame)))
 
-        val viewModel = AppViewModel(
-            configManager = configManager,
-            httpClient = createMockHttpClient(),
-        )
+        val viewModel =
+            AppViewModel(
+                configManager = configManager,
+                httpClient = createMockHttpClient(),
+            )
 
         viewModel.loadConfig()
 
@@ -104,23 +110,29 @@ class AppViewModelTest {
         val configManager = ConfigManager(configFile.absolutePath)
         configManager.save(AppConfig(entries = emptyList()))
 
-        val viewModel = AppViewModel(
-            configManager = configManager,
-            httpClient = createMockHttpClient(),
-        )
+        val viewModel =
+            AppViewModel(
+                configManager = configManager,
+                httpClient = createMockHttpClient(),
+            )
 
         assertEquals(AppStatus.Idle, viewModel.uiState.value.status)
 
         viewModel.setStatus(AppStatus.Syncing("Uploading saves..."))
         assertTrue(viewModel.uiState.value.status is AppStatus.Syncing)
-        assertEquals("Uploading saves...", (viewModel.uiState.value.status as AppStatus.Syncing).message)
+        assertEquals(
+            "Uploading saves...",
+            (viewModel.uiState.value.status as AppStatus.Syncing).message,
+        )
 
         viewModel.setStatus(AppStatus.Playing)
         assertEquals(AppStatus.Playing, viewModel.uiState.value.status)
     }
 
     @Test
-    fun `reorderEntries should change entry positions and persist to config`(@TempDir tempDir: File) = runTest {
+    fun `reorderEntries should change entry positions and persist to config`(
+        @TempDir tempDir: File
+    ) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
 
@@ -130,19 +142,26 @@ class AppViewModelTest {
 
         configManager.save(AppConfig(entries = listOf(entry1, entry2, entry3)))
 
-        val viewModel = AppViewModel(
-            configManager = configManager,
-            httpClient = createMockHttpClient(),
-        )
+        val viewModel =
+            AppViewModel(
+                configManager = configManager,
+                httpClient = createMockHttpClient(),
+            )
         viewModel.loadConfig()
 
         // Initially: Play 1 (0), Play 2 (1), Spelunky (2)
-        assertEquals(listOf("Play 1", "Play 2", "Spelunky"), viewModel.uiState.value.config!!.entries.map { it.name })
+        assertEquals(
+            listOf("Play 1", "Play 2", "Spelunky"),
+            viewModel.uiState.value.config!!.entries.map { it.name },
+        )
 
         // Move Spelunky from index 2 to index 0 -> Spelunky, Play 1, Play 2
         viewModel.reorderEntries(fromIndex = 2, toIndex = 0)
 
-        assertEquals(listOf("Spelunky", "Play 1", "Play 2"), viewModel.uiState.value.config!!.entries.map { it.name })
+        assertEquals(
+            listOf("Spelunky", "Play 1", "Play 2"),
+            viewModel.uiState.value.config!!.entries.map { it.name },
+        )
 
         // Verify persisted to config.json file
         val reloaded = configManager.load()
@@ -150,14 +169,17 @@ class AppViewModelTest {
     }
 
     @Test
-    fun `should auto-create default config and reach Idle state when config file is missing`(@TempDir tempDir: File) = runTest {
+    fun `should auto-create default config and reach Idle state when config file is missing`(
+        @TempDir tempDir: File
+    ) = runTest {
         val missingConfigFile = File(tempDir, "missing_config.json")
         val configManager = ConfigManager(missingConfigFile.absolutePath)
 
-        val viewModel = AppViewModel(
-            configManager = configManager,
-            httpClient = createMockHttpClient(),
-        )
+        val viewModel =
+            AppViewModel(
+                configManager = configManager,
+                httpClient = createMockHttpClient(),
+            )
 
         viewModel.loadConfig()
 
@@ -169,15 +191,18 @@ class AppViewModelTest {
     }
 
     @Test
-    fun `setupGoogleDrive should save credentials and unlinkGoogleDrive should clear refreshToken`(@TempDir tempDir: File) = runTest {
+    fun `setupGoogleDrive should save credentials and unlinkGoogleDrive should clear refreshToken`(
+        @TempDir tempDir: File
+    ) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
         configManager.save(AppConfig(entries = emptyList()))
 
-        val viewModel = AppViewModel(
-            configManager = configManager,
-            httpClient = createMockHttpClient(),
-        )
+        val viewModel =
+            AppViewModel(
+                configManager = configManager,
+                httpClient = createMockHttpClient(),
+            )
         viewModel.loadConfig()
 
         // Setup without connecting immediately (connectNow = false)
@@ -190,7 +215,9 @@ class AppViewModelTest {
         assertEquals(null, updated.googleDrive?.refreshToken)
 
         // Simulate having a refresh token
-        configManager.save(updated.copy(googleDrive = updated.googleDrive!!.copy(refreshToken = "valid-token")))
+        configManager.save(
+            updated.copy(googleDrive = updated.googleDrive!!.copy(refreshToken = "valid-token"))
+        )
         viewModel.loadConfig()
         assertEquals("valid-token", viewModel.uiState.value.config?.googleDrive?.refreshToken)
 
@@ -205,14 +232,16 @@ class AppViewModelTest {
 
     @Test
     fun `restartApp sets UpdateUiState Error when updateManager fails`(@TempDir tempDir: File) {
-        val failingManager = object : com.emusync.update.UpdateManager() {
-            override fun applyUpdateAndRestart(downloadedFile: File): Boolean = false
-        }
-        val viewModel = AppViewModel(
-            configManager = ConfigManager(File(tempDir, "config.json")),
-            updateManager = failingManager,
-            httpClient = createMockHttpClient(),
-        )
+        val failingManager =
+            object : com.emusync.update.UpdateManager() {
+                override fun applyUpdateAndRestart(downloadedFile: File): Boolean = false
+            }
+        val viewModel =
+            AppViewModel(
+                configManager = ConfigManager(File(tempDir, "config.json")),
+                updateManager = failingManager,
+                httpClient = createMockHttpClient(),
+            )
 
         val testFile = File(tempDir, "update.AppImage").apply { createNewFile() }
         val success = viewModel.restartApp(testFile)
@@ -225,14 +254,16 @@ class AppViewModelTest {
 
     @Test
     fun `restartApp returns true when updateManager succeeds`(@TempDir tempDir: File) {
-        val succeedingManager = object : com.emusync.update.UpdateManager() {
-            override fun applyUpdateAndRestart(downloadedFile: File): Boolean = true
-        }
-        val viewModel = AppViewModel(
-            configManager = ConfigManager(File(tempDir, "config.json")),
-            updateManager = succeedingManager,
-            httpClient = createMockHttpClient(),
-        )
+        val succeedingManager =
+            object : com.emusync.update.UpdateManager() {
+                override fun applyUpdateAndRestart(downloadedFile: File): Boolean = true
+            }
+        val viewModel =
+            AppViewModel(
+                configManager = ConfigManager(File(tempDir, "config.json")),
+                updateManager = succeedingManager,
+                httpClient = createMockHttpClient(),
+            )
 
         val testFile = File(tempDir, "update.AppImage").apply { createNewFile() }
         val success = viewModel.restartApp(testFile)
@@ -241,22 +272,26 @@ class AppViewModelTest {
     }
 
     @Test
-    fun `editGameOverride updates coverPathByRom and savePathsByRom for EmulatorSystem`(@TempDir tempDir: File) = runTest {
+    fun `editGameOverride updates coverPathByRom and savePathsByRom for EmulatorSystem`(
+        @TempDir tempDir: File
+    ) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
 
-        val system = EmulatorSystem(
-            name = "GBA",
-            executablePath = "mgba",
-            romsDirectory = tempDir.absolutePath,
-            extensions = listOf("gba")
-        )
+        val system =
+            EmulatorSystem(
+                name = "GBA",
+                executablePath = "mgba",
+                romsDirectory = tempDir.absolutePath,
+                extensions = listOf("gba"),
+            )
         configManager.save(AppConfig(entries = listOf(system)))
 
-        val viewModel = AppViewModel(
-            configManager = configManager,
-            httpClient = createMockHttpClient(),
-        )
+        val viewModel =
+            AppViewModel(
+                configManager = configManager,
+                httpClient = createMockHttpClient(),
+            )
         viewModel.loadConfig()
 
         val romFile = File(tempDir, "zelda.gba").apply { createNewFile() }
@@ -265,7 +300,7 @@ class AppViewModelTest {
         viewModel.editGameOverride(
             gameItem = gameItem,
             newTargets = listOf(inferLegacySaveTarget("/path/to/zelda.sav")),
-            newCoverPath = "/path/to/zelda_box.png"
+            newCoverPath = "/path/to/zelda_box.png",
         )
 
         val updatedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
@@ -277,7 +312,7 @@ class AppViewModelTest {
         viewModel.editGameOverride(
             gameItem = gameItem.copy(entry = updatedSystem),
             newTargets = listOf(inferLegacySaveTarget("/path/to/zelda.sav")),
-            newCoverPath = ""
+            newCoverPath = "",
         )
         val clearedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
         assertNotNull(clearedSystem)
@@ -285,18 +320,22 @@ class AppViewModelTest {
     }
 
     @Test
-    fun `clearing game save paths removes override and preserves global fallback`(@TempDir tempDir: File) = runTest {
+    fun `clearing game save paths removes override and preserves global fallback`(
+        @TempDir tempDir: File
+    ) = runTest {
         val configManager = ConfigManager(File(tempDir, "config.json").absolutePath)
-        val system = EmulatorSystem(
-            name = "PS2",
-            executablePath = "pcsx2",
-            romsDirectory = tempDir.absolutePath,
-            extensions = listOf("iso"),
-            savePaths = listOf("/mnt/Juegos/Saves/PS2"),
-            savePathsByRom = mapOf("Black.iso" to listOf("/mnt/Juegos/Saves/PS2")),
-        )
+        val system =
+            EmulatorSystem(
+                name = "PS2",
+                executablePath = "pcsx2",
+                romsDirectory = tempDir.absolutePath,
+                extensions = listOf("iso"),
+                savePaths = listOf("/mnt/Juegos/Saves/PS2"),
+                savePathsByRom = mapOf("Black.iso" to listOf("/mnt/Juegos/Saves/PS2")),
+            )
         configManager.save(AppConfig(entries = listOf(system)))
-        val viewModel = AppViewModel(configManager = configManager, httpClient = createMockHttpClient())
+        val viewModel =
+            AppViewModel(configManager = configManager, httpClient = createMockHttpClient())
         viewModel.loadConfig()
 
         val romFile = File(tempDir, "Black.iso").apply { createNewFile() }
@@ -316,26 +355,36 @@ class AppViewModelTest {
     }
 
     @Test
-    fun `editGameOverride updates custom title in titleByRom for EmulatorSystem`(@TempDir tempDir: File) = runTest {
+    fun `editGameOverride updates custom title in titleByRom for EmulatorSystem`(
+        @TempDir tempDir: File
+    ) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
 
-        val system = EmulatorSystem(
-            name = "GBA",
-            executablePath = "mgba",
-            romsDirectory = tempDir.absolutePath,
-            extensions = listOf("gba")
-        )
+        val system =
+            EmulatorSystem(
+                name = "GBA",
+                executablePath = "mgba",
+                romsDirectory = tempDir.absolutePath,
+                extensions = listOf("gba"),
+            )
         configManager.save(AppConfig(entries = listOf(system)))
 
-        val viewModel = AppViewModel(
-            configManager = configManager,
-            httpClient = createMockHttpClient(),
-        )
+        val viewModel =
+            AppViewModel(
+                configManager = configManager,
+                httpClient = createMockHttpClient(),
+            )
         viewModel.loadConfig()
 
-        val romFile = File(tempDir, "The_Legend_of_Zelda_The_Minish_Cap_(USA).gba").apply { createNewFile() }
-        val gameItem = GameItem(name = "The_Legend_of_Zelda_The_Minish_Cap_(USA)", entry = system, romFile = romFile)
+        val romFile =
+            File(tempDir, "The_Legend_of_Zelda_The_Minish_Cap_(USA).gba").apply { createNewFile() }
+        val gameItem =
+            GameItem(
+                name = "The_Legend_of_Zelda_The_Minish_Cap_(USA)",
+                entry = system,
+                romFile = romFile,
+            )
 
         // Default clean title before override
         assertEquals("The Legend of Zelda The Minish Cap", gameItem.effectiveTitle)
@@ -345,12 +394,15 @@ class AppViewModelTest {
             gameItem = gameItem,
             newTargets = emptyList(),
             newCoverPath = null,
-            newTitle = "Zelda: Minish Cap (Custom)"
+            newTitle = "Zelda: Minish Cap (Custom)",
         )
 
         val updatedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
         assertNotNull(updatedSystem)
-        assertEquals("Zelda: Minish Cap (Custom)", updatedSystem.titleByRom["The_Legend_of_Zelda_The_Minish_Cap_(USA).gba"])
+        assertEquals(
+            "Zelda: Minish Cap (Custom)",
+            updatedSystem.titleByRom["The_Legend_of_Zelda_The_Minish_Cap_(USA).gba"],
+        )
 
         val updatedGameItem = gameItem.copy(entry = updatedSystem)
         assertEquals("Zelda: Minish Cap (Custom)", updatedGameItem.effectiveTitle)
@@ -360,30 +412,39 @@ class AppViewModelTest {
             gameItem = updatedGameItem,
             newTargets = emptyList(),
             newCoverPath = null,
-            newTitle = ""
+            newTitle = "",
         )
         val clearedSystem = viewModel.uiState.value.config?.entries?.first() as? EmulatorSystem
         assertNotNull(clearedSystem)
-        kotlin.test.assertNull(clearedSystem.titleByRom["The_Legend_of_Zelda_The_Minish_Cap_(USA).gba"])
-        assertEquals("The Legend of Zelda The Minish Cap", gameItem.copy(entry = clearedSystem).effectiveTitle)
+        kotlin.test.assertNull(
+            clearedSystem.titleByRom["The_Legend_of_Zelda_The_Minish_Cap_(USA).gba"]
+        )
+        assertEquals(
+            "The Legend of Zelda The Minish Cap",
+            gameItem.copy(entry = clearedSystem).effectiveTitle,
+        )
     }
 
     @Test
-    fun `editGameOverride updates coverPath and savePaths for NativePCGame`(@TempDir tempDir: File) = runTest {
+    fun `editGameOverride updates coverPath and savePaths for NativePCGame`(
+        @TempDir tempDir: File
+    ) = runTest {
         val configFile = File(tempDir, "config.json")
         val configManager = ConfigManager(configFile.absolutePath)
 
-        val game = NativePCGame(
-            name = "Portal",
-            executablePath = "/games/portal/hl2.exe",
-            savePaths = listOf("/old/save")
-        )
+        val game =
+            NativePCGame(
+                name = "Portal",
+                executablePath = "/games/portal/hl2.exe",
+                savePaths = listOf("/old/save"),
+            )
         configManager.save(AppConfig(entries = listOf(game)))
 
-        val viewModel = AppViewModel(
-            configManager = configManager,
-            httpClient = createMockHttpClient(),
-        )
+        val viewModel =
+            AppViewModel(
+                configManager = configManager,
+                httpClient = createMockHttpClient(),
+            )
         viewModel.loadConfig()
 
         val gameItem = GameItem(name = "Portal", entry = game)
@@ -391,7 +452,7 @@ class AppViewModelTest {
         viewModel.editGameOverride(
             gameItem = gameItem,
             newTargets = listOf(inferLegacySaveTarget("/new/save.dat")),
-            newCoverPath = "/images/portal.png"
+            newCoverPath = "/images/portal.png",
         )
 
         val updatedGame = viewModel.uiState.value.config?.entries?.first() as? NativePCGame
@@ -401,38 +462,41 @@ class AppViewModelTest {
     }
 
     @Test
-    fun `addEntry and editEntry preserve and update group and cloudFolder`(@TempDir tempDir: File) = runTest {
-        val configFile = File(tempDir, "config.json")
-        val configManager = ConfigManager(configFile.absolutePath)
-        val viewModel = AppViewModel(
-            configManager = configManager,
-            httpClient = createMockHttpClient(),
-        )
-        viewModel.loadConfig()
+    fun `addEntry and editEntry preserve and update group and cloudFolder`(@TempDir tempDir: File) =
+        runTest {
+            val configFile = File(tempDir, "config.json")
+            val configManager = ConfigManager(configFile.absolutePath)
+            val viewModel =
+                AppViewModel(
+                    configManager = configManager,
+                    httpClient = createMockHttpClient(),
+                )
+            viewModel.loadConfig()
 
-        val yuzu = EmulatorSystem(
-            name = "Yuzu",
-            executablePath = "/usr/bin/yuzu",
-            romsDirectory = tempDir.absolutePath,
-            extensions = listOf("nsp"),
-            group = "Switch",
-        )
-        viewModel.addEntry(yuzu)
+            val yuzu =
+                EmulatorSystem(
+                    name = "Yuzu",
+                    executablePath = "/usr/bin/yuzu",
+                    romsDirectory = tempDir.absolutePath,
+                    extensions = listOf("nsp"),
+                    group = "Switch",
+                )
+            viewModel.addEntry(yuzu)
 
-        val configAfterAdd = viewModel.uiState.value.config
-        assertEquals(1, configAfterAdd?.entries?.size)
-        val addedEntry = configAfterAdd?.entries?.first() as? EmulatorSystem
-        assertEquals("Switch", addedEntry?.group)
-        assertEquals("Switch", addedEntry?.effectiveCloudFolder)
+            val configAfterAdd = viewModel.uiState.value.config
+            assertEquals(1, configAfterAdd?.entries?.size)
+            val addedEntry = configAfterAdd?.entries?.first() as? EmulatorSystem
+            assertEquals("Switch", addedEntry?.group)
+            assertEquals("Switch", addedEntry?.effectiveCloudFolder)
 
-        // Edit entry to assign explicit cloudFolder
-        val updatedYuzu = yuzu.copy(cloudFolder = "UnifiedSwitch")
-        viewModel.editEntry(yuzu, updatedYuzu)
+            // Edit entry to assign explicit cloudFolder
+            val updatedYuzu = yuzu.copy(cloudFolder = "UnifiedSwitch")
+            viewModel.editEntry(yuzu, updatedYuzu)
 
-        val configAfterEdit = viewModel.uiState.value.config
-        val editedEntry = configAfterEdit?.entries?.first() as? EmulatorSystem
-        assertEquals("Switch", editedEntry?.group)
-        assertEquals("UnifiedSwitch", editedEntry?.cloudFolder)
-        assertEquals("UnifiedSwitch", editedEntry?.effectiveCloudFolder)
-    }
+            val configAfterEdit = viewModel.uiState.value.config
+            val editedEntry = configAfterEdit?.entries?.first() as? EmulatorSystem
+            assertEquals("Switch", editedEntry?.group)
+            assertEquals("UnifiedSwitch", editedEntry?.cloudFolder)
+            assertEquals("UnifiedSwitch", editedEntry?.effectiveCloudFolder)
+        }
 }

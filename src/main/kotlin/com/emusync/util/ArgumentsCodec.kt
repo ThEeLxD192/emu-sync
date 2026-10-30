@@ -2,13 +2,16 @@ package com.emusync.util
 
 /** Converts the editable arguments field to and from an argument list without losing spaces. */
 object ArgumentsCodec {
-    fun format(arguments: List<String>): String = arguments.joinToString(" ") { argument ->
-        if (argument.isEmpty() || argument.any { it.isWhitespace() || it == '"' || it == '\\' }) {
-            "\"${argument.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-        } else {
-            argument
+    fun format(arguments: List<String>): String =
+        arguments.joinToString(" ") { argument ->
+            if (
+                argument.isEmpty() || argument.any { it.isWhitespace() || it == '"' || it == '\\' }
+            ) {
+                "\"${argument.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+            } else {
+                argument
+            }
         }
-    }
 
     /** Returns null for an unmatched quote or trailing escape inside a quoted argument. */
     fun parse(text: String): List<String>? {

@@ -11,9 +11,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/**
- * Token response from the refresh flow (no refresh_token included).
- */
+/** Token response from the refresh flow (no refresh_token included). */
 @Serializable
 data class TokenResponse(
     @SerialName("access_token") val accessToken: String,
@@ -22,8 +20,8 @@ data class TokenResponse(
 )
 
 /**
- * Full token response from the initial authorization code exchange.
- * Includes the [refreshToken] which must be persisted to config.json.
+ * Full token response from the initial authorization code exchange. Includes the [refreshToken]
+ * which must be persisted to config.json.
  */
 @Serializable
 data class AuthTokens(
@@ -37,10 +35,10 @@ data class AuthTokens(
  * Handles Google OAuth 2.0 authentication.
  *
  * Two flows:
- * 1. **Initial authorization**: [exchangeCodeForTokens] — exchanges an authorization code
- *    (from the loopback redirect) for access + refresh tokens.
- * 2. **Subsequent sessions**: [refreshAccessToken] — uses the stored refresh token
- *    to get a new short-lived access token.
+ * 1. **Initial authorization**: [exchangeCodeForTokens] — exchanges an authorization code (from the
+ *    loopback redirect) for access + refresh tokens.
+ * 2. **Subsequent sessions**: [refreshAccessToken] — uses the stored refresh token to get a new
+ *    short-lived access token.
  */
 class DriveAuth(private val client: HttpClient) {
 
@@ -49,13 +47,13 @@ class DriveAuth(private val client: HttpClient) {
     }
 
     /**
-     * Exchanges an authorization code for access and refresh tokens.
-     * Called once during the initial OAuth loopback flow.
+     * Exchanges an authorization code for access and refresh tokens. Called once during the initial
+     * OAuth loopback flow.
      *
-     * @param clientId     OAuth 2.0 client ID.
+     * @param clientId OAuth 2.0 client ID.
      * @param clientSecret OAuth 2.0 client secret.
-     * @param code         Authorization code from the loopback redirect.
-     * @param redirectUri  Must match the redirect URI used in the authorization request.
+     * @param code Authorization code from the loopback redirect.
+     * @param redirectUri Must match the redirect URI used in the authorization request.
      * @return [AuthTokens] containing both access and refresh tokens.
      */
     suspend fun exchangeCodeForTokens(
@@ -64,16 +62,18 @@ class DriveAuth(private val client: HttpClient) {
         code: String,
         redirectUri: String,
     ): AuthTokens {
-        val response = client.submitForm(
-            url = TOKEN_URL,
-            formParameters = parameters {
-                append("client_id", clientId)
-                append("client_secret", clientSecret)
-                append("code", code)
-                append("redirect_uri", redirectUri)
-                append("grant_type", "authorization_code")
-            },
-        )
+        val response =
+            client.submitForm(
+                url = TOKEN_URL,
+                formParameters =
+                    parameters {
+                        append("client_id", clientId)
+                        append("client_secret", clientSecret)
+                        append("code", code)
+                        append("redirect_uri", redirectUri)
+                        append("grant_type", "authorization_code")
+                    },
+            )
 
         if (response.status != HttpStatusCode.OK) {
             val errorBody = response.body<String>()
@@ -84,10 +84,10 @@ class DriveAuth(private val client: HttpClient) {
     }
 
     /**
-     * Exchanges a refresh token for a new access token.
-     * Used on every session after initial authorization.
+     * Exchanges a refresh token for a new access token. Used on every session after initial
+     * authorization.
      *
-     * @param clientId     OAuth 2.0 client ID.
+     * @param clientId OAuth 2.0 client ID.
      * @param clientSecret OAuth 2.0 client secret.
      * @param refreshToken Stored offline refresh token.
      * @return [TokenResponse] containing the access token and its TTL.
@@ -97,28 +97,34 @@ class DriveAuth(private val client: HttpClient) {
         clientSecret: String,
         refreshToken: String,
     ): TokenResponse {
-        val response = client.submitForm(
-            url = TOKEN_URL,
-            formParameters = parameters {
-                append("client_id", clientId)
-                append("client_secret", clientSecret)
-                append("refresh_token", refreshToken)
-                append("grant_type", "refresh_token")
-            },
-        )
+        val response =
+            client.submitForm(
+                url = TOKEN_URL,
+                formParameters =
+                    parameters {
+                        append("client_id", clientId)
+                        append("client_secret", clientSecret)
+                        append("refresh_token", refreshToken)
+                        append("grant_type", "refresh_token")
+                    },
+            )
 
         if (response.status != HttpStatusCode.OK) {
             val errorBody = response.body<String>()
-            val errorCode = runCatching { Json.parseToJsonElement(errorBody).jsonObject["error"]?.jsonPrimitive?.content }.getOrNull()
-            throw DriveApiException("Token refresh failed (${response.status}): $errorBody", errorCode = errorCode)
+            val errorCode = runCatching {
+                Json.parseToJsonElement(errorBody).jsonObject["error"]?.jsonPrimitive?.content
+            }
+                .getOrNull()
+            throw DriveApiException(
+                "Token refresh failed (${response.status}): $errorBody",
+                errorCode = errorCode,
+            )
         }
 
         return response.body<TokenResponse>()
     }
 }
 
-/**
- * Exception for Google Drive API errors.
- */
-class DriveApiException(message: String, cause: Throwable? = null, val errorCode: String? = null) : Exception(message, cause)
-
+/** Exception for Google Drive API errors. */
+class DriveApiException(message: String, cause: Throwable? = null, val errorCode: String? = null) :
+    Exception(message, cause)

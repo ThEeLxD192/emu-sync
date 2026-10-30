@@ -12,16 +12,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,8 +28,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -70,9 +66,9 @@ import com.emusync.ui.dialogs.StatusOverlay
 import com.emusync.ui.dialogs.UpdateDialog
 import com.emusync.ui.theme.EmuSyncColors
 import com.emusync.ui.theme.EmuSyncDarkScheme
+import javax.swing.UIManager
 import kotlinx.coroutines.launch
 import org.jetbrains.skia.Image
-import javax.swing.UIManager
 
 fun main() {
     try {
@@ -80,13 +76,14 @@ fun main() {
     } catch (_: Exception) {
         // Fallback to default if system L&F fails
     }
-    
+
     application {
-        val windowState = rememberWindowState(
-            width = 1280.dp,
-            height = 800.dp,
-            position = WindowPosition(Alignment.Center),
-        )
+        val windowState =
+            rememberWindowState(
+                width = 1280.dp,
+                height = 800.dp,
+                position = WindowPosition(Alignment.Center),
+            )
 
         val appIcon = remember { loadAppIcon() }
 
@@ -131,9 +128,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // ── Header ──────────────────────────────────────────
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp)
                 ) {
                     Text(
                         text = "EmuSync",
@@ -145,40 +140,45 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                     )
                     Row(
                         modifier = Modifier.align(Alignment.CenterEnd),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         // Google Drive status indicator / Connect action
                         val googleDrive = uiState.config?.googleDrive
-                        val isLinked = googleDrive != null && !googleDrive.refreshToken.isNullOrBlank()
+                        val isLinked =
+                            googleDrive != null && !googleDrive.refreshToken.isNullOrBlank()
                         if (isLinked) {
                             Surface(
                                 onClick = { showDriveSetupDialog = true },
                                 shape = RoundedCornerShape(8.dp),
                                 color = EmuSyncColors.SurfaceVariant,
-                                modifier = Modifier.padding(end = 12.dp)
+                                modifier = Modifier.padding(end = 12.dp),
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    modifier =
+                                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Cloud,
                                         contentDescription = "Drive Connected",
                                         tint = EmuSyncColors.Success,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(16.dp),
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
                                         text = "Drive Linked",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = EmuSyncColors.OnSurface
+                                        color = EmuSyncColors.OnSurface,
                                     )
                                 }
                             }
                         } else {
                             OutlinedButton(
                                 onClick = {
-                                    if (googleDrive?.clientId.isNullOrBlank() || googleDrive.clientSecret.isNullOrBlank()) {
+                                    if (
+                                        googleDrive?.clientId.isNullOrBlank() ||
+                                            googleDrive.clientSecret.isNullOrBlank()
+                                    ) {
                                         showDriveSetupDialog = true
                                     } else {
                                         scope.launch {
@@ -188,13 +188,13 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                                     }
                                 },
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                modifier = Modifier.padding(end = 12.dp)
+                                modifier = Modifier.padding(end = 12.dp),
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.CloudSync,
                                     contentDescription = "Connect Google Drive",
                                     tint = EmuSyncColors.Primary,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(16.dp),
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text("Connect Drive", style = MaterialTheme.typography.labelSmall)
@@ -208,24 +208,25 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                                 onClick = { viewModel.showUpdateDialog() },
                                 shape = RoundedCornerShape(8.dp),
                                 color = EmuSyncColors.Primary,
-                                modifier = Modifier.padding(end = 12.dp)
+                                modifier = Modifier.padding(end = 12.dp),
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    modifier =
+                                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.SystemUpdate,
                                         contentDescription = null,
                                         tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(16.dp),
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
                                         text = "Update v${updateState.info.version}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = Color.White,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
                                     )
                                 }
                             }
@@ -234,24 +235,25 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                                 onClick = { viewModel.showUpdateDialog() },
                                 shape = RoundedCornerShape(8.dp),
                                 color = EmuSyncColors.Success,
-                                modifier = Modifier.padding(end = 12.dp)
+                                modifier = Modifier.padding(end = 12.dp),
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    modifier =
+                                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.RestartAlt,
                                         contentDescription = null,
                                         tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(16.dp),
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
                                         text = "Restart EmuSync",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = Color.White,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
                                     )
                                 }
                             }
@@ -265,8 +267,11 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                         )
                         Button(
                             onClick = onExit,
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                            colors =
+                                ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                ),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         ) {
                             Text("Safe Close")
                         }
@@ -308,9 +313,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                                 }
                             }
                         },
-                        modifier = Modifier
-                            .width(240.dp)
-                            .fillMaxHeight(),
+                        modifier = Modifier.width(240.dp).fillMaxHeight(),
                     )
 
                     VerticalDivider(
@@ -323,7 +326,9 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                         items = uiState.gameItems,
                         selectedEntry = uiState.selectedEntry,
                         isLoading = uiState.isLoading,
-                        syncStatus = uiState.entrySyncStatus[uiState.selectedEntry?.name] ?: CloudSyncStatus.IDLE,
+                        syncStatus =
+                            uiState.entrySyncStatus[uiState.selectedEntry?.name]
+                                ?: CloudSyncStatus.IDLE,
                         onGameClicked = { gameItem ->
                             scope.launch { viewModel.launchGame(gameItem) }
                         },
@@ -352,10 +357,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                                 scope.launch { viewModel.deleteEntry(entry) }
                             }
                         },
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .padding(20.dp),
+                        modifier = Modifier.weight(1f).fillMaxHeight().padding(20.dp),
                     )
                 }
             }
@@ -363,19 +365,20 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
             // ── Status Overlays (on top of everything) ──────────────
             StatusOverlay(
                 status = uiState.status,
-                onDismissError = { viewModel.clearStatus() }
+                onDismissError = { viewModel.clearStatus() },
             )
 
             // ── Add Entry Dialog ────────────────────────────────────
             if (showAddDialog) {
-                val existingGroups = uiState.config?.entries
-                    ?.mapNotNull { it.group?.trim()?.takeIf { g -> g.isNotBlank() } }
-                    ?.distinct()
-                    ?: emptyList()
+                val existingGroups =
+                    uiState.config
+                        ?.entries
+                        ?.mapNotNull { it.group?.trim()?.takeIf { g -> g.isNotBlank() } }
+                        ?.distinct() ?: emptyList()
                 AddEntryDialog(
                     initialEntry = entryToEdit,
                     existingGroups = existingGroups,
-                    onDismiss = { 
+                    onDismiss = {
                         showAddDialog = false
                         entryToEdit = null
                     },
@@ -389,7 +392,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                             }
                             entryToEdit = null
                         }
-                    }
+                    },
                 )
             }
 
@@ -403,7 +406,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                             viewModel.editGameOverride(gameItem, newTargets, newCoverPath, newTitle)
                             gameToEdit = null
                         }
-                    }
+                    },
                 )
             }
 
@@ -416,7 +419,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                     onDismiss = { viewModel.completeSaveSetup(emptyList(), request = request) },
                     onSave = { newTitle, newTargets, newCoverPath ->
                         viewModel.completeSaveSetup(newTargets, newTitle, newCoverPath, request)
-                    }
+                    },
                 )
             }
 
@@ -430,7 +433,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                     },
                     onRestart = { file ->
                         viewModel.restartApp(file)
-                    }
+                    },
                 )
             }
 
@@ -442,7 +445,12 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                     onDismiss = { showDriveSetupDialog = false },
                     onSaveAndConnect = { clientId, clientSecret ->
                         scope.launch {
-                            val result = viewModel.setupGoogleDrive(clientId, clientSecret, connectNow = true)
+                            val result =
+                                viewModel.setupGoogleDrive(
+                                    clientId,
+                                    clientSecret,
+                                    connectNow = true,
+                                )
                             steamMessage = result
                         }
                     },
@@ -451,7 +459,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                             val result = viewModel.unlinkGoogleDrive()
                             steamMessage = result
                         }
-                    }
+                    },
                 )
             }
 
@@ -478,8 +486,9 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
 
 private fun loadAppIcon(): Painter? {
     return try {
-        val stream = Thread.currentThread().contextClassLoader.getResourceAsStream("icon.png")
-            ?: object {}.javaClass.getResourceAsStream("/icon.png")
+        val stream =
+            Thread.currentThread().contextClassLoader.getResourceAsStream("icon.png")
+                ?: object {}.javaClass.getResourceAsStream("/icon.png")
         val bytes = stream?.use { it.readAllBytes() } ?: return null
         val imageBitmap = Image.makeFromEncoded(bytes).toComposeImageBitmap()
         BitmapPainter(imageBitmap)

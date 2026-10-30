@@ -10,24 +10,22 @@ import io.ktor.http.HttpStatusCode
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * A single file result from the Google Drive Files.list API.
- */
+/** A single file result from the Google Drive Files.list API. */
 @Serializable
 data class DriveFile(
     val id: String,
     val name: String,
-    @SerialName("modifiedTime") val modifiedTime: String,  // ISO 8601 e.g. "2024-01-15T10:30:00.000Z"
+    @SerialName("modifiedTime")
+    val modifiedTime: String, // ISO 8601 e.g. "2024-01-15T10:30:00.000Z"
     val mimeType: String? = null,
     val sha256Checksum: String? = null,
     val version: String? = null,
 ) {
-    val isFolder: Boolean get() = mimeType == "application/vnd.google-apps.folder"
+    val isFolder: Boolean
+        get() = mimeType == "application/vnd.google-apps.folder"
 }
 
-/**
- * Google Drive Files.list API response.
- */
+/** Google Drive Files.list API response. */
 @Serializable
 data class DriveFileList(
     val files: List<DriveFile> = emptyList(),
@@ -48,11 +46,11 @@ class DriveSearch(private val client: HttpClient) {
     /**
      * Searches for a file on Google Drive by its exact name.
      *
-     * @param accessToken    Valid OAuth 2.0 access token.
-     * @param fileName       Exact name of the file to find (e.g. "pokemon_emerald.sav").
+     * @param accessToken Valid OAuth 2.0 access token.
+     * @param fileName Exact name of the file to find (e.g. "pokemon_emerald.sav").
      * @param parentFolderId Optional folder ID to scope the search (e.g. the entry's subfolder).
-     * @return [DriveFile] if found, or `null` if no file matches.
-     *         If multiple files match, returns the most recently modified one.
+     * @return [DriveFile] if found, or `null` if no file matches. If multiple files match, returns
+     *   the most recently modified one.
      * @throws DriveApiException if the API request fails.
      */
     suspend fun findByName(
@@ -68,13 +66,14 @@ class DriveSearch(private val client: HttpClient) {
             }
         }
 
-        val response = client.get(FILES_URL) {
-            header(HttpHeaders.Authorization, "Bearer $accessToken")
-            parameter("q", query)
-            parameter("fields", "files(id, name, modifiedTime, sha256Checksum, version)")
-            parameter("orderBy", "modifiedTime desc")
-            parameter("pageSize", "1")
-        }
+        val response =
+            client.get(FILES_URL) {
+                header(HttpHeaders.Authorization, "Bearer $accessToken")
+                parameter("q", query)
+                parameter("fields", "files(id, name, modifiedTime, sha256Checksum, version)")
+                parameter("orderBy", "modifiedTime desc")
+                parameter("pageSize", "1")
+            }
 
         if (response.status != HttpStatusCode.OK) {
             val errorBody = response.body<String>()
@@ -89,7 +88,7 @@ class DriveSearch(private val client: HttpClient) {
      * Lists all files in a specific Google Drive folder.
      *
      * @param accessToken Valid OAuth 2.0 access token.
-     * @param folderId    Google Drive folder ID.
+     * @param folderId Google Drive folder ID.
      * @return List of [DriveFile] objects.
      */
     suspend fun listFilesInFolder(
@@ -107,14 +106,18 @@ class DriveSearch(private val client: HttpClient) {
         var pageToken: String? = null
 
         do {
-            val response = client.get(FILES_URL) {
-                header(HttpHeaders.Authorization, "Bearer $accessToken")
-                parameter("q", query)
-                parameter("fields", "nextPageToken, files(id, name, modifiedTime, mimeType, sha256Checksum, version)")
-                parameter("orderBy", "modifiedTime desc")
-                parameter("pageSize", 1000)
-                pageToken?.let { parameter("pageToken", it) }
-            }
+            val response =
+                client.get(FILES_URL) {
+                    header(HttpHeaders.Authorization, "Bearer $accessToken")
+                    parameter("q", query)
+                    parameter(
+                        "fields",
+                        "nextPageToken, files(id, name, modifiedTime, mimeType, sha256Checksum, version)",
+                    )
+                    parameter("orderBy", "modifiedTime desc")
+                    parameter("pageSize", 1000)
+                    pageToken?.let { parameter("pageToken", it) }
+                }
 
             if (response.status != HttpStatusCode.OK) {
                 val errorBody = response.body<String>()
@@ -133,15 +136,16 @@ class DriveSearch(private val client: HttpClient) {
      * Retrieves a file's metadata by its Drive ID.
      *
      * @param accessToken Valid OAuth 2.0 access token.
-     * @param fileId      Google Drive file ID.
+     * @param fileId Google Drive file ID.
      * @return [DriveFile] with id, name, and modifiedTime.
      * @throws DriveApiException if the file is not found or the request fails.
      */
     suspend fun getById(accessToken: String, fileId: String): DriveFile {
-        val response = client.get("$FILES_URL/$fileId") {
-            header(HttpHeaders.Authorization, "Bearer $accessToken")
-            parameter("fields", "id, name, modifiedTime, sha256Checksum, version")
-        }
+        val response =
+            client.get("$FILES_URL/$fileId") {
+                header(HttpHeaders.Authorization, "Bearer $accessToken")
+                parameter("fields", "id, name, modifiedTime, sha256Checksum, version")
+            }
 
         if (response.status != HttpStatusCode.OK) {
             val errorBody = response.body<String>()

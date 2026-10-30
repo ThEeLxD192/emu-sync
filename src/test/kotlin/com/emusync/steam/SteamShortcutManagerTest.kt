@@ -2,14 +2,14 @@ package com.emusync.steam
 
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.NativePCGame
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 
 class SteamShortcutManagerTest {
 
@@ -23,11 +23,13 @@ class SteamShortcutManagerTest {
         vdfFile.parentFile?.mkdirs()
         BinaryVdf.write(vdfFile, existing)
 
-        return object : SteamShortcutManager(
-            customLauncherDir = File(testDir, "launchers"),
-            registryQuery = registryQuery,
-        ) {
+        return object :
+            SteamShortcutManager(
+                customLauncherDir = File(testDir, "launchers"),
+                registryQuery = registryQuery,
+            ) {
             override fun findShortcutsFile(): File = vdfFile
+
             override fun isWindows(): Boolean = isWindows
         }
     }
@@ -36,12 +38,13 @@ class SteamShortcutManagerTest {
     fun `should register emulator entry and create shortcut on Linux`(@TempDir tempDir: File) {
         val manager = createTestManager(tempDir, isWindows = false)
 
-        val entry = EmulatorSystem(
-            name = "Game Boy Advance",
-            executablePath = "/usr/bin/mgba-qt",
-            romsDirectory = "/roms/gba",
-            extensions = listOf("gba"),
-        )
+        val entry =
+            EmulatorSystem(
+                name = "Game Boy Advance",
+                executablePath = "/usr/bin/mgba-qt",
+                romsDirectory = "/roms/gba",
+                extensions = listOf("gba"),
+            )
 
         val shortcut = manager.registerEntry(entry)
         assertNotNull(shortcut)
@@ -60,19 +63,26 @@ class SteamShortcutManagerTest {
         val content = script.readText()
         assertTrue(content.startsWith("#!/bin/bash"))
         assertTrue(content.contains("FULLSCREEN_ARGS=(\"-f\")"))
-        assertTrue(content.contains("exec \"/usr/bin/mgba-qt\" \"\${FULLSCREEN_ARGS[@]}\" \"\${ROM_PATH}\""))
+        assertTrue(
+            content.contains(
+                "exec \"/usr/bin/mgba-qt\" \"\${FULLSCREEN_ARGS[@]}\" \"\${ROM_PATH}\""
+            )
+        )
     }
 
     @Test
-    fun `should register emulator entry and create batch script on Windows`(@TempDir tempDir: File) {
+    fun `should register emulator entry and create batch script on Windows`(
+        @TempDir tempDir: File
+    ) {
         val manager = createTestManager(tempDir, isWindows = true)
 
-        val entry = EmulatorSystem(
-            name = "Game Boy Advance",
-            executablePath = "C:\\Emulators\\mGBA\\mgba.exe",
-            romsDirectory = "C:\\ROMs\\gba",
-            extensions = listOf("gba"),
-        )
+        val entry =
+            EmulatorSystem(
+                name = "Game Boy Advance",
+                executablePath = "C:\\Emulators\\mGBA\\mgba.exe",
+                romsDirectory = "C:\\ROMs\\gba",
+                extensions = listOf("gba"),
+            )
 
         val shortcut = manager.registerEntry(entry)
         assertNotNull(shortcut)
@@ -90,22 +100,26 @@ class SteamShortcutManagerTest {
     }
 
     @Test
-    fun `should preserve appId when re-registering entry with modified path`(@TempDir tempDir: File) {
+    fun `should preserve appId when re-registering entry with modified path`(
+        @TempDir tempDir: File
+    ) {
         val manager = createTestManager(tempDir)
 
-        val originalEntry = EmulatorSystem(
-            name = "Playstation 1",
-            executablePath = "/old/path/duckstation.AppImage",
-            romsDirectory = "/roms/ps1",
-            extensions = listOf("bin"),
-        )
+        val originalEntry =
+            EmulatorSystem(
+                name = "Playstation 1",
+                executablePath = "/old/path/duckstation.AppImage",
+                romsDirectory = "/roms/ps1",
+                extensions = listOf("bin"),
+            )
 
         val firstShortcut = manager.registerEntry(originalEntry)
 
-        val updatedEntry = originalEntry.copy(
-            executablePath = "/new/path/duckstation.AppImage",
-            steamAppId = firstShortcut.appId,
-        )
+        val updatedEntry =
+            originalEntry.copy(
+                executablePath = "/new/path/duckstation.AppImage",
+                steamAppId = firstShortcut.appId,
+            )
 
         val secondShortcut = manager.registerEntry(updatedEntry)
 
@@ -119,8 +133,20 @@ class SteamShortcutManagerTest {
     fun `should unregister entry cleanly`(@TempDir tempDir: File) {
         val manager = createTestManager(tempDir)
 
-        val ps1 = EmulatorSystem(name = "PS1", executablePath = "/duck", romsDirectory = "/roms", extensions = listOf("bin"))
-        val ps2 = EmulatorSystem(name = "PS2", executablePath = "/pcsx2", romsDirectory = "/roms2", extensions = listOf("iso"))
+        val ps1 =
+            EmulatorSystem(
+                name = "PS1",
+                executablePath = "/duck",
+                romsDirectory = "/roms",
+                extensions = listOf("bin"),
+            )
+        val ps2 =
+            EmulatorSystem(
+                name = "PS2",
+                executablePath = "/pcsx2",
+                romsDirectory = "/roms2",
+                extensions = listOf("iso"),
+            )
 
         val sc1 = manager.registerEntry(ps1)
         val sc2 = manager.registerEntry(ps2)
@@ -138,12 +164,13 @@ class SteamShortcutManagerTest {
     fun `should register native PC game directly with launch options`(@TempDir tempDir: File) {
         val manager = createTestManager(tempDir)
 
-        val nativeGame = NativePCGame(
-            name = "Spelunky",
-            executablePath = "/opt/games/spelunky/spelunky",
-            arguments = listOf("--fullscreen"),
-            savePaths = listOf("/saves/spelunky.sav"),
-        )
+        val nativeGame =
+            NativePCGame(
+                name = "Spelunky",
+                executablePath = "/opt/games/spelunky/spelunky",
+                arguments = listOf("--fullscreen"),
+                savePaths = listOf("/saves/spelunky.sav"),
+            )
 
         val shortcut = manager.registerEntry(nativeGame)
         assertEquals("[EmuSync] Spelunky", shortcut.appName)
@@ -153,61 +180,83 @@ class SteamShortcutManagerTest {
 
     @Test
     fun `should parse Windows registry output accurately`() {
-        val standardOutput = """
+        val standardOutput =
+            """
             HKEY_CURRENT_USER\Software\Valve\Steam
                 SteamPath    REG_SZ    c:/program files (x86)/steam
-        """.trimIndent()
+            """
+                .trimIndent()
 
         val parsedPath = SteamShortcutManager.parseRegistryOutput(standardOutput, "SteamPath")
         assertEquals("c:/program files (x86)/steam", parsedPath)
 
-        val wow64Output = """
+        val wow64Output =
+            """
             HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam
                 InstallPath    REG_SZ    C:\Program Files (x86)\Steam
-        """.trimIndent()
+            """
+                .trimIndent()
 
         val parsedInstall = SteamShortcutManager.parseRegistryOutput(wow64Output, "InstallPath")
         assertEquals("C:\\Program Files (x86)\\Steam", parsedInstall)
 
-        val expandSzOutput = """
+        val expandSzOutput =
+            """
             HKEY_CURRENT_USER\Software\Valve\Steam
                 SteamPath    REG_EXPAND_SZ    %ProgramFiles%\Steam
-        """.trimIndent()
+            """
+                .trimIndent()
 
         val parsedExpand = SteamShortcutManager.parseRegistryOutput(expandSzOutput, "SteamPath")
         assertEquals("%ProgramFiles%\\Steam", parsedExpand)
 
-        val multiLineOutput = """
+        val multiLineOutput =
+            """
             HKEY_CURRENT_USER\Software\Valve\Steam
                 Language     REG_SZ    english
                 SteamPath    REG_SZ    D:\Games\Steam
                 SteamExe     REG_SZ    D:\Games\Steam\steam.exe
-        """.trimIndent()
+            """
+                .trimIndent()
 
-        assertEquals("D:\\Games\\Steam", SteamShortcutManager.parseRegistryOutput(multiLineOutput, "SteamPath"))
-        assertEquals("english", SteamShortcutManager.parseRegistryOutput(multiLineOutput, "Language"))
-        assertEquals("D:\\Games\\Steam\\steam.exe", SteamShortcutManager.parseRegistryOutput(multiLineOutput, "SteamExe"))
+        assertEquals(
+            "D:\\Games\\Steam",
+            SteamShortcutManager.parseRegistryOutput(multiLineOutput, "SteamPath"),
+        )
+        assertEquals(
+            "english",
+            SteamShortcutManager.parseRegistryOutput(multiLineOutput, "Language"),
+        )
+        assertEquals(
+            "D:\\Games\\Steam\\steam.exe",
+            SteamShortcutManager.parseRegistryOutput(multiLineOutput, "SteamExe"),
+        )
 
-        val errorOutput = "ERROR: The system was unable to find the specified registry key or value."
+        val errorOutput =
+            "ERROR: The system was unable to find the specified registry key or value."
         assertNull(SteamShortcutManager.parseRegistryOutput(errorOutput, "SteamPath"))
         assertNull(SteamShortcutManager.parseRegistryOutput("", "SteamPath"))
     }
 
     @Test
-    fun `should locate Windows Steam userdata directory via registry query`(@TempDir tempDir: File) {
+    fun `should locate Windows Steam userdata directory via registry query`(
+        @TempDir tempDir: File
+    ) {
         val mockSteamDir = File(tempDir, "Steam")
         val mockUserdata = File(mockSteamDir, "userdata")
         mockUserdata.mkdirs()
 
-        val manager = object : SteamShortcutManager(
-            registryQuery = { key, valueName ->
-                if (key.contains("Valve\\Steam") && valueName == "SteamPath") {
-                    mockSteamDir.absolutePath
-                } else null
+        val manager =
+            object :
+                SteamShortcutManager(
+                    registryQuery = { key, valueName ->
+                        if (key.contains("Valve\\Steam") && valueName == "SteamPath") {
+                            mockSteamDir.absolutePath
+                        } else null
+                    }
+                ) {
+                override fun isWindows(): Boolean = true
             }
-        ) {
-            override fun isWindows(): Boolean = true
-        }
 
         val resolved = manager.getSteamUserdataDir()
         assertNotNull(resolved)
@@ -216,12 +265,21 @@ class SteamShortcutManagerTest {
 
     @Test
     fun `should detect fullscreen flags for various emulators including RetroArch`() {
-        assertEquals("-bigpicture -fullscreen", SteamShortcutManager.detectFullscreenArgs("C:\\Emulators\\duckstation-qt.exe"))
-        assertEquals("-bigpicture -fullscreen", SteamShortcutManager.detectFullscreenArgs("/usr/bin/pcsx2"))
+        assertEquals(
+            "-bigpicture -fullscreen",
+            SteamShortcutManager.detectFullscreenArgs("C:\\Emulators\\duckstation-qt.exe"),
+        )
+        assertEquals(
+            "-bigpicture -fullscreen",
+            SteamShortcutManager.detectFullscreenArgs("/usr/bin/pcsx2"),
+        )
         assertEquals("-b -e", SteamShortcutManager.detectFullscreenArgs("D:\\Dolphin\\Dolphin.exe"))
         assertEquals("--fullscreen", SteamShortcutManager.detectFullscreenArgs("ppsspp.exe"))
         assertEquals("", SteamShortcutManager.detectFullscreenArgs("/opt/rpcs3/rpcs3"))
-        assertEquals("-f", SteamShortcutManager.detectFullscreenArgs("C:\\RetroArch\\retroarch.exe"))
+        assertEquals(
+            "-f",
+            SteamShortcutManager.detectFullscreenArgs("C:\\RetroArch\\retroarch.exe"),
+        )
         assertEquals("-f", SteamShortcutManager.detectFullscreenArgs("/usr/bin/mgba-qt"))
         assertEquals("", SteamShortcutManager.detectFullscreenArgs("notepad.exe"))
     }
@@ -229,12 +287,13 @@ class SteamShortcutManagerTest {
     @Test
     fun `prepareLaunch writes ROM path to signal file correctly`(@TempDir tempDir: File) {
         val manager = object : SteamShortcutManager(customLauncherDir = tempDir) {}
-        val entry = EmulatorSystem(
-            name = "Super Nintendo",
-            executablePath = "/usr/bin/snes9x",
-            romsDirectory = "/roms/snes",
-            extensions = listOf("sfc"),
-        )
+        val entry =
+            EmulatorSystem(
+                name = "Super Nintendo",
+                executablePath = "/usr/bin/snes9x",
+                romsDirectory = "/roms/snes",
+                extensions = listOf("sfc"),
+            )
         val dummyRom = File(tempDir, "Super Mario World.sfc")
         dummyRom.writeText("dummy-rom-bytes")
 
@@ -246,7 +305,9 @@ class SteamShortcutManagerTest {
     }
 
     @Test
-    fun `findShortcutsFile should pick most recently active user account skipping 0`(@TempDir tempDir: File) {
+    fun `findShortcutsFile should pick most recently active user account skipping 0`(
+        @TempDir tempDir: File
+    ) {
         val userdataDir = File(tempDir, "userdata")
         val offlineDir = File(userdataDir, "0/config").apply { mkdirs() }
         val user1Dir = File(userdataDir, "111111/config").apply { mkdirs() }

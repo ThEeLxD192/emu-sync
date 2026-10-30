@@ -2,53 +2,59 @@ package com.emusync.ui.components
 
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.NativePCGame
-import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Test
 
 class SidebarTest {
 
-    private val eden = EmulatorSystem(
-        name = "Eden",
-        executablePath = "/usr/bin/eden",
-        romsDirectory = "/roms/switch",
-        extensions = listOf("nsp", "xci"),
-        group = "Switch",
-    )
+    private val eden =
+        EmulatorSystem(
+            name = "Eden",
+            executablePath = "/usr/bin/eden",
+            romsDirectory = "/roms/switch",
+            extensions = listOf("nsp", "xci"),
+            group = "Switch",
+        )
 
-    private val yuzu = EmulatorSystem(
-        name = "Yuzu",
-        executablePath = "/usr/bin/yuzu",
-        romsDirectory = "/roms/switch",
-        extensions = listOf("nsp", "xci"),
-        group = "Switch",
-    )
+    private val yuzu =
+        EmulatorSystem(
+            name = "Yuzu",
+            executablePath = "/usr/bin/yuzu",
+            romsDirectory = "/roms/switch",
+            extensions = listOf("nsp", "xci"),
+            group = "Switch",
+        )
 
-    private val pcsx2 = EmulatorSystem(
-        name = "PCSX2",
-        executablePath = "/usr/bin/pcsx2",
-        romsDirectory = "/roms/ps2",
-        extensions = listOf("iso"),
-        group = null,
-    )
+    private val pcsx2 =
+        EmulatorSystem(
+            name = "PCSX2",
+            executablePath = "/usr/bin/pcsx2",
+            romsDirectory = "/roms/ps2",
+            extensions = listOf("iso"),
+            group = null,
+        )
 
-    private val hollowKnight = NativePCGame(
-        name = "Hollow Knight",
-        executablePath = "/games/hk/start.sh",
-        group = null,
-    )
+    private val hollowKnight =
+        NativePCGame(
+            name = "Hollow Knight",
+            executablePath = "/games/hk/start.sh",
+            group = null,
+        )
 
     @Test
     fun `computeSidebarRows includes FolderHeader and child items when expanded`() {
         val entries = listOf(eden, pcsx2, yuzu)
-        val rows = computeSidebarRows(
-            entries = entries,
-            collapsedGroups = emptySet(),
-            selectedEntry = null,
-        )
+        val rows =
+            computeSidebarRows(
+                entries = entries,
+                collapsedGroups = emptySet(),
+                selectedEntry = null,
+            )
 
-        // Expected: FolderHeader(Switch), EntryRow(Eden, isNested=true), EntryRow(Yuzu, isNested=true), EntryRow(PCSX2, isNested=false)
+        // Expected: FolderHeader(Switch), EntryRow(Eden, isNested=true), EntryRow(Yuzu,
+        // isNested=true), EntryRow(PCSX2, isNested=false)
         assertEquals(4, rows.size)
 
         val header = rows[0] as SidebarRow.FolderHeader
@@ -81,13 +87,15 @@ class SidebarTest {
     @Test
     fun `computeSidebarRows keeps FolderHeader and excludes children when collapsed`() {
         val entries = listOf(eden, yuzu, pcsx2)
-        val rows = computeSidebarRows(
-            entries = entries,
-            collapsedGroups = setOf("Switch"),
-            selectedEntry = null,
-        )
+        val rows =
+            computeSidebarRows(
+                entries = entries,
+                collapsedGroups = setOf("Switch"),
+                selectedEntry = null,
+            )
 
-        // When collapsed, FolderHeader is NEVER removed! It stays in rows, but children are excluded.
+        // When collapsed, FolderHeader is NEVER removed! It stays in rows, but children are
+        // excluded.
         assertEquals(2, rows.size)
 
         val header = rows[0] as SidebarRow.FolderHeader
@@ -160,13 +168,14 @@ class SidebarTest {
 
     @Test
     fun `computeSidebarRows handles mixed groups and standalone entries correctly`() {
-        val citra = EmulatorSystem(
-            name = "Citra",
-            executablePath = "/usr/bin/citra",
-            romsDirectory = "/roms/3ds",
-            extensions = listOf("3ds"),
-            group = "3DS",
-        )
+        val citra =
+            EmulatorSystem(
+                name = "Citra",
+                executablePath = "/usr/bin/citra",
+                romsDirectory = "/roms/3ds",
+                extensions = listOf("3ds"),
+                group = "3DS",
+            )
         val entries = listOf(hollowKnight, eden, pcsx2, yuzu, citra)
 
         val rows = computeSidebarRows(entries, setOf("3DS"), null)
@@ -219,13 +228,14 @@ class SidebarTest {
 
     @Test
     fun `moveTopLevelUnit allows dragging folder past standalone entries and other folders`() {
-        val citra = EmulatorSystem(
-            name = "Citra",
-            executablePath = "/usr/bin/citra",
-            romsDirectory = "/roms/3ds",
-            extensions = listOf("3ds"),
-            group = "3DS",
-        )
+        val citra =
+            EmulatorSystem(
+                name = "Citra",
+                executablePath = "/usr/bin/citra",
+                romsDirectory = "/roms/3ds",
+                extensions = listOf("3ds"),
+                group = "3DS",
+            )
         // Order: [Switch (Eden, Yuzu), PCSX2, 3DS (Citra)]
         val entries = listOf(eden, yuzu, pcsx2, citra)
 
@@ -244,13 +254,14 @@ class SidebarTest {
 
     @Test
     fun `moveChildEntry allows dragging children within their folder`() {
-        val ryujinx = EmulatorSystem(
-            name = "Ryujinx",
-            executablePath = "/usr/bin/ryujinx",
-            romsDirectory = "/roms/switch",
-            extensions = listOf("nsp"),
-            group = "Switch",
-        )
+        val ryujinx =
+            EmulatorSystem(
+                name = "Ryujinx",
+                executablePath = "/usr/bin/ryujinx",
+                romsDirectory = "/roms/switch",
+                extensions = listOf("nsp"),
+                group = "Switch",
+            )
         // Switch has: [Eden, Yuzu, Ryujinx]
         val entries = listOf(eden, yuzu, ryujinx, pcsx2)
 

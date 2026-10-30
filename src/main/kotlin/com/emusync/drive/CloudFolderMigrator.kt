@@ -22,7 +22,9 @@ internal class CloudFolderMigrator(
                 folders.renameFolder(token, sourceId, newPath.last())
             } else {
                 folders.renameFolder(
-                    token, sourceId, newPath.last(),
+                    token,
+                    sourceId,
+                    newPath.last(),
                     addParentId = folders.ensurePath(token, newParent),
                     removeParentId = folders.findPath(token, oldParent),
                 )
@@ -34,19 +36,26 @@ internal class CloudFolderMigrator(
         val destinationFiles = search.listChildrenInFolder(token, destinationId)
         val sourceDuplicates = sourceFiles.groupBy { it.name }.filterValues { it.size > 1 }.keys
         val destinationNames = destinationFiles.mapTo(mutableSetOf()) { it.name }
-        val collisions = (sourceDuplicates + sourceFiles.map { it.name }.filter { it in destinationNames }).sorted()
+        val collisions =
+            (sourceDuplicates + sourceFiles.map { it.name }.filter { it in destinationNames })
+                .sorted()
         if (collisions.isNotEmpty()) {
             throw DriveApiException(
                 "Cloud folders '${oldPath.joinToString("/")}' and '${newPath.joinToString("/")}' " +
                     "contain duplicate names: ${collisions.joinToString(", ")}. " +
-                    "Both copies were kept. Resolve the duplicates in Google Drive before renaming.",
+                    "Both copies were kept. Resolve the duplicates in Google Drive before renaming."
             )
         }
 
         val movedFiles = mutableListOf<DriveFile>()
         try {
             for (file in sourceFiles) {
-                folders.moveFile(token, file.id, addParentId = destinationId, removeParentId = sourceId)
+                folders.moveFile(
+                    token,
+                    file.id,
+                    addParentId = destinationId,
+                    removeParentId = sourceId,
+                )
                 movedFiles += file
             }
         } catch (failure: Exception) {
@@ -55,7 +64,12 @@ internal class CloudFolderMigrator(
             withContext(NonCancellable) {
                 for (file in movedFiles.asReversed()) {
                     try {
-                        folders.moveFile(token, file.id, addParentId = sourceId, removeParentId = destinationId)
+                        folders.moveFile(
+                            token,
+                            file.id,
+                            addParentId = sourceId,
+                            removeParentId = destinationId,
+                        )
                     } catch (restoreFailure: Exception) {
                         rollbackFailures += file.name
                         failure.addSuppressed(restoreFailure)
@@ -63,12 +77,16 @@ internal class CloudFolderMigrator(
                 }
             }
             if (failure is CancellationException) throw failure
-            val recovery = if (rollbackFailures.isEmpty()) {
-                "Previously moved files were restored to '${oldPath.joinToString("/")}'."
-            } else {
-                "Some files remain in '${newPath.joinToString("/")}': ${rollbackFailures.joinToString(", ")}."
-            }
-            throw DriveApiException("Cloud migration failed: ${failure.message}. $recovery No folders were deleted.", failure)
+            val recovery =
+                if (rollbackFailures.isEmpty()) {
+                    "Previously moved files were restored to '${oldPath.joinToString("/")}'."
+                } else {
+                    "Some files remain in '${newPath.joinToString("/")}': ${rollbackFailures.joinToString(", ")}."
+                }
+            throw DriveApiException(
+                "Cloud migration failed: ${failure.message}. $recovery No folders were deleted.",
+                failure,
+            )
         }
 
         // Keep the source folder: another device can add files after our listing,

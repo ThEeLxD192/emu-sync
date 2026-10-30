@@ -8,6 +8,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import java.io.File
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -17,7 +18,6 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
-import java.io.File
 
 class UpdateManagerTest {
 
@@ -37,7 +37,8 @@ class UpdateManagerTest {
     @Test
     fun `checkForUpdates detects newer release and AppImage asset on Linux`() = runTest {
         val mockEngine = MockEngine { _ ->
-            val jsonResponse = """
+            val jsonResponse =
+                """
                 {
                     "tag_name": "v0.3.0",
                     "name": "EmuSync 0.3.0",
@@ -55,23 +56,31 @@ class UpdateManagerTest {
                         }
                     ]
                 }
-            """.trimIndent()
+                """
+                    .trimIndent()
             respond(
                 content = jsonResponse,
                 status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, "application/json")
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
             )
         }
 
-        val client = HttpClient(mockEngine) {
-            install(ContentNegotiation) {
-                json(Json { ignoreUnknownKeys = true; isLenient = true })
+        val client =
+            HttpClient(mockEngine) {
+                install(ContentNegotiation) {
+                    json(
+                        Json {
+                            ignoreUnknownKeys = true
+                            isLenient = true
+                        }
+                    )
+                }
             }
-        }
 
-        val manager = object : UpdateManager(client) {
-            override fun isWindows(): Boolean = false
-        }
+        val manager =
+            object : UpdateManager(client) {
+                override fun isWindows(): Boolean = false
+            }
         val update = manager.checkForUpdates(currentVersion = "0.2.0")
 
         assertNotNull(update)
@@ -84,7 +93,8 @@ class UpdateManagerTest {
     @Test
     fun `checkForUpdates detects newer release and MSI asset on Windows`() = runTest {
         val mockEngine = MockEngine { _ ->
-            val jsonResponse = """
+            val jsonResponse =
+                """
                 {
                     "tag_name": "v0.3.0",
                     "name": "EmuSync 0.3.0",
@@ -102,23 +112,31 @@ class UpdateManagerTest {
                         }
                     ]
                 }
-            """.trimIndent()
+                """
+                    .trimIndent()
             respond(
                 content = jsonResponse,
                 status = HttpStatusCode.OK,
-                headers = headersOf(HttpHeaders.ContentType, "application/json")
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
             )
         }
 
-        val client = HttpClient(mockEngine) {
-            install(ContentNegotiation) {
-                json(Json { ignoreUnknownKeys = true; isLenient = true })
+        val client =
+            HttpClient(mockEngine) {
+                install(ContentNegotiation) {
+                    json(
+                        Json {
+                            ignoreUnknownKeys = true
+                            isLenient = true
+                        }
+                    )
+                }
             }
-        }
 
-        val manager = object : UpdateManager(client) {
-            override fun isWindows(): Boolean = true
-        }
+        val manager =
+            object : UpdateManager(client) {
+                override fun isWindows(): Boolean = true
+            }
         val update = manager.checkForUpdates(currentVersion = "0.2.0")
 
         assertNotNull(update)
@@ -136,15 +154,24 @@ class UpdateManagerTest {
         val msiAsset = GitHubAsset(name = "EmuSync.msi", downloadUrl = "http://msi")
 
         // Priority 1: MSI
-        val best1 = UpdateManager.findBestAssetForPlatform(listOf(zipAsset, appImage, exeAsset, msiAsset), isWindows = true)
+        val best1 =
+            UpdateManager.findBestAssetForPlatform(
+                listOf(zipAsset, appImage, exeAsset, msiAsset),
+                isWindows = true,
+            )
         assertEquals("EmuSync.msi", best1?.name)
 
         // Priority 2: EXE
-        val best2 = UpdateManager.findBestAssetForPlatform(listOf(zipAsset, appImage, exeAsset), isWindows = true)
+        val best2 =
+            UpdateManager.findBestAssetForPlatform(
+                listOf(zipAsset, appImage, exeAsset),
+                isWindows = true,
+            )
         assertEquals("EmuSync-Setup.exe", best2?.name)
 
         // Priority 3: ZIP
-        val best3 = UpdateManager.findBestAssetForPlatform(listOf(zipAsset, appImage), isWindows = true)
+        val best3 =
+            UpdateManager.findBestAssetForPlatform(listOf(zipAsset, appImage), isWindows = true)
         assertEquals("EmuSync.zip", best3?.name)
 
         // No Windows asset
@@ -160,15 +187,24 @@ class UpdateManagerTest {
         val msiAsset = GitHubAsset(name = "EmuSync.msi", downloadUrl = "http://msi")
 
         // Priority 1: AppImage
-        val best1 = UpdateManager.findBestAssetForPlatform(listOf(msiAsset, debAsset, tarAsset, appImage), isWindows = false)
+        val best1 =
+            UpdateManager.findBestAssetForPlatform(
+                listOf(msiAsset, debAsset, tarAsset, appImage),
+                isWindows = false,
+            )
         assertEquals("EmuSync.AppImage", best1?.name)
 
         // Priority 2: tar.gz
-        val best2 = UpdateManager.findBestAssetForPlatform(listOf(msiAsset, debAsset, tarAsset), isWindows = false)
+        val best2 =
+            UpdateManager.findBestAssetForPlatform(
+                listOf(msiAsset, debAsset, tarAsset),
+                isWindows = false,
+            )
         assertEquals("EmuSync.tar.gz", best2?.name)
 
         // Priority 3: deb
-        val best3 = UpdateManager.findBestAssetForPlatform(listOf(msiAsset, debAsset), isWindows = false)
+        val best3 =
+            UpdateManager.findBestAssetForPlatform(listOf(msiAsset, debAsset), isWindows = false)
         assertEquals("EmuSync.deb", best3?.name)
 
         // No Linux asset
@@ -182,9 +218,10 @@ class UpdateManagerTest {
         val msiFile = File(tempDir, "EmuSync-Setup.msi").apply { createNewFile() }
 
         var executedCommand: List<String>? = null
-        val success = manager.applyWindowsUpdateAndRestart(msiFile) { cmd ->
-            executedCommand = cmd
-        }
+        val success =
+            manager.applyWindowsUpdateAndRestart(msiFile) { cmd ->
+                executedCommand = cmd
+            }
 
         assertTrue(success)
         assertNotNull(executedCommand)
@@ -197,9 +234,10 @@ class UpdateManagerTest {
         val exeFile = File(tempDir, "EmuSync-Setup.exe").apply { createNewFile() }
 
         var executedCommand: List<String>? = null
-        val success = manager.applyWindowsUpdateAndRestart(exeFile) { cmd ->
-            executedCommand = cmd
-        }
+        val success =
+            manager.applyWindowsUpdateAndRestart(exeFile) { cmd ->
+                executedCommand = cmd
+            }
 
         assertTrue(success)
         assertNotNull(executedCommand)
@@ -207,14 +245,17 @@ class UpdateManagerTest {
     }
 
     @Test
-    fun `applyWindowsUpdateAndRestart returns false for non-installer files`(@TempDir tempDir: File) {
+    fun `applyWindowsUpdateAndRestart returns false for non-installer files`(
+        @TempDir tempDir: File
+    ) {
         val manager = UpdateManager()
         val txtFile = File(tempDir, "readme.txt").apply { createNewFile() }
 
         var launched = false
-        val success = manager.applyWindowsUpdateAndRestart(txtFile) { _ ->
-            launched = true
-        }
+        val success =
+            manager.applyWindowsUpdateAndRestart(txtFile) { _ ->
+                launched = true
+            }
 
         assertFalse(success)
         assertFalse(launched)
@@ -227,10 +268,11 @@ class UpdateManagerTest {
             respond(
                 content = sampleData,
                 status = HttpStatusCode.OK,
-                headers = headersOf(
-                    HttpHeaders.ContentType to listOf("application/octet-stream"),
-                    HttpHeaders.ContentLength to listOf(sampleData.size.toString())
-                )
+                headers =
+                    headersOf(
+                        HttpHeaders.ContentType to listOf("application/octet-stream"),
+                        HttpHeaders.ContentLength to listOf(sampleData.size.toString()),
+                    ),
             )
         }
 
@@ -240,9 +282,10 @@ class UpdateManagerTest {
 
         try {
             var finalProgress = 0f
-            val result = manager.downloadUpdate("https://example.com/download/file", tempFile) { progress ->
-                finalProgress = progress
-            }
+            val result =
+                manager.downloadUpdate("https://example.com/download/file", tempFile) { progress ->
+                    finalProgress = progress
+                }
 
             assertTrue(result.isSuccess)
             assertTrue(tempFile.exists())
@@ -254,20 +297,26 @@ class UpdateManagerTest {
     }
 
     @Test
-    fun `applyLinuxUpdateAndRestart replaces AppImage file and calls launcher`(@TempDir tempDir: File) {
+    fun `applyLinuxUpdateAndRestart replaces AppImage file and calls launcher`(
+        @TempDir tempDir: File
+    ) {
         val currentAppImage = File(tempDir, "EmuSync.AppImage").apply { writeText("OLD_VERSION") }
         val downloadedUpdate = File(tempDir, ".update.AppImage").apply { writeText("NEW_VERSION") }
 
         var launchedPath: String? = null
-        val manager = object : UpdateManager() {
-            override fun isWindows() = false
-            override fun isSteamGameMode() = false
-            override fun getCurrentAppImagePath() = currentAppImage.absolutePath
-        }
+        val manager =
+            object : UpdateManager() {
+                override fun isWindows() = false
 
-        val success = manager.applyLinuxUpdateAndRestart(downloadedUpdate) { path ->
-            launchedPath = path
-        }
+                override fun isSteamGameMode() = false
+
+                override fun getCurrentAppImagePath() = currentAppImage.absolutePath
+            }
+
+        val success =
+            manager.applyLinuxUpdateAndRestart(downloadedUpdate) { path ->
+                launchedPath = path
+            }
 
         assertTrue(success)
         assertEquals(currentAppImage.absolutePath, launchedPath)
@@ -276,37 +325,47 @@ class UpdateManagerTest {
     }
 
     @Test
-    fun `applyLinuxUpdateAndRestart returns false when APPIMAGE path is missing`(@TempDir tempDir: File) {
+    fun `applyLinuxUpdateAndRestart returns false when APPIMAGE path is missing`(
+        @TempDir tempDir: File
+    ) {
         val downloadedUpdate = File(tempDir, ".update.AppImage").apply { writeText("NEW_VERSION") }
 
         var launched = false
-        val manager = object : UpdateManager() {
-            override fun isWindows() = false
-            override fun getCurrentAppImagePath(): String? = null
-        }
+        val manager =
+            object : UpdateManager() {
+                override fun isWindows() = false
 
-        val success = manager.applyLinuxUpdateAndRestart(downloadedUpdate) { _ ->
-            launched = true
-        }
+                override fun getCurrentAppImagePath(): String? = null
+            }
+
+        val success =
+            manager.applyLinuxUpdateAndRestart(downloadedUpdate) { _ ->
+                launched = true
+            }
 
         assertFalse(success)
         assertFalse(launched)
     }
 
     @Test
-    fun `applyLinuxUpdateAndRestart returns false when downloaded file does not exist`(@TempDir tempDir: File) {
+    fun `applyLinuxUpdateAndRestart returns false when downloaded file does not exist`(
+        @TempDir tempDir: File
+    ) {
         val currentAppImage = File(tempDir, "EmuSync.AppImage").apply { writeText("OLD_VERSION") }
         val nonExistentUpdate = File(tempDir, "does-not-exist.AppImage")
 
         var launched = false
-        val manager = object : UpdateManager() {
-            override fun isWindows() = false
-            override fun getCurrentAppImagePath() = currentAppImage.absolutePath
-        }
+        val manager =
+            object : UpdateManager() {
+                override fun isWindows() = false
 
-        val success = manager.applyLinuxUpdateAndRestart(nonExistentUpdate) { _ ->
-            launched = true
-        }
+                override fun getCurrentAppImagePath() = currentAppImage.absolutePath
+            }
+
+        val success =
+            manager.applyLinuxUpdateAndRestart(nonExistentUpdate) { _ ->
+                launched = true
+            }
 
         assertFalse(success)
         assertFalse(launched)
@@ -327,18 +386,25 @@ class UpdateManagerTest {
     }
 
     @Test
-    fun `applyUpdateAndRestart delegates to Linux update on Linux platform`(@TempDir tempDir: File) {
+    fun `applyUpdateAndRestart delegates to Linux update on Linux platform`(
+        @TempDir tempDir: File
+    ) {
         val currentAppImage = File(tempDir, "EmuSync.AppImage").apply { writeText("V1") }
         val downloadedUpdate = File(tempDir, "update.AppImage").apply { writeText("V2") }
 
         var linuxUpdateCalled = false
-        val manager = object : UpdateManager(exitApplication = {}) {
-            override fun isWindows() = false
-            override fun applyLinuxUpdateAndRestart(downloadedFile: File, launcher: (String) -> Unit): Boolean {
-                linuxUpdateCalled = true
-                return true
+        val manager =
+            object : UpdateManager(exitApplication = {}) {
+                override fun isWindows() = false
+
+                override fun applyLinuxUpdateAndRestart(
+                    downloadedFile: File,
+                    launcher: (String) -> Unit,
+                ): Boolean {
+                    linuxUpdateCalled = true
+                    return true
+                }
             }
-        }
 
         val success = manager.applyUpdateAndRestart(downloadedUpdate)
         assertTrue(success)
@@ -346,20 +412,26 @@ class UpdateManagerTest {
     }
 
     @Test
-    fun `applyLinuxUpdateAndRestart in Steam Game Mode calls launcher with updated path`(@TempDir tempDir: File) {
+    fun `applyLinuxUpdateAndRestart in Steam Game Mode calls launcher with updated path`(
+        @TempDir tempDir: File
+    ) {
         val currentAppImage = File(tempDir, "EmuSync.AppImage").apply { writeText("V1") }
         val downloadedUpdate = File(tempDir, "update.AppImage").apply { writeText("V2") }
 
         var launchedPath: String? = null
-        val manager = object : UpdateManager() {
-            override fun isWindows() = false
-            override fun isSteamGameMode() = true
-            override fun getCurrentAppImagePath() = currentAppImage.absolutePath
-        }
+        val manager =
+            object : UpdateManager() {
+                override fun isWindows() = false
 
-        val success = manager.applyLinuxUpdateAndRestart(downloadedUpdate) { path ->
-            launchedPath = path
-        }
+                override fun isSteamGameMode() = true
+
+                override fun getCurrentAppImagePath() = currentAppImage.absolutePath
+            }
+
+        val success =
+            manager.applyLinuxUpdateAndRestart(downloadedUpdate) { path ->
+                launchedPath = path
+            }
 
         assertTrue(success)
         assertEquals(currentAppImage.absolutePath, launchedPath)

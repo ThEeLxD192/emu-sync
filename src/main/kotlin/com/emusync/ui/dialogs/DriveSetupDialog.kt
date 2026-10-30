@@ -2,7 +2,6 @@ package com.emusync.ui.dialogs
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -50,8 +49,8 @@ import java.awt.Desktop
 import java.io.File
 
 /**
- * Dialog for viewing and configuring Google Drive OAuth credentials,
- * unlinking an account, or opening the directory containing config.json.
+ * Dialog for viewing and configuring Google Drive OAuth credentials, unlinking an account, or
+ * opening the directory containing config.json.
  */
 @Composable
 fun DriveSetupDialog(
@@ -71,22 +70,17 @@ fun DriveSetupDialog(
             shape = RoundedCornerShape(16.dp),
             color = EmuSyncColors.Surface,
             border = BorderStroke(1.dp, EmuSyncColors.Divider),
-            modifier = Modifier
-                .widthIn(min = 450.dp, max = 560.dp)
-                .wrapContentHeight(),
+            modifier = Modifier.widthIn(min = 450.dp, max = 560.dp).wrapContentHeight(),
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(24.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
+            Column(modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState())) {
                 // Header
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(
-                        imageVector = if (isLinked) Icons.Default.Cloud else Icons.Default.CloudSync,
+                        imageVector =
+                            if (isLinked) Icons.Default.Cloud else Icons.Default.CloudSync,
                         contentDescription = null,
                         tint = if (isLinked) EmuSyncColors.Success else EmuSyncColors.Primary,
                         modifier = Modifier.size(28.dp),
@@ -100,9 +94,12 @@ fun DriveSetupDialog(
                             color = EmuSyncColors.OnSurface,
                         )
                         Text(
-                            text = if (isLinked) "Account linked and active" else "Configure cross-device save synchronization",
+                            text =
+                                if (isLinked) "Account linked and active"
+                                else "Configure cross-device save synchronization",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (isLinked) EmuSyncColors.Success else EmuSyncColors.OnSurfaceDim,
+                            color =
+                                if (isLinked) EmuSyncColors.Success else EmuSyncColors.OnSurfaceDim,
                         )
                     }
                 }
@@ -127,7 +124,8 @@ fun DriveSetupDialog(
                         )
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            text = "Requires an OAuth 2.0 Client ID (Desktop App) from Google Cloud Console with the Google Drive API enabled.",
+                            text =
+                                "Requires an OAuth 2.0 Client ID (Desktop App) from Google Cloud Console with the Google Drive API enabled.",
                             style = MaterialTheme.typography.bodySmall,
                             color = EmuSyncColors.OnSurfaceDim,
                             lineHeight = 18.sp,
@@ -148,12 +146,13 @@ fun DriveSetupDialog(
                     placeholder = { Text("xxxxxx.apps.googleusercontent.com") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = EmuSyncColors.Primary,
-                        unfocusedBorderColor = EmuSyncColors.Divider,
-                        focusedTextColor = EmuSyncColors.OnSurface,
-                        unfocusedTextColor = EmuSyncColors.OnSurface,
-                    ),
+                    colors =
+                        OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = EmuSyncColors.Primary,
+                            unfocusedBorderColor = EmuSyncColors.Divider,
+                            focusedTextColor = EmuSyncColors.OnSurface,
+                            unfocusedTextColor = EmuSyncColors.OnSurface,
+                        ),
                 )
 
                 Spacer(Modifier.height(12.dp))
@@ -169,12 +168,13 @@ fun DriveSetupDialog(
                     placeholder = { Text("GOCSPX-xxxxxx") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = EmuSyncColors.Primary,
-                        unfocusedBorderColor = EmuSyncColors.Divider,
-                        focusedTextColor = EmuSyncColors.OnSurface,
-                        unfocusedTextColor = EmuSyncColors.OnSurface,
-                    ),
+                    colors =
+                        OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = EmuSyncColors.Primary,
+                            unfocusedBorderColor = EmuSyncColors.Divider,
+                            focusedTextColor = EmuSyncColors.OnSurface,
+                            unfocusedTextColor = EmuSyncColors.OnSurface,
+                        ),
                 )
 
                 if (errorMessage != null) {
@@ -217,7 +217,11 @@ fun DriveSetupDialog(
                         Spacer(Modifier.width(8.dp))
                         OutlinedButton(
                             onClick = { openConfigDirectory(configFile) },
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            contentPadding =
+                                androidx.compose.foundation.layout.PaddingValues(
+                                    horizontal = 10.dp,
+                                    vertical = 4.dp,
+                                ),
                         ) {
                             Icon(
                                 imageVector = Icons.Default.FolderOpen,
@@ -245,9 +249,14 @@ fun DriveSetupDialog(
                                 onUnlink()
                                 onDismiss()
                             },
-                            colors = ButtonDefaults.textButtonColors(contentColor = EmuSyncColors.Error),
+                            colors =
+                                ButtonDefaults.textButtonColors(contentColor = EmuSyncColors.Error),
                         ) {
-                            Icon(Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(
+                                Icons.Default.LinkOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
                             Spacer(Modifier.width(6.dp))
                             Text("Unlink Account")
                         }
@@ -259,7 +268,10 @@ fun DriveSetupDialog(
                     Row {
                         TextButton(
                             onClick = onDismiss,
-                            colors = ButtonDefaults.textButtonColors(contentColor = EmuSyncColors.OnSurfaceDim),
+                            colors =
+                                ButtonDefaults.textButtonColors(
+                                    contentColor = EmuSyncColors.OnSurfaceDim
+                                ),
                         ) {
                             Text("Cancel")
                         }
@@ -273,12 +285,17 @@ fun DriveSetupDialog(
                                     onDismiss()
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = EmuSyncColors.Primary,
-                                contentColor = androidx.compose.ui.graphics.Color.White,
-                            ),
+                            colors =
+                                ButtonDefaults.buttonColors(
+                                    containerColor = EmuSyncColors.Primary,
+                                    contentColor = androidx.compose.ui.graphics.Color.White,
+                                ),
                         ) {
-                            Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(
+                                Icons.Default.CloudSync,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
                             Spacer(Modifier.width(6.dp))
                             Text("Save & Connect")
                         }

@@ -19,8 +19,12 @@ internal class AppImageInstaller(
     fun replace(source: File, target: File, onInstalled: () -> Unit = {}) {
         val sourcePath = source.toPath().toAbsolutePath().normalize()
         val targetPath = target.toPath().toAbsolutePath().normalize()
-        require(Files.isRegularFile(sourcePath)) { "The downloaded AppImage is not a regular file: $source" }
-        require(Files.isRegularFile(targetPath)) { "The current AppImage is not a regular file: $target" }
+        require(Files.isRegularFile(sourcePath)) {
+            "The downloaded AppImage is not a regular file: $source"
+        }
+        require(Files.isRegularFile(targetPath)) {
+            "The current AppImage is not a regular file: $target"
+        }
         require(!Files.isSameFile(sourcePath, targetPath)) { "The update must be a separate file" }
 
         val parent = targetPath.parent
@@ -48,7 +52,9 @@ internal class AppImageInstaller(
                     moveFile(requireNotNull(backup), targetPath)
                     originalBackedUp = false
                 } catch (restoreFailure: Exception) {
-                    failure.addSuppressed(IOException("The original AppImage is preserved at $backup", restoreFailure))
+                    failure.addSuppressed(
+                        IOException("The original AppImage is preserved at $backup", restoreFailure)
+                    )
                 }
             }
             throw failure
@@ -67,7 +73,12 @@ internal class AppImageInstaller(
 
 private fun moveReplacing(source: Path, target: Path) {
     try {
-        Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        Files.move(
+            source,
+            target,
+            StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING,
+        )
     } catch (_: AtomicMoveNotSupportedException) {
         Files.move(source, target, StandardCopyOption.REPLACE_EXISTING)
     }

@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,8 +38,8 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -67,17 +66,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
 import com.emusync.ui.CloudSyncStatus
 import com.emusync.ui.GameItem
 import com.emusync.ui.theme.EmuSyncColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
- * Main content area displaying games as cards in an adaptive grid.
- * Features prominent custom cover art with auto-lookup and hover-activated play/edit actions.
+ * Main content area displaying games as cards in an adaptive grid. Features prominent custom cover
+ * art with auto-lookup and hover-activated play/edit actions.
  */
 @Composable
 fun GameGrid(
@@ -111,7 +110,11 @@ fun GameGrid(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (selectedEntry is EmulatorSystem) {
                         OutlinedButton(onClick = { onOpenEmulator(selectedEntry) }) {
-                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
                             Spacer(Modifier.width(6.dp))
                             Text("Open Emulator")
                         }
@@ -131,14 +134,14 @@ fun GameGrid(
                         Icon(
                             imageVector = Icons.Default.Edit,
                             contentDescription = "Edit Category",
-                            tint = EmuSyncColors.OnSurfaceDim
+                            tint = EmuSyncColors.OnSurfaceDim,
                         )
                     }
                     IconButton(onClick = onDeleteCategory) {
                         Icon(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Delete Category",
-                            tint = EmuSyncColors.OnSurfaceDim
+                            tint = EmuSyncColors.OnSurfaceDim,
                         )
                     }
                     Spacer(Modifier.width(8.dp))
@@ -174,10 +177,9 @@ fun GameGrid(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = if (selectedEntry is EmulatorSystem)
-                            "No ROMs found"
-                        else
-                            "Select a category",
+                        text =
+                            if (selectedEntry is EmulatorSystem) "No ROMs found"
+                            else "Select a category",
                         style = MaterialTheme.typography.titleMedium,
                         color = EmuSyncColors.OnSurfaceDim,
                     )
@@ -198,7 +200,12 @@ fun GameGrid(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(items, key = { gameItem -> "${gameItem.entry.name}_${gameItem.romFile?.absolutePath ?: gameItem.name}" }) { gameItem ->
+                items(
+                    items,
+                    key = { gameItem ->
+                        "${gameItem.entry.name}_${gameItem.romFile?.absolutePath ?: gameItem.name}"
+                    },
+                ) { gameItem ->
                     GameCard(
                         item = gameItem,
                         onClick = { onGameClicked(gameItem) },
@@ -217,121 +224,135 @@ private fun CloudStatusChip(
     onCheckClick: (() -> Unit)?,
 ) {
     val infiniteTransition = rememberInfiniteTransition()
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = LinearEasing)
+    val rotation by
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(animation = tween(1200, easing = LinearEasing)),
         )
-    )
 
     when (status) {
         CloudSyncStatus.IN_SYNC -> {
             Surface(
                 shape = RoundedCornerShape(8.dp),
                 color = EmuSyncColors.SurfaceVariant,
-                modifier = Modifier.padding(end = 4.dp)
+                modifier = Modifier.padding(end = 4.dp),
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
                         imageVector = Icons.Default.CloudDone,
                         contentDescription = "Saves in sync",
                         tint = EmuSyncColors.Success,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(16.dp),
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
                         text = "In Sync",
                         style = MaterialTheme.typography.labelSmall,
-                        color = EmuSyncColors.OnSurface
+                        color = EmuSyncColors.OnSurface,
                     )
                     if (onCheckClick != null) {
                         Spacer(Modifier.width(4.dp))
                         IconButton(
                             onClick = onCheckClick,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(18.dp),
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
                                 contentDescription = "Check sync",
                                 tint = EmuSyncColors.OnSurfaceDim,
-                                modifier = Modifier.size(13.dp)
+                                modifier = Modifier.size(13.dp),
                             )
                         }
                     }
                 }
             }
         }
-        CloudSyncStatus.OUT_OF_SYNC, CloudSyncStatus.CONFLICT -> {
+        CloudSyncStatus.OUT_OF_SYNC,
+        CloudSyncStatus.CONFLICT -> {
             Button(
                 onClick = onSyncClick,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (status == CloudSyncStatus.CONFLICT) EmuSyncColors.Warning.copy(alpha = 0.2f) else EmuSyncColors.PrimaryContainer,
-                    contentColor = if (status == CloudSyncStatus.CONFLICT) EmuSyncColors.Warning else EmuSyncColors.Primary,
-                ),
+                colors =
+                    ButtonDefaults.buttonColors(
+                        containerColor =
+                            if (status == CloudSyncStatus.CONFLICT)
+                                EmuSyncColors.Warning.copy(alpha = 0.2f)
+                            else EmuSyncColors.PrimaryContainer,
+                        contentColor =
+                            if (status == CloudSyncStatus.CONFLICT) EmuSyncColors.Warning
+                            else EmuSyncColors.Primary,
+                    ),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.padding(end = 4.dp)
+                modifier = Modifier.padding(end = 4.dp),
             ) {
                 Icon(
-                    imageVector = if (status == CloudSyncStatus.CONFLICT) Icons.Default.Warning else Icons.Default.CloudDownload,
+                    imageVector =
+                        if (status == CloudSyncStatus.CONFLICT) Icons.Default.Warning
+                        else Icons.Default.CloudDownload,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(16.dp),
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = if (status == CloudSyncStatus.CONFLICT) "Conflict • Sync" else "Out of sync • Sync All",
+                    text =
+                        if (status == CloudSyncStatus.CONFLICT) "Conflict • Sync"
+                        else "Out of sync • Sync All",
                     style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
                 )
             }
         }
-        CloudSyncStatus.CHECKING, CloudSyncStatus.SYNCING -> {
+        CloudSyncStatus.CHECKING,
+        CloudSyncStatus.SYNCING -> {
             Surface(
                 shape = RoundedCornerShape(8.dp),
                 color = EmuSyncColors.SurfaceVariant,
-                modifier = Modifier.padding(end = 4.dp)
+                modifier = Modifier.padding(end = 4.dp),
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
                         imageVector = Icons.Default.CloudSync,
                         contentDescription = null,
                         tint = EmuSyncColors.Primary,
-                        modifier = Modifier.size(16.dp).rotate(rotation)
+                        modifier = Modifier.size(16.dp).rotate(rotation),
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = if (status == CloudSyncStatus.SYNCING) "Syncing..." else "Checking...",
+                        text =
+                            if (status == CloudSyncStatus.SYNCING) "Syncing..." else "Checking...",
                         style = MaterialTheme.typography.labelSmall,
-                        color = EmuSyncColors.OnSurface
+                        color = EmuSyncColors.OnSurface,
                     )
                 }
             }
         }
-        CloudSyncStatus.IDLE, CloudSyncStatus.ERROR, CloudSyncStatus.NOT_CONFIGURED -> {
+        CloudSyncStatus.IDLE,
+        CloudSyncStatus.ERROR,
+        CloudSyncStatus.NOT_CONFIGURED -> {
             if (status != CloudSyncStatus.NOT_CONFIGURED) {
                 OutlinedButton(
                     onClick = onSyncClick,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.padding(end = 4.dp)
+                    modifier = Modifier.padding(end = 4.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Default.CloudSync,
                         contentDescription = "Sync All",
                         tint = EmuSyncColors.Primary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(16.dp),
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
                         text = "Sync All",
-                        style = MaterialTheme.typography.labelSmall
+                        style = MaterialTheme.typography.labelSmall,
                     )
                 }
             }
@@ -348,48 +369,52 @@ private fun GameCard(
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
 
-    val coverBitmap = produceState<ImageBitmap?>(initialValue = null, key1 = item) {
-        value = withContext(Dispatchers.IO) { loadGameCover(item.coverFile) }
-    }.value
+    val coverBitmap =
+        produceState<ImageBitmap?>(initialValue = null, key1 = item) {
+                value = withContext(Dispatchers.IO) { loadGameCover(item.coverFile) }
+            }
+            .value
 
-    val cardColor by animateColorAsState(
-        if (isHovered) EmuSyncColors.CardHover else EmuSyncColors.SurfaceVariant
-    )
+    val cardColor by
+        animateColorAsState(
+            if (isHovered) EmuSyncColors.CardHover else EmuSyncColors.SurfaceVariant
+        )
 
-    val borderColor by animateColorAsState(
-        if (isHovered) EmuSyncColors.Primary else EmuSyncColors.Divider
-    )
+    val borderColor by
+        animateColorAsState(if (isHovered) EmuSyncColors.Primary else EmuSyncColors.Divider)
 
-    val editAlpha by animateFloatAsState(
-        targetValue = if (isHovered) 1f else 0f,
-        animationSpec = tween(durationMillis = 150)
-    )
+    val editAlpha by
+        animateFloatAsState(
+            targetValue = if (isHovered) 1f else 0f,
+            animationSpec = tween(durationMillis = 150),
+        )
 
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(205.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
-            .hoverable(interactionSource),
+        modifier =
+            Modifier.fillMaxWidth()
+                .height(205.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(interactionSource = interactionSource, indication = null) { onClick() }
+                .hoverable(interactionSource),
         shape = RoundedCornerShape(12.dp),
         color = cardColor,
         border = BorderStroke(1.dp, borderColor),
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize().padding(8.dp)
-        ) {
+        Box(modifier = Modifier.fillMaxSize().padding(8.dp)) {
             Column(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // Cover Art / Fallback Play Icon (140dp height for prominent showcase)
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (coverBitmap != null) Color.Transparent else EmuSyncColors.Surface.copy(alpha = 0.5f)),
+                    modifier =
+                        Modifier.fillMaxWidth()
+                            .height(140.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (coverBitmap != null) Color.Transparent
+                                else EmuSyncColors.Surface.copy(alpha = 0.5f)
+                            ),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (coverBitmap != null) {
@@ -401,9 +426,9 @@ private fun GameCard(
                         )
                         if (isHovered) {
                             Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.45f)),
+                                modifier =
+                                    Modifier.fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.45f)),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
@@ -416,10 +441,10 @@ private fun GameCard(
                         }
                     } else {
                         Box(
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(EmuSyncColors.PrimaryContainer),
+                            modifier =
+                                Modifier.size(56.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(EmuSyncColors.PrimaryContainer),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
@@ -447,24 +472,25 @@ private fun GameCard(
                 )
             }
 
-            // Top-right edit button shown only on hover (smooth pure alpha fade, compact 22dp circle)
+            // Top-right edit button shown only on hover (smooth pure alpha fade, compact 22dp
+            // circle)
             if (onEdit != null && editAlpha > 0.01f) {
                 Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .graphicsLayer { alpha = editAlpha }
-                        .size(22.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .clickable(onClick = { onEdit() }),
-                    contentAlignment = Alignment.Center
+                    modifier =
+                        Modifier.align(Alignment.TopEnd)
+                            .padding(4.dp)
+                            .graphicsLayer { alpha = editAlpha }
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .clickable(onClick = { onEdit() }),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = Icons.Default.Edit,
                         contentDescription = "Edit Saves",
                         tint = Color.White.copy(alpha = 0.9f),
-                        modifier = Modifier.size(12.dp)
+                        modifier = Modifier.size(12.dp),
                     )
                 }
             }

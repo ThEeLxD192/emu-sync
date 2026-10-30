@@ -11,10 +11,12 @@ object AppImageEnvironment {
         environment.remove("OWD")
 
         val ldLibraryPath = environment["LD_LIBRARY_PATH"] ?: return
-        val cleanedPaths = ldLibraryPath.split(File.pathSeparator).filterNot { path ->
-            (appDir.isNotEmpty() && (path == appDir || path.startsWith("$appDir${File.separator}"))) ||
-                path.split('/', '\\').any { segment -> segment.startsWith(".mount_") }
-        }
+        val cleanedPaths =
+            ldLibraryPath.split(File.pathSeparator).filterNot { path ->
+                (appDir.isNotEmpty() &&
+                    (path == appDir || path.startsWith("$appDir${File.separator}"))) ||
+                    path.split('/', '\\').any { segment -> segment.startsWith(".mount_") }
+            }
         if (cleanedPaths.isEmpty()) {
             environment.remove("LD_LIBRARY_PATH")
         } else {

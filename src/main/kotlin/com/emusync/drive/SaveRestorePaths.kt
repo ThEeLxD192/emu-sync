@@ -10,17 +10,26 @@ import java.nio.file.Path
 private val WINDOWS_DRIVE_PATH = Regex("^[A-Za-z]:.*")
 
 internal fun remotePathSegments(remoteName: String): List<String>? {
-    if (remoteName.isBlank() || remoteName != remoteName.trim() || '\u0000' in remoteName) return null
-    if (remoteName.startsWith('/') || remoteName.startsWith('\\') || WINDOWS_DRIVE_PATH.matches(remoteName)) return null
+    if (remoteName.isBlank() || remoteName != remoteName.trim() || '\u0000' in remoteName)
+        return null
+    if (
+        remoteName.startsWith('/') ||
+            remoteName.startsWith('\\') ||
+            WINDOWS_DRIVE_PATH.matches(remoteName)
+    )
+        return null
     val segments = remoteName.split(Regex("[/\\\\]"), limit = 0)
-    return segments.takeIf { it.isNotEmpty() && it.none { segment -> segment.isBlank() || segment == "." || segment == ".." } }
+    return segments.takeIf {
+        it.isNotEmpty() &&
+            it.none { segment -> segment.isBlank() || segment == "." || segment == ".." }
+    }
 }
 
 /**
  * Resolves a Drive file name below [destinationRoot].
  *
- * Drive names are untrusted input. Both slash styles are treated as separators so a
- * name created on another operating system cannot escape the save directory.
+ * Drive names are untrusted input. Both slash styles are treated as separators so a name created on
+ * another operating system cannot escape the save directory.
  */
 fun resolveRemoteFile(destinationRoot: File, remoteName: String): File? {
     val segments = remotePathSegments(remoteName) ?: return null
@@ -42,11 +51,12 @@ fun resolveRemoteFile(destinationRoot: File, remoteName: String): File? {
 
     // Also verify the canonical parent when it already exists. This protects against
     // non-obvious filesystem aliases and keeps accepted targets beneath the chosen root.
-    val canonicalRoot = if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
-        runCatching { root.toRealPath() }.getOrNull() ?: return null
-    } else {
-        root
-    }
+    val canonicalRoot =
+        if (Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
+            runCatching { root.toRealPath() }.getOrNull() ?: return null
+        } else {
+            root
+        }
     val parent = resolved.parent
     if (parent != null && Files.exists(parent)) {
         val canonicalParent = runCatching { parent.toRealPath() }.getOrNull() ?: return null
@@ -57,17 +67,25 @@ fun resolveRemoteFile(destinationRoot: File, remoteName: String): File? {
 }
 
 /** Resolves a selected restore folder to individual local paths for the cloud files. */
-fun resolveCloudRestorePaths(destinationFolder: String, cloudFileNames: List<String>): List<String> {
+fun resolveCloudRestorePaths(
+    destinationFolder: String,
+    cloudFileNames: List<String>,
+): List<String> {
     return resolveCloudRestoreTargets(destinationFolder, cloudFileNames).map { it.path }.distinct()
 }
 
 /** Keeps each exact Drive name, including its nested path, when restoring individual files. */
-fun resolveCloudRestoreTargets(destinationFolder: String, cloudFileNames: List<String>): List<SaveTarget> {
+fun resolveCloudRestoreTargets(
+    destinationFolder: String,
+    cloudFileNames: List<String>,
+): List<SaveTarget> {
     if (destinationFolder.isBlank()) return emptyList()
 
-    return cloudFileNames.mapNotNull { cloudName ->
-        resolveRemoteFile(File(destinationFolder), cloudName)?.let { local ->
-            SaveTarget(local.absolutePath, SaveTargetType.FILE, cloudPath = cloudName)
+    return cloudFileNames
+        .mapNotNull { cloudName ->
+            resolveRemoteFile(File(destinationFolder), cloudName)?.let { local ->
+                SaveTarget(local.absolutePath, SaveTargetType.FILE, cloudPath = cloudName)
+            }
         }
-    }.distinct()
+        .distinct()
 }

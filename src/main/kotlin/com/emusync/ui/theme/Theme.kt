@@ -3,9 +3,7 @@ package com.emusync.ui.theme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.graphics.Color
 
-/**
- * EmuSync dark theme colors — a premium dark palette inspired by gaming UIs.
- */
+/** EmuSync dark theme colors — a premium dark palette inspired by gaming UIs. */
 object EmuSyncColors {
     // Main background tones
     val Background = Color(0xFF0D1117)
@@ -36,20 +34,21 @@ object EmuSyncColors {
     val CardHover = Color(0xFF222D3D)
 }
 
-val EmuSyncDarkScheme = darkColorScheme(
-    primary = EmuSyncColors.Primary,
-    onPrimary = Color.White,
-    primaryContainer = EmuSyncColors.PrimaryContainer,
-    secondary = EmuSyncColors.Secondary,
-    onSecondary = Color.White,
-    secondaryContainer = EmuSyncColors.SecondaryContainer,
-    background = EmuSyncColors.Background,
-    onBackground = EmuSyncColors.OnBackground,
-    surface = EmuSyncColors.Surface,
-    onSurface = EmuSyncColors.OnSurface,
-    surfaceVariant = EmuSyncColors.SurfaceVariant,
-    onSurfaceVariant = EmuSyncColors.OnSurfaceDim,
-    outline = EmuSyncColors.Divider,
-    error = EmuSyncColors.Error,
-    onError = Color.White,
-)
+val EmuSyncDarkScheme =
+    darkColorScheme(
+        primary = EmuSyncColors.Primary,
+        onPrimary = Color.White,
+        primaryContainer = EmuSyncColors.PrimaryContainer,
+        secondary = EmuSyncColors.Secondary,
+        onSecondary = Color.White,
+        secondaryContainer = EmuSyncColors.SecondaryContainer,
+        background = EmuSyncColors.Background,
+        onBackground = EmuSyncColors.OnBackground,
+        surface = EmuSyncColors.Surface,
+        onSurface = EmuSyncColors.OnSurface,
+        surfaceVariant = EmuSyncColors.SurfaceVariant,
+        onSurfaceVariant = EmuSyncColors.OnSurfaceDim,
+        outline = EmuSyncColors.Divider,
+        error = EmuSyncColors.Error,
+        onError = Color.White,
+    )

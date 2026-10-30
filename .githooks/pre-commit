@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+relevant=false
+while IFS= read -r -d '' path; do
+    case "$path" in
+        *.kt|*.kts|gradle.properties|gradlew|gradlew.bat|gradle/*|config/detekt*.yml|.editorconfig|.gitattributes|.githooks/*|scripts/*quality*|scripts/install-git-hooks.sh|scripts/tests/git-hooks-test.sh|.github/workflows/ci.yml)
+            relevant=true
+            break
+            ;;
+    esac
+done < <(git diff --cached --name-only --diff-filter=ACDMRT -z)
+
+if [[ "$relevant" != true ]]; then
+    exit 0
+fi
+
+# Export only the index. Never stash, reset, stage, or rewrite the user's files.
+snapshot=$(mktemp -d "${TMPDIR:-/tmp}/emusync-quality.XXXXXXXX")
+trap 'rm -rf -- "$snapshot"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+git checkout-index --all --prefix="$snapshot/"
+
+if [[ ! -f "$snapshot/gradlew" ]]; then
+    echo "Quality check failed: the staged commit must include the Gradle wrapper." >&2
+    exit 1
+fi
+
+echo "Checking formatting and Detekt against the staged commit..."
+if ! (cd "$snapshot" && bash ./gradlew qualityCheck --console=plain --no-daemon); then
+    echo "Commit blocked. Review the error above, run ./gradlew spotlessApply if needed, and stage the corrected files." >&2
+    exit 1
+fi

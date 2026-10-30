@@ -3,20 +3,20 @@ package com.emusync.steam
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.StandardCopyOption
-import java.nio.channels.FileChannel
-import java.nio.file.StandardOpenOption
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.channels.FileChannel
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 
 /**
  * Represents a single Non-Steam Game shortcut entry from `shortcuts.vdf`.
  *
- * All fields mirror the binary VDF structure that Steam uses to store
- * non-Steam game shortcuts in `~/.local/share/Steam/userdata/<ID>/config/shortcuts.vdf`.
+ * All fields mirror the binary VDF structure that Steam uses to store non-Steam game shortcuts in
+ * `~/.local/share/Steam/userdata/<ID>/config/shortcuts.vdf`.
  */
 data class SteamShortcut(
     val appId: Int,
@@ -67,9 +67,30 @@ data class SteamShortcut(
  */
 object BinaryVdf {
 
-    private val KNOWN_FIELDS = setOf("appid", "AppName", "appname", "Exe", "exe", "StartDir", "startdir",
-        "icon", "ShortcutPath", "LaunchOptions", "IsHidden", "AllowDesktopConfig", "AllowOverlay", "OpenVR",
-        "Devkit", "DevkitGameID", "DevkitOverrideAppID", "LastPlayTime", "FlatpakAppID", "sortas", "tags")
+    private val KNOWN_FIELDS =
+        setOf(
+            "appid",
+            "AppName",
+            "appname",
+            "Exe",
+            "exe",
+            "StartDir",
+            "startdir",
+            "icon",
+            "ShortcutPath",
+            "LaunchOptions",
+            "IsHidden",
+            "AllowDesktopConfig",
+            "AllowOverlay",
+            "OpenVR",
+            "Devkit",
+            "DevkitGameID",
+            "DevkitOverrideAppID",
+            "LastPlayTime",
+            "FlatpakAppID",
+            "sortas",
+            "tags",
+        )
 
     private const val TYPE_OBJECT: Int = 0x00
     private const val TYPE_STRING: Int = 0x01
@@ -93,7 +114,9 @@ object BinaryVdf {
 
         // Read root object marker and name ("shortcuts")
         val rootType = stream.read()
-        require(rootType == TYPE_OBJECT) { "Expected object marker (0x00) at start, got 0x${rootType.toString(16)}" }
+        require(rootType == TYPE_OBJECT) {
+            "Expected object marker (0x00) at start, got 0x${rootType.toString(16)}"
+        }
         val rootName = readNullTermString(stream)
         require(rootName == "shortcuts") { "Expected 'shortcuts' root object, got '$rootName'" }
 
@@ -104,7 +127,9 @@ object BinaryVdf {
             val type = stream.read()
             require(type != -1) { "Truncated VDF root object" }
             if (type == TYPE_END) break
-            require(type == TYPE_OBJECT) { "Expected object (0x00) or end (0x08), got 0x${type.toString(16)}" }
+            require(type == TYPE_OBJECT) {
+                "Expected object (0x00) or end (0x08), got 0x${type.toString(16)}"
+            }
 
             // Index name ("0", "1", ...) — we don't use it, just consume
             readNullTermString(stream)
@@ -117,9 +142,8 @@ object BinaryVdf {
     }
 
     /**
-     * Writes a list of shortcuts to a `shortcuts.vdf` file.
-     * This completely replaces the file content — callers must include
-     * ALL shortcuts (existing + new) in the list.
+     * Writes a list of shortcuts to a `shortcuts.vdf` file. This completely replaces the file
+     * content — callers must include ALL shortcuts (existing + new) in the list.
      *
      * @param file The target `shortcuts.vdf` file.
      * @param shortcuts All shortcuts to write.
@@ -152,18 +176,25 @@ object BinaryVdf {
             FileChannel.open(staged, StandardOpenOption.WRITE).use { it.force(true) }
             beforeReplace(staged)
             try {
-                Files.move(staged, file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                Files.move(
+                    staged,
+                    file.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
             } catch (_: AtomicMoveNotSupportedException) {
                 Files.move(staged, file.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
-        } finally { Files.deleteIfExists(staged) }
+        } finally {
+            Files.deleteIfExists(staged)
+        }
     }
 
     // ── Reading helpers ──────────────────────────────────────────────
 
     /**
-     * Reads all fields within an object until TYPE_END (0x08) is encountered.
-     * Returns a map of field names to values (String, Int, or nested Map).
+     * Reads all fields within an object until TYPE_END (0x08) is encountered. Returns a map of
+     * field names to values (String, Int, or nested Map).
      */
     @Suppress("UNCHECKED_CAST")
     private fun readObjectFields(stream: ByteArrayInputStream, depth: Int = 0): Map<String, Any> {

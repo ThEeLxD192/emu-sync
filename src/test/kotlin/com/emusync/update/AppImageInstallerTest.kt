@@ -1,15 +1,15 @@
 package com.emusync.update
 
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 
 class AppImageInstallerTest {
     @Test
@@ -33,10 +33,13 @@ class AppImageInstallerTest {
     fun `partial staging copy failure preserves original and download`(@TempDir directory: File) {
         val target = File(directory, "EmuSync.AppImage").apply { writeText("ORIGINAL") }
         val source = File(directory, "download.AppImage").apply { writeText("UPDATE") }
-        val installer = AppImageInstaller(copyFile = { _, staged ->
-            Files.writeString(staged, "PARTIAL")
-            throw IOException("Disk full")
-        })
+        val installer =
+            AppImageInstaller(
+                copyFile = { _, staged ->
+                    Files.writeString(staged, "PARTIAL")
+                    throw IOException("Disk full")
+                }
+            )
         var launched = false
 
         assertFailsWith<IOException> {
@@ -53,12 +56,15 @@ class AppImageInstallerTest {
     fun `failed promotion restores original and retains download`(@TempDir directory: File) {
         val target = File(directory, "EmuSync.AppImage").apply { writeText("ORIGINAL") }
         val source = File(directory, "download.AppImage").apply { writeText("UPDATE") }
-        val installer = AppImageInstaller(moveFile = { from, to ->
-            if (from.fileName.toString().contains(".update.")) {
-                throw IOException("Could not promote staged update")
-            }
-            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING)
-        })
+        val installer =
+            AppImageInstaller(
+                moveFile = { from, to ->
+                    if (from.fileName.toString().contains(".update.")) {
+                        throw IOException("Could not promote staged update")
+                    }
+                    Files.move(from, to, StandardCopyOption.REPLACE_EXISTING)
+                }
+            )
 
         assertFailsWith<IOException> { installer.replace(source, target) }
 
@@ -73,7 +79,9 @@ class AppImageInstallerTest {
         val source = File(directory, "download.AppImage").apply { writeText("UPDATE") }
 
         assertFailsWith<IOException> {
-            AppImageInstaller().replace(source, target) { throw IOException("Could not start process") }
+            AppImageInstaller().replace(source, target) {
+                throw IOException("Could not start process")
+            }
         }
 
         assertEquals("ORIGINAL", target.readText())
@@ -85,10 +93,13 @@ class AppImageInstallerTest {
     fun `failed rollback keeps backup available for recovery`(@TempDir directory: File) {
         val target = File(directory, "EmuSync.AppImage").apply { writeText("ORIGINAL") }
         val source = File(directory, "download.AppImage").apply { writeText("UPDATE") }
-        val installer = AppImageInstaller(moveFile = { from, to ->
-            if (from != target.toPath()) throw IOException("Filesystem unavailable")
-            Files.move(from, to, StandardCopyOption.REPLACE_EXISTING)
-        })
+        val installer =
+            AppImageInstaller(
+                moveFile = { from, to ->
+                    if (from != target.toPath()) throw IOException("Filesystem unavailable")
+                    Files.move(from, to, StandardCopyOption.REPLACE_EXISTING)
+                }
+            )
 
         val failure = assertFailsWith<IOException> { installer.replace(source, target) }
 

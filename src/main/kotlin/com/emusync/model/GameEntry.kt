@@ -1,8 +1,8 @@
 package com.emusync.model
 
+import java.io.File
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import java.io.File
 
 @Serializable
 enum class SaveTargetType {
@@ -16,7 +16,9 @@ enum class SaveTargetType {
 data class SaveTarget(
     val path: String,
     val type: SaveTargetType,
-    /** File name or directory prefix within the game's cloud saves; null keeps the legacy layout. */
+    /**
+     * File name or directory prefix within the game's cloud saves; null keeps the legacy layout.
+     */
     val cloudPath: String? = null,
 )
 
@@ -29,7 +31,11 @@ fun scopeNewSaveTargets(targets: List<SaveTarget>): List<SaveTarget> {
         if (target.type != SaveTargetType.DIRECTORY || !target.cloudPath.isNullOrBlank()) target
         else {
             var prefix: String
-            do { prefix = "save-target-${next++}" } while (used.any { it == prefix || it.startsWith("$prefix/") || prefix.startsWith("$it/") })
+            do {
+                prefix = "save-target-${next++}"
+            } while (
+                used.any { it == prefix || it.startsWith("$prefix/") || prefix.startsWith("$it/") }
+            )
             used += prefix
             target.copy(cloudPath = prefix)
         }
@@ -39,10 +45,11 @@ fun scopeNewSaveTargets(targets: List<SaveTarget>): List<SaveTarget> {
 /** Used only while migrating legacy string-only save paths. */
 fun inferLegacySaveTarget(path: String): SaveTarget {
     val file = File(path)
-    val type = when {
-        file.exists() -> if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
-        else -> SaveTargetType.UNKNOWN
-    }
+    val type =
+        when {
+            file.exists() -> if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
+            else -> SaveTargetType.UNKNOWN
+        }
     return SaveTarget(path, type)
 }
 
@@ -60,7 +67,7 @@ sealed interface GameEntry {
     /** Display name shown in the UI (e.g. "Game Boy Advance" or "Spelunky Classic"). */
     val name: String
 
-    // Note: savePaths acts as a global fallback for EmulatorSystem, 
+    // Note: savePaths acts as a global fallback for EmulatorSystem,
     // overridden by savePathsByRom for explicit games.
     val savePaths: List<String>
 
@@ -68,45 +75,44 @@ sealed interface GameEntry {
     val saveTargets: List<SaveTarget>
 
     /**
-     * Optional folder/category name to group emulators together in the UI
-     * and share a unified cloud saves folder (e.g. "Switch", "PlayStation").
+     * Optional folder/category name to group emulators together in the UI and share a unified cloud
+     * saves folder (e.g. "Switch", "PlayStation").
      */
     val group: String?
 
     /**
-     * Optional custom Google Drive folder name.
-     * When null or blank, defaults to [group] (if set) or [name].
+     * Optional custom Google Drive folder name. When null or blank, defaults to [group] (if set) or
+     * [name].
      */
     val cloudFolder: String?
 
     /**
-     * Optional Google Drive file ID for an already-uploaded save.
-     * When null, the first sync will create the file on Drive.
+     * Optional Google Drive file ID for an already-uploaded save. When null, the first sync will
+     * create the file on Drive.
      */
     val driveFileId: String?
 
-    /**
-     * Optional Steam Non-Steam Game shortcut AppID.
-     */
+    /** Optional Steam Non-Steam Game shortcut AppID. */
     val steamAppId: Int?
 }
 
 /**
- * Returns the effective Google Drive folder name used for storing saves.
- * Priority: [GameEntry.cloudFolder] > [GameEntry.group] > [GameEntry.name].
+ * Returns the effective Google Drive folder name used for storing saves. Priority:
+ * [GameEntry.cloudFolder] > [GameEntry.group] > [GameEntry.name].
  */
 val GameEntry.effectiveCloudFolder: String
-    get() = cloudFolder?.trim()?.takeIf { it.isNotBlank() }
-        ?: group?.trim()?.takeIf { it.isNotBlank() }
-        ?: name
+    get() =
+        cloudFolder?.trim()?.takeIf { it.isNotBlank() }
+            ?: group?.trim()?.takeIf { it.isNotBlank() }
+            ?: name
 
 /**
  * An emulator-based system.
  *
  * @property executablePath Absolute path to the emulator's executable.
- * @property arguments      List of arguments. Use `{ROM}` as a wildcard for the selected ROM.
- * @property romsDirectory  Absolute path to the directory containing ROM files.
- * @property extensions     Allowed file extensions (without dots), e.g. ["gba", "gbc"].
+ * @property arguments List of arguments. Use `{ROM}` as a wildcard for the selected ROM.
+ * @property romsDirectory Absolute path to the directory containing ROM files.
+ * @property extensions Allowed file extensions (without dots), e.g. ["gba", "gbc"].
  */
 @Serializable
 @SerialName("emulator")
@@ -129,9 +135,10 @@ data class EmulatorSystem(
     override val driveFileId: String? = null,
     override val steamAppId: Int? = null,
     val steamProcessName: String? = null,
-    /** Optional flags to force the emulator into Big Picture / fullscreen UI mode.
-     *  When null, auto-detected from the executable name.
-     *  Set to an empty string to disable. */
+    /**
+     * Optional flags to force the emulator into Big Picture / fullscreen UI mode. When null,
+     * auto-detected from the executable name. Set to an empty string to disable.
+     */
     val fullscreenArgs: String? = null,
     /** Optional custom directory for game cover art / boxart images. */
     val coversDirectory: String? = null,
@@ -140,14 +147,26 @@ data class EmulatorSystem(
      * Resolves the effective display title for a ROM.
      * 1. Direct match by exact filename in [titleByRom].
      * 2. Direct match by filename without extension in [titleByRom].
-     * 3. Flexible normalized match across devices (e.g. matching "Super_Mario_World.sfc" with "Super Mario World (USA).sfc").
+     * 3. Flexible normalized match across devices (e.g. matching "Super_Mario_World.sfc" with
+     *    "Super Mario World (USA).sfc").
      * 4. Falls back to [cleanGameTitle] on the provided [fallback].
      */
     fun getEffectiveTitle(romName: String, fallback: String = romName): String {
-        titleByRom[romName]?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+        titleByRom[romName]
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+                return it
+            }
 
-        val nameWithoutExt = if (romName.contains('.')) java.io.File(romName).nameWithoutExtension else romName
-        titleByRom[nameWithoutExt]?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+        val nameWithoutExt =
+            if (romName.contains('.')) java.io.File(romName).nameWithoutExtension else romName
+        titleByRom[nameWithoutExt]
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+                return it
+            }
 
         val targetKey = normalizeGameKey(romName)
         if (targetKey.isNotBlank()) {
@@ -166,7 +185,7 @@ data class EmulatorSystem(
  * A native PC game or decompiled port.
  *
  * @property executablePath Absolute path to the game's executable.
- * @property arguments      Optional CLI arguments passed to the executable.
+ * @property arguments Optional CLI arguments passed to the executable.
  */
 @Serializable
 @SerialName("native")
@@ -190,7 +209,11 @@ private fun SaveTarget.resolveUnknownTypeIfPresent(): SaveTarget {
     val normalized = if (cloudPath != null && cloudPath.isBlank()) copy(cloudPath = null) else this
     if (!file.exists()) return normalized
     val actualType = if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
-    return if (type == SaveTargetType.UNKNOWN || (type == SaveTargetType.FILE && file.isDirectory) || (type == SaveTargetType.DIRECTORY && file.isFile)) {
+    return if (
+        type == SaveTargetType.UNKNOWN ||
+            (type == SaveTargetType.FILE && file.isDirectory) ||
+            (type == SaveTargetType.DIRECTORY && file.isFile)
+    ) {
         normalized.copy(type = actualType)
     } else {
         normalized
@@ -198,33 +221,50 @@ private fun SaveTarget.resolveUnknownTypeIfPresent(): SaveTarget {
 }
 
 fun GameEntry.effectiveSaveTargets(): List<SaveTarget> =
-    (saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) })
-        .map(SaveTarget::resolveUnknownTypeIfPresent)
+    (saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) }).map(
+        SaveTarget::resolveUnknownTypeIfPresent
+    )
 
 fun EmulatorSystem.effectiveSaveTargetsForRom(romName: String): List<SaveTarget> =
     saveTargetsByRom[romName]?.map(SaveTarget::resolveUnknownTypeIfPresent)
-        ?: saveTargetsByRom[romName.substringBeforeLast('.', romName)]
-            ?.map(SaveTarget::resolveUnknownTypeIfPresent)
+        ?: saveTargetsByRom[romName.substringBeforeLast('.', romName)]?.map(
+            SaveTarget::resolveUnknownTypeIfPresent
+        )
         ?: savePathsByRom[romName]?.filter { it.isNotBlank() }?.map(::inferLegacySaveTarget)
-        ?: savePathsByRom[romName.substringBeforeLast('.', romName)]?.filter { it.isNotBlank() }?.map(::inferLegacySaveTarget)
+        ?: savePathsByRom[romName.substringBeforeLast('.', romName)]
+            ?.filter { it.isNotBlank() }
+            ?.map(::inferLegacySaveTarget)
         ?: emptyList()
 
 /** Adds explicit types to legacy paths without changing their path values. */
-fun GameEntry.migrateLegacySaveTargets(): GameEntry = when (this) {
-    is EmulatorSystem -> copy(
-        saveTargets = (saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) })
-            .map(SaveTarget::resolveUnknownTypeIfPresent),
-        saveTargetsByRom = saveTargetsByRom.toMutableMap().apply {
-            replaceAll { _, targets -> targets.map(SaveTarget::resolveUnknownTypeIfPresent) }
-            savePathsByRom.forEach { (rom, paths) ->
-                if (rom !in this && paths.isNotEmpty()) {
-                    this[rom] = paths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget)
-                }
-            }
-        },
-    )
-    is NativePCGame -> copy(
-        saveTargets = (saveTargets.ifEmpty { savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget) })
-            .map(SaveTarget::resolveUnknownTypeIfPresent),
-    )
-}
+fun GameEntry.migrateLegacySaveTargets(): GameEntry =
+    when (this) {
+        is EmulatorSystem ->
+            copy(
+                saveTargets =
+                    (saveTargets.ifEmpty {
+                            savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget)
+                        })
+                        .map(SaveTarget::resolveUnknownTypeIfPresent),
+                saveTargetsByRom =
+                    saveTargetsByRom.toMutableMap().apply {
+                        replaceAll { _, targets ->
+                            targets.map(SaveTarget::resolveUnknownTypeIfPresent)
+                        }
+                        savePathsByRom.forEach { (rom, paths) ->
+                            if (rom !in this && paths.isNotEmpty()) {
+                                this[rom] =
+                                    paths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget)
+                            }
+                        }
+                    },
+            )
+        is NativePCGame ->
+            copy(
+                saveTargets =
+                    (saveTargets.ifEmpty {
+                            savePaths.filter { it.isNotBlank() }.map(::inferLegacySaveTarget)
+                        })
+                        .map(SaveTarget::resolveUnknownTypeIfPresent)
+            )
+    }

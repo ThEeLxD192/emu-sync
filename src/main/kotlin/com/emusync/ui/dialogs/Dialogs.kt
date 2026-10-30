@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,8 +57,8 @@ import com.emusync.ui.theme.EmuSyncColors
 import kotlinx.coroutines.launch
 
 /**
- * Full-screen overlay showing the current sync/game status.
- * Displayed during sync, play, and upload phases.
+ * Full-screen overlay showing the current sync/game status. Displayed during sync, play, and upload
+ * phases.
  */
 @Composable
 fun StatusOverlay(
@@ -68,44 +67,52 @@ fun StatusOverlay(
 ) {
     val coroutineScope = rememberCoroutineScope()
     when (status) {
-        is AppStatus.Syncing -> StatusDialog(
-            icon = Icons.Default.CloudSync,
-            title = status.message,
-            spinning = true,
-            color = EmuSyncColors.Primary,
-        )
-        is AppStatus.Playing -> StatusDialog(
-            icon = Icons.Default.SportsEsports,
-            title = "Playing...",
-            subtitle = "The game is running. This window will update when you close it.",
-            spinning = false,
-            color = EmuSyncColors.Success,
-        )
-        is AppStatus.Loading -> StatusDialog(
-            icon = Icons.Default.HourglassTop,
-            title = "Loading...",
-            spinning = true,
-            color = EmuSyncColors.OnSurfaceDim,
-        )
-        is AppStatus.Error -> ErrorDialog(
-            message = status.message,
-            onDismiss = { onDismissError?.invoke() }
-        )
-        is AppStatus.PostSyncFailed -> PostSyncFailedDialog(
-            gameName = status.gameName,
-            reason = status.reason,
-            completedSaveCount = status.completedSaveCount,
-            pendingSaveCount = status.pendingSaveCount,
-            onRetry = { coroutineScope.launch { status.onRetry() } },
-            onDismiss = { onDismissError?.invoke() },
-        )
-        is AppStatus.Conflict -> ConflictDialog(
-            gameName = status.gameName,
-            localDate = status.localDate,
-            cloudDate = status.cloudDate,
-            onResolve = status.onResolve,
-        )
-        is AppStatus.Idle -> { /* no overlay */ }
+        is AppStatus.Syncing ->
+            StatusDialog(
+                icon = Icons.Default.CloudSync,
+                title = status.message,
+                spinning = true,
+                color = EmuSyncColors.Primary,
+            )
+        is AppStatus.Playing ->
+            StatusDialog(
+                icon = Icons.Default.SportsEsports,
+                title = "Playing...",
+                subtitle = "The game is running. This window will update when you close it.",
+                spinning = false,
+                color = EmuSyncColors.Success,
+            )
+        is AppStatus.Loading ->
+            StatusDialog(
+                icon = Icons.Default.HourglassTop,
+                title = "Loading...",
+                spinning = true,
+                color = EmuSyncColors.OnSurfaceDim,
+            )
+        is AppStatus.Error ->
+            ErrorDialog(
+                message = status.message,
+                onDismiss = { onDismissError?.invoke() },
+            )
+        is AppStatus.PostSyncFailed ->
+            PostSyncFailedDialog(
+                gameName = status.gameName,
+                reason = status.reason,
+                completedSaveCount = status.completedSaveCount,
+                pendingSaveCount = status.pendingSaveCount,
+                onRetry = { coroutineScope.launch { status.onRetry() } },
+                onDismiss = { onDismissError?.invoke() },
+            )
+        is AppStatus.Conflict ->
+            ConflictDialog(
+                gameName = status.gameName,
+                localDate = status.localDate,
+                cloudDate = status.cloudDate,
+                onResolve = status.onResolve,
+            )
+        is AppStatus.Idle -> {
+            /* no overlay */
+        }
     }
 }
 
@@ -143,16 +150,17 @@ private fun PostSyncFailedDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = buildString {
-                        append("$gameName closed normally. ")
-                        if (completedSaveCount == 0) {
-                            append("Google Drive was not updated.")
-                        } else {
-                            append("$completedSaveCount save(s) synced successfully; ")
-                            append("$pendingSaveCount save(s) still need to be uploaded.")
-                        }
-                        append("\n\n$reason")
-                    },
+                    text =
+                        buildString {
+                            append("$gameName closed normally. ")
+                            if (completedSaveCount == 0) {
+                                append("Google Drive was not updated.")
+                            } else {
+                                append("$completedSaveCount save(s) synced successfully; ")
+                                append("$pendingSaveCount save(s) still need to be uploaded.")
+                            }
+                            append("\n\n$reason")
+                        },
                     style = MaterialTheme.typography.bodyMedium,
                     color = EmuSyncColors.OnSurface,
                     textAlign = TextAlign.Center,
@@ -162,7 +170,8 @@ private fun PostSyncFailedDialog(
                     OutlinedButton(onClick = onDismiss) { Text("Keep local") }
                     Button(
                         onClick = onRetry,
-                        colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
+                        colors =
+                            ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
                     ) {
                         Text("Retry upload")
                     }
@@ -182,13 +191,13 @@ private fun StatusDialog(
 ) {
     // Spinner animation
     val infiniteTransition = rememberInfiniteTransition()
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = LinearEasing),
-        ),
-    )
+    val rotation by
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec =
+                infiniteRepeatable(animation = tween(durationMillis = 1200, easing = LinearEasing)),
+        )
 
     Dialog(onDismissRequest = {}) {
         Surface(
@@ -202,19 +211,19 @@ private fun StatusDialog(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(CircleShape)
-                        .background(color.copy(alpha = 0.15f)),
+                    modifier =
+                        Modifier.size(64.dp)
+                            .clip(CircleShape)
+                            .background(color.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
                         tint = color,
-                        modifier = Modifier
-                            .size(32.dp)
-                            .then(if (spinning) Modifier.rotate(rotation) else Modifier),
+                        modifier =
+                            Modifier.size(32.dp)
+                                .then(if (spinning) Modifier.rotate(rotation) else Modifier),
                     )
                 }
 
@@ -300,23 +309,24 @@ private fun ConflictDialog(
     var resolved by remember(gameName, localDate, cloudDate) { mutableStateOf(false) }
 
     val infiniteTransition = rememberInfiniteTransition()
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = LinearEasing),
-        ),
-    )
+    val rotation by
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec =
+                infiniteRepeatable(animation = tween(durationMillis = 1200, easing = LinearEasing)),
+        )
 
     Dialog(onDismissRequest = {}) {
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = EmuSyncColors.Surface,
-            border = BorderStroke(
-                1.dp,
-                if (resolved) EmuSyncColors.Primary.copy(alpha = 0.5f)
-                else EmuSyncColors.Warning.copy(alpha = 0.5f),
-            ),
+            border =
+                BorderStroke(
+                    1.dp,
+                    if (resolved) EmuSyncColors.Primary.copy(alpha = 0.5f)
+                    else EmuSyncColors.Warning.copy(alpha = 0.5f),
+                ),
         ) {
             if (resolved) {
                 Column(
@@ -324,10 +334,10 @@ private fun ConflictDialog(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Box(
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(CircleShape)
-                            .background(EmuSyncColors.Primary.copy(alpha = 0.15f)),
+                        modifier =
+                            Modifier.size(64.dp)
+                                .clip(CircleShape)
+                                .background(EmuSyncColors.Primary.copy(alpha = 0.15f)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
@@ -379,7 +389,8 @@ private fun ConflictDialog(
 
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "Both copies changed, or their shared history could not be verified. Choose which progress to keep. Restoring from the cloud preserves a local recovery copy.",
+                        text =
+                            "Both copies changed, or their shared history could not be verified. Choose which progress to keep. Restoring from the cloud preserves a local recovery copy.",
                         style = MaterialTheme.typography.bodySmall,
                         color = EmuSyncColors.OnSurfaceDim,
                     )
@@ -434,9 +445,7 @@ private fun ConflictOptionCard(
         modifier = modifier.height(IntrinsicSize.Min),
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, color.copy(alpha = 0.4f)),
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = color.copy(alpha = 0.08f),
-        ),
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = color.copy(alpha = 0.08f)),
     ) {
         Column(
             modifier = Modifier.padding(vertical = 12.dp),

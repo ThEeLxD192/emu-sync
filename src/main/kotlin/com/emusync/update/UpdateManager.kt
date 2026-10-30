@@ -1,8 +1,7 @@
 package com.emusync.update
 
-import com.emusync.util.AppImageEnvironment
-
 import com.emusync.AppInfo
+import com.emusync.util.AppImageEnvironment
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
@@ -18,22 +17,22 @@ import io.ktor.http.contentLength
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.StandardCopyOption
 import java.util.logging.Level
 import java.util.logging.Logger
 import kotlin.system.exitProcess
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 @Serializable
 data class GitHubAsset(
@@ -62,19 +61,22 @@ data class UpdateInfo(
 )
 
 open class UpdateManager(
-    private val client: HttpClient = HttpClient(CIO) {
-        install(ContentNegotiation) {
-            json(Json {
-                ignoreUnknownKeys = true
-                isLenient = true
-            })
-        }
-        install(HttpTimeout) {
-            connectTimeoutMillis = 15_000
-            socketTimeoutMillis = 60_000
-            requestTimeoutMillis = null
-        }
-    },
+    private val client: HttpClient =
+        HttpClient(CIO) {
+            install(ContentNegotiation) {
+                json(
+                    Json {
+                        ignoreUnknownKeys = true
+                        isLenient = true
+                    }
+                )
+            }
+            install(HttpTimeout) {
+                connectTimeoutMillis = 15_000
+                socketTimeoutMillis = 60_000
+                requestTimeoutMillis = null
+            }
+        },
     private val exitApplication: (Int) -> Unit = ::exitProcess,
 ) : AutoCloseable {
     override fun close() = client.close()
@@ -83,152 +85,164 @@ open class UpdateManager(
     private val logger = Logger.getLogger(UpdateManager::class.java.name)
 
     /**
-     * Indicates whether the host OS is Windows.
-     * Can be overridden in tests to simulate Windows environment.
+     * Indicates whether the host OS is Windows. Can be overridden in tests to simulate Windows
+     * environment.
      */
     open fun isWindows(): Boolean =
         System.getProperty("os.name", "").lowercase().contains("windows")
 
-    /**
-     * Finds the best asset for the current operating system.
-     */
+    /** Finds the best asset for the current operating system. */
     open fun findBestAsset(assets: List<GitHubAsset>): GitHubAsset? {
         return findBestAssetForPlatform(assets, isWindows = isWindows())
     }
 
-    /**
-     * Checks GitHub for the latest release and compares with the running version.
-     */
+    /** Checks GitHub for the latest release and compares with the running version. */
     suspend fun checkForUpdates(
         owner: String = AppInfo.GITHUB_OWNER,
         repo: String = AppInfo.GITHUB_REPO,
         currentVersion: String = AppInfo.VERSION,
-    ): UpdateInfo? = withContext(Dispatchers.IO) {
-        try {
-            val response: HttpResponse = client.get("https://api.github.com/repos/$owner/$repo/releases/latest") {
-                header(HttpHeaders.Accept, "application/vnd.github+json")
-                header(HttpHeaders.UserAgent, "EmuSync-Desktop-App")
+    ): UpdateInfo? =
+        withContext(Dispatchers.IO) {
+            try {
+                val response: HttpResponse =
+                    client.get("https://api.github.com/repos/$owner/$repo/releases/latest") {
+                        header(HttpHeaders.Accept, "application/vnd.github+json")
+                        header(HttpHeaders.UserAgent, "EmuSync-Desktop-App")
+                    }
+
+                if (response.status != HttpStatusCode.OK) {
+                    return@withContext null
+                }
+
+                val release: GitHubRelease = response.body()
+                val remoteVersion = release.tagName.removePrefix("v").removePrefix("V").trim()
+
+                if (!isNewerVersion(current = currentVersion, remote = remoteVersion)) {
+                    return@withContext null
+                }
+
+                // Find platform-appropriate asset (.msi/.exe on Windows, .AppImage on Linux)
+                val asset = findBestAsset(release.assets) ?: return@withContext null
+
+                UpdateInfo(
+                    version = remoteVersion,
+                    tagName = release.tagName,
+                    releaseNotes =
+                        release.body ?: release.name ?: "New version $remoteVersion available.",
+                    downloadUrl = asset.downloadUrl,
+                    assetSize = asset.size,
+                    assetName = asset.name,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
             }
-
-            if (response.status != HttpStatusCode.OK) {
-                return@withContext null
-            }
-
-            val release: GitHubRelease = response.body()
-            val remoteVersion = release.tagName.removePrefix("v").removePrefix("V").trim()
-
-            if (!isNewerVersion(current = currentVersion, remote = remoteVersion)) {
-                return@withContext null
-            }
-
-            // Find platform-appropriate asset (.msi/.exe on Windows, .AppImage on Linux)
-            val asset = findBestAsset(release.assets) ?: return@withContext null
-
-            UpdateInfo(
-                version = remoteVersion,
-                tagName = release.tagName,
-                releaseNotes = release.body ?: release.name ?: "New version $remoteVersion available.",
-                downloadUrl = asset.downloadUrl,
-                assetSize = asset.size,
-                assetName = asset.name,
-            )
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            null
         }
-    }
 
-    /**
-     * Downloads the asset from [downloadUrl] to [destinationFile] reporting progress.
-     */
+    /** Downloads the asset from [downloadUrl] to [destinationFile] reporting progress. */
     suspend fun downloadUpdate(
         downloadUrl: String,
         destinationFile: File,
         onProgress: (Float) -> Unit,
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        var staged: Path? = null
-        var channel: ByteReadChannel? = null
-        try {
-            val parent = destinationFile.absoluteFile.parentFile
-            Files.createDirectories(parent.toPath())
-            staged = Files.createTempFile(parent.toPath(), ".${destinationFile.name}.", ".part")
-            val response: HttpResponse = client.get(downloadUrl) {
-                header(HttpHeaders.UserAgent, "EmuSync-Desktop-App")
-                timeout {
-                    requestTimeoutMillis = null
-                    socketTimeoutMillis = 60_000
+    ): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            var staged: Path? = null
+            var channel: ByteReadChannel? = null
+            try {
+                val parent = destinationFile.absoluteFile.parentFile
+                Files.createDirectories(parent.toPath())
+                staged = Files.createTempFile(parent.toPath(), ".${destinationFile.name}.", ".part")
+                val response: HttpResponse =
+                    client.get(downloadUrl) {
+                        header(HttpHeaders.UserAgent, "EmuSync-Desktop-App")
+                        timeout {
+                            requestTimeoutMillis = null
+                            socketTimeoutMillis = 60_000
+                        }
+                    }
+                if (response.status != HttpStatusCode.OK) {
+                    return@withContext Result.failure(
+                        IllegalStateException(
+                            "HTTP ${response.status.value} ${response.status.description}"
+                        )
+                    )
                 }
-            }
-            if (response.status != HttpStatusCode.OK) {
-                return@withContext Result.failure(
-                    IllegalStateException("HTTP ${response.status.value} ${response.status.description}"))
-            }
-            val totalBytes = response.contentLength()
-            val body: ByteReadChannel = response.body()
-            channel = body
-            var bytesRead = 0L
-            Files.newOutputStream(staged).use { output ->
-                val buffer = ByteArray(64 * 1024)
-                while (!body.isClosedForRead) {
-                    currentCoroutineContext().ensureActive()
-                    val read = body.readAvailable(buffer, 0, buffer.size)
-                    if (read < 0) break
-                    if (read == 0) continue
-                    output.write(buffer, 0, read)
-                    bytesRead += read
-                    if (totalBytes != null && totalBytes > 0) {
-                        onProgress((bytesRead.toFloat() / totalBytes).coerceIn(0f, 1f))
+                val totalBytes = response.contentLength()
+                val body: ByteReadChannel = response.body()
+                channel = body
+                var bytesRead = 0L
+                Files.newOutputStream(staged).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (!body.isClosedForRead) {
+                        currentCoroutineContext().ensureActive()
+                        val read = body.readAvailable(buffer, 0, buffer.size)
+                        if (read < 0) break
+                        if (read == 0) continue
+                        output.write(buffer, 0, read)
+                        bytesRead += read
+                        if (totalBytes != null && totalBytes > 0) {
+                            onProgress((bytesRead.toFloat() / totalBytes).coerceIn(0f, 1f))
+                        }
                     }
                 }
+                check(bytesRead > 0) { "The downloaded update is empty" }
+                check(totalBytes == null || bytesRead == totalBytes) {
+                    "The downloaded update is incomplete: expected $totalBytes bytes, received $bytesRead"
+                }
+                currentCoroutineContext().ensureActive()
+                staged.toFile().setExecutable(true, false)
+                try {
+                    Files.move(
+                        staged,
+                        destinationFile.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                } catch (_: AtomicMoveNotSupportedException) {
+                    Files.move(
+                        staged,
+                        destinationFile.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                }
+                staged = null
+                onProgress(1f)
+                Result.success(Unit)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                Result.failure(failure)
+            } finally {
+                channel?.cancel(CancellationException("Update response is no longer needed"))
+                staged?.let { Files.deleteIfExists(it) }
             }
-            check(bytesRead > 0) { "The downloaded update is empty" }
-            check(totalBytes == null || bytesRead == totalBytes) { "The downloaded update is incomplete: expected $totalBytes bytes, received $bytesRead" }
-            currentCoroutineContext().ensureActive()
-            staged.toFile().setExecutable(true, false)
-            try {
-                Files.move(staged, destinationFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(staged, destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            }
-            staged = null
-            onProgress(1f)
-            Result.success(Unit)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            Result.failure(failure)
-        } finally {
-            channel?.cancel(CancellationException("Update response is no longer needed"))
-            staged?.let { Files.deleteIfExists(it) }
         }
-    }
 
     /**
-     * Applies the downloaded update and restarts the application.
-     * On Windows, launches the installer (.msi or .exe) and terminates EmuSync.
-     * On Linux, atomically replaces the AppImage and launches the new executable.
+     * Applies the downloaded update and restarts the application. On Windows, launches the
+     * installer (.msi or .exe) and terminates EmuSync. On Linux, atomically replaces the AppImage
+     * and launches the new executable.
      */
     open fun applyUpdateAndRestart(downloadedFile: File): Boolean {
         if (!downloadedFile.exists()) return false
 
-        val applied = if (isWindows()) {
-            applyWindowsUpdateAndRestart(downloadedFile)
-        } else {
-            applyLinuxUpdateAndRestart(downloadedFile)
-        }
+        val applied =
+            if (isWindows()) {
+                applyWindowsUpdateAndRestart(downloadedFile)
+            } else {
+                applyLinuxUpdateAndRestart(downloadedFile)
+            }
         if (applied) exitApplication(0)
         return applied
     }
 
-    /**
-     * Applies an update on Windows by running the installer (.msi or .exe).
-     */
+    /** Applies an update on Windows by running the installer (.msi or .exe). */
     open fun applyWindowsUpdateAndRestart(
         downloadedFile: File,
         launcher: (List<String>) -> Unit = { cmd ->
             ProcessBuilder(cmd).start()
-        }
+        },
     ): Boolean {
         return try {
             val name = downloadedFile.name.lowercase()
@@ -249,8 +263,8 @@ open class UpdateManager(
     }
 
     /**
-     * Resolves the path to the currently running AppImage on Linux.
-     * Defaults to the APPIMAGE environment variable set by the AppImage runtime.
+     * Resolves the path to the currently running AppImage on Linux. Defaults to the APPIMAGE
+     * environment variable set by the AppImage runtime.
      */
     open fun getCurrentAppImagePath(): String? =
         System.getenv("APPIMAGE")?.takeIf { it.isNotBlank() }
@@ -261,39 +275,38 @@ open class UpdateManager(
      */
     open fun isSteamGameMode(): Boolean =
         System.getenv("SteamGamepadUI") == "1" ||
-        System.getenv("XDG_CURRENT_DESKTOP")?.lowercase() == "gamescope"
+            System.getenv("XDG_CURRENT_DESKTOP")?.lowercase() == "gamescope"
 
     /**
-     * Replaces the running [target] AppImage with [source].
-     * Stages the download on the destination filesystem before replacing the active binary.
+     * Replaces the running [target] AppImage with [source]. Stages the download on the destination
+     * filesystem before replacing the active binary.
      */
     internal fun replaceAppImageFile(source: File, target: File) {
         appImageInstaller.replace(source, target)
     }
 
     /**
-     * Starts the updated AppImage with independent standard streams.
-     * In Steam Deck Game Mode, Steam manages the process tree; exiting cleanly lets
-     * the user relaunch the updated app from Steam without leaving ghost processes.
-     * Application exit is handled after installation by [applyUpdateAndRestart].
+     * Starts the updated AppImage with independent standard streams. In Steam Deck Game Mode, Steam
+     * manages the process tree; exiting cleanly lets the user relaunch the updated app from Steam
+     * without leaving ghost processes. Application exit is handled after installation by
+     * [applyUpdateAndRestart].
      */
     open fun defaultLinuxLauncher(path: String) {
         if (isSteamGameMode()) return
 
-        val builder = ProcessBuilder(path)
-            .redirectInput(File("/dev/null"))
-            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-            .redirectError(ProcessBuilder.Redirect.DISCARD)
+        val builder =
+            ProcessBuilder(path)
+                .redirectInput(File("/dev/null"))
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
         AppImageEnvironment.clean(builder.environment())
         builder.start()
     }
 
-    /**
-     * Replaces the currently running AppImage on Linux and restarts the application.
-     */
+    /** Replaces the currently running AppImage on Linux and restarts the application. */
     open fun applyLinuxUpdateAndRestart(
         downloadedFile: File,
-        launcher: (String) -> Unit = ::defaultLinuxLauncher
+        launcher: (String) -> Unit = ::defaultLinuxLauncher,
     ): Boolean {
         val currentAppImagePath = getCurrentAppImagePath() ?: return false
         val currentAppImage = File(currentAppImagePath)
@@ -305,16 +318,19 @@ open class UpdateManager(
             }
             true
         } catch (failure: Exception) {
-            logger.log(Level.WARNING, "Could not install or launch the updated AppImage at $currentAppImagePath", failure)
+            logger.log(
+                Level.WARNING,
+                "Could not install or launch the updated AppImage at $currentAppImagePath",
+                failure,
+            )
             false
         }
     }
 
     companion object {
         /**
-         * Selects the most appropriate asset from a release based on platform priority.
-         * Windows: .msi > .exe > .zip
-         * Linux: .AppImage > .tar.gz > .deb
+         * Selects the most appropriate asset from a release based on platform priority. Windows:
+         * .msi > .exe > .zip Linux: .AppImage > .tar.gz > .deb
          */
         fun findBestAssetForPlatform(assets: List<GitHubAsset>, isWindows: Boolean): GitHubAsset? {
             return if (isWindows) {
@@ -328,9 +344,7 @@ open class UpdateManager(
             }
         }
 
-        /**
-         * Compares semantic versions (e.g. 0.1.0 vs 0.1.1 or 0.2.0 vs 0.1.9).
-         */
+        /** Compares semantic versions (e.g. 0.1.0 vs 0.1.1 or 0.2.0 vs 0.1.9). */
         fun isNewerVersion(current: String, remote: String): Boolean {
             val currParts = current.split('.').mapNotNull { it.trim().toIntOrNull() }
             val remoteParts = remote.split('.').mapNotNull { it.trim().toIntOrNull() }

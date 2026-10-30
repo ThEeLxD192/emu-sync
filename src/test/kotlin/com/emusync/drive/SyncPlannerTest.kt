@@ -1,24 +1,27 @@
 package com.emusync.drive
 
-import org.junit.jupiter.api.Test
 import java.time.Instant
 import kotlin.test.assertEquals
+import org.junit.jupiter.api.Test
 
 class SyncPlannerTest {
     private val base = Instant.parse("2026-10-09T12:00:00Z")
 
     @Test
     fun `planner creates deterministic actions for local cloud and shared files`() {
-        val plan = planDirectorySync(
-            localFiles = listOf(
-                LocalFileState("local-only.sav", base.toEpochMilli()),
-                LocalFileState("shared.sav", base.plusSeconds(10).toEpochMilli()),
-            ),
-            cloudFiles = listOf(
-                CloudFileState("cloud", "cloud-only.sav", base.toString()),
-                CloudFileState("shared", "shared.sav", base.toString()),
-            ),
-        )
+        val plan =
+            planDirectorySync(
+                localFiles =
+                    listOf(
+                        LocalFileState("local-only.sav", base.toEpochMilli()),
+                        LocalFileState("shared.sav", base.plusSeconds(10).toEpochMilli()),
+                    ),
+                cloudFiles =
+                    listOf(
+                        CloudFileState("cloud", "cloud-only.sav", base.toString()),
+                        CloudFileState("shared", "shared.sav", base.toString()),
+                    ),
+            )
 
         assertEquals(
             listOf(
@@ -32,11 +35,12 @@ class SyncPlannerTest {
 
     @Test
     fun `post-play planning prefers newer local progress`() {
-        val plan = planDirectorySync(
-            localFiles = listOf(LocalFileState("save.dat", base.plusMillis(1).toEpochMilli())),
-            cloudFiles = listOf(CloudFileState("id", "save.dat", base.toString())),
-            localNewerAction = LocalNewerAction.UPLOAD,
-        )
+        val plan =
+            planDirectorySync(
+                localFiles = listOf(LocalFileState("save.dat", base.plusMillis(1).toEpochMilli())),
+                cloudFiles = listOf(CloudFileState("id", "save.dat", base.toString())),
+                localNewerAction = LocalNewerAction.UPLOAD,
+            )
 
         assertEquals(SyncDecision.UPLOAD_LOCAL, plan.single().decision)
     }

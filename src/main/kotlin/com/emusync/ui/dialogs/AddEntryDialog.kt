@@ -38,41 +38,37 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.emusync.util.ArgumentsCodec
 import androidx.compose.ui.window.Dialog
+import com.emusync.drive.remotePathSegments
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
 import com.emusync.model.NativePCGame
 import com.emusync.model.SaveTarget
 import com.emusync.model.SaveTargetType
-import com.emusync.model.scopeNewSaveTargets
-import com.emusync.drive.remotePathSegments
-import com.emusync.ui.components.CloudPathField
 import com.emusync.model.effectiveSaveTargets
+import com.emusync.model.scopeNewSaveTargets
 import com.emusync.steam.SteamShortcutManager
+import com.emusync.ui.components.CloudPathField
 import com.emusync.ui.components.FilePicker
 import com.emusync.ui.components.PickerType
 import com.emusync.ui.theme.EmuSyncColors
+import com.emusync.util.ArgumentsCodec
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/**
- * Entry type selector for the add dialog.
- */
+/** Entry type selector for the add dialog. */
 private enum class EntryType(val label: String) {
     EMULATOR("Emulator"),
     NATIVE("Native Game"),
 }
 
-/**
- * Dialog to add or edit an emulator system or native game entry.
- */
+/** Dialog to add or edit an emulator system or native game entry. */
 @Composable
 fun AddEntryDialog(
     initialEntry: GameEntry? = null,
@@ -114,18 +110,25 @@ fun AddEntryDialog(
     }
     var savePaths by remember {
         mutableStateOf(
-            if (initialEntry != null && initialEntry.effectiveSaveTargets().isNotEmpty()) initialEntry.effectiveSaveTargets().map { it.path }
+            if (initialEntry != null && initialEntry.effectiveSaveTargets().isNotEmpty())
+                initialEntry.effectiveSaveTargets().map { it.path }
             else listOf("")
         )
     }
     var saveTypes by remember {
         mutableStateOf(
-            if (initialEntry != null && initialEntry.effectiveSaveTargets().isNotEmpty()) initialEntry.effectiveSaveTargets().map { it.type }
+            if (initialEntry != null && initialEntry.effectiveSaveTargets().isNotEmpty())
+                initialEntry.effectiveSaveTargets().map { it.type }
             else listOf(SaveTargetType.FILE)
         )
     }
     var saveCloudPaths by remember {
-        mutableStateOf(initialEntry?.effectiveSaveTargets()?.map { it.cloudPath.orEmpty() }?.ifEmpty { listOf("") } ?: listOf(""))
+        mutableStateOf(
+            initialEntry
+                ?.effectiveSaveTargets()
+                ?.map { it.cloudPath.orEmpty() }
+                ?.ifEmpty { listOf("") } ?: listOf("")
+        )
     }
     var waitForProcess by remember {
         mutableStateOf((initialEntry as? NativePCGame)?.waitForProcess ?: "")
@@ -156,10 +159,10 @@ fun AddEntryDialog(
             tonalElevation = 8.dp,
         ) {
             Column(
-                modifier = Modifier
-                    .padding(24.dp)
-                    .widthIn(min = 500.dp, max = 600.dp)
-                    .verticalScroll(rememberScrollState()),
+                modifier =
+                    Modifier.padding(24.dp)
+                        .widthIn(min = 500.dp, max = 600.dp)
+                        .verticalScroll(rememberScrollState())
             ) {
                 // ── Header ──────────────────────────────────────────
                 Text(
@@ -189,19 +192,21 @@ fun AddEntryDialog(
                             label = { Text(type.label) },
                             leadingIcon = {
                                 Icon(
-                                    imageVector = when (type) {
-                                        EntryType.EMULATOR -> Icons.Default.SportsEsports
-                                        EntryType.NATIVE -> Icons.Default.Gamepad
-                                    },
+                                    imageVector =
+                                        when (type) {
+                                            EntryType.EMULATOR -> Icons.Default.SportsEsports
+                                            EntryType.NATIVE -> Icons.Default.Gamepad
+                                        },
                                     contentDescription = null,
                                     modifier = Modifier.size(18.dp),
                                 )
                             },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = EmuSyncColors.PrimaryContainer,
-                                selectedLabelColor = EmuSyncColors.Primary,
-                                selectedLeadingIconColor = EmuSyncColors.Primary,
-                            ),
+                            colors =
+                                FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = EmuSyncColors.PrimaryContainer,
+                                    selectedLabelColor = EmuSyncColors.Primary,
+                                    selectedLeadingIconColor = EmuSyncColors.Primary,
+                                ),
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -214,7 +219,9 @@ fun AddEntryDialog(
                     label = "Name",
                     value = name,
                     onValueChange = { name = it },
-                    placeholder = if (entryType == EntryType.EMULATOR) "e.g. Yuzu or Eden" else "e.g. Spelunky Classic",
+                    placeholder =
+                        if (entryType == EntryType.EMULATOR) "e.g. Yuzu or Eden"
+                        else "e.g. Spelunky Classic",
                 )
 
                 Spacer(Modifier.height(12.dp))
@@ -241,14 +248,17 @@ fun AddEntryDialog(
                         existingGroups.forEach { grp ->
                             FilterChip(
                                 selected = group.equals(grp, ignoreCase = true),
-                                onClick = { group = if (group.equals(grp, ignoreCase = true)) "" else grp },
+                                onClick = {
+                                    group = if (group.equals(grp, ignoreCase = true)) "" else grp
+                                },
                                 label = { Text(grp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = EmuSyncColors.PrimaryContainer,
-                                    selectedLabelColor = EmuSyncColors.Primary,
-                                    containerColor = EmuSyncColors.SurfaceVariant,
-                                    labelColor = EmuSyncColors.OnSurface,
-                                ),
+                                colors =
+                                    FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = EmuSyncColors.PrimaryContainer,
+                                        selectedLabelColor = EmuSyncColors.Primary,
+                                        containerColor = EmuSyncColors.SurfaceVariant,
+                                        labelColor = EmuSyncColors.OnSurface,
+                                    ),
                             )
                         }
                     }
@@ -257,18 +267,24 @@ fun AddEntryDialog(
                 Text(
                     text = "☁️ Google Drive saves folder: \"$previewCloud\"",
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (group.isNotBlank()) EmuSyncColors.Primary else EmuSyncColors.OnSurfaceDim,
-                    modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                    color =
+                        if (group.isNotBlank()) EmuSyncColors.Primary
+                        else EmuSyncColors.OnSurfaceDim,
+                    modifier = Modifier.padding(top = 4.dp, start = 4.dp),
                 )
 
                 Spacer(Modifier.height(12.dp))
 
                 // ── Executable Path ─────────────────────────────────
                 PathField(
-                    label = if (entryType == EntryType.EMULATOR) "Emulator Executable Path" else "Executable Path",
+                    label =
+                        if (entryType == EntryType.EMULATOR) "Emulator Executable Path"
+                        else "Executable Path",
                     value = executablePath,
                     onValueChange = { executablePath = it },
-                    placeholder = if (entryType == EntryType.EMULATOR) "/usr/bin/mgba-qt" else "/opt/spelunky/spelunky",
+                    placeholder =
+                        if (entryType == EntryType.EMULATOR) "/usr/bin/mgba-qt"
+                        else "/opt/spelunky/spelunky",
                     pickerType = PickerType.FILE,
                 )
                 Spacer(Modifier.height(12.dp))
@@ -278,20 +294,22 @@ fun AddEntryDialog(
                     label = "Arguments (quote values that contain spaces)",
                     value = arguments,
                     onValueChange = { arguments = it },
-                    placeholder = if (entryType == EntryType.EMULATOR) "{ROM} --fullscreen" else "--fullscreen --no-intro",
+                    placeholder =
+                        if (entryType == EntryType.EMULATOR) "{ROM} --fullscreen"
+                        else "--fullscreen --no-intro",
                 )
                 Text(
                     text = "Example: --profile \"My Profile\" keeps My Profile as one argument.",
                     style = MaterialTheme.typography.bodySmall,
                     color = EmuSyncColors.OnSurfaceDim,
-                    modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                    modifier = Modifier.padding(top = 4.dp, start = 4.dp),
                 )
                 if (entryType == EntryType.EMULATOR) {
                     Text(
                         text = "Use {ROM} to insert the requested game's path.",
                         style = MaterialTheme.typography.bodySmall,
                         color = EmuSyncColors.OnSurfaceDim,
-                        modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                        modifier = Modifier.padding(top = 4.dp, start = 4.dp),
                     )
                 }
                 Spacer(Modifier.height(12.dp))
@@ -319,20 +337,21 @@ fun AddEntryDialog(
                         label = "Fullscreen / Big Picture Flags (auto-detected if empty)",
                         value = fullscreenArgs,
                         onValueChange = { fullscreenArgs = it },
-                        placeholder = SteamShortcutManager.detectFullscreenArgs(executablePath)
-                            .ifEmpty { "e.g. -bigpicture -fullscreen" },
+                        placeholder =
+                            SteamShortcutManager.detectFullscreenArgs(executablePath).ifEmpty {
+                                "e.g. -bigpicture -fullscreen"
+                            },
                     )
                     Text(
-                        text = "Forces the emulator to bypass its Qt GUI. Auto-detected: \"${
+                        text =
+                            "Forces the emulator to bypass its Qt GUI. Auto-detected: \"${
                             SteamShortcutManager.detectFullscreenArgs(executablePath).ifEmpty { "(none)" }
                         }\"",
                         style = MaterialTheme.typography.bodySmall,
                         color = EmuSyncColors.OnSurfaceDim,
-                        modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                        modifier = Modifier.padding(top = 4.dp, start = 4.dp),
                     )
                     Spacer(Modifier.height(12.dp))
-
-
                 }
 
                 if (entryType == EntryType.NATIVE) {
@@ -343,10 +362,11 @@ fun AddEntryDialog(
                         placeholder = "Spelunky.exe",
                     )
                     Text(
-                        text = "Useful for Steam games: EmuSync will wait for this process to close.",
+                        text =
+                            "Useful for Steam games: EmuSync will wait for this process to close.",
                         style = MaterialTheme.typography.bodySmall,
                         color = EmuSyncColors.OnSurfaceDim,
-                        modifier = Modifier.padding(horizontal = 4.dp)
+                        modifier = Modifier.padding(horizontal = 4.dp),
                     )
                     Spacer(Modifier.height(12.dp))
 
@@ -367,7 +387,7 @@ fun AddEntryDialog(
                     color = EmuSyncColors.OnSurfaceDim,
                 )
                 Spacer(Modifier.height(4.dp))
-                
+
                 savePaths.forEachIndexed { index, path ->
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
@@ -384,7 +404,9 @@ fun AddEntryDialog(
                                     val file = File(newVal.trim())
                                     if (file.exists()) {
                                         val newTypes = saveTypes.toMutableList()
-                                        newTypes[index] = if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
+                                        newTypes[index] =
+                                            if (file.isDirectory) SaveTargetType.DIRECTORY
+                                            else SaveTargetType.FILE
                                         saveTypes = newTypes
                                     }
                                 },
@@ -393,54 +415,71 @@ fun AddEntryDialog(
                                     newTypes[index] = newType
                                     saveTypes = newTypes
                                 },
-                                placeholder = if (entryType == EntryType.EMULATOR)
-                                    "/home/user/emulator/memcards/Mcd001.ps2"
-                                else
-                                    "/home/user/.local/share/save.dat",
+                                placeholder =
+                                    if (entryType == EntryType.EMULATOR)
+                                        "/home/user/emulator/memcards/Mcd001.ps2"
+                                    else "/home/user/.local/share/save.dat",
                                 pickerType = PickerType.ANY,
                             )
                         }
-                        TextButton(onClick = {
-                            val newTypes = saveTypes.toMutableList()
-                            newTypes[index] = if (newTypes[index] == SaveTargetType.FILE) SaveTargetType.DIRECTORY else SaveTargetType.FILE
-                            saveTypes = newTypes
-                        }) {
-                            Text(when (saveTypes[index]) {
-                                SaveTargetType.FILE -> "File"
-                                SaveTargetType.DIRECTORY -> "Folder"
-                                SaveTargetType.UNKNOWN -> "Choose type"
-                            })
+                        TextButton(
+                            onClick = {
+                                val newTypes = saveTypes.toMutableList()
+                                newTypes[index] =
+                                    if (newTypes[index] == SaveTargetType.FILE)
+                                        SaveTargetType.DIRECTORY
+                                    else SaveTargetType.FILE
+                                saveTypes = newTypes
+                            }
+                        ) {
+                            Text(
+                                when (saveTypes[index]) {
+                                    SaveTargetType.FILE -> "File"
+                                    SaveTargetType.DIRECTORY -> "Folder"
+                                    SaveTargetType.UNKNOWN -> "Choose type"
+                                }
+                            )
                         }
                         if (savePaths.size > 1) {
                             Spacer(Modifier.width(8.dp))
-                            IconButton(onClick = {
-                                val newList = savePaths.toMutableList()
-                                newList.removeAt(index)
-                                savePaths = newList
-                                val newTypes = saveTypes.toMutableList()
-                                newTypes.removeAt(index)
-                                saveTypes = newTypes
-                                saveCloudPaths = saveCloudPaths.toMutableList().apply { removeAt(index) }
-                            }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove Path", tint = EmuSyncColors.Error)
+                            IconButton(
+                                onClick = {
+                                    val newList = savePaths.toMutableList()
+                                    newList.removeAt(index)
+                                    savePaths = newList
+                                    val newTypes = saveTypes.toMutableList()
+                                    newTypes.removeAt(index)
+                                    saveTypes = newTypes
+                                    saveCloudPaths =
+                                        saveCloudPaths.toMutableList().apply { removeAt(index) }
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Remove Path",
+                                    tint = EmuSyncColors.Error,
+                                )
                             }
                         }
                     }
                     CloudPathField(
                         value = saveCloudPaths.getOrElse(index) { "" },
-                        onValueChange = { value -> saveCloudPaths = saveCloudPaths.toMutableList().apply { set(index, value) } },
+                        onValueChange = { value ->
+                            saveCloudPaths =
+                                saveCloudPaths.toMutableList().apply { set(index, value) }
+                        },
                         type = saveTypes[index],
                     )
                     Spacer(Modifier.height(8.dp))
                 }
-                
+
                 TextButton(
                     onClick = {
                         savePaths = savePaths + ""
                         saveTypes = saveTypes + SaveTargetType.FILE
                         saveCloudPaths = saveCloudPaths + ""
                     },
-                    modifier = Modifier.align(Alignment.Start)
+                    modifier = Modifier.align(Alignment.Start),
                 ) {
                     Text("+ Add Another Path", color = EmuSyncColors.Primary)
                 }
@@ -467,65 +506,103 @@ fun AddEntryDialog(
                     }
                     Button(
                         onClick = {
-                            val validSavePaths = savePaths.map { it.trim() }.filter { it.isNotBlank() }
+                            val validSavePaths =
+                                savePaths.map { it.trim() }.filter { it.isNotBlank() }
                             val rawSaveTargets = savePaths.mapIndexedNotNull { index, path ->
-                                path.trim().takeIf { it.isNotBlank() }?.let { trimmed ->
-                                    val file = File(trimmed)
-                                    val actualType = when {
-                                        file.exists() -> if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
-                                        else -> saveTypes.getOrElse(index) { SaveTargetType.FILE }
+                                path
+                                    .trim()
+                                    .takeIf { it.isNotBlank() }
+                                    ?.let { trimmed ->
+                                        val file = File(trimmed)
+                                        val actualType =
+                                            when {
+                                                file.exists() ->
+                                                    if (file.isDirectory) SaveTargetType.DIRECTORY
+                                                    else SaveTargetType.FILE
+                                                else ->
+                                                    saveTypes.getOrElse(index) {
+                                                        SaveTargetType.FILE
+                                                    }
+                                            }
+                                        SaveTarget(
+                                            trimmed,
+                                            actualType,
+                                            saveCloudPaths
+                                                .getOrElse(index) { "" }
+                                                .trim()
+                                                .ifBlank { null },
+                                        )
                                     }
-                                    SaveTarget(trimmed, actualType, saveCloudPaths.getOrElse(index) { "" }.trim().ifBlank { null })
-                                }
                             }
-                            if (rawSaveTargets.any { it.cloudPath?.let { path -> remotePathSegments(path) == null } == true }) {
-                                errorMessage = "Cloud paths must be relative and cannot contain '..'."
+                            if (
+                                rawSaveTargets.any {
+                                    it.cloudPath?.let { path ->
+                                        remotePathSegments(path) == null
+                                    } == true
+                                }
+                            ) {
+                                errorMessage =
+                                    "Cloud paths must be relative and cannot contain '..'."
                                 return@Button
                             }
-                            val validSaveTargets = if (initialEntry?.effectiveSaveTargets().isNullOrEmpty()) {
-                                scopeNewSaveTargets(rawSaveTargets)
-                            } else rawSaveTargets
-                            val entry = validateAndBuild(
-                                type = entryType,
-                                name = name.trim(),
-                                executablePath = executablePath.trim(),
-                                arguments = arguments.trim(),
-                                romsDirectory = romsDirectory.trim(),
-                                extensions = extensions.trim(),
-                                savePaths = validSavePaths,
-                                saveTargets = validSaveTargets,
-                                waitForProcess = waitForProcess.trim(),
-                                fullscreenArgs = fullscreenArgs.trim(),
-                                coversDirectory = coversDirectory.trim(),
-                                coverPath = coverPath.trim(),
-                                group = group.trim(),
-                                cloudFolder = cloudFolder.trim(),
-                            )
+                            val validSaveTargets =
+                                if (initialEntry?.effectiveSaveTargets().isNullOrEmpty()) {
+                                    scopeNewSaveTargets(rawSaveTargets)
+                                } else rawSaveTargets
+                            val entry =
+                                validateAndBuild(
+                                    type = entryType,
+                                    name = name.trim(),
+                                    executablePath = executablePath.trim(),
+                                    arguments = arguments.trim(),
+                                    romsDirectory = romsDirectory.trim(),
+                                    extensions = extensions.trim(),
+                                    savePaths = validSavePaths,
+                                    saveTargets = validSaveTargets,
+                                    waitForProcess = waitForProcess.trim(),
+                                    fullscreenArgs = fullscreenArgs.trim(),
+                                    coversDirectory = coversDirectory.trim(),
+                                    coverPath = coverPath.trim(),
+                                    group = group.trim(),
+                                    cloudFolder = cloudFolder.trim(),
+                                )
                             if (entry != null) {
                                 // Preserve driveFileId and steamAppId if editing
-                                val updatedEntry = when (entry) {
-                                    is EmulatorSystem -> entry.copy(
-                                        driveFileId = initialEntry?.driveFileId,
-                                        steamAppId = initialEntry?.steamAppId,
-                                        steamProcessName = (initialEntry as? EmulatorSystem)?.steamProcessName,
-                                        savePathsByRom = (initialEntry as? EmulatorSystem)?.savePathsByRom ?: emptyMap(),
-                                        saveTargetsByRom = (initialEntry as? EmulatorSystem)?.saveTargetsByRom ?: emptyMap(),
-                                        coverPathByRom = (initialEntry as? EmulatorSystem)?.coverPathByRom ?: emptyMap(),
-                                        titleByRom = (initialEntry as? EmulatorSystem)?.titleByRom ?: emptyMap(),
-                                    )
-                                    is NativePCGame -> entry.copy(
-                                        driveFileId = initialEntry?.driveFileId,
-                                        steamAppId = initialEntry?.steamAppId,
-                                    )
-                                }
+                                val updatedEntry =
+                                    when (entry) {
+                                        is EmulatorSystem ->
+                                            entry.copy(
+                                                driveFileId = initialEntry?.driveFileId,
+                                                steamAppId = initialEntry?.steamAppId,
+                                                steamProcessName =
+                                                    (initialEntry as? EmulatorSystem)
+                                                        ?.steamProcessName,
+                                                savePathsByRom =
+                                                    (initialEntry as? EmulatorSystem)
+                                                        ?.savePathsByRom ?: emptyMap(),
+                                                saveTargetsByRom =
+                                                    (initialEntry as? EmulatorSystem)
+                                                        ?.saveTargetsByRom ?: emptyMap(),
+                                                coverPathByRom =
+                                                    (initialEntry as? EmulatorSystem)
+                                                        ?.coverPathByRom ?: emptyMap(),
+                                                titleByRom =
+                                                    (initialEntry as? EmulatorSystem)?.titleByRom
+                                                        ?: emptyMap(),
+                                            )
+                                        is NativePCGame ->
+                                            entry.copy(
+                                                driveFileId = initialEntry?.driveFileId,
+                                                steamAppId = initialEntry?.steamAppId,
+                                            )
+                                    }
                                 onSave(updatedEntry)
                             } else {
                                 errorMessage = "Please fill in all required fields."
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = EmuSyncColors.Primary,
-                        ),
+                        colors =
+                            ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
                     ) {
                         Text(if (initialEntry == null) "Add" else "Save")
                     }
@@ -560,13 +637,14 @@ private fun FormField(
                     color = EmuSyncColors.OnSurfaceDim.copy(alpha = 0.5f),
                 )
             },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = EmuSyncColors.Primary,
-                unfocusedBorderColor = EmuSyncColors.Divider,
-                cursorColor = EmuSyncColors.Primary,
-                focusedTextColor = EmuSyncColors.OnBackground,
-                unfocusedTextColor = EmuSyncColors.OnSurface,
-            ),
+            colors =
+                OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = EmuSyncColors.Primary,
+                    unfocusedBorderColor = EmuSyncColors.Divider,
+                    cursorColor = EmuSyncColors.Primary,
+                    focusedTextColor = EmuSyncColors.OnBackground,
+                    unfocusedTextColor = EmuSyncColors.OnSurface,
+                ),
             shape = RoundedCornerShape(10.dp),
         )
     }
@@ -603,13 +681,14 @@ private fun PathField(
                         color = EmuSyncColors.OnSurfaceDim.copy(alpha = 0.5f),
                     )
                 },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = EmuSyncColors.Primary,
-                    unfocusedBorderColor = EmuSyncColors.Divider,
-                    cursorColor = EmuSyncColors.Primary,
-                    focusedTextColor = EmuSyncColors.OnBackground,
-                    unfocusedTextColor = EmuSyncColors.OnSurface,
-                ),
+                colors =
+                    OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = EmuSyncColors.Primary,
+                        unfocusedBorderColor = EmuSyncColors.Divider,
+                        cursorColor = EmuSyncColors.Primary,
+                        focusedTextColor = EmuSyncColors.OnBackground,
+                        unfocusedTextColor = EmuSyncColors.OnSurface,
+                    ),
                 shape = RoundedCornerShape(10.dp),
             )
             Spacer(Modifier.width(8.dp))
@@ -617,23 +696,25 @@ private fun PathField(
                 Button(
                     onClick = {
                         coroutineScope.launch {
-                            val result = withContext(Dispatchers.IO) {
-                                FilePicker.pickPath(
-                                    label = label ?: "File",
-                                    initialPath = value,
-                                    type = PickerType.FILE
-                                )
-                            }
+                            val result =
+                                withContext(Dispatchers.IO) {
+                                    FilePicker.pickPath(
+                                        label = label ?: "File",
+                                        initialPath = value,
+                                        type = PickerType.FILE,
+                                    )
+                                }
                             if (result != null) {
                                 onValueChange(result)
                                 onTypeChange?.invoke(SaveTargetType.FILE)
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = EmuSyncColors.SurfaceSelected,
-                        contentColor = EmuSyncColors.OnSurface,
-                    ),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor = EmuSyncColors.SurfaceSelected,
+                            contentColor = EmuSyncColors.OnSurface,
+                        ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.height(56.dp),
                 ) {
@@ -645,23 +726,25 @@ private fun PathField(
                 Button(
                     onClick = {
                         coroutineScope.launch {
-                            val result = withContext(Dispatchers.IO) {
-                                FilePicker.pickPath(
-                                    label = label ?: "Folder",
-                                    initialPath = value,
-                                    type = PickerType.DIRECTORY
-                                )
-                            }
+                            val result =
+                                withContext(Dispatchers.IO) {
+                                    FilePicker.pickPath(
+                                        label = label ?: "Folder",
+                                        initialPath = value,
+                                        type = PickerType.DIRECTORY,
+                                    )
+                                }
                             if (result != null) {
                                 onValueChange(result)
                                 onTypeChange?.invoke(SaveTargetType.DIRECTORY)
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = EmuSyncColors.SurfaceSelected,
-                        contentColor = EmuSyncColors.OnSurface,
-                    ),
+                    colors =
+                        ButtonDefaults.buttonColors(
+                            containerColor = EmuSyncColors.SurfaceSelected,
+                            contentColor = EmuSyncColors.OnSurface,
+                        ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.height(56.dp),
                 ) {
@@ -689,7 +772,7 @@ private fun validateAndBuild(
     cloudFolder: String = "",
 ): GameEntry? {
     if (name.isBlank() || executablePath.isBlank()) return null
-    
+
     val validSavePaths = savePaths.map { it.trim() }.filter { it.isNotBlank() }
     if (type == EntryType.NATIVE && validSavePaths.isEmpty()) return null
 

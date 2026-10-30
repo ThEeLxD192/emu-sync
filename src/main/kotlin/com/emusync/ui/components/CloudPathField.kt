@@ -18,11 +18,17 @@ internal fun CloudPathField(value: String, onValueChange: (String) -> Unit, type
         singleLine = true,
         label = { Text("Cloud path (optional)") },
         placeholder = {
-            Text(if (type == SaveTargetType.DIRECTORY) "Folder prefix shared across devices" else "File name, including any subfolders")
+            Text(
+                if (type == SaveTargetType.DIRECTORY) "Folder prefix shared across devices"
+                else "File name, including any subfolders"
+            )
         },
         isError = invalid,
         supportingText = {
-            Text(if (invalid) "Use a relative path without '..'." else "Use the same cloud path for this save on each device.")
+            Text(
+                if (invalid) "Use a relative path without '..'."
+                else "Use the same cloud path for this save on each device."
+            )
         },
     )
 }

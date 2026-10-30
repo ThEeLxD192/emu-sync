@@ -78,6 +78,49 @@ You can configure Google Drive credentials directly inside the app by clicking *
 
 ---
 
+### Code Quality
+
+Use JDK 25 and Git Bash on Windows. The pinned Spotless/ktfmt formatter applies to
+application code, tests and Gradle Kotlin scripts. Detekt analyzes production and
+tests with type resolution, with settings adapted to Compose and test scenarios.
+
+```bash
+# Install the versioned pre-commit hook once per clone
+./gradlew installGitHooks
+
+# Apply formatting explicitly, then stage the formatted changes
+./gradlew spotlessApply
+
+# Check formatting and static analysis without running tests
+./gradlew qualityCheck
+
+# Run quality checks and the unit tests (also required by CI)
+./gradlew check
+```
+
+The hook checks an isolated copy of the staged commit when Kotlin, Gradle or
+quality configuration changes. Unstaged edits remain untouched. Documentation-only
+and image-only commits skip these checks. The hook never formats or stages files
+and does not run tests. Gradle may download dependencies on the first run.
+
+During adoption, Detekt reports existing and new findings without blocking commits
+or CI. Formatting violations still block both. No baseline is generated. To enforce
+Detekt after the cleanup, set `ignoreFailures` to `false` in the Gradle configuration.
+A legitimate exception may use a suppression on the smallest declaration with an
+adjacent comment explaining why that rule does not apply. The target policy for
+production code is to handle nullable values explicitly instead of using `!!`;
+existing violations will be resolved incrementally. Document important contracts
+and design decisions with KDoc.
+Reports are written to `build/reports/detekt/` and uploaded by CI even when analysis
+findings do not fail the build.
+
+Git hooks can be bypassed and must be installed in each clone. Configure GitHub
+branch protection to require the Linux and Windows validation jobs before merging.
+The installer refuses to replace existing custom hook settings or active hooks.
+To uninstall this repository's hook, run `git config --local --unset core.hooksPath`.
+
+---
+
 ### Google Drive OAuth 2.0 Setup
 
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/).

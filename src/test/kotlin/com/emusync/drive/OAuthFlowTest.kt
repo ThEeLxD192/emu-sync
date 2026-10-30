@@ -1,18 +1,18 @@
 package com.emusync.drive
 
+import com.sun.net.httpserver.HttpServer
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
-import com.sun.net.httpserver.HttpServer
-import org.junit.jupiter.api.Test
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
-import java.net.URI
 import java.net.Socket
+import java.net.URI
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Test
 
 class OAuthFlowTest {
     private val flow = OAuthFlow(HttpClient(MockEngine { error("HTTP should not be called") }))
@@ -45,7 +45,10 @@ class OAuthFlowTest {
     @Test
     fun `callback reports provider errors and malformed requests`() {
         assertFailsWith<DriveApiException> {
-            flow.validateCallback(mapOf("error" to "access_denied", "state" to "expected"), "expected")
+            flow.validateCallback(
+                mapOf("error" to "access_denied", "state" to "expected"),
+                "expected",
+            )
         }
         assertFailsWith<DriveApiException> {
             flow.validateCallback(mapOf("state" to "expected"), "expected")
@@ -66,10 +69,13 @@ class OAuthFlowTest {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         val results = mutableListOf<Result<String>>()
         val callbackReceived = CountDownLatch(1)
-        server.createContext("/", flow.callbackHandler(server, "expected") {
-            results += it
-            callbackReceived.countDown()
-        })
+        server.createContext(
+            "/",
+            flow.callbackHandler(server, "expected") {
+                results += it
+                callbackReceived.countDown()
+            },
+        )
         server.start()
 
         try {

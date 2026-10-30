@@ -6,10 +6,6 @@ import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.NativePCGame
 import com.emusync.model.SaveTarget
 import com.emusync.model.SaveTargetType
-import kotlinx.serialization.json.Json
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
-import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -17,6 +13,10 @@ import java.nio.file.attribute.PosixFilePermission
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.Json
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.api.io.TempDir
 
 class ConfigManagerTest {
 
@@ -25,36 +25,35 @@ class ConfigManagerTest {
         val configFile = File(tempDir, "config.json")
         val manager = ConfigManager(configFile.absolutePath)
 
-        val sampleConfig = AppConfig(
-            googleDrive = GoogleDriveConfig(
-                clientId = "test-client-id",
-                clientSecret = "test-secret",
-                refreshToken = "test-refresh-token",
-            ),
-            entries = listOf(
-                EmulatorSystem(
-                    name = "Playstation 1",
-                    executablePath = "/usr/bin/duckstation",
-                    romsDirectory = "/roms/ps1",
-                    extensions = listOf("bin", "cue"),
-                    savePathsByRom = mapOf(
-                        "game.bin" to listOf("/saves/game_1.mcd")
+        val sampleConfig =
+            AppConfig(
+                googleDrive =
+                    GoogleDriveConfig(
+                        clientId = "test-client-id",
+                        clientSecret = "test-secret",
+                        refreshToken = "test-refresh-token",
                     ),
-                    coverPathByRom = mapOf(
-                        "game.bin" to "/covers/game_custom.png"
+                entries =
+                    listOf(
+                        EmulatorSystem(
+                            name = "Playstation 1",
+                            executablePath = "/usr/bin/duckstation",
+                            romsDirectory = "/roms/ps1",
+                            extensions = listOf("bin", "cue"),
+                            savePathsByRom = mapOf("game.bin" to listOf("/saves/game_1.mcd")),
+                            coverPathByRom = mapOf("game.bin" to "/covers/game_custom.png"),
+                            steamAppId = 12345,
+                        ),
+                        NativePCGame(
+                            name = "Hollow Knight",
+                            executablePath = "/games/hollow_knight/start.sh",
+                            arguments = listOf("--fullscreen"),
+                            savePaths = listOf("/saves/hollow_knight.dat"),
+                            coverPath = "/covers/hollow_knight.jpg",
+                            steamAppId = 67890,
+                        ),
                     ),
-                    steamAppId = 12345
-                ),
-                NativePCGame(
-                    name = "Hollow Knight",
-                    executablePath = "/games/hollow_knight/start.sh",
-                    arguments = listOf("--fullscreen"),
-                    savePaths = listOf("/saves/hollow_knight.dat"),
-                    coverPath = "/covers/hollow_knight.jpg",
-                    steamAppId = 67890
-                )
             )
-        )
 
         manager.save(sampleConfig)
         assertTrue(configFile.exists())
@@ -79,7 +78,9 @@ class ConfigManagerTest {
     }
 
     @Test
-    fun `should automatically create default config when file does not exist`(@TempDir tempDir: File) {
+    fun `should automatically create default config when file does not exist`(
+        @TempDir tempDir: File
+    ) {
         val nonExistent = File(tempDir, "auto_created.json")
         val manager = ConfigManager(nonExistent.absolutePath)
 
@@ -94,13 +95,16 @@ class ConfigManagerTest {
     }
 
     @Test
-    fun `should throw IllegalArgumentException when autoCreate is false and file does not exist`(@TempDir tempDir: File) {
+    fun `should throw IllegalArgumentException when autoCreate is false and file does not exist`(
+        @TempDir tempDir: File
+    ) {
         val nonExistent = File(tempDir, "does_not_exist.json")
         val manager = ConfigManager(nonExistent.absolutePath)
 
-        val exception = assertThrows<IllegalArgumentException> {
-            manager.load(autoCreate = false)
-        }
+        val exception =
+            assertThrows<IllegalArgumentException> {
+                manager.load(autoCreate = false)
+            }
         assertTrue(exception.message!!.contains("Configuration file not found"))
     }
 
@@ -118,11 +122,12 @@ class ConfigManagerTest {
     @Test
     fun `should resolve explicit custom path over environment or defaults`(@TempDir tempDir: File) {
         val customFile = File(tempDir, "my_custom_config.json")
-        val resolved = ConfigManager.resolveDefaultConfigFile(
-            customPath = customFile.absolutePath,
-            envProvider = { "some_env_val" },
-            propertyProvider = { "some_prop_val" },
-        )
+        val resolved =
+            ConfigManager.resolveDefaultConfigFile(
+                customPath = customFile.absolutePath,
+                envProvider = { "some_env_val" },
+                propertyProvider = { "some_prop_val" },
+            )
         assertEquals(customFile.absolutePath, resolved.absolutePath)
     }
 
@@ -131,52 +136,64 @@ class ConfigManagerTest {
         val appImageFile = File(tempDir, "EmuSync-x86_64.AppImage").apply { createNewFile() }
         val coLocatedConfig = File(tempDir, "config.json").apply { writeText("{}") }
 
-        val resolved = ConfigManager.resolveDefaultConfigFile(
-            envProvider = { if (it == "APPIMAGE") appImageFile.absolutePath else null },
-            propertyProvider = { null },
-            workingDir = File("/nonexistent/cwd"),
-        )
+        val resolved =
+            ConfigManager.resolveDefaultConfigFile(
+                envProvider = { if (it == "APPIMAGE") appImageFile.absolutePath else null },
+                propertyProvider = { null },
+                workingDir = File("/nonexistent/cwd"),
+            )
         assertEquals(coLocatedConfig.absolutePath, resolved.absolutePath)
     }
 
     @Test
-    fun `should resolve co-located config in working directory when it exists`(@TempDir tempDir: File) {
+    fun `should resolve co-located config in working directory when it exists`(
+        @TempDir tempDir: File
+    ) {
         val cwdConfig = File(tempDir, "config.json").apply { writeText("{}") }
 
-        val resolved = ConfigManager.resolveDefaultConfigFile(
-            envProvider = { null },
-            propertyProvider = { null },
-            workingDir = tempDir,
-        )
+        val resolved =
+            ConfigManager.resolveDefaultConfigFile(
+                envProvider = { null },
+                propertyProvider = { null },
+                workingDir = tempDir,
+            )
         assertEquals(cwdConfig.absolutePath, resolved.absolutePath)
     }
 
     @Test
     fun `should resolve Windows platform default config path`() {
-        val resolved = ConfigManager.getDefaultPlatformConfigFile(
-            envProvider = { if (it == "APPDATA") "C:\\Users\\Gamer\\AppData\\Roaming" else null },
-            propertyProvider = { if (it == "os.name") "Windows 11" else null },
-        )
+        val resolved =
+            ConfigManager.getDefaultPlatformConfigFile(
+                envProvider = {
+                    if (it == "APPDATA") "C:\\Users\\Gamer\\AppData\\Roaming" else null
+                },
+                propertyProvider = { if (it == "os.name") "Windows 11" else null },
+            )
         assertTrue(resolved.path.contains("AppData") && resolved.path.contains("emusync"))
         assertTrue(resolved.name == "config.json")
     }
 
     @Test
     fun `should resolve Linux platform default config path`() {
-        val resolved = ConfigManager.getDefaultPlatformConfigFile(
-            envProvider = { if (it == "XDG_CONFIG_HOME") "/home/gamer/.config" else null },
-            propertyProvider = { if (it == "os.name") "Linux" else null },
+        val resolved =
+            ConfigManager.getDefaultPlatformConfigFile(
+                envProvider = { if (it == "XDG_CONFIG_HOME") "/home/gamer/.config" else null },
+                propertyProvider = { if (it == "os.name") "Linux" else null },
+            )
+        assertEquals(
+            File("/home/gamer/.config/emusync/config.json").absolutePath,
+            resolved.absolutePath,
         )
-        assertEquals(File("/home/gamer/.config/emusync/config.json").absolutePath, resolved.absolutePath)
     }
 
     @Test
     fun `legacy paths are migrated once to explicit save target types`(@TempDir tempDir: File) {
         val extensionlessFile = File(tempDir, "SAVE_SLOT").apply { writeText("save") }
         val dottedDirectory = File(tempDir, "profile.d").apply { mkdirs() }
-        val configFile = File(tempDir, "config.json").apply {
-            writeText(
-                """
+        val configFile =
+            File(tempDir, "config.json").apply {
+                writeText(
+                    """
                 {
                   "entries": [{
                     "type": "native",
@@ -185,9 +202,10 @@ class ConfigManagerTest {
                     "savePaths": [${Json.encodeToString(extensionlessFile.absolutePath)}, ${Json.encodeToString(dottedDirectory.absolutePath)}]
                   }]
                 }
-                """.trimIndent()
-            )
-        }
+                """
+                        .trimIndent()
+                )
+            }
 
         val migrated = ConfigManager(configFile).load().entries.single() as NativePCGame
 
@@ -206,13 +224,19 @@ class ConfigManagerTest {
         val ambiguous = File(tempDir, "future.folder")
         val manager = ConfigManager(File(tempDir, "config.json"))
         manager.save(
-            AppConfig(entries = listOf(
-                NativePCGame(
-                    name = "Explicit",
-                    executablePath = "/game/start",
-                    saveTargets = listOf(SaveTarget(ambiguous.absolutePath, SaveTargetType.DIRECTORY)),
-                )
-            ))
+            AppConfig(
+                entries =
+                    listOf(
+                        NativePCGame(
+                            name = "Explicit",
+                            executablePath = "/game/start",
+                            saveTargets =
+                                listOf(
+                                    SaveTarget(ambiguous.absolutePath, SaveTargetType.DIRECTORY)
+                                ),
+                        )
+                    )
+            )
         )
 
         val loaded = manager.load().entries.single() as NativePCGame
@@ -220,11 +244,14 @@ class ConfigManagerTest {
     }
 
     @Test
-    fun `missing dotted legacy path stays unknown until created as a directory`(@TempDir tempDir: File) {
+    fun `missing dotted legacy path stays unknown until created as a directory`(
+        @TempDir tempDir: File
+    ) {
         val dottedPath = File(tempDir, "profile.d")
-        val configFile = File(tempDir, "config.json").apply {
-            writeText(
-                """
+        val configFile =
+            File(tempDir, "config.json").apply {
+                writeText(
+                    """
                 {
                   "entries": [{
                     "type": "native",
@@ -233,9 +260,10 @@ class ConfigManagerTest {
                     "savePaths": [${Json.encodeToString(dottedPath.absolutePath)}]
                   }]
                 }
-                """.trimIndent()
-            )
-        }
+                """
+                        .trimIndent()
+                )
+            }
         val manager = ConfigManager(configFile)
 
         val firstLoad = manager.load().entries.single() as NativePCGame
@@ -256,15 +284,19 @@ class ConfigManagerTest {
         val configFile = File(tempDir, "config.json")
         val manager = ConfigManager(configFile)
         manager.save(
-            AppConfig(entries = listOf(
-                EmulatorSystem(
-                    name = "Legacy emulator",
-                    executablePath = "/emulator",
-                    romsDirectory = tempDir.absolutePath,
-                    extensions = listOf("rom"),
-                    savePathsByRom = mapOf(rom.name to listOf(dottedDirectory.absolutePath)),
-                ),
-            )),
+            AppConfig(
+                entries =
+                    listOf(
+                        EmulatorSystem(
+                            name = "Legacy emulator",
+                            executablePath = "/emulator",
+                            romsDirectory = tempDir.absolutePath,
+                            extensions = listOf("rom"),
+                            savePathsByRom =
+                                mapOf(rom.name to listOf(dottedDirectory.absolutePath)),
+                        )
+                    )
+            )
         )
 
         val firstLoad = manager.load().entries.single() as EmulatorSystem
@@ -287,15 +319,23 @@ class ConfigManagerTest {
     @Test
     fun `interrupted save preserves last valid configuration`(@TempDir tempDir: File) {
         val configFile = File(tempDir, "config.json")
-        val original = AppConfig(entries = listOf(NativePCGame("Original", "/game/start", savePaths = listOf("/save.dat"))))
+        val original =
+            AppConfig(
+                entries =
+                    listOf(NativePCGame("Original", "/game/start", savePaths = listOf("/save.dat")))
+            )
         ConfigManager(configFile).save(original)
-        val interruptedManager = ConfigManager(configFile) { throw IOException("simulated power loss") }
+        val interruptedManager =
+            ConfigManager(configFile) { throw IOException("simulated power loss") }
 
         assertFailsWith<IOException> {
             interruptedManager.save(AppConfig(entries = emptyList()))
         }
 
-        assertEquals("Original", (ConfigManager(configFile).load().entries.single() as NativePCGame).name)
+        assertEquals(
+            "Original",
+            (ConfigManager(configFile).load().entries.single() as NativePCGame).name,
+        )
         assertEquals(listOf("config.json"), tempDir.list()?.toList())
     }
 
@@ -313,12 +353,15 @@ class ConfigManagerTest {
     }
 
     @Test
-    fun `existing directory target misconfigured as FILE resolves to DIRECTORY on load`(@TempDir tempDir: File) {
+    fun `existing directory target misconfigured as FILE resolves to DIRECTORY on load`(
+        @TempDir tempDir: File
+    ) {
         val saveDir = File(tempDir, "CUSA13795").apply { mkdirs() }
         File(saveDir, "save.dat").writeText("data")
-        val configFile = File(tempDir, "config.json").apply {
-            writeText(
-                """
+        val configFile =
+            File(tempDir, "config.json").apply {
+                writeText(
+                    """
                 {
                   "entries": [{
                     "type": "native",
@@ -331,9 +374,10 @@ class ConfigManagerTest {
                     }]
                   }]
                 }
-                """.trimIndent()
-            )
-        }
+                """
+                        .trimIndent()
+                )
+            }
         val manager = ConfigManager(configFile)
         val loaded = manager.load().entries.single() as NativePCGame
 

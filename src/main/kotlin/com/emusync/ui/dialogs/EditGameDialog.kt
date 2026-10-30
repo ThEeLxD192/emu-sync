@@ -23,7 +23,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
@@ -44,9 +43,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,24 +50,25 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.emusync.drive.remotePathSegments
 import com.emusync.drive.resolveCloudRestorePaths
 import com.emusync.drive.resolveCloudRestoreTargets
-import com.emusync.drive.remotePathSegments
 import com.emusync.model.EmulatorSystem
-import com.emusync.ui.GameItem
-import com.emusync.ui.components.FilePicker
-import com.emusync.ui.components.CloudPathField
-import com.emusync.ui.components.PickerType
-import com.emusync.ui.components.loadGameCover
-import com.emusync.ui.theme.EmuSyncColors
 import com.emusync.model.SaveTarget
 import com.emusync.model.SaveTargetType
 import com.emusync.model.scopeNewSaveTargets
+import com.emusync.ui.GameItem
+import com.emusync.ui.components.CloudPathField
+import com.emusync.ui.components.FilePicker
+import com.emusync.ui.components.PickerType
+import com.emusync.ui.components.loadGameCover
+import com.emusync.ui.theme.EmuSyncColors
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/**
- * A dialog to edit custom cover art and specific save paths for a single game.
- */
+/** A dialog to edit custom cover art and specific save paths for a single game. */
 @Composable
 fun EditGameDialog(
     game: GameItem,
@@ -87,8 +84,7 @@ fun EditGameDialog(
 
     var savePaths by remember {
         mutableStateOf(
-            if (game.gameSpecificSavePaths.isEmpty()) listOf("")
-            else game.gameSpecificSavePaths
+            if (game.gameSpecificSavePaths.isEmpty()) listOf("") else game.gameSpecificSavePaths
         )
     }
     var saveTypes by remember {
@@ -98,35 +94,40 @@ fun EditGameDialog(
         )
     }
     var saveCloudPaths by remember {
-        mutableStateOf(game.gameSpecificSaveTargets.map { it.cloudPath.orEmpty() }.ifEmpty { listOf("") })
+        mutableStateOf(
+            game.gameSpecificSaveTargets.map { it.cloudPath.orEmpty() }.ifEmpty { listOf("") }
+        )
     }
     var restoreDestinationFolder by remember { mutableStateOf("") }
     var restoreWholeFolder by remember { mutableStateOf(false) }
-    val selectedRestorePaths = remember(restoreDestinationFolder, restoreWholeFolder, cloudRestoreFileNames) {
-        val destination = restoreDestinationFolder.trim()
-        when {
-            cloudRestoreFileNames.isEmpty() || destination.isBlank() -> emptyList()
-            restoreWholeFolder -> listOf(destination)
-            else -> resolveCloudRestorePaths(destination, cloudRestoreFileNames)
+    val selectedRestorePaths =
+        remember(restoreDestinationFolder, restoreWholeFolder, cloudRestoreFileNames) {
+            val destination = restoreDestinationFolder.trim()
+            when {
+                cloudRestoreFileNames.isEmpty() || destination.isBlank() -> emptyList()
+                restoreWholeFolder -> listOf(destination)
+                else -> resolveCloudRestorePaths(destination, cloudRestoreFileNames)
+            }
         }
-    }
 
     var coverPath by remember {
         mutableStateOf(game.effectiveCoverPath ?: "")
     }
 
-    val previewFile = remember(coverPath) {
-        val trimmed = coverPath.trim()
-        if (trimmed.isNotBlank()) {
-            File(trimmed).takeIf { it.exists() && it.isFile }
-        } else {
-            game.coverFile
+    val previewFile =
+        remember(coverPath) {
+            val trimmed = coverPath.trim()
+            if (trimmed.isNotBlank()) {
+                File(trimmed).takeIf { it.exists() && it.isFile }
+            } else {
+                game.coverFile
+            }
         }
-    }
 
-    val previewBitmap = remember(previewFile?.absolutePath) {
-        loadGameCover(previewFile)
-    }
+    val previewBitmap =
+        remember(previewFile?.absolutePath) {
+            loadGameCover(previewFile)
+        }
 
     val isCustomCover = coverPath.isNotBlank()
     val isAutoDetected = !isCustomCover && previewFile != null
@@ -136,15 +137,13 @@ fun EditGameDialog(
             shape = RoundedCornerShape(16.dp),
             color = EmuSyncColors.Surface,
             border = BorderStroke(1.dp, EmuSyncColors.Divider),
-            modifier = Modifier
-                .widthIn(min = 520.dp, max = 580.dp)
-                .wrapContentHeight(),
+            modifier = Modifier.widthIn(min = 520.dp, max = 580.dp).wrapContentHeight(),
         ) {
             Column(
-                modifier = Modifier
-                    .padding(24.dp)
-                    .heightIn(max = 640.dp)
-                    .verticalScroll(rememberScrollState())
+                modifier =
+                    Modifier.padding(24.dp)
+                        .heightIn(max = 640.dp)
+                        .verticalScroll(rememberScrollState())
             ) {
                 Text(
                     text = "Edit Game",
@@ -206,11 +205,12 @@ fun EditGameDialog(
                         color = EmuSyncColors.OnSurface,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        val cleanSuggestion = com.emusync.model.cleanGameTitle(game.romFile?.nameWithoutExtension ?: game.name)
+                        val cleanSuggestion =
+                            com.emusync.model.cleanGameTitle(
+                                game.romFile?.nameWithoutExtension ?: game.name
+                            )
                         if (customTitle != cleanSuggestion) {
-                            TextButton(
-                                onClick = { customTitle = cleanSuggestion },
-                            ) {
+                            TextButton(onClick = { customTitle = cleanSuggestion }) {
                                 Text(
                                     text = "Auto-Clean",
                                     style = MaterialTheme.typography.labelSmall,
@@ -220,9 +220,7 @@ fun EditGameDialog(
                         }
                         val rawFilename = game.romFile?.nameWithoutExtension ?: game.name
                         if (customTitle != rawFilename) {
-                            TextButton(
-                                onClick = { customTitle = rawFilename },
-                            ) {
+                            TextButton(onClick = { customTitle = rawFilename }) {
                                 Text(
                                     text = "Raw Name",
                                     style = MaterialTheme.typography.labelSmall,
@@ -239,7 +237,10 @@ fun EditGameDialog(
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = {
                         Text(
-                            text = com.emusync.model.cleanGameTitle(game.romFile?.nameWithoutExtension ?: game.name),
+                            text =
+                                com.emusync.model.cleanGameTitle(
+                                    game.romFile?.nameWithoutExtension ?: game.name
+                                ),
                             color = EmuSyncColors.OnSurfaceDim.copy(alpha = 0.5f),
                         )
                     },
@@ -253,13 +254,14 @@ fun EditGameDialog(
                             )
                         }
                     },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = EmuSyncColors.Primary,
-                        unfocusedBorderColor = EmuSyncColors.Divider,
-                        cursorColor = EmuSyncColors.Primary,
-                        focusedTextColor = EmuSyncColors.OnBackground,
-                        unfocusedTextColor = EmuSyncColors.OnSurface,
-                    ),
+                    colors =
+                        OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = EmuSyncColors.Primary,
+                            unfocusedBorderColor = EmuSyncColors.Divider,
+                            cursorColor = EmuSyncColors.Primary,
+                            focusedTextColor = EmuSyncColors.OnBackground,
+                            unfocusedTextColor = EmuSyncColors.OnSurface,
+                        ),
                     shape = RoundedCornerShape(10.dp),
                 )
                 Spacer(Modifier.height(18.dp))
@@ -277,21 +279,23 @@ fun EditGameDialog(
                         color = EmuSyncColors.OnSurface,
                     )
                     // Status Badge
-                    val badgeText = when {
-                        isCustomCover -> "Custom Cover"
-                        isAutoDetected -> "Auto-detected"
-                        else -> "No Cover"
-                    }
-                    val badgeColor = when {
-                        isCustomCover -> EmuSyncColors.Primary
-                        isAutoDetected -> EmuSyncColors.Success
-                        else -> EmuSyncColors.OnSurfaceDim
-                    }
+                    val badgeText =
+                        when {
+                            isCustomCover -> "Custom Cover"
+                            isAutoDetected -> "Auto-detected"
+                            else -> "No Cover"
+                        }
+                    val badgeColor =
+                        when {
+                            isCustomCover -> EmuSyncColors.Primary
+                            isAutoDetected -> EmuSyncColors.Success
+                            else -> EmuSyncColors.OnSurfaceDim
+                        }
                     Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(badgeColor.copy(alpha = 0.15f))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                        modifier =
+                            Modifier.clip(RoundedCornerShape(6.dp))
+                                .background(badgeColor.copy(alpha = 0.15f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = badgeText,
@@ -303,7 +307,8 @@ fun EditGameDialog(
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Individual cover image for this game, or empty for automatic detection.",
+                    text =
+                        "Individual cover image for this game, or empty for automatic detection.",
                     style = MaterialTheme.typography.bodySmall,
                     color = EmuSyncColors.OnSurfaceDim,
                 )
@@ -315,11 +320,14 @@ fun EditGameDialog(
                 ) {
                     // Generous Box Art Preview (136 x 180 dp)
                     Box(
-                        modifier = Modifier
-                            .size(136.dp, 180.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(EmuSyncColors.SurfaceVariant)
-                            .border(BorderStroke(1.dp, EmuSyncColors.Divider), RoundedCornerShape(10.dp)),
+                        modifier =
+                            Modifier.size(136.dp, 180.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(EmuSyncColors.SurfaceVariant)
+                                .border(
+                                    BorderStroke(1.dp, EmuSyncColors.Divider),
+                                    RoundedCornerShape(10.dp),
+                                ),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (previewBitmap != null) {
@@ -327,9 +335,7 @@ fun EditGameDialog(
                                 bitmap = previewBitmap,
                                 contentDescription = "Cover preview",
                                 contentScale = ContentScale.Fit,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(4.dp),
+                                modifier = Modifier.fillMaxSize().padding(4.dp),
                             )
                         } else {
                             Column(
@@ -357,10 +363,11 @@ fun EditGameDialog(
 
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Text(
-                            text = if (isCustomCover) "Custom Image File:" else "Detected Image File:",
+                            text =
+                                if (isCustomCover) "Custom Image File:" else "Detected Image File:",
                             style = MaterialTheme.typography.labelMedium,
                             color = EmuSyncColors.OnSurfaceDim,
                         )
@@ -372,27 +379,33 @@ fun EditGameDialog(
                             singleLine = true,
                             placeholder = {
                                 Text(
-                                    text = if (game.coverFile != null) game.coverFile?.name.orEmpty() else "Auto-detecting...",
+                                    text =
+                                        if (game.coverFile != null) game.coverFile?.name.orEmpty()
+                                        else "Auto-detecting...",
                                     color = EmuSyncColors.OnSurfaceDim.copy(alpha = 0.5f),
                                     maxLines = 1,
                                 )
                             },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = EmuSyncColors.Primary,
-                                unfocusedBorderColor = EmuSyncColors.Divider,
-                                cursorColor = EmuSyncColors.Primary,
-                                focusedTextColor = EmuSyncColors.OnBackground,
-                                unfocusedTextColor = EmuSyncColors.OnSurface,
-                            ),
+                            colors =
+                                OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = EmuSyncColors.Primary,
+                                    unfocusedBorderColor = EmuSyncColors.Divider,
+                                    cursorColor = EmuSyncColors.Primary,
+                                    focusedTextColor = EmuSyncColors.OnBackground,
+                                    unfocusedTextColor = EmuSyncColors.OnSurface,
+                                ),
                             shape = RoundedCornerShape(10.dp),
                         )
 
                         Text(
-                            text = when {
-                                isCustomCover -> "Using your specific custom image for this game."
-                                isAutoDetected -> "Found automatically next to ROM or emulator covers."
-                                else -> "Select an image file to display as box art."
-                            },
+                            text =
+                                when {
+                                    isCustomCover ->
+                                        "Using your specific custom image for this game."
+                                    isAutoDetected ->
+                                        "Found automatically next to ROM or emulator covers."
+                                    else -> "Select an image file to display as box art."
+                                },
                             style = MaterialTheme.typography.bodySmall,
                             color = EmuSyncColors.OnSurfaceDim.copy(alpha = 0.75f),
                         )
@@ -407,20 +420,22 @@ fun EditGameDialog(
                                         game.romFile?.parentFile?.absolutePath ?: ""
                                     }
                                     coroutineScope.launch {
-                                        val result = withContext(Dispatchers.IO) {
-                                            FilePicker.pickPath(
-                                                label = "Cover Image",
-                                                initialPath = initialDir,
-                                                type = PickerType.FILE
-                                            )
-                                        }
+                                        val result =
+                                            withContext(Dispatchers.IO) {
+                                                FilePicker.pickPath(
+                                                    label = "Cover Image",
+                                                    initialPath = initialDir,
+                                                    type = PickerType.FILE,
+                                                )
+                                            }
                                         if (result != null) coverPath = result
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = EmuSyncColors.SurfaceSelected,
-                                    contentColor = EmuSyncColors.OnSurface,
-                                ),
+                                colors =
+                                    ButtonDefaults.buttonColors(
+                                        containerColor = EmuSyncColors.SurfaceSelected,
+                                        contentColor = EmuSyncColors.OnSurface,
+                                    ),
                                 shape = RoundedCornerShape(8.dp),
                             ) {
                                 Text(if (isCustomCover) "Change Image..." else "Select Image...")
@@ -438,20 +453,23 @@ fun EditGameDialog(
 
                 // ── Save Paths Section ────────────────────────────
                 Text(
-                    text = if (cloudRestoreFileNames.isNotEmpty()) "Cloud Save Destination" else "Save Files/Directories Paths",
+                    text =
+                        if (cloudRestoreFileNames.isNotEmpty()) "Cloud Save Destination"
+                        else "Save Files/Directories Paths",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = EmuSyncColors.OnSurface,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = if (cloudRestoreFileNames.isNotEmpty()) {
-                        "Choose one folder. The cloud files below will be restored as individual files; other files in this folder will not be synced."
-                    } else if (game.entry is EmulatorSystem) {
-                        "Only paths specific to this game. Emulator-wide paths are configured in the system settings."
-                    } else {
-                        "Specific save files or directories synchronized for this game."
-                    },
+                    text =
+                        if (cloudRestoreFileNames.isNotEmpty()) {
+                            "Choose one folder. The cloud files below will be restored as individual files; other files in this folder will not be synced."
+                        } else if (game.entry is EmulatorSystem) {
+                            "Only paths specific to this game. Emulator-wide paths are configured in the system settings."
+                        } else {
+                            "Specific save files or directories synchronized for this game."
+                        },
                     style = MaterialTheme.typography.bodySmall,
                     color = EmuSyncColors.OnSurfaceDim,
                 )
@@ -462,22 +480,29 @@ fun EditGameDialog(
                         modifier = Modifier.fillMaxWidth().clickable { restoreWholeFolder = false },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RadioButton(selected = !restoreWholeFolder, onClick = { restoreWholeFolder = false })
+                        RadioButton(
+                            selected = !restoreWholeFolder,
+                            onClick = { restoreWholeFolder = false },
+                        )
                         Text("Only the cloud files listed below", color = EmuSyncColors.OnSurface)
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth().clickable { restoreWholeFolder = true },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RadioButton(selected = restoreWholeFolder, onClick = { restoreWholeFolder = true })
+                        RadioButton(
+                            selected = restoreWholeFolder,
+                            onClick = { restoreWholeFolder = true },
+                        )
                         Text("The entire folder", color = EmuSyncColors.OnSurface)
                     }
                     Text(
-                        text = if (restoreWholeFolder) {
-                            "Every file in this folder will be synchronized. Use a dedicated folder if it contains saves from other games."
-                        } else {
-                            "Only the cloud files listed below will be synchronized; other files in the folder will be left alone."
-                        },
+                        text =
+                            if (restoreWholeFolder) {
+                                "Every file in this folder will be synchronized. Use a dedicated folder if it contains saves from other games."
+                            } else {
+                                "Only the cloud files listed below will be synchronized; other files in the folder will be left alone."
+                            },
                         style = MaterialTheme.typography.bodySmall,
                         color = EmuSyncColors.OnSurfaceDim,
                         modifier = Modifier.padding(start = 8.dp, bottom = 8.dp),
@@ -505,70 +530,86 @@ fun EditGameDialog(
                             modifier = Modifier.padding(start = 8.dp, bottom = 3.dp),
                         )
                     }
-                } else savePaths.forEachIndexed { index, path ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            EditPathField(
-                                value = path,
-                                onValueChange = { newVal ->
-                                    val newList = savePaths.toMutableList()
-                                    newList[index] = newVal
-                                    savePaths = newList
-                                    val file = File(newVal.trim())
-                                    if (file.exists()) {
+                } else
+                    savePaths.forEachIndexed { index, path ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                EditPathField(
+                                    value = path,
+                                    onValueChange = { newVal ->
+                                        val newList = savePaths.toMutableList()
+                                        newList[index] = newVal
+                                        savePaths = newList
+                                        val file = File(newVal.trim())
+                                        if (file.exists()) {
+                                            val newTypes = saveTypes.toMutableList()
+                                            newTypes[index] =
+                                                if (file.isDirectory) SaveTargetType.DIRECTORY
+                                                else SaveTargetType.FILE
+                                            saveTypes = newTypes
+                                        }
+                                    },
+                                    onTypeChange = { newType ->
                                         val newTypes = saveTypes.toMutableList()
-                                        newTypes[index] = if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
+                                        newTypes[index] = newType
                                         saveTypes = newTypes
-                                    }
-                                },
-                                onTypeChange = { newType ->
-                                    val newTypes = saveTypes.toMutableList()
-                                    newTypes[index] = newType
-                                    saveTypes = newTypes
-                                },
-                                placeholder = "/home/user/saves/game.sav",
-                            )
-                        }
-                        TextButton(onClick = {
-                            val newTypes = saveTypes.toMutableList()
-                            newTypes[index] = if (newTypes[index] == SaveTargetType.FILE) SaveTargetType.DIRECTORY else SaveTargetType.FILE
-                            saveTypes = newTypes
-                        }) {
-                            Text(when (saveTypes[index]) {
-                                SaveTargetType.FILE -> "File"
-                                SaveTargetType.DIRECTORY -> "Folder"
-                                SaveTargetType.UNKNOWN -> "Choose type"
-                            })
-                        }
-                        if (savePaths.size > 1) {
-                            Spacer(Modifier.width(8.dp))
-                            IconButton(onClick = {
-                                val newList = savePaths.toMutableList()
-                                newList.removeAt(index)
-                                savePaths = newList
-                                val newTypes = saveTypes.toMutableList()
-                                newTypes.removeAt(index)
-                                saveTypes = newTypes
-                                saveCloudPaths = saveCloudPaths.toMutableList().apply { removeAt(index) }
-                            }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Remove Path",
-                                    tint = EmuSyncColors.Error
+                                    },
+                                    placeholder = "/home/user/saves/game.sav",
                                 )
                             }
+                            TextButton(
+                                onClick = {
+                                    val newTypes = saveTypes.toMutableList()
+                                    newTypes[index] =
+                                        if (newTypes[index] == SaveTargetType.FILE)
+                                            SaveTargetType.DIRECTORY
+                                        else SaveTargetType.FILE
+                                    saveTypes = newTypes
+                                }
+                            ) {
+                                Text(
+                                    when (saveTypes[index]) {
+                                        SaveTargetType.FILE -> "File"
+                                        SaveTargetType.DIRECTORY -> "Folder"
+                                        SaveTargetType.UNKNOWN -> "Choose type"
+                                    }
+                                )
+                            }
+                            if (savePaths.size > 1) {
+                                Spacer(Modifier.width(8.dp))
+                                IconButton(
+                                    onClick = {
+                                        val newList = savePaths.toMutableList()
+                                        newList.removeAt(index)
+                                        savePaths = newList
+                                        val newTypes = saveTypes.toMutableList()
+                                        newTypes.removeAt(index)
+                                        saveTypes = newTypes
+                                        saveCloudPaths =
+                                            saveCloudPaths.toMutableList().apply { removeAt(index) }
+                                    }
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Remove Path",
+                                        tint = EmuSyncColors.Error,
+                                    )
+                                }
+                            }
                         }
+                        CloudPathField(
+                            value = saveCloudPaths.getOrElse(index) { "" },
+                            onValueChange = { value ->
+                                saveCloudPaths =
+                                    saveCloudPaths.toMutableList().apply { set(index, value) }
+                            },
+                            type = saveTypes[index],
+                        )
+                        Spacer(Modifier.height(8.dp))
                     }
-                    CloudPathField(
-                        value = saveCloudPaths.getOrElse(index) { "" },
-                        onValueChange = { value -> saveCloudPaths = saveCloudPaths.toMutableList().apply { set(index, value) } },
-                        type = saveTypes[index],
-                    )
-                    Spacer(Modifier.height(8.dp))
-                }
 
                 if (cloudRestoreFileNames.isEmpty()) {
                     TextButton(
@@ -577,7 +618,7 @@ fun EditGameDialog(
                             saveTypes = saveTypes + SaveTargetType.FILE
                             saveCloudPaths = saveCloudPaths + ""
                         },
-                        modifier = Modifier.align(Alignment.Start)
+                        modifier = Modifier.align(Alignment.Start),
                     ) {
                         Text("+ Add Another Path", color = EmuSyncColors.Primary)
                     }
@@ -594,30 +635,68 @@ fun EditGameDialog(
                         Text("Cancel")
                     }
                     Button(
-                        enabled = (cloudRestoreFileNames.isEmpty() || selectedRestorePaths.isNotEmpty()) &&
-                            saveCloudPaths.all { it.isBlank() || remotePathSegments(it.trim()) != null },
+                        enabled =
+                            (cloudRestoreFileNames.isEmpty() ||
+                                selectedRestorePaths.isNotEmpty()) &&
+                                saveCloudPaths.all {
+                                    it.isBlank() || remotePathSegments(it.trim()) != null
+                                },
                         onClick = {
-                            val validSaveTargets = if (cloudRestoreFileNames.isNotEmpty()) {
-                                if (restoreWholeFolder) listOf(SaveTarget(restoreDestinationFolder.trim(), SaveTargetType.DIRECTORY))
-                                else resolveCloudRestoreTargets(restoreDestinationFolder.trim(), cloudRestoreFileNames)
-                            } else savePaths.mapIndexedNotNull { index, path ->
-                                path.trim().takeIf { it.isNotBlank() }?.let { trimmed ->
-                                    val file = File(trimmed)
-                                    val actualType = when {
-                                        file.exists() -> if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
-                                        else -> saveTypes.getOrElse(index) { SaveTargetType.FILE }
+                            val validSaveTargets =
+                                if (cloudRestoreFileNames.isNotEmpty()) {
+                                    if (restoreWholeFolder)
+                                        listOf(
+                                            SaveTarget(
+                                                restoreDestinationFolder.trim(),
+                                                SaveTargetType.DIRECTORY,
+                                            )
+                                        )
+                                    else
+                                        resolveCloudRestoreTargets(
+                                            restoreDestinationFolder.trim(),
+                                            cloudRestoreFileNames,
+                                        )
+                                } else
+                                    savePaths.mapIndexedNotNull { index, path ->
+                                        path
+                                            .trim()
+                                            .takeIf { it.isNotBlank() }
+                                            ?.let { trimmed ->
+                                                val file = File(trimmed)
+                                                val actualType =
+                                                    when {
+                                                        file.exists() ->
+                                                            if (file.isDirectory)
+                                                                SaveTargetType.DIRECTORY
+                                                            else SaveTargetType.FILE
+                                                        else ->
+                                                            saveTypes.getOrElse(index) {
+                                                                SaveTargetType.FILE
+                                                            }
+                                                    }
+                                                SaveTarget(
+                                                    trimmed,
+                                                    actualType,
+                                                    saveCloudPaths
+                                                        .getOrElse(index) { "" }
+                                                        .trim()
+                                                        .ifBlank { null },
+                                                )
+                                            }
                                     }
-                                    SaveTarget(trimmed, actualType, saveCloudPaths.getOrElse(index) { "" }.trim().ifBlank { null })
-                                }
-                            }
                             val cleanCover = coverPath.trim().takeIf { it.isNotBlank() }
                             val cleanTitle = customTitle.trim().takeIf { it.isNotBlank() }
-                            val targets = if (cloudRestoreFileNames.isEmpty() && game.gameSpecificSaveTargets.isEmpty()) {
-                                scopeNewSaveTargets(validSaveTargets)
-                            } else validSaveTargets
+                            val targets =
+                                if (
+                                    cloudRestoreFileNames.isEmpty() &&
+                                        game.gameSpecificSaveTargets.isEmpty()
+                                ) {
+                                    scopeNewSaveTargets(validSaveTargets)
+                                } else validSaveTargets
                             onSave(cleanTitle, targets, cleanCover)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
+                        colors =
+                            ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
                     ) {
                         Text("Save")
                     }
@@ -648,62 +727,68 @@ private fun EditPathField(
                     color = EmuSyncColors.OnSurfaceDim.copy(alpha = 0.5f),
                 )
             },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = EmuSyncColors.Primary,
-                unfocusedBorderColor = EmuSyncColors.Divider,
-                cursorColor = EmuSyncColors.Primary,
-                focusedTextColor = EmuSyncColors.OnBackground,
-                unfocusedTextColor = EmuSyncColors.OnSurface,
-            ),
+            colors =
+                OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = EmuSyncColors.Primary,
+                    unfocusedBorderColor = EmuSyncColors.Divider,
+                    cursorColor = EmuSyncColors.Primary,
+                    focusedTextColor = EmuSyncColors.OnBackground,
+                    unfocusedTextColor = EmuSyncColors.OnSurface,
+                ),
             shape = RoundedCornerShape(10.dp),
         )
         Spacer(Modifier.width(8.dp))
-        if (allowFileSelection) Button(
-            onClick = {
-                coroutineScope.launch {
-                    val result = withContext(Dispatchers.IO) {
-                        FilePicker.pickPath(
-                            label = "File",
-                            initialPath = value,
-                            type = PickerType.FILE
-                        )
+        if (allowFileSelection)
+            Button(
+                onClick = {
+                    coroutineScope.launch {
+                        val result =
+                            withContext(Dispatchers.IO) {
+                                FilePicker.pickPath(
+                                    label = "File",
+                                    initialPath = value,
+                                    type = PickerType.FILE,
+                                )
+                            }
+                        if (result != null) {
+                            onValueChange(result)
+                            onTypeChange?.invoke(SaveTargetType.FILE)
+                        }
                     }
-                    if (result != null) {
-                        onValueChange(result)
-                        onTypeChange?.invoke(SaveTargetType.FILE)
-                    }
-                }
-            },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = EmuSyncColors.SurfaceSelected,
-                contentColor = EmuSyncColors.OnSurface,
-            ),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.height(56.dp),
-        ) {
-            Text("File")
-        }
+                },
+                colors =
+                    ButtonDefaults.buttonColors(
+                        containerColor = EmuSyncColors.SurfaceSelected,
+                        contentColor = EmuSyncColors.OnSurface,
+                    ),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.height(56.dp),
+            ) {
+                Text("File")
+            }
         if (allowFileSelection) Spacer(Modifier.width(8.dp))
         Button(
             onClick = {
                 coroutineScope.launch {
-                    val result = withContext(Dispatchers.IO) {
-                        FilePicker.pickPath(
-                            label = "Folder",
-                            initialPath = value,
-                            type = PickerType.DIRECTORY
-                        )
-                    }
+                    val result =
+                        withContext(Dispatchers.IO) {
+                            FilePicker.pickPath(
+                                label = "Folder",
+                                initialPath = value,
+                                type = PickerType.DIRECTORY,
+                            )
+                        }
                     if (result != null) {
                         onValueChange(result)
                         onTypeChange?.invoke(SaveTargetType.DIRECTORY)
                     }
                 }
             },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = EmuSyncColors.SurfaceSelected,
-                contentColor = EmuSyncColors.OnSurface,
-            ),
+            colors =
+                ButtonDefaults.buttonColors(
+                    containerColor = EmuSyncColors.SurfaceSelected,
+                    contentColor = EmuSyncColors.OnSurface,
+                ),
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.height(56.dp),
         ) {

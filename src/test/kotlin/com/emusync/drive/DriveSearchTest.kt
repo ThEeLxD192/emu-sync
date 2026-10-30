@@ -7,10 +7,10 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.HttpHeaders
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import kotlin.test.assertEquals
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
-import kotlin.test.assertEquals
 
 class DriveSearchTest {
 
@@ -23,32 +23,39 @@ class DriveSearchTest {
             val search = DriveSearch(drive.client)
 
             assertEquals(listOf("save"), search.listFilesInFolder("token", "entry").map { it.id })
-            assertEquals(setOf("game", "save"), search.listChildrenInFolder("token", "entry").map { it.id }.toSet())
+            assertEquals(
+                setOf("game", "save"),
+                search.listChildrenInFolder("token", "entry").map { it.id }.toSet(),
+            )
         }
     }
 
     @Test
     fun `listFilesInFolder follows next page tokens and combines results`() = runTest {
         val pageTokens = mutableListOf<String?>()
-        val client = HttpClient(MockEngine) {
-            install(ContentNegotiation) {
-                json(Json { ignoreUnknownKeys = true })
-            }
-            engine {
-                addHandler { request ->
-                    pageTokens += request.url.parameters["pageToken"]
-                    val response = when (request.url.parameters["pageToken"]) {
-                        null -> """{"nextPageToken":"page-2","files":[{"id":"one","name":"slot-1.sav","modifiedTime":"2026-03-18T12:00:00Z"}]}"""
-                        "page-2" -> """{"files":[{"id":"two","name":"subdir/slot-2.sav","modifiedTime":"2026-03-18T11:00:00Z"}]}"""
-                        else -> error("Unexpected page token")
+        val client =
+            HttpClient(MockEngine) {
+                install(ContentNegotiation) {
+                    json(Json { ignoreUnknownKeys = true })
+                }
+                engine {
+                    addHandler { request ->
+                        pageTokens += request.url.parameters["pageToken"]
+                        val response =
+                            when (request.url.parameters["pageToken"]) {
+                                null ->
+                                    """{"nextPageToken":"page-2","files":[{"id":"one","name":"slot-1.sav","modifiedTime":"2026-03-18T12:00:00Z"}]}"""
+                                "page-2" ->
+                                    """{"files":[{"id":"two","name":"subdir/slot-2.sav","modifiedTime":"2026-03-18T11:00:00Z"}]}"""
+                                else -> error("Unexpected page token")
+                            }
+                        respond(
+                            content = response,
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
                     }
-                    respond(
-                        content = response,
-                        headers = headersOf(HttpHeaders.ContentType, "application/json"),
-                    )
                 }
             }
-        }
 
         val files = DriveSearch(client).listFilesInFolder("access-token", "folder-id")
 

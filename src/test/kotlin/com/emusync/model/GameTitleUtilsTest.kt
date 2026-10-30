@@ -1,7 +1,7 @@
 package com.emusync.model
 
-import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import org.junit.jupiter.api.Test
 
 class GameTitleUtilsTest {
 
@@ -20,7 +20,10 @@ class GameTitleUtilsTest {
 
     @Test
     fun `cleanGameTitle removes region and language tags in parentheses`() {
-        assertEquals("Pokemon - Emerald Version", cleanGameTitle("Pokemon - Emerald Version (USA, Europe)"))
+        assertEquals(
+            "Pokemon - Emerald Version",
+            cleanGameTitle("Pokemon - Emerald Version (USA, Europe)"),
+        )
         assertEquals("The Legend of Zelda", cleanGameTitle("The_Legend_of_Zelda_(USA)_(En,Fr,De)"))
         assertEquals("Sonic The Hedgehog 2", cleanGameTitle("Sonic_The_Hedgehog_2_(W)_(REV01)"))
     }
@@ -28,7 +31,10 @@ class GameTitleUtilsTest {
     @Test
     fun `cleanGameTitle preserves multi-disc and multi-part indicators in parentheses`() {
         assertEquals("Crash Bandicoot (Disc 1)", cleanGameTitle("Crash_Bandicoot_(USA)_(Disc 1)"))
-        assertEquals("Final Fantasy VII (Disc 2)", cleanGameTitle("Final Fantasy VII (USA) (Disc 2)"))
+        assertEquals(
+            "Final Fantasy VII (Disc 2)",
+            cleanGameTitle("Final Fantasy VII (USA) (Disc 2)"),
+        )
         assertEquals("Metal Gear Solid (CD 1)", cleanGameTitle("Metal_Gear_Solid_(Europe)_(CD 1)"))
         assertEquals("Shenmue (Part 3)", cleanGameTitle("Shenmue (USA) (Part 3)"))
     }
@@ -67,52 +73,66 @@ class GameTitleUtilsTest {
 
     @Test
     fun `EmulatorSystem getEffectiveTitle resolves exact match first`() {
-        val emu = EmulatorSystem(
-            name = "GBA",
-            executablePath = "/bin/mgba",
-            romsDirectory = "/roms/gba",
-            extensions = listOf("gba"),
-            titleByRom = mapOf("zelda.gba" to "Zelda: Minish Cap"),
-        )
+        val emu =
+            EmulatorSystem(
+                name = "GBA",
+                executablePath = "/bin/mgba",
+                romsDirectory = "/roms/gba",
+                extensions = listOf("gba"),
+                titleByRom = mapOf("zelda.gba" to "Zelda: Minish Cap"),
+            )
         assertEquals("Zelda: Minish Cap", emu.getEffectiveTitle("zelda.gba"))
     }
 
     @Test
     fun `EmulatorSystem getEffectiveTitle resolves match without extension`() {
-        val emu = EmulatorSystem(
-            name = "GBA",
-            executablePath = "/bin/mgba",
-            romsDirectory = "/roms/gba",
-            extensions = listOf("gba"),
-            titleByRom = mapOf("zelda" to "Zelda: Minish Cap"),
-        )
+        val emu =
+            EmulatorSystem(
+                name = "GBA",
+                executablePath = "/bin/mgba",
+                romsDirectory = "/roms/gba",
+                extensions = listOf("gba"),
+                titleByRom = mapOf("zelda" to "Zelda: Minish Cap"),
+            )
         assertEquals("Zelda: Minish Cap", emu.getEffectiveTitle("zelda.gba"))
     }
 
     @Test
     fun `EmulatorSystem getEffectiveTitle resolves flexible normalized cross-device match`() {
         // PC 1 saved title under "Super_Mario_World_[U].sfc"
-        val emu = EmulatorSystem(
-            name = "SNES",
-            executablePath = "/bin/snes9x",
-            romsDirectory = "/roms/snes",
-            extensions = listOf("sfc"),
-            titleByRom = mapOf("Super_Mario_World_[U].sfc" to "Super Mario World - Custom Title"),
-        )
+        val emu =
+            EmulatorSystem(
+                name = "SNES",
+                executablePath = "/bin/snes9x",
+                romsDirectory = "/roms/snes",
+                extensions = listOf("sfc"),
+                titleByRom =
+                    mapOf("Super_Mario_World_[U].sfc" to "Super Mario World - Custom Title"),
+            )
 
         // PC 2 scans a ROM named "Super Mario World (USA).sfc"
-        assertEquals("Super Mario World - Custom Title", emu.getEffectiveTitle("Super Mario World (USA).sfc"))
+        assertEquals(
+            "Super Mario World - Custom Title",
+            emu.getEffectiveTitle("Super Mario World (USA).sfc"),
+        )
     }
 
     @Test
     fun `EmulatorSystem getEffectiveTitle falls back to cleanGameTitle when no override set`() {
-        val emu = EmulatorSystem(
-            name = "SNES",
-            executablePath = "/bin/snes9x",
-            romsDirectory = "/roms/snes",
-            extensions = listOf("sfc"),
-            titleByRom = emptyMap(),
+        val emu =
+            EmulatorSystem(
+                name = "SNES",
+                executablePath = "/bin/snes9x",
+                romsDirectory = "/roms/snes",
+                extensions = listOf("sfc"),
+                titleByRom = emptyMap(),
+            )
+        assertEquals(
+            "Super Mario World",
+            emu.getEffectiveTitle(
+                "Super_Mario_World_[U]_[!].sfc",
+                fallback = "Super_Mario_World_[U]_[!]",
+            ),
         )
-        assertEquals("Super Mario World", emu.getEffectiveTitle("Super_Mario_World_[U]_[!].sfc", fallback = "Super_Mario_World_[U]_[!]"))
     }
 }

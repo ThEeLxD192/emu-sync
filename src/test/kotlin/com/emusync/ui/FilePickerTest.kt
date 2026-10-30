@@ -3,6 +3,7 @@ package com.emusync.ui
 import com.emusync.ui.components.ExternalChooserResult
 import com.emusync.ui.components.FilePicker
 import com.emusync.ui.components.PickerType
+import java.io.File
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -11,7 +12,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
-import java.io.File
 
 class FilePickerTest {
 
@@ -90,7 +90,9 @@ class FilePickerTest {
     }
 
     @Test
-    fun `pickFile returns null and does not fall back to AWT when Linux external tool is cancelled`(@TempDir tempDir: File) {
+    fun `pickFile returns null and does not fall back to AWT when Linux external tool is cancelled`(
+        @TempDir tempDir: File
+    ) {
         FilePicker.isWindowsProvider = { false }
         val testFile = File(tempDir, "cover.png").apply { writeText("img") }
         FilePicker.linuxExternalFileChooser = { _, _, _ -> ExternalChooserResult.Cancelled }
@@ -107,7 +109,9 @@ class FilePickerTest {
     }
 
     @Test
-    fun `pickFile falls back to fileChooser on Linux when external tools are not available`(@TempDir tempDir: File) {
+    fun `pickFile falls back to fileChooser on Linux when external tools are not available`(
+        @TempDir tempDir: File
+    ) {
         FilePicker.isWindowsProvider = { false }
         val testFile = File(tempDir, "cover.png").apply { writeText("img") }
         FilePicker.linuxExternalFileChooser = { _, _, _ -> ExternalChooserResult.NotAvailable }
@@ -137,7 +141,8 @@ class FilePickerTest {
             "C:\\Games\\ROMs"
         }
 
-        val result = FilePicker.pickPath("ROM Directory", tempDir.absolutePath, PickerType.DIRECTORY)
+        val result =
+            FilePicker.pickPath("ROM Directory", tempDir.absolutePath, PickerType.DIRECTORY)
         assertTrue(swingInvoked)
         assertEquals("C:\\Games\\ROMs", result)
     }
@@ -162,7 +167,9 @@ class FilePickerTest {
     }
 
     @Test
-    fun `pickDirectory returns null and does not fall back to Swing when Linux external tool is cancelled`(@TempDir tempDir: File) {
+    fun `pickDirectory returns null and does not fall back to Swing when Linux external tool is cancelled`(
+        @TempDir tempDir: File
+    ) {
         FilePicker.isWindowsProvider = { false }
         FilePicker.linuxExternalDirectoryChooser = { _, _ -> ExternalChooserResult.Cancelled }
 
@@ -178,7 +185,9 @@ class FilePickerTest {
     }
 
     @Test
-    fun `pickDirectory falls back to Swing chooser on Linux when external tools are not available`(@TempDir tempDir: File) {
+    fun `pickDirectory falls back to Swing chooser on Linux when external tools are not available`(
+        @TempDir tempDir: File
+    ) {
         FilePicker.isWindowsProvider = { false }
         FilePicker.linuxExternalDirectoryChooser = { _, _ -> ExternalChooserResult.NotAvailable }
 
@@ -190,7 +199,8 @@ class FilePickerTest {
             "/home/user/saves"
         }
 
-        val result = FilePicker.pickPath("Saves Directory", tempDir.absolutePath, PickerType.DIRECTORY)
+        val result =
+            FilePicker.pickPath("Saves Directory", tempDir.absolutePath, PickerType.DIRECTORY)
         assertTrue(swingInvoked)
         assertEquals("/home/user/saves", result)
     }
@@ -205,6 +215,9 @@ class FilePickerTest {
         }
 
         FilePicker.pickPath("Select", "", PickerType.FILE)
-        assertEquals(File(System.getProperty("user.home")).absolutePath, resolvedParent?.absolutePath)
+        assertEquals(
+            File(System.getProperty("user.home")).absolutePath,
+            resolvedParent?.absolutePath,
+        )
     }
 }

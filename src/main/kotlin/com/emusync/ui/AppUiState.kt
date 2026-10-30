@@ -12,8 +12,8 @@ import com.emusync.update.UpdateInfo
 import java.io.File
 
 /**
- * Represents a displayable game item in the grid.
- * Unifies ROMs (from scanning) and native games into a single UI model.
+ * Represents a displayable game item in the grid. Unifies ROMs (from scanning) and native games
+ * into a single UI model.
  */
 data class GameItem(
     val name: String,
@@ -21,51 +21,57 @@ data class GameItem(
     val romFile: File? = null,
 ) {
     val effectiveTitle: String
-        get() = when (entry) {
-            is EmulatorSystem -> {
-                val romName = romFile?.name ?: name
-                entry.getEffectiveTitle(romName, name)
+        get() =
+            when (entry) {
+                is EmulatorSystem -> {
+                    val romName = romFile?.name ?: name
+                    entry.getEffectiveTitle(romName, name)
+                }
+                is NativePCGame -> entry.name
             }
-            is NativePCGame -> entry.name
-        }
 
     val effectiveSavePaths: List<String>
         get() = effectiveSaveTargets.map { it.path }
 
     val effectiveSaveTargets: List<SaveTarget>
-        get() = when (entry) {
-            is NativePCGame -> entry.effectiveSaveTargets()
-            is EmulatorSystem -> {
-                val romName = romFile?.name
-                val romTargets = if (romName != null) entry.effectiveSaveTargetsForRom(romName) else emptyList()
-                
-                if (romTargets.isNotEmpty()) {
-                    romTargets
-                } else if (entry.effectiveSaveTargets().isNotEmpty()) {
-                    entry.effectiveSaveTargets()
-                } else {
-                    emptyList()
+        get() =
+            when (entry) {
+                is NativePCGame -> entry.effectiveSaveTargets()
+                is EmulatorSystem -> {
+                    val romName = romFile?.name
+                    val romTargets =
+                        if (romName != null) entry.effectiveSaveTargetsForRom(romName)
+                        else emptyList()
+
+                    if (romTargets.isNotEmpty()) {
+                        romTargets
+                    } else if (entry.effectiveSaveTargets().isNotEmpty()) {
+                        entry.effectiveSaveTargets()
+                    } else {
+                        emptyList()
+                    }
                 }
             }
-        }
 
     /** Save paths configured specifically for this ROM, without emulator-wide fallback paths. */
     val gameSpecificSavePaths: List<String>
         get() = gameSpecificSaveTargets.map { it.path }
 
     val gameSpecificSaveTargets: List<SaveTarget>
-        get() = when (entry) {
-            is NativePCGame -> entry.effectiveSaveTargets()
-            is EmulatorSystem -> romFile?.name
-                ?.let { entry.effectiveSaveTargetsForRom(it) }
-                .orEmpty()
-        }
+        get() =
+            when (entry) {
+                is NativePCGame -> entry.effectiveSaveTargets()
+                is EmulatorSystem ->
+                    romFile?.name?.let { entry.effectiveSaveTargetsForRom(it) }.orEmpty()
+            }
 
     val effectiveCoverPath: String?
-        get() = when (entry) {
-            is NativePCGame -> entry.coverPath?.takeIf { it.isNotBlank() }
-            is EmulatorSystem -> romFile?.name?.let { entry.coverPathByRom[it]?.takeIf { p -> p.isNotBlank() } }
-        }
+        get() =
+            when (entry) {
+                is NativePCGame -> entry.coverPath?.takeIf { it.isNotBlank() }
+                is EmulatorSystem ->
+                    romFile?.name?.let { entry.coverPathByRom[it]?.takeIf { p -> p.isNotBlank() } }
+            }
 
     val coverFile: File?
         get() {
@@ -81,15 +87,19 @@ data class GameItem(
             val spaceName = baseName.replace('_', ' ').trim()
 
             // 2. Same folder as the ROM / game with the exact same name as the ROM
-            val romDir = romFile?.parentFile ?: (entry as? NativePCGame)?.let { File(it.executablePath).parentFile }
+            val romDir =
+                romFile?.parentFile
+                    ?: (entry as? NativePCGame)?.let { File(it.executablePath).parentFile }
             if (romDir != null && romDir.exists()) {
-                val targetNames = listOfNotNull(
-                    baseName,
-                    effectiveTitle,
-                    cleanName,
-                    spaceName,
-                    romFile?.name
-                ).distinct()
+                val targetNames =
+                    listOfNotNull(
+                            baseName,
+                            effectiveTitle,
+                            cleanName,
+                            spaceName,
+                            romFile?.name,
+                        )
+                        .distinct()
                 for (target in targetNames) {
                     for (ext in extensions) {
                         val candidate = File(romDir, "$target.$ext")
@@ -101,7 +111,8 @@ data class GameItem(
                 // Case-insensitive check in same folder with exact baseName
                 val sameFolderFiles = romDir.listFiles() ?: emptyArray()
                 val exactMatch = sameFolderFiles.firstOrNull { f ->
-                    f.isFile && extensions.any { ext -> f.extension.equals(ext, ignoreCase = true) } &&
+                    f.isFile &&
+                        extensions.any { ext -> f.extension.equals(ext, ignoreCase = true) } &&
                         f.nameWithoutExtension.equals(baseName, ignoreCase = true)
                 }
                 if (exactMatch != null) return exactMatch
@@ -111,7 +122,8 @@ data class GameItem(
             when (entry) {
                 is EmulatorSystem -> {
                     val dirsToCheck = mutableListOf<File>()
-                    val customDir = entry.coversDirectory?.takeIf { it.isNotBlank() }?.let { File(it) }
+                    val customDir =
+                        entry.coversDirectory?.takeIf { it.isNotBlank() }?.let { File(it) }
                     if (customDir != null && customDir.exists()) {
                         dirsToCheck.add(customDir)
                     }
@@ -124,12 +136,15 @@ data class GameItem(
 
                     for (dir in dirsToCheck) {
                         // Exact lookups with clean/space variations
-                        val targetNames = listOfNotNull(
-                            baseName,
-                            cleanName.takeIf { it.isNotBlank() && it != baseName },
-                            spaceName.takeIf { it.isNotBlank() && it != baseName && it != cleanName },
-                            romFile?.name
-                        )
+                        val targetNames =
+                            listOfNotNull(
+                                baseName,
+                                cleanName.takeIf { it.isNotBlank() && it != baseName },
+                                spaceName.takeIf {
+                                    it.isNotBlank() && it != baseName && it != cleanName
+                                },
+                                romFile?.name,
+                            )
                         for (target in targetNames) {
                             for (ext in extensions) {
                                 val candidate = File(dir, "$target.$ext")
@@ -142,10 +157,13 @@ data class GameItem(
                         // Case-insensitive fallback
                         val files = dir.listFiles() ?: emptyArray()
                         val match = files.firstOrNull { f ->
-                            f.isFile && extensions.any { ext -> f.extension.equals(ext, ignoreCase = true) } &&
+                            f.isFile &&
+                                extensions.any { ext ->
+                                    f.extension.equals(ext, ignoreCase = true)
+                                } &&
                                 (f.nameWithoutExtension.equals(baseName, ignoreCase = true) ||
-                                 f.nameWithoutExtension.equals(cleanName, ignoreCase = true) ||
-                                 f.nameWithoutExtension.equals(spaceName, ignoreCase = true))
+                                    f.nameWithoutExtension.equals(cleanName, ignoreCase = true) ||
+                                    f.nameWithoutExtension.equals(spaceName, ignoreCase = true))
                         }
                         if (match != null) return match
                     }
@@ -169,15 +187,18 @@ data class GameItem(
         }
 }
 
-/**
- * Current status of the game launch/sync lifecycle.
- */
+/** Current status of the game launch/sync lifecycle. */
 sealed interface AppStatus {
     data object Idle : AppStatus
+
     data object Loading : AppStatus
+
     data class Syncing(val message: String) : AppStatus
+
     data object Playing : AppStatus
+
     data class Error(val message: String) : AppStatus
+
     data class PostSyncFailed(
         val gameName: String,
         val reason: String,
@@ -185,6 +206,7 @@ sealed interface AppStatus {
         val pendingSaveCount: Int,
         val onRetry: suspend () -> Unit,
     ) : AppStatus
+
     data class Conflict(
         val localDate: String,
         val cloudDate: String,
@@ -193,9 +215,7 @@ sealed interface AppStatus {
     ) : AppStatus
 }
 
-/**
- * Cloud sync status for an entry/emulator system (Steam Cloud style).
- */
+/** Cloud sync status for an entry/emulator system (Steam Cloud style). */
 enum class CloudSyncStatus {
     IDLE,
     CHECKING,
@@ -207,15 +227,19 @@ enum class CloudSyncStatus {
     ERROR,
 }
 
-/**
- * UI State for in-app updates.
- */
+/** UI State for in-app updates. */
 sealed interface UpdateUiState {
     data object Idle : UpdateUiState
+
     data object Checking : UpdateUiState
+
     data class Available(val info: UpdateInfo) : UpdateUiState
+
     data class Downloading(val progress: Float, val info: UpdateInfo) : UpdateUiState
-    data class ReadyToRestart(val downloadedFile: File, val isSteamGameMode: Boolean = false) : UpdateUiState
+
+    data class ReadyToRestart(val downloadedFile: File, val isSteamGameMode: Boolean = false) :
+        UpdateUiState
+
     data class Error(val message: String) : UpdateUiState
 }
 
@@ -225,9 +249,7 @@ data class SaveSetupRequest(
     val cloudFileNames: List<String> = emptyList(),
 )
 
-/**
- * Immutable Single Source of Truth for the entire application UI state.
- */
+/** Immutable Single Source of Truth for the entire application UI state. */
 data class AppUiState(
     val config: AppConfig? = null,
     val selectedEntry: GameEntry? = null,
@@ -240,4 +262,3 @@ data class AppUiState(
     val updateState: UpdateUiState = UpdateUiState.Idle,
     val showUpdateDialog: Boolean = false,
 )
-

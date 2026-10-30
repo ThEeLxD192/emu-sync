@@ -17,79 +17,106 @@ import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
-import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.Json
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.EnumSource
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 
 class PostSyncFailureTest {
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
 
     @Test
-    fun `partial post game upload reports successes and retries only failed saves`(@TempDir tempDir: File) = runTest {
+    fun `partial post game upload reports successes and retries only failed saves`(
+        @TempDir tempDir: File
+    ) = runTest {
         val rom = File(tempDir, "Game.rom").apply { writeText("ROM") }
         val save = File(tempDir, "save.dat").apply { writeText("LOCAL SAVE") }
         val secondSave = File(tempDir, "second.dat").apply { writeText("SECOND SAVE") }
-        val entry = EmulatorSystem(
-            name = "Test emulator",
-            executablePath = "echo",
-            arguments = listOf("{ROM}"),
-            romsDirectory = tempDir.absolutePath,
-            extensions = listOf("rom"),
-            group = "Tests",
-            savePathsByRom = mapOf(rom.name to listOf(save.absolutePath, secondSave.absolutePath)),
-        )
-        val config = AppConfig(
-            googleDrive = GoogleDriveConfig("client", "secret", "refresh"),
-            entries = listOf(entry),
-        )
+        val entry =
+            EmulatorSystem(
+                name = "Test emulator",
+                executablePath = "echo",
+                arguments = listOf("{ROM}"),
+                romsDirectory = tempDir.absolutePath,
+                extensions = listOf("rom"),
+                group = "Tests",
+                savePathsByRom =
+                    mapOf(rom.name to listOf(save.absolutePath, secondSave.absolutePath)),
+            )
+        val config =
+            AppConfig(
+                googleDrive = GoogleDriveConfig("client", "secret", "refresh"),
+                entries = listOf(entry),
+            )
         val configManager = ConfigManager(File(tempDir, "config.json").absolutePath)
         configManager.save(config)
 
         var uploadInitiations = 0
         var successfulUploads = 0
-        val client = HttpClient(MockEngine) {
-            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
-            engine {
-                addHandler { request ->
-                    val url = request.url.toString()
-                    val query = request.url.parameters["q"].orEmpty()
-                    when {
-                        url.contains("oauth2.googleapis.com/token") -> respond(
-                            """{"access_token":"token","expires_in":3600,"token_type":"Bearer"}""",
-                            headers = jsonHeaders,
-                        )
-                        query.contains("name = 'EmuSync'") -> respond("""{"files":[{"id":"root","name":"EmuSync"}]}""", headers = jsonHeaders)
-                        query.contains("name = 'Tests'") -> respond("""{"files":[{"id":"group","name":"Tests"}]}""", headers = jsonHeaders)
-                        query.contains("name = 'Game'") -> respond("""{"files":[{"id":"game","name":"Game"}]}""", headers = jsonHeaders)
-                        query.contains("in parents and trashed = false") -> respond("""{"files":[]}""", headers = jsonHeaders)
-                        url.contains("upload/drive/v3/files") -> {
-                            uploadInitiations++
-                            if (uploadInitiations == 2) {
-                                respond("offline", HttpStatusCode.InternalServerError)
-                            } else {
-                                respond("", headers = headersOf(HttpHeaders.Location, "https://uploads.example/session"))
+        val client =
+            HttpClient(MockEngine) {
+                install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                engine {
+                    addHandler { request ->
+                        val url = request.url.toString()
+                        val query = request.url.parameters["q"].orEmpty()
+                        when {
+                            url.contains("oauth2.googleapis.com/token") ->
+                                respond(
+                                    """{"access_token":"token","expires_in":3600,"token_type":"Bearer"}""",
+                                    headers = jsonHeaders,
+                                )
+                            query.contains("name = 'EmuSync'") ->
+                                respond(
+                                    """{"files":[{"id":"root","name":"EmuSync"}]}""",
+                                    headers = jsonHeaders,
+                                )
+                            query.contains("name = 'Tests'") ->
+                                respond(
+                                    """{"files":[{"id":"group","name":"Tests"}]}""",
+                                    headers = jsonHeaders,
+                                )
+                            query.contains("name = 'Game'") ->
+                                respond(
+                                    """{"files":[{"id":"game","name":"Game"}]}""",
+                                    headers = jsonHeaders,
+                                )
+                            query.contains("in parents and trashed = false") ->
+                                respond("""{"files":[]}""", headers = jsonHeaders)
+                            url.contains("upload/drive/v3/files") -> {
+                                uploadInitiations++
+                                if (uploadInitiations == 2) {
+                                    respond("offline", HttpStatusCode.InternalServerError)
+                                } else {
+                                    respond(
+                                        "",
+                                        headers =
+                                            headersOf(
+                                                HttpHeaders.Location,
+                                                "https://uploads.example/session",
+                                            ),
+                                    )
+                                }
                             }
+                            url.contains("uploads.example/session") -> {
+                                successfulUploads++
+                                respond(
+                                    """{"id":"save-id","name":"save.dat","modifiedTime":"2026-10-09T12:00:00Z"}""",
+                                    headers = jsonHeaders,
+                                )
+                            }
+                            else -> error("Unexpected request: ${request.method.value} $url")
                         }
-                        url.contains("uploads.example/session") -> {
-                            successfulUploads++
-                            respond(
-                                """{"id":"save-id","name":"save.dat","modifiedTime":"2026-10-09T12:00:00Z"}""",
-                                headers = jsonHeaders,
-                            )
-                        }
-                        else -> error("Unexpected request: ${request.method.value} $url")
                     }
                 }
             }
-        }
         val statuses = mutableListOf<AppStatus>()
         val orchestrator = SyncOrchestrator(client, config, configManager, statuses::add)
 
@@ -110,79 +137,117 @@ class PostSyncFailureTest {
         assertEquals(2, successfulUploads)
         assertEquals("LOCAL SAVE", save.readText())
         assertEquals("SECOND SAVE", secondSave.readText())
-        assertEquals(1, statuses.count { it == AppStatus.Playing }, "Retry must not launch the game again")
+        assertEquals(
+            1,
+            statuses.count { it == AppStatus.Playing },
+            "Retry must not launch the game again",
+        )
     }
 
     @Test
-    fun `retry retries transient upload while keeping name collision blocked`(@TempDir tempDir: File) = runTest {
+    fun `retry retries transient upload while keeping name collision blocked`(
+        @TempDir tempDir: File
+    ) = runTest {
         val rom = File(tempDir, "Game.rom").apply { writeText("ROM") }
         val saveDirectory = File(tempDir, "saves/SAVE_SLOT").apply { mkdirs() }
-        val collidingDirectorySave = File(saveDirectory, "SAVE_SLOT").apply { writeText("DIRECTORY SAVE") }
+        val collidingDirectorySave =
+            File(saveDirectory, "SAVE_SLOT").apply { writeText("DIRECTORY SAVE") }
         val siblingFile = File(tempDir, "other/SAVE_SLOT")
         val transientSave = File(tempDir, "retry.dat").apply { writeText("RETRY SAVE") }
-        val entry = EmulatorSystem(
-            name = "Test emulator",
-            executablePath = "echo",
-            arguments = listOf("{ROM}"),
-            romsDirectory = tempDir.absolutePath,
-            extensions = listOf("rom"),
-            group = "Tests",
-            saveTargetsByRom = mapOf(rom.name to listOf(
-                SaveTarget(saveDirectory.absolutePath, SaveTargetType.DIRECTORY),
-                SaveTarget(siblingFile.absolutePath, SaveTargetType.FILE),
-                SaveTarget(transientSave.absolutePath, SaveTargetType.FILE),
-            )),
-        )
-        val config = AppConfig(
-            googleDrive = GoogleDriveConfig("client", "secret", "refresh"),
-            entries = listOf(entry),
-        )
-        val configManager = ConfigManager(File(tempDir, "config.json").absolutePath).apply { save(config) }
+        val entry =
+            EmulatorSystem(
+                name = "Test emulator",
+                executablePath = "echo",
+                arguments = listOf("{ROM}"),
+                romsDirectory = tempDir.absolutePath,
+                extensions = listOf("rom"),
+                group = "Tests",
+                saveTargetsByRom =
+                    mapOf(
+                        rom.name to
+                            listOf(
+                                SaveTarget(saveDirectory.absolutePath, SaveTargetType.DIRECTORY),
+                                SaveTarget(siblingFile.absolutePath, SaveTargetType.FILE),
+                                SaveTarget(transientSave.absolutePath, SaveTargetType.FILE),
+                            )
+                    ),
+            )
+        val config =
+            AppConfig(
+                googleDrive = GoogleDriveConfig("client", "secret", "refresh"),
+                entries = listOf(entry),
+            )
+        val configManager =
+            ConfigManager(File(tempDir, "config.json").absolutePath).apply { save(config) }
         var uploadInitiations = 0
         var successfulUploads = 0
         var failFirstUpload = true
-        val client = HttpClient(MockEngine) {
-            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
-            engine {
-                addHandler { request ->
-                    val url = request.url.toString()
-                    val query = request.url.parameters["q"].orEmpty()
-                    when {
-                        url.contains("oauth2.googleapis.com/token") -> respond(
-                            """{"access_token":"token","expires_in":3600,"token_type":"Bearer"}""",
-                            headers = jsonHeaders,
-                        )
-                        query.contains("name = 'EmuSync'") -> respond("""{"files":[{"id":"root","name":"EmuSync"}]}""", headers = jsonHeaders)
-                        query.contains("name = 'Tests'") -> respond("""{"files":[{"id":"group","name":"Tests"}]}""", headers = jsonHeaders)
-                        query.contains("name = 'Game'") -> respond("""{"files":[{"id":"game","name":"Game"}]}""", headers = jsonHeaders)
-                        url.contains("sibling-id") && request.method == HttpMethod.Get -> respond(
-                            "SIBLING CLOUD SAVE", HttpStatusCode.OK,
-                        )
-                        query.contains("in parents and trashed = false") -> respond(
-                            """{"files":[{"id":"sibling-id","name":"SAVE_SLOT","modifiedTime":"2020-01-01T00:00:00Z"}]}""",
-                            headers = jsonHeaders,
-                        )
-                        url.contains("upload/drive/v3/files") -> {
-                            uploadInitiations++
-                            if (failFirstUpload) {
-                                failFirstUpload = false
-                                respond("offline", HttpStatusCode.InternalServerError)
-                            } else {
-                                respond("", headers = headersOf(HttpHeaders.Location, "https://uploads.example/retry"))
+        val client =
+            HttpClient(MockEngine) {
+                install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                engine {
+                    addHandler { request ->
+                        val url = request.url.toString()
+                        val query = request.url.parameters["q"].orEmpty()
+                        when {
+                            url.contains("oauth2.googleapis.com/token") ->
+                                respond(
+                                    """{"access_token":"token","expires_in":3600,"token_type":"Bearer"}""",
+                                    headers = jsonHeaders,
+                                )
+                            query.contains("name = 'EmuSync'") ->
+                                respond(
+                                    """{"files":[{"id":"root","name":"EmuSync"}]}""",
+                                    headers = jsonHeaders,
+                                )
+                            query.contains("name = 'Tests'") ->
+                                respond(
+                                    """{"files":[{"id":"group","name":"Tests"}]}""",
+                                    headers = jsonHeaders,
+                                )
+                            query.contains("name = 'Game'") ->
+                                respond(
+                                    """{"files":[{"id":"game","name":"Game"}]}""",
+                                    headers = jsonHeaders,
+                                )
+                            url.contains("sibling-id") && request.method == HttpMethod.Get ->
+                                respond(
+                                    "SIBLING CLOUD SAVE",
+                                    HttpStatusCode.OK,
+                                )
+                            query.contains("in parents and trashed = false") ->
+                                respond(
+                                    """{"files":[{"id":"sibling-id","name":"SAVE_SLOT","modifiedTime":"2020-01-01T00:00:00Z"}]}""",
+                                    headers = jsonHeaders,
+                                )
+                            url.contains("upload/drive/v3/files") -> {
+                                uploadInitiations++
+                                if (failFirstUpload) {
+                                    failFirstUpload = false
+                                    respond("offline", HttpStatusCode.InternalServerError)
+                                } else {
+                                    respond(
+                                        "",
+                                        headers =
+                                            headersOf(
+                                                HttpHeaders.Location,
+                                                "https://uploads.example/retry",
+                                            ),
+                                    )
+                                }
                             }
+                            url.contains("uploads.example/retry") -> {
+                                successfulUploads++
+                                respond(
+                                    """{"id":"retry-id","name":"retry.dat","modifiedTime":"2026-10-09T12:00:00Z"}""",
+                                    headers = jsonHeaders,
+                                )
+                            }
+                            else -> error("Unexpected request: ${request.method.value} $url")
                         }
-                        url.contains("uploads.example/retry") -> {
-                            successfulUploads++
-                            respond(
-                                """{"id":"retry-id","name":"retry.dat","modifiedTime":"2026-10-09T12:00:00Z"}""",
-                                headers = jsonHeaders,
-                            )
-                        }
-                        else -> error("Unexpected request: ${request.method.value} $url")
                     }
                 }
             }
-        }
         val statuses = mutableListOf<AppStatus>()
         val orchestrator = SyncOrchestrator(client, config, configManager, statuses::add)
 
@@ -201,11 +266,19 @@ class PostSyncFailureTest {
 
         val blockedError = assertIs<AppStatus.Error>(statuses.last())
         assertTrue(blockedError.message.contains("conflicts with another configured file target"))
-        assertEquals(2, uploadInitiations, "Retry should attempt only the transient upload once more")
+        assertEquals(
+            2,
+            uploadInitiations,
+            "Retry should attempt only the transient upload once more",
+        )
         assertEquals(1, successfulUploads)
         assertEquals("SIBLING CLOUD SAVE", siblingFile.readText())
         assertEquals("DIRECTORY SAVE", collidingDirectorySave.readText())
-        assertEquals(1, statuses.count { it == AppStatus.Playing }, "Retry must not launch the game again")
+        assertEquals(
+            1,
+            statuses.count { it == AppStatus.Playing },
+            "Retry must not launch the game again",
+        )
     }
 
     @ParameterizedTest
@@ -221,25 +294,31 @@ class PostSyncFailureTest {
         val localTime = Instant.parse("2026-10-09T12:00:00Z").toEpochMilli()
         firstSave.setLastModified(localTime)
         secondSave.setLastModified(localTime)
-        val entry = EmulatorSystem(
-            name = "Test emulator",
-            executablePath = "echo",
-            arguments = listOf("{ROM}"),
-            romsDirectory = tempDir.absolutePath,
-            extensions = listOf("rom"),
-            group = "Tests",
-            savePathsByRom = mapOf(rom.name to listOf(saveDirectory.absolutePath)),
-        )
-        val config = AppConfig(
-            googleDrive = GoogleDriveConfig("client", "secret", "refresh"),
-            entries = listOf(entry),
-        )
-        val configManager = ConfigManager(File(tempDir, "config.json").absolutePath).apply { save(config) }
+        val entry =
+            EmulatorSystem(
+                name = "Test emulator",
+                executablePath = "echo",
+                arguments = listOf("{ROM}"),
+                romsDirectory = tempDir.absolutePath,
+                extensions = listOf("rom"),
+                group = "Tests",
+                savePathsByRom = mapOf(rom.name to listOf(saveDirectory.absolutePath)),
+            )
+        val config =
+            AppConfig(
+                googleDrive = GoogleDriveConfig("client", "secret", "refresh"),
+                entries = listOf(entry),
+            )
+        val configManager =
+            ConfigManager(File(tempDir, "config.json").absolutePath).apply { save(config) }
         // Both files previously agreed with Drive. Local progress was made offline.
         val history = SyncHistoryStore(configManager.configFile)
         for ((file, id) in listOf(firstSave to "first-id", secondSave to "second-id")) {
-            history.record(history.key(file, "game", file.name), sha256("ORIGINAL".toByteArray()),
-                DriveFile(id, file.name, "2020-01-01T00:00:00Z"))
+            history.record(
+                history.key(file, "game", file.name),
+                sha256("ORIGINAL".toByteArray()),
+                DriveFile(id, file.name, "2020-01-01T00:00:00Z"),
+            )
         }
         var firstCloudTime = "2020-01-01T00:00:00Z"
         var secondCloudTime = "2020-01-01T00:00:00Z"
@@ -247,81 +326,145 @@ class PostSyncFailureTest {
         var secondUpdates = 0
         var failSecondUpdate = true
         var failTokenRefresh = false
-        val client = HttpClient(MockEngine) {
-            install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
-            engine {
-                addHandler { request ->
-                    val url = request.url.toString()
-                    val query = request.url.parameters["q"].orEmpty()
-                    when {
-                        request.url.encodedPath.startsWith("/drive/v2/files/") -> {
-                            val first = request.url.segments.last() == "first-id"
-                            val id = if (first) "first-id" else "second-id"
-                            val date = if (first) firstCloudTime else secondCloudTime
-                            respond(Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile(id,
-                                if (first) "first.dat" else "second.dat", date, "\"$date\"", date)), headers = jsonHeaders)
-                        }
-                        request.url.encodedPath.startsWith("/upload/drive/v2/files/") -> {
-                            val first = request.url.segments.last() == "first-id"
-                            if (first) firstUpdates++ else secondUpdates++
-                            if (!first && failSecondUpdate) respond("offline", HttpStatusCode.InternalServerError)
-                            else {
-                                if (first) firstCloudTime = "2027-01-01T00:00:00Z"
-                                respond(Json.encodeToString(ConditionalDriveFile.serializer(), ConditionalDriveFile(
-                                    if (first) "first-id" else "second-id", if (first) "first.dat" else "second.dat",
-                                    "2026-10-09T12:00:00Z", "\"new\"", "2026-10-09T12:00:00Z")), headers = jsonHeaders)
+        val client =
+            HttpClient(MockEngine) {
+                install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                engine {
+                    addHandler { request ->
+                        val url = request.url.toString()
+                        val query = request.url.parameters["q"].orEmpty()
+                        when {
+                            request.url.encodedPath.startsWith("/drive/v2/files/") -> {
+                                val first = request.url.segments.last() == "first-id"
+                                val id = if (first) "first-id" else "second-id"
+                                val date = if (first) firstCloudTime else secondCloudTime
+                                respond(
+                                    Json.encodeToString(
+                                        ConditionalDriveFile.serializer(),
+                                        ConditionalDriveFile(
+                                            id,
+                                            if (first) "first.dat" else "second.dat",
+                                            date,
+                                            "\"$date\"",
+                                            date,
+                                        ),
+                                    ),
+                                    headers = jsonHeaders,
+                                )
                             }
+                            request.url.encodedPath.startsWith("/upload/drive/v2/files/") -> {
+                                val first = request.url.segments.last() == "first-id"
+                                if (first) firstUpdates++ else secondUpdates++
+                                if (!first && failSecondUpdate)
+                                    respond("offline", HttpStatusCode.InternalServerError)
+                                else {
+                                    if (first) firstCloudTime = "2027-01-01T00:00:00Z"
+                                    respond(
+                                        Json.encodeToString(
+                                            ConditionalDriveFile.serializer(),
+                                            ConditionalDriveFile(
+                                                if (first) "first-id" else "second-id",
+                                                if (first) "first.dat" else "second.dat",
+                                                "2026-10-09T12:00:00Z",
+                                                "\"new\"",
+                                                "2026-10-09T12:00:00Z",
+                                            ),
+                                        ),
+                                        headers = jsonHeaders,
+                                    )
+                                }
+                            }
+                            url.contains("www.googleapis.com/drive/v3/files/second-id") &&
+                                request.method == HttpMethod.Get ->
+                                respond(
+                                    "NEWER CLOUD SECOND",
+                                    HttpStatusCode.OK,
+                                )
+                            url.contains("oauth2.googleapis.com/token") && failTokenRefresh ->
+                                respond(
+                                    "offline",
+                                    HttpStatusCode.InternalServerError,
+                                )
+                            url.contains("oauth2.googleapis.com/token") ->
+                                respond(
+                                    """{"access_token":"token","expires_in":3600,"token_type":"Bearer"}""",
+                                    headers = jsonHeaders,
+                                )
+                            query.contains("name = 'EmuSync'") ->
+                                respond(
+                                    """{"files":[{"id":"root","name":"EmuSync"}]}""",
+                                    headers = jsonHeaders,
+                                )
+                            query.contains("name = 'Tests'") ->
+                                respond(
+                                    """{"files":[{"id":"group","name":"Tests"}]}""",
+                                    headers = jsonHeaders,
+                                )
+                            query.contains("name = 'Game'") ->
+                                respond(
+                                    """{"files":[{"id":"game","name":"Game"}]}""",
+                                    headers = jsonHeaders,
+                                )
+                            query.contains("in parents and trashed = false") ->
+                                respond(
+                                    """{"files":[{"id":"first-id","name":"first.dat","modifiedTime":"$firstCloudTime","version":"$firstCloudTime"},{"id":"second-id","name":"second.dat","modifiedTime":"$secondCloudTime","version":"$secondCloudTime"}]}""",
+                                    headers = jsonHeaders,
+                                )
+                            url.contains("upload/drive/v3/files/first-id") -> {
+                                firstUpdates++
+                                respond(
+                                    "",
+                                    headers =
+                                        headersOf(
+                                            HttpHeaders.Location,
+                                            "https://uploads.example/first",
+                                        ),
+                                )
+                            }
+                            url.contains("upload/drive/v3/files/second-id") -> {
+                                secondUpdates++
+                                if (failSecondUpdate)
+                                    respond("offline", HttpStatusCode.InternalServerError)
+                                else
+                                    respond(
+                                        "",
+                                        headers =
+                                            headersOf(
+                                                HttpHeaders.Location,
+                                                "https://uploads.example/second",
+                                            ),
+                                    )
+                            }
+                            url.contains("uploads.example/first") -> {
+                                // Simulate another device publishing a newer copy after this
+                                // upload.
+                                firstCloudTime = "2027-01-01T00:00:00Z"
+                                respond(
+                                    """{"id":"first-id","name":"first.dat","modifiedTime":"2026-10-09T12:00:00Z"}""",
+                                    headers = jsonHeaders,
+                                )
+                            }
+                            url.contains("uploads.example/second") ->
+                                respond(
+                                    """{"id":"second-id","name":"second.dat","modifiedTime":"2026-10-09T12:00:00Z"}""",
+                                    headers = jsonHeaders,
+                                )
+                            else -> error("Unexpected request: ${request.method.value} $url")
                         }
-                        url.contains("www.googleapis.com/drive/v3/files/second-id") && request.method == HttpMethod.Get -> respond(
-                            "NEWER CLOUD SECOND", HttpStatusCode.OK,
-                        )
-                        url.contains("oauth2.googleapis.com/token") && failTokenRefresh -> respond(
-                            "offline", HttpStatusCode.InternalServerError,
-                        )
-                        url.contains("oauth2.googleapis.com/token") -> respond(
-                            """{"access_token":"token","expires_in":3600,"token_type":"Bearer"}""", headers = jsonHeaders,
-                        )
-                        query.contains("name = 'EmuSync'") -> respond("""{"files":[{"id":"root","name":"EmuSync"}]}""", headers = jsonHeaders)
-                        query.contains("name = 'Tests'") -> respond("""{"files":[{"id":"group","name":"Tests"}]}""", headers = jsonHeaders)
-                        query.contains("name = 'Game'") -> respond("""{"files":[{"id":"game","name":"Game"}]}""", headers = jsonHeaders)
-                        query.contains("in parents and trashed = false") -> respond(
-                            """{"files":[{"id":"first-id","name":"first.dat","modifiedTime":"$firstCloudTime","version":"$firstCloudTime"},{"id":"second-id","name":"second.dat","modifiedTime":"$secondCloudTime","version":"$secondCloudTime"}]}""",
-                            headers = jsonHeaders,
-                        )
-                        url.contains("upload/drive/v3/files/first-id") -> {
-                            firstUpdates++
-                            respond("", headers = headersOf(HttpHeaders.Location, "https://uploads.example/first"))
-                        }
-                        url.contains("upload/drive/v3/files/second-id") -> {
-                            secondUpdates++
-                            if (failSecondUpdate) respond("offline", HttpStatusCode.InternalServerError)
-                            else respond("", headers = headersOf(HttpHeaders.Location, "https://uploads.example/second"))
-                        }
-                        url.contains("uploads.example/first") -> {
-                            // Simulate another device publishing a newer copy after this upload.
-                            firstCloudTime = "2027-01-01T00:00:00Z"
-                            respond(
-                                """{"id":"first-id","name":"first.dat","modifiedTime":"2026-10-09T12:00:00Z"}""",
-                                headers = jsonHeaders,
-                            )
-                        }
-                        url.contains("uploads.example/second") -> respond(
-                            """{"id":"second-id","name":"second.dat","modifiedTime":"2026-10-09T12:00:00Z"}""",
-                            headers = jsonHeaders,
-                        )
-                        else -> error("Unexpected request: ${request.method.value} $url")
                     }
                 }
             }
-        }
         val statuses = mutableListOf<AppStatus>()
-        val orchestrator = SyncOrchestrator(client, config, configManager) { status ->
-            statuses += status
-            if (status is AppStatus.Conflict) {
-                val choice = if (status.cloudDate > status.localDate) cloudNewerChoice else SyncDecision.UPLOAD_LOCAL
-                status.onResolve(choice)
+        val orchestrator =
+            SyncOrchestrator(client, config, configManager) { status ->
+                statuses += status
+                if (status is AppStatus.Conflict) {
+                    val choice =
+                        if (status.cloudDate > status.localDate) cloudNewerChoice
+                        else SyncDecision.UPLOAD_LOCAL
+                    status.onResolve(choice)
+                }
             }
-        }
 
         orchestrator.playWithSync(GameItem("Game", entry, rom))
 
@@ -355,9 +498,16 @@ class PostSyncFailureTest {
         val expectedSecondUpdates = if (cloudNewerChoice == SyncDecision.UPLOAD_LOCAL) 2 else 1
         assertEquals(expectedSecondUpdates, secondUpdates)
         assertEquals("FIRST", firstSave.readText())
-        val expectedSecondSave = if (cloudNewerChoice == SyncDecision.UPLOAD_LOCAL) "SECOND" else "NEWER CLOUD SECOND"
+        val expectedSecondSave =
+            if (cloudNewerChoice == SyncDecision.UPLOAD_LOCAL) "SECOND" else "NEWER CLOUD SECOND"
         assertEquals(expectedSecondSave, secondSave.readText())
-        assertTrue(statuses.filterIsInstance<AppStatus.Conflict>().any { it.cloudDate > it.localDate })
-        assertEquals(1, statuses.count { it == AppStatus.Playing }, "Retries must not launch the game again")
+        assertTrue(
+            statuses.filterIsInstance<AppStatus.Conflict>().any { it.cloudDate > it.localDate }
+        )
+        assertEquals(
+            1,
+            statuses.count { it == AppStatus.Playing },
+            "Retries must not launch the game again",
+        )
     }
 }

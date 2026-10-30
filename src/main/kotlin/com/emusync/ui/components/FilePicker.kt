@@ -11,58 +11,60 @@ import javax.swing.JFileChooser
 import javax.swing.UIManager
 
 enum class PickerType {
-    FILE, DIRECTORY, ANY
+    FILE,
+    DIRECTORY,
+    ANY,
 }
 
 sealed class ExternalChooserResult {
     data class Selected(val path: String) : ExternalChooserResult()
+
     object Cancelled : ExternalChooserResult()
+
     object NotAvailable : ExternalChooserResult()
 }
 
 object FilePicker {
 
-    /**
-     * Provider for checking if the running OS is Windows.
-     * Can be replaced in tests.
-     */
+    /** Provider for checking if the running OS is Windows. Can be replaced in tests. */
     var isWindowsProvider: () -> Boolean = {
         System.getProperty("os.name", "").lowercase().contains("windows")
     }
 
-    /**
-     * Delegate for AWT/native file selection. Can be replaced in tests.
-     */
-    var fileChooser: (label: String, parentDir: File, startFile: File) -> String? = ::defaultFileChooser
+    /** Delegate for AWT/native file selection. Can be replaced in tests. */
+    var fileChooser: (label: String, parentDir: File, startFile: File) -> String? =
+        ::defaultFileChooser
 
-    /**
-     * Delegate for Swing directory selection. Can be replaced in tests.
-     */
-    var swingDirectoryChooser: (label: String, parentDir: File) -> String? = ::defaultSwingFolderChooser
+    /** Delegate for Swing directory selection. Can be replaced in tests. */
+    var swingDirectoryChooser: (label: String, parentDir: File) -> String? =
+        ::defaultSwingFolderChooser
 
     /**
      * Delegate for Linux external directory selection (kdialog/zenity). Can be replaced in tests.
      */
-    var linuxExternalDirectoryChooser: (label: String, parentDir: File) -> ExternalChooserResult = ::defaultLinuxDirectoryChooser
+    var linuxExternalDirectoryChooser: (label: String, parentDir: File) -> ExternalChooserResult =
+        ::defaultLinuxDirectoryChooser
 
-    /**
-     * Delegate for Linux external file selection (kdialog/zenity). Can be replaced in tests.
-     */
-    var linuxExternalFileChooser: (label: String, parentDir: File, startFile: File) -> ExternalChooserResult = ::defaultLinuxFileChooser
+    /** Delegate for Linux external file selection (kdialog/zenity). Can be replaced in tests. */
+    var linuxExternalFileChooser:
+        (label: String, parentDir: File, startFile: File) -> ExternalChooserResult =
+        ::defaultLinuxFileChooser
 
     /**
      * Opens a file or directory picker.
-     * - On Linux: kdialog -> zenity -> fallback to AWT/Swing.
-     *   If user cancels, returns null immediately without fallback.
+     * - On Linux: kdialog -> zenity -> fallback to AWT/Swing. If user cancels, returns null
+     *   immediately without fallback.
      * - On Windows: AWT FileDialog for files, Swing JFileChooser for directories.
      */
     fun pickPath(
         label: String,
         initialPath: String,
-        type: PickerType
+        type: PickerType,
     ): String? {
         val startFile = File(initialPath.ifBlank { System.getProperty("user.home") })
-        val parentDir = if (startFile.isDirectory) startFile else startFile.parentFile ?: File(System.getProperty("user.home"))
+        val parentDir =
+            if (startFile.isDirectory) startFile
+            else startFile.parentFile ?: File(System.getProperty("user.home"))
 
         return when (type) {
             PickerType.FILE -> pickFile(label, parentDir, startFile)
@@ -79,7 +81,9 @@ object FilePicker {
         when (val externalResult = linuxExternalFileChooser(label, parentDir, startFile)) {
             is ExternalChooserResult.Selected -> return externalResult.path
             is ExternalChooserResult.Cancelled -> return null
-            is ExternalChooserResult.NotAvailable -> { /* fallback to AWT */ }
+            is ExternalChooserResult.NotAvailable -> {
+                /* fallback to AWT */
+            }
         }
 
         return pickFileAwt(label, parentDir, startFile)
@@ -93,23 +97,34 @@ object FilePicker {
         when (val externalResult = linuxExternalDirectoryChooser(label, parentDir)) {
             is ExternalChooserResult.Selected -> return externalResult.path
             is ExternalChooserResult.Cancelled -> return null
-            is ExternalChooserResult.NotAvailable -> { /* fallback to Swing */ }
+            is ExternalChooserResult.NotAvailable -> {
+                /* fallback to Swing */
+            }
         }
 
         return pickDirectorySwing(label, parentDir)
     }
 
-    private fun defaultLinuxFileChooser(label: String, parentDir: File, startFile: File): ExternalChooserResult {
+    private fun defaultLinuxFileChooser(
+        label: String,
+        parentDir: File,
+        startFile: File,
+    ): ExternalChooserResult {
         val active = getActiveWindow()
-        val initialPath = if (startFile.isFile) startFile.absolutePath else "${parentDir.absolutePath}/"
+        val initialPath =
+            if (startFile.isFile) startFile.absolutePath else "${parentDir.absolutePath}/"
         try {
             // On Linux / SteamOS KDE: try kdialog first
             try {
-                val kdialog = ProcessBuilder(
-                    "kdialog",
-                    "--title", "Select $label",
-                    "--getopenfilename", initialPath
-                ).start()
+                val kdialog =
+                    ProcessBuilder(
+                            "kdialog",
+                            "--title",
+                            "Select $label",
+                            "--getopenfilename",
+                            initialPath,
+                        )
+                        .start()
                 val exitCode = kdialog.waitFor()
                 if (exitCode == 0) {
                     val path = kdialog.inputStream.bufferedReader().readText().trim()
@@ -117,16 +132,21 @@ object FilePicker {
                 } else if (exitCode == 1) {
                     return ExternalChooserResult.Cancelled
                 }
-            } catch (_: Exception) { /* kdialog not found or failed */ }
+            } catch (_: Exception) {
+                /* kdialog not found or failed */
+            }
 
             // On GNOME / other Linux: try zenity
             try {
-                val zenity = ProcessBuilder(
-                    "zenity",
-                    "--file-selection",
-                    "--title", "Select $label",
-                    "--filename=$initialPath"
-                ).start()
+                val zenity =
+                    ProcessBuilder(
+                            "zenity",
+                            "--file-selection",
+                            "--title",
+                            "Select $label",
+                            "--filename=$initialPath",
+                        )
+                        .start()
                 val exitCode = zenity.waitFor()
                 if (exitCode == 0) {
                     val path = zenity.inputStream.bufferedReader().readText().trim()
@@ -134,7 +154,9 @@ object FilePicker {
                 } else if (exitCode == 1) {
                     return ExternalChooserResult.Cancelled
                 }
-            } catch (_: Exception) { /* zenity not found or failed */ }
+            } catch (_: Exception) {
+                /* zenity not found or failed */
+            }
 
             return ExternalChooserResult.NotAvailable
         } finally {
@@ -142,16 +164,23 @@ object FilePicker {
         }
     }
 
-    private fun defaultLinuxDirectoryChooser(label: String, parentDir: File): ExternalChooserResult {
+    private fun defaultLinuxDirectoryChooser(
+        label: String,
+        parentDir: File,
+    ): ExternalChooserResult {
         val active = getActiveWindow()
         try {
             // On Linux / SteamOS KDE: try kdialog first
             try {
-                val kdialog = ProcessBuilder(
-                    "kdialog",
-                    "--title", "Select $label",
-                    "--getexistingdirectory", parentDir.absolutePath
-                ).start()
+                val kdialog =
+                    ProcessBuilder(
+                            "kdialog",
+                            "--title",
+                            "Select $label",
+                            "--getexistingdirectory",
+                            parentDir.absolutePath,
+                        )
+                        .start()
                 val exitCode = kdialog.waitFor()
                 if (exitCode == 0) {
                     val path = kdialog.inputStream.bufferedReader().readText().trim()
@@ -159,17 +188,22 @@ object FilePicker {
                 } else if (exitCode == 1) {
                     return ExternalChooserResult.Cancelled
                 }
-            } catch (_: Exception) { /* kdialog not found or failed */ }
+            } catch (_: Exception) {
+                /* kdialog not found or failed */
+            }
 
             // On GNOME / other Linux: try zenity
             try {
-                val zenity = ProcessBuilder(
-                    "zenity",
-                    "--file-selection",
-                    "--directory",
-                    "--title", "Select $label",
-                    "--filename=${parentDir.absolutePath}/"
-                ).start()
+                val zenity =
+                    ProcessBuilder(
+                            "zenity",
+                            "--file-selection",
+                            "--directory",
+                            "--title",
+                            "Select $label",
+                            "--filename=${parentDir.absolutePath}/",
+                        )
+                        .start()
                 val exitCode = zenity.waitFor()
                 if (exitCode == 0) {
                     val path = zenity.inputStream.bufferedReader().readText().trim()
@@ -177,7 +211,9 @@ object FilePicker {
                 } else if (exitCode == 1) {
                     return ExternalChooserResult.Cancelled
                 }
-            } catch (_: Exception) { /* zenity not found or failed */ }
+            } catch (_: Exception) {
+                /* zenity not found or failed */
+            }
 
             return ExternalChooserResult.NotAvailable
         } finally {
@@ -203,11 +239,12 @@ object FilePicker {
 
     private fun defaultFileChooser(label: String, parentDir: File, startFile: File): String? {
         val active = getActiveWindow()
-        val dialog = when (active) {
-            is Frame -> FileDialog(active, "Select $label", FileDialog.LOAD)
-            is Dialog -> FileDialog(active, "Select $label", FileDialog.LOAD)
-            else -> FileDialog(null as Frame?, "Select $label", FileDialog.LOAD)
-        }
+        val dialog =
+            when (active) {
+                is Frame -> FileDialog(active, "Select $label", FileDialog.LOAD)
+                is Dialog -> FileDialog(active, "Select $label", FileDialog.LOAD)
+                else -> FileDialog(null as Frame?, "Select $label", FileDialog.LOAD)
+            }
         return try {
             dialog.directory = parentDir.absolutePath
             if (startFile.isFile) dialog.file = startFile.name
@@ -242,14 +279,17 @@ object FilePicker {
     private fun defaultSwingFolderChooser(label: String, parentDir: File): String? {
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName())
-        } catch (_: Throwable) { /* Ignore L&F issues */ }
+        } catch (_: Throwable) {
+            /* Ignore L&F issues */
+        }
 
         val active = getActiveWindow()
-        val chooser = JFileChooser(parentDir).apply {
-            dialogTitle = "Select $label"
-            fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-            isAcceptAllFileFilterUsed = false
-        }
+        val chooser =
+            JFileChooser(parentDir).apply {
+                dialogTitle = "Select $label"
+                fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+                isAcceptAllFileFilterUsed = false
+            }
 
         return try {
             val result = chooser.showOpenDialog(active)
@@ -279,12 +319,16 @@ object FilePicker {
         try {
             window.toFront()
             window.requestFocus()
-        } catch (_: Throwable) { /* ignore */ }
+        } catch (_: Throwable) {
+            /* ignore */
+        }
         EventQueue.invokeLater {
             try {
                 window.toFront()
                 window.requestFocus()
-            } catch (_: Throwable) { /* ignore */ }
+            } catch (_: Throwable) {
+                /* ignore */
+            }
         }
     }
 }

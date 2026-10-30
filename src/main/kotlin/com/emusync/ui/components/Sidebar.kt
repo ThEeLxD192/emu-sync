@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -67,8 +66,8 @@ import java.awt.Cursor
 import kotlin.math.roundToInt
 
 /**
- * Sidebar showing the list of categories (emulator systems and native games).
- * Supports drag-and-drop reordering as well as quick up/down controls.
+ * Sidebar showing the list of categories (emulator systems and native games). Supports
+ * drag-and-drop reordering as well as quick up/down controls.
  */
 @Composable
 fun Sidebar(
@@ -89,9 +88,10 @@ fun Sidebar(
     val density = LocalDensity.current
     val itemHeightPx = with(density) { 52.dp.toPx() }
 
-    val sidebarRows = remember(entries, collapsedGroups, selectedEntry) {
-        computeSidebarRows(entries, collapsedGroups, selectedEntry)
-    }
+    val sidebarRows =
+        remember(entries, collapsedGroups, selectedEntry) {
+            computeSidebarRows(entries, collapsedGroups, selectedEntry)
+        }
 
     val applyReorder: (List<GameEntry>) -> Unit = { newEntries ->
         if (onReorderEntries != null) {
@@ -141,20 +141,20 @@ fun Sidebar(
                         is SidebarRow.FolderHeader -> "folder_${row.groupName.lowercase()}"
                         is SidebarRow.EntryRow -> "entry_${row.entry.name}"
                     }
-                }
+                },
             ) { row ->
                 when (row) {
                     is SidebarRow.FolderHeader -> {
                         val folderKey = "folder_${row.groupName.lowercase()}"
                         val isDragging = draggingKey == folderKey
-                        val itemModifier = if (isDragging) {
-                            Modifier
-                                .zIndex(10f)
-                                .offset { IntOffset(0, dragOffsetY.roundToInt()) }
-                                .shadow(8.dp, RoundedCornerShape(8.dp))
-                        } else {
-                            Modifier.zIndex(1f)
-                        }
+                        val itemModifier =
+                            if (isDragging) {
+                                Modifier.zIndex(10f)
+                                    .offset { IntOffset(0, dragOffsetY.roundToInt()) }
+                                    .shadow(8.dp, RoundedCornerShape(8.dp))
+                            } else {
+                                Modifier.zIndex(1f)
+                            }
 
                         SidebarFolderHeader(
                             name = row.groupName,
@@ -165,11 +165,13 @@ fun Sidebar(
                             canMoveUp = row.unitIndex > 0,
                             canMoveDown = row.unitIndex < row.totalUnits - 1,
                             onMoveUp = {
-                                val newOrder = moveTopLevelUnit(entries, row.unitIndex, row.unitIndex - 1)
+                                val newOrder =
+                                    moveTopLevelUnit(entries, row.unitIndex, row.unitIndex - 1)
                                 applyReorder(newOrder)
                             },
                             onMoveDown = {
-                                val newOrder = moveTopLevelUnit(entries, row.unitIndex, row.unitIndex + 1)
+                                val newOrder =
+                                    moveTopLevelUnit(entries, row.unitIndex, row.unitIndex + 1)
                                 applyReorder(newOrder)
                             },
                             onDragStart = {
@@ -180,17 +182,22 @@ fun Sidebar(
                                 dragOffsetY += dy
                                 val currentKey = draggingKey ?: return@SidebarFolderHeader
                                 if (currentKey != folderKey) return@SidebarFolderHeader
-                                val currentUnitIndex = partitionIntoUnits(entries).indexOfFirst {
-                                    it is SidebarUnit.GroupUnit && it.groupName.equals(row.groupName, ignoreCase = true)
-                                }
+                                val currentUnitIndex =
+                                    partitionIntoUnits(entries).indexOfFirst {
+                                        it is SidebarUnit.GroupUnit &&
+                                            it.groupName.equals(row.groupName, ignoreCase = true)
+                                    }
                                 if (currentUnitIndex == -1) return@SidebarFolderHeader
                                 val totalUnits = partitionIntoUnits(entries).size
                                 val offsetSteps = (dragOffsetY / itemHeightPx).toInt()
-                                val targetUnitIndex = (currentUnitIndex + offsetSteps).coerceIn(0, totalUnits - 1)
+                                val targetUnitIndex =
+                                    (currentUnitIndex + offsetSteps).coerceIn(0, totalUnits - 1)
                                 if (targetUnitIndex != currentUnitIndex) {
-                                    val newOrder = moveTopLevelUnit(entries, currentUnitIndex, targetUnitIndex)
+                                    val newOrder =
+                                        moveTopLevelUnit(entries, currentUnitIndex, targetUnitIndex)
                                     applyReorder(newOrder)
-                                    dragOffsetY -= (targetUnitIndex - currentUnitIndex) * itemHeightPx
+                                    dragOffsetY -=
+                                        (targetUnitIndex - currentUnitIndex) * itemHeightPx
                                 }
                             },
                             onDragEnd = {
@@ -198,15 +205,25 @@ fun Sidebar(
                                 dragOffsetY = 0f
                             },
                             onToggleCollapse = {
-                                collapsedGroups = if (row.isCollapsed) {
-                                    collapsedGroups.filterNot { it.equals(row.groupName, ignoreCase = true) }.toSet()
-                                } else {
-                                    collapsedGroups + row.groupName
-                                }
+                                collapsedGroups =
+                                    if (row.isCollapsed) {
+                                        collapsedGroups
+                                            .filterNot {
+                                                it.equals(row.groupName, ignoreCase = true)
+                                            }
+                                            .toSet()
+                                    } else {
+                                        collapsedGroups + row.groupName
+                                    }
                             },
                             onClick = {
                                 if (row.isCollapsed) {
-                                    collapsedGroups = collapsedGroups.filterNot { it.equals(row.groupName, ignoreCase = true) }.toSet()
+                                    collapsedGroups =
+                                        collapsedGroups
+                                            .filterNot {
+                                                it.equals(row.groupName, ignoreCase = true)
+                                            }
+                                            .toSet()
                                     if (!row.hasSelectedChild) {
                                         row.firstChild?.let { onEntrySelected(it) }
                                     }
@@ -224,17 +241,20 @@ fun Sidebar(
                     is SidebarRow.EntryRow -> {
                         val entryKey = "entry_${row.entry.name}"
                         val isDragging = draggingKey == entryKey
-                        val itemModifier = if (isDragging) {
-                            Modifier
-                                .zIndex(10f)
-                                .offset { IntOffset(0, dragOffsetY.roundToInt()) }
-                                .shadow(8.dp, RoundedCornerShape(8.dp))
-                        } else {
-                            Modifier.zIndex(1f)
-                        }
+                        val itemModifier =
+                            if (isDragging) {
+                                Modifier.zIndex(10f)
+                                    .offset { IntOffset(0, dragOffsetY.roundToInt()) }
+                                    .shadow(8.dp, RoundedCornerShape(8.dp))
+                            } else {
+                                Modifier.zIndex(1f)
+                            }
 
-                        val canMoveUp = if (row.isNested) row.siblingIndex > 0 else row.unitIndex > 0
-                        val canMoveDown = if (row.isNested) row.siblingIndex < row.totalSiblings - 1 else row.unitIndex < row.totalUnits - 1
+                        val canMoveUp =
+                            if (row.isNested) row.siblingIndex > 0 else row.unitIndex > 0
+                        val canMoveDown =
+                            if (row.isNested) row.siblingIndex < row.totalSiblings - 1
+                            else row.unitIndex < row.totalUnits - 1
 
                         SidebarItem(
                             entry = row.entry,
@@ -243,19 +263,31 @@ fun Sidebar(
                             canMoveUp = canMoveUp,
                             canMoveDown = canMoveDown,
                             onMoveUp = {
-                                val newOrder = if (row.isNested && row.groupName != null) {
-                                    moveChildEntry(entries, row.groupName, row.siblingIndex, row.siblingIndex - 1)
-                                } else {
-                                    moveTopLevelUnit(entries, row.unitIndex, row.unitIndex - 1)
-                                }
+                                val newOrder =
+                                    if (row.isNested && row.groupName != null) {
+                                        moveChildEntry(
+                                            entries,
+                                            row.groupName,
+                                            row.siblingIndex,
+                                            row.siblingIndex - 1,
+                                        )
+                                    } else {
+                                        moveTopLevelUnit(entries, row.unitIndex, row.unitIndex - 1)
+                                    }
                                 applyReorder(newOrder)
                             },
                             onMoveDown = {
-                                val newOrder = if (row.isNested && row.groupName != null) {
-                                    moveChildEntry(entries, row.groupName, row.siblingIndex, row.siblingIndex + 1)
-                                } else {
-                                    moveTopLevelUnit(entries, row.unitIndex, row.unitIndex + 1)
-                                }
+                                val newOrder =
+                                    if (row.isNested && row.groupName != null) {
+                                        moveChildEntry(
+                                            entries,
+                                            row.groupName,
+                                            row.siblingIndex,
+                                            row.siblingIndex + 1,
+                                        )
+                                    } else {
+                                        moveTopLevelUnit(entries, row.unitIndex, row.unitIndex + 1)
+                                    }
                                 applyReorder(newOrder)
                             },
                             onDragStart = {
@@ -268,30 +300,57 @@ fun Sidebar(
                                 if (currentKey != entryKey) return@SidebarItem
 
                                 if (row.isNested && row.groupName != null) {
-                                    val groupUnit = partitionIntoUnits(entries).firstOrNull {
-                                        it is SidebarUnit.GroupUnit && it.groupName.equals(row.groupName, ignoreCase = true)
-                                    } as? SidebarUnit.GroupUnit ?: return@SidebarItem
-                                    val currentSiblingIndex = groupUnit.entries.indexOfFirst { it.name == row.entry.name }
+                                    val groupUnit =
+                                        partitionIntoUnits(entries).firstOrNull {
+                                            it is SidebarUnit.GroupUnit &&
+                                                it.groupName.equals(
+                                                    row.groupName,
+                                                    ignoreCase = true,
+                                                )
+                                        } as? SidebarUnit.GroupUnit ?: return@SidebarItem
+                                    val currentSiblingIndex =
+                                        groupUnit.entries.indexOfFirst { it.name == row.entry.name }
                                     if (currentSiblingIndex == -1) return@SidebarItem
                                     val offsetSteps = (dragOffsetY / itemHeightPx).toInt()
-                                    val targetSiblingIndex = (currentSiblingIndex + offsetSteps).coerceIn(0, groupUnit.entries.lastIndex)
+                                    val targetSiblingIndex =
+                                        (currentSiblingIndex + offsetSteps).coerceIn(
+                                            0,
+                                            groupUnit.entries.lastIndex,
+                                        )
                                     if (targetSiblingIndex != currentSiblingIndex) {
-                                        val newOrder = moveChildEntry(entries, row.groupName, currentSiblingIndex, targetSiblingIndex)
+                                        val newOrder =
+                                            moveChildEntry(
+                                                entries,
+                                                row.groupName,
+                                                currentSiblingIndex,
+                                                targetSiblingIndex,
+                                            )
                                         applyReorder(newOrder)
-                                        dragOffsetY -= (targetSiblingIndex - currentSiblingIndex) * itemHeightPx
+                                        dragOffsetY -=
+                                            (targetSiblingIndex - currentSiblingIndex) *
+                                                itemHeightPx
                                     }
                                 } else {
-                                    val currentUnitIndex = partitionIntoUnits(entries).indexOfFirst {
-                                        it is SidebarUnit.StandaloneUnit && it.entry.name == row.entry.name
-                                    }
+                                    val currentUnitIndex =
+                                        partitionIntoUnits(entries).indexOfFirst {
+                                            it is SidebarUnit.StandaloneUnit &&
+                                                it.entry.name == row.entry.name
+                                        }
                                     if (currentUnitIndex == -1) return@SidebarItem
                                     val totalUnits = partitionIntoUnits(entries).size
                                     val offsetSteps = (dragOffsetY / itemHeightPx).toInt()
-                                    val targetUnitIndex = (currentUnitIndex + offsetSteps).coerceIn(0, totalUnits - 1)
+                                    val targetUnitIndex =
+                                        (currentUnitIndex + offsetSteps).coerceIn(0, totalUnits - 1)
                                     if (targetUnitIndex != currentUnitIndex) {
-                                        val newOrder = moveTopLevelUnit(entries, currentUnitIndex, targetUnitIndex)
+                                        val newOrder =
+                                            moveTopLevelUnit(
+                                                entries,
+                                                currentUnitIndex,
+                                                targetUnitIndex,
+                                            )
                                         applyReorder(newOrder)
-                                        dragOffsetY -= (targetUnitIndex - currentUnitIndex) * itemHeightPx
+                                        dragOffsetY -=
+                                            (targetUnitIndex - currentUnitIndex) * itemHeightPx
                                     }
                                 }
                             },
@@ -315,6 +374,7 @@ fun Sidebar(
 
 sealed interface SidebarUnit {
     data class GroupUnit(val groupName: String, val entries: List<GameEntry>) : SidebarUnit
+
     data class StandaloneUnit(val entry: GameEntry) : SidebarUnit
 }
 
@@ -329,7 +389,9 @@ internal fun partitionIntoUnits(entries: List<GameEntry>): List<SidebarUnit> {
         } else {
             val normalized = groupName.lowercase()
             if (seenGroups.add(normalized)) {
-                val groupEntries = entries.filter { it.group?.trim().equals(groupName, ignoreCase = true) }
+                val groupEntries = entries.filter {
+                    it.group?.trim().equals(groupName, ignoreCase = true)
+                }
                 units.add(SidebarUnit.GroupUnit(groupName, groupEntries))
             }
         }
@@ -352,7 +414,11 @@ internal fun moveTopLevelUnit(
     toUnitIndex: Int,
 ): List<GameEntry> {
     val units = partitionIntoUnits(entries).toMutableList()
-    if (fromUnitIndex !in units.indices || toUnitIndex !in units.indices || fromUnitIndex == toUnitIndex) {
+    if (
+        fromUnitIndex !in units.indices ||
+            toUnitIndex !in units.indices ||
+            fromUnitIndex == toUnitIndex
+    ) {
         return entries
     }
     val item = units.removeAt(fromUnitIndex)
@@ -373,7 +439,11 @@ internal fun moveChildEntry(
     if (groupUnitIndex == -1) return entries
     val groupUnit = units[groupUnitIndex] as SidebarUnit.GroupUnit
     val siblingEntries = groupUnit.entries.toMutableList()
-    if (fromSiblingIndex !in siblingEntries.indices || toSiblingIndex !in siblingEntries.indices || fromSiblingIndex == toSiblingIndex) {
+    if (
+        fromSiblingIndex !in siblingEntries.indices ||
+            toSiblingIndex !in siblingEntries.indices ||
+            fromSiblingIndex == toSiblingIndex
+    ) {
         return entries
     }
     val moved = siblingEntries.removeAt(fromSiblingIndex)
@@ -430,8 +500,11 @@ internal fun computeSidebarRows(
             }
             is SidebarUnit.GroupUnit -> {
                 val groupEntries = unit.entries
-                val isCollapsed = collapsedGroups.any { it.equals(unit.groupName, ignoreCase = true) }
-                val hasSelectedChild = selectedEntry != null && groupEntries.any { it.name == selectedEntry.name }
+                val isCollapsed = collapsedGroups.any {
+                    it.equals(unit.groupName, ignoreCase = true)
+                }
+                val hasSelectedChild =
+                    selectedEntry != null && groupEntries.any { it.name == selectedEntry.name }
 
                 rows.add(
                     SidebarRow.FolderHeader(
@@ -496,29 +569,29 @@ private fun SidebarFolderHeader(
     val currentOnDragEnd by rememberUpdatedState(onDragEnd)
 
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                when {
-                    isDragging -> EmuSyncColors.SurfaceSelected.copy(alpha = 0.9f)
-                    hasSelectedChild && isCollapsed -> EmuSyncColors.SurfaceSelected.copy(alpha = 0.5f)
-                    isHovered -> EmuSyncColors.CardHover
-                    else -> Color.Transparent
-                }
-            )
-            .pointerHoverIcon(handCursor)
-            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
-            .hoverable(interactionSource)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(
+                    when {
+                        isDragging -> EmuSyncColors.SurfaceSelected.copy(alpha = 0.9f)
+                        hasSelectedChild && isCollapsed ->
+                            EmuSyncColors.SurfaceSelected.copy(alpha = 0.5f)
+                        isHovered -> EmuSyncColors.CardHover
+                        else -> Color.Transparent
+                    }
+                )
+                .pointerHoverIcon(handCursor)
+                .clickable(interactionSource = interactionSource, indication = null) { onClick() }
+                .hoverable(interactionSource)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Drag Handle
         Box(
-            modifier = Modifier
-                .size(24.dp)
-                .pointerHoverIcon(moveCursor)
-                .pointerInput(name) {
+            modifier =
+                Modifier.size(24.dp).pointerHoverIcon(moveCursor).pointerInput(name) {
                     detectDragGestures(
                         onDragStart = { currentOnDragStart() },
                         onDrag = { change, dragAmount ->
@@ -534,7 +607,9 @@ private fun SidebarFolderHeader(
             Icon(
                 imageVector = Icons.Default.DragIndicator,
                 contentDescription = "Drag folder to reorder",
-                tint = if (isDragging) EmuSyncColors.Primary else EmuSyncColors.OnSurfaceDim.copy(alpha = if (isHovered) 0.8f else 0.35f),
+                tint =
+                    if (isDragging) EmuSyncColors.Primary
+                    else EmuSyncColors.OnSurfaceDim.copy(alpha = if (isHovered) 0.8f else 0.35f),
                 modifier = Modifier.size(16.dp),
             )
         }
@@ -544,7 +619,9 @@ private fun SidebarFolderHeader(
         Icon(
             imageVector = Icons.Default.FolderOpen,
             contentDescription = null,
-            tint = if (hasSelectedChild) EmuSyncColors.Primary else EmuSyncColors.Primary.copy(alpha = 0.85f),
+            tint =
+                if (hasSelectedChild) EmuSyncColors.Primary
+                else EmuSyncColors.Primary.copy(alpha = 0.85f),
             modifier = Modifier.size(18.dp),
         )
         Spacer(Modifier.width(8.dp))
@@ -559,10 +636,10 @@ private fun SidebarFolderHeader(
         )
         // Count badge
         Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(EmuSyncColors.SurfaceVariant)
-                .padding(horizontal = 6.dp, vertical = 2.dp)
+            modifier =
+                Modifier.clip(RoundedCornerShape(10.dp))
+                    .background(EmuSyncColors.SurfaceVariant)
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
         ) {
             Text(
                 text = "$count",
@@ -614,9 +691,7 @@ private fun SidebarFolderHeader(
                 imageVector = Icons.Default.KeyboardArrowDown,
                 contentDescription = if (isCollapsed) "Expand" else "Collapse",
                 tint = EmuSyncColors.OnSurfaceDim,
-                modifier = Modifier
-                    .size(18.dp)
-                    .rotate(rotation),
+                modifier = Modifier.size(18.dp).rotate(rotation),
             )
         }
     }
@@ -648,54 +723,57 @@ private fun SidebarItem(
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
 
-    val backgroundColor by animateColorAsState(
-        when {
-            isDragging -> EmuSyncColors.SurfaceSelected.copy(alpha = 0.9f)
-            isSelected -> EmuSyncColors.SurfaceSelected
-            isHovered -> EmuSyncColors.CardHover
-            else -> EmuSyncColors.Surface
+    val backgroundColor by
+        animateColorAsState(
+            when {
+                isDragging -> EmuSyncColors.SurfaceSelected.copy(alpha = 0.9f)
+                isSelected -> EmuSyncColors.SurfaceSelected
+                isHovered -> EmuSyncColors.CardHover
+                else -> EmuSyncColors.Surface
+            }
+        )
+
+    val textColor by
+        animateColorAsState(
+            when {
+                isSelected -> EmuSyncColors.Primary
+                isHovered -> EmuSyncColors.OnBackground
+                else -> EmuSyncColors.OnSurface
+            }
+        )
+
+    val icon =
+        when (entry) {
+            is EmulatorSystem -> Icons.Default.SportsEsports
+            is NativePCGame -> Icons.Default.Gamepad
         }
-    )
 
-    val textColor by animateColorAsState(
-        when {
-            isSelected -> EmuSyncColors.Primary
-            isHovered -> EmuSyncColors.OnBackground
-            else -> EmuSyncColors.OnSurface
+    val subtitle =
+        when (entry) {
+            is EmulatorSystem -> entry.extensions.joinToString(", ") { ".$it" }
+            is NativePCGame -> "Native"
         }
-    )
-
-    val icon = when (entry) {
-        is EmulatorSystem -> Icons.Default.SportsEsports
-        is NativePCGame -> Icons.Default.Gamepad
-    }
-
-    val subtitle = when (entry) {
-        is EmulatorSystem -> entry.extensions.joinToString(", ") { ".$it" }
-        is NativePCGame -> "Native"
-    }
 
     val moveCursor = remember { PointerIcon(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR)) }
     val handCursor = remember { PointerIcon(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)) }
 
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .then(if (isNested) Modifier.padding(start = 12.dp) else Modifier)
-            .clip(RoundedCornerShape(8.dp))
-            .background(backgroundColor)
-            .pointerHoverIcon(handCursor)
-            .clickable(interactionSource = interactionSource, indication = null) { onClick() }
-            .hoverable(interactionSource)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .then(if (isNested) Modifier.padding(start = 12.dp) else Modifier)
+                .clip(RoundedCornerShape(8.dp))
+                .background(backgroundColor)
+                .pointerHoverIcon(handCursor)
+                .clickable(interactionSource = interactionSource, indication = null) { onClick() }
+                .hoverable(interactionSource)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Drag Handle
         Box(
-            modifier = Modifier
-                .size(24.dp)
-                .pointerHoverIcon(moveCursor)
-                .pointerInput(entry.name) {
+            modifier =
+                Modifier.size(24.dp).pointerHoverIcon(moveCursor).pointerInput(entry.name) {
                     detectDragGestures(
                         onDragStart = { currentOnDragStart() },
                         onDrag = { change, dragAmount ->
@@ -711,7 +789,9 @@ private fun SidebarItem(
             Icon(
                 imageVector = Icons.Default.DragIndicator,
                 contentDescription = "Drag to reorder",
-                tint = if (isDragging) EmuSyncColors.Primary else EmuSyncColors.OnSurfaceDim.copy(alpha = if (isHovered) 0.8f else 0.35f),
+                tint =
+                    if (isDragging) EmuSyncColors.Primary
+                    else EmuSyncColors.OnSurfaceDim.copy(alpha = if (isHovered) 0.8f else 0.35f),
                 modifier = Modifier.size(16.dp),
             )
         }
@@ -776,9 +856,11 @@ private fun SidebarItem(
 
         // Steam registration toggle button
         if (steamAvailable) {
-            val steamColor by animateColorAsState(
-                if (isSteamRegistered) Color(0xFF66BB6A) else EmuSyncColors.OnSurfaceDim.copy(alpha = 0.4f)
-            )
+            val steamColor by
+                animateColorAsState(
+                    if (isSteamRegistered) Color(0xFF66BB6A)
+                    else EmuSyncColors.OnSurfaceDim.copy(alpha = 0.4f)
+                )
 
             IconButton(
                 onClick = onSteamToggle,
@@ -786,7 +868,8 @@ private fun SidebarItem(
             ) {
                 Icon(
                     imageVector = Icons.Default.Widgets,
-                    contentDescription = if (isSteamRegistered) "Unregister from Steam" else "Register in Steam",
+                    contentDescription =
+                        if (isSteamRegistered) "Unregister from Steam" else "Register in Steam",
                     tint = steamColor,
                     modifier = Modifier.size(16.dp),
                 )
@@ -797,11 +880,11 @@ private fun SidebarItem(
         // Selection indicator bar
         if (isSelected) {
             Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .height(24.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(EmuSyncColors.Primary),
+                modifier =
+                    Modifier.width(3.dp)
+                        .height(24.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(EmuSyncColors.Primary)
             )
         }
     }

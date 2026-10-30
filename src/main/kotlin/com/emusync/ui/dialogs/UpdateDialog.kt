@@ -49,31 +49,27 @@ fun UpdateDialog(
     onStartDownload: (UpdateInfo) -> Unit,
     onRestart: (File) -> Unit,
 ) {
-    Dialog(onDismissRequest = {
-        if (state !is UpdateUiState.Downloading) {
-            onDismiss()
+    Dialog(
+        onDismissRequest = {
+            if (state !is UpdateUiState.Downloading) {
+                onDismiss()
+            }
         }
-    }) {
+    ) {
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = EmuSyncColors.Surface,
-            modifier = Modifier
-                .widthIn(min = 400.dp, max = 500.dp)
-                .wrapContentHeight(),
+            modifier = Modifier.widthIn(min = 400.dp, max = 500.dp).wrapContentHeight(),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp)
-            ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(24.dp)) {
                 when (state) {
                     is UpdateUiState.Available -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(EmuSyncColors.PrimaryContainer),
+                                modifier =
+                                    Modifier.size(40.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(EmuSyncColors.PrimaryContainer),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
@@ -91,7 +87,8 @@ fun UpdateDialog(
                                     color = EmuSyncColors.OnSurface,
                                 )
                                 Text(
-                                    text = "Version ${state.info.version} (current: ${AppInfo.VERSION})",
+                                    text =
+                                        "Version ${state.info.version} (current: ${AppInfo.VERSION})",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = EmuSyncColors.OnSurfaceDim,
                                 )
@@ -109,13 +106,13 @@ fun UpdateDialog(
                         Spacer(Modifier.height(6.dp))
 
                         Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 160.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(EmuSyncColors.SurfaceVariant)
-                                .padding(12.dp)
-                                .verticalScroll(rememberScrollState())
+                            modifier =
+                                Modifier.fillMaxWidth()
+                                    .heightIn(max = 160.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(EmuSyncColors.SurfaceVariant)
+                                    .padding(12.dp)
+                                    .verticalScroll(rememberScrollState())
                         ) {
                             Text(
                                 text = state.info.releaseNotes,
@@ -135,9 +132,16 @@ fun UpdateDialog(
                             }
                             Button(
                                 onClick = { onStartDownload(state.info) },
-                                colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
+                                colors =
+                                    ButtonDefaults.buttonColors(
+                                        containerColor = EmuSyncColors.Primary
+                                    ),
                             ) {
-                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Default.Download,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
                                 Spacer(Modifier.width(6.dp))
                                 Text("Update Now")
                             }
@@ -161,7 +165,8 @@ fun UpdateDialog(
                         Spacer(Modifier.height(16.dp))
                         LinearProgressIndicator(
                             progress = { state.progress },
-                            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                            modifier =
+                                Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
                             color = EmuSyncColors.Primary,
                         )
                         Spacer(Modifier.height(8.dp))
@@ -176,10 +181,10 @@ fun UpdateDialog(
                     is UpdateUiState.ReadyToRestart -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(EmuSyncColors.PrimaryContainer),
+                                modifier =
+                                    Modifier.size(40.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(EmuSyncColors.PrimaryContainer),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
@@ -197,11 +202,12 @@ fun UpdateDialog(
                                     color = EmuSyncColors.OnSurface,
                                 )
                                 Text(
-                                    text = if (state.isSteamGameMode) {
-                                        "The new version is ready to apply."
-                                    } else {
-                                        "The new version is ready to install."
-                                    },
+                                    text =
+                                        if (state.isSteamGameMode) {
+                                            "The new version is ready to apply."
+                                        } else {
+                                            "The new version is ready to install."
+                                        },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = EmuSyncColors.OnSurfaceDim,
                                 )
@@ -210,11 +216,12 @@ fun UpdateDialog(
 
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            text = if (state.isSteamGameMode) {
-                                "In Steam Deck Game Mode, closing EmuSync applies the update. You can then relaunch it from Steam to start the new version."
-                            } else {
-                                "To apply changes and enjoy the new version, restart EmuSync."
-                            },
+                            text =
+                                if (state.isSteamGameMode) {
+                                    "In Steam Deck Game Mode, closing EmuSync applies the update. You can then relaunch it from Steam to start the new version."
+                                } else {
+                                    "To apply changes and enjoy the new version, restart EmuSync."
+                                },
                             style = MaterialTheme.typography.bodyMedium,
                             color = EmuSyncColors.OnSurface,
                         )
@@ -229,7 +236,10 @@ fun UpdateDialog(
                             }
                             Button(
                                 onClick = { onRestart(state.downloadedFile) },
-                                colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
+                                colors =
+                                    ButtonDefaults.buttonColors(
+                                        containerColor = EmuSyncColors.Primary
+                                    ),
                             ) {
                                 Text(if (state.isSteamGameMode) "Close to Apply" else "Restart Now")
                             }
@@ -253,7 +263,8 @@ fun UpdateDialog(
                         Button(
                             onClick = onDismiss,
                             modifier = Modifier.align(Alignment.End),
-                            colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
+                            colors =
+                                ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
                         ) {
                             Text("Close")
                         }

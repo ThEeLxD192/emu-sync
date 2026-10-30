@@ -3,9 +3,7 @@ package com.emusync.drive
 import java.time.Duration
 import java.time.Instant
 
-/**
- * The result of comparing a local save file with its cloud counterpart.
- */
+/** The result of comparing a local save file with its cloud counterpart. */
 enum class SyncDecision {
     /** Local file is newer → should upload to Drive. */
     UPLOAD_LOCAL,
@@ -32,8 +30,8 @@ enum class LocalNewerAction {
 /**
  * Selects the synchronization action for a local/cloud file pair.
  *
- * Missing timestamps represent a missing side. When both sides exist, the
- * established timestamp conflict policy is used by [resolveConflict].
+ * Missing timestamps represent a missing side. When both sides exist, the established timestamp
+ * conflict policy is used by [resolveConflict].
  */
 fun planSyncDecision(
     localModifiedTimeMs: Long?,
@@ -56,13 +54,12 @@ fun planSyncDecision(
 /**
  * Pure function that determines the sync action based on file timestamps.
  *
- * This contains NO I/O — it's a deterministic decision function that can be
- * easily unit-tested.
+ * This contains NO I/O — it's a deterministic decision function that can be easily unit-tested.
  *
- * @param localModifiedTime  Last modified time of the local save file.
- * @param cloudModifiedTime  `modifiedTime` from the Google Drive API (ISO 8601).
- * @param conflictThresholdSeconds  If both files were modified within this window
- *                                   of each other, treat it as a conflict. Default: 5 seconds.
+ * @param localModifiedTime Last modified time of the local save file.
+ * @param cloudModifiedTime `modifiedTime` from the Google Drive API (ISO 8601).
+ * @param conflictThresholdSeconds If both files were modified within this window of each other,
+ *   treat it as a conflict. Default: 5 seconds.
  * @return [SyncDecision] indicating what action to take.
  */
 fun resolveConflict(
@@ -81,7 +78,7 @@ fun resolveConflict(
         difference.isNegative -> SyncDecision.DOWNLOAD_CLOUD
 
         // Local is newer → this means local was modified offline (or without syncing).
-        // Since we don't have a sync state database, we ask the user to resolve the conflict 
+        // Since we don't have a sync state database, we ask the user to resolve the conflict
         // to avoid overwriting cloud progress from another device.
         else -> SyncDecision.CONFLICT
     }

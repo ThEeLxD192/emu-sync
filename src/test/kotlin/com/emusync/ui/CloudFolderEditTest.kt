@@ -8,19 +8,21 @@ import com.emusync.model.GameEntry
 import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.NativePCGame
 import com.emusync.model.effectiveCloudFolder
+import java.io.File
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
-import java.io.File
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 
 class CloudFolderEditTest {
     @Test
-    fun `entry migration preserves unrelated configuration changes while waiting for Drive`(@TempDir directory: File) = runTest {
+    fun `entry migration preserves unrelated configuration changes while waiting for Drive`(
+        @TempDir directory: File
+    ) = runTest {
         MigrationDrive().use { drive ->
             drive.folder("source", "Old")
             drive.folder("destination", "New")
@@ -47,7 +49,9 @@ class CloudFolderEditTest {
     }
 
     @Test
-    fun `regrouping a shared emulator keeps its cloud location and other entries`(@TempDir directory: File) = runTest {
+    fun `regrouping a shared emulator keeps its cloud location and other entries`(
+        @TempDir directory: File
+    ) = runTest {
         MigrationDrive().use { drive ->
             val first = emulator(directory, "First").copy(group = "Switch")
             val second = emulator(directory, "Second").copy(group = "Switch")
@@ -66,24 +70,31 @@ class CloudFolderEditTest {
     }
 
     @Test
-    fun `explicit migration of a shared root is rejected before saving`(@TempDir directory: File) = runTest {
-        MigrationDrive().use { drive ->
-            val first = emulator(directory, "First").copy(group = "Switch")
-            val second = emulator(directory, "Second").copy(group = "Switch")
-            val (viewModel, manager) = viewModel(drive, directory, listOf(first, second))
-            val originalConfig = manager.load()
+    fun `explicit migration of a shared root is rejected before saving`(@TempDir directory: File) =
+        runTest {
+            MigrationDrive().use { drive ->
+                val first = emulator(directory, "First").copy(group = "Switch")
+                val second = emulator(directory, "Second").copy(group = "Switch")
+                val (viewModel, manager) = viewModel(drive, directory, listOf(first, second))
+                val originalConfig = manager.load()
 
-            assertFalse(viewModel.editEntry(first, first.copy(cloudFolder = "New Cloud Folder")))
+                assertFalse(
+                    viewModel.editEntry(first, first.copy(cloudFolder = "New Cloud Folder"))
+                )
 
-            assertEquals(originalConfig, manager.load())
-            assertEquals(originalConfig, viewModel.uiState.value.config)
-            assertTrue((viewModel.uiState.value.status as AppStatus.Error).message.contains("shared"))
-            assertTrue(drive.mutations.isEmpty())
+                assertEquals(originalConfig, manager.load())
+                assertEquals(originalConfig, viewModel.uiState.value.config)
+                assertTrue(
+                    (viewModel.uiState.value.status as AppStatus.Error).message.contains("shared")
+                )
+                assertTrue(drive.mutations.isEmpty())
+            }
         }
-    }
 
     @Test
-    fun `blocked entry merge keeps old configuration and both remote copies`(@TempDir directory: File) = runTest {
+    fun `blocked entry merge keeps old configuration and both remote copies`(
+        @TempDir directory: File
+    ) = runTest {
         MigrationDrive().use { drive ->
             drive.folder("source", "Old")
             drive.folder("destination", "New")
@@ -103,7 +114,9 @@ class CloudFolderEditTest {
     }
 
     @Test
-    fun `blocked game title merge keeps its previous title and remote saves`(@TempDir directory: File) = runTest {
+    fun `blocked game title merge keeps its previous title and remote saves`(
+        @TempDir directory: File
+    ) = runTest {
         MigrationDrive().use { drive ->
             drive.folder("console", "Console")
             drive.folder("source", "Old", "console")
@@ -125,34 +138,39 @@ class CloudFolderEditTest {
     }
 
     @Test
-    fun `renaming grouped native game updates only its own folder once`(@TempDir directory: File) = runTest {
-        MigrationDrive().use { drive ->
-            drive.folder("group", "Ports")
-            drive.folder("game", "Old", "group")
-            drive.folder("other", "Other", "group")
-            drive.file("save", "save.dat", "game")
-            val entry = NativePCGame("Old", "echo", group = "Ports")
-            val other = NativePCGame("Other", "echo", group = "Ports")
-            val (viewModel, manager) = viewModel(drive, directory, listOf(entry, other))
+    fun `renaming grouped native game updates only its own folder once`(@TempDir directory: File) =
+        runTest {
+            MigrationDrive().use { drive ->
+                drive.folder("group", "Ports")
+                drive.folder("game", "Old", "group")
+                drive.folder("other", "Other", "group")
+                drive.file("save", "save.dat", "game")
+                val entry = NativePCGame("Old", "echo", group = "Ports")
+                val other = NativePCGame("Other", "echo", group = "Ports")
+                val (viewModel, manager) = viewModel(drive, directory, listOf(entry, other))
 
-            viewModel.editGameOverride(GameItem("Old", entry), emptyList(), newTitle = "New")
+                viewModel.editGameOverride(GameItem("Old", entry), emptyList(), newTitle = "New")
 
-            assertEquals("New", drive.nodes.getValue("game").name)
-            assertEquals("group", drive.nodes.getValue("game").parent)
-            assertEquals("group", drive.nodes.getValue("other").parent)
-            assertEquals(listOf("PATCH:game"), drive.mutations)
-            assertEquals("New", manager.load().entries.first().name)
-            assertEquals(other, manager.load().entries.last())
+                assertEquals("New", drive.nodes.getValue("game").name)
+                assertEquals("group", drive.nodes.getValue("game").parent)
+                assertEquals("group", drive.nodes.getValue("other").parent)
+                assertEquals(listOf("PATCH:game"), drive.mutations)
+                assertEquals("New", manager.load().entries.first().name)
+                assertEquals(other, manager.load().entries.last())
+            }
         }
-    }
 
     @Test
-    fun `clearing a custom title migrates saves back to the default title`(@TempDir directory: File) = runTest {
+    fun `clearing a custom title migrates saves back to the default title`(
+        @TempDir directory: File
+    ) = runTest {
         MigrationDrive().use { drive ->
             drive.folder("console", "Console")
             drive.folder("game", "Custom Title", "console")
             drive.file("save", "save.dat", "game")
-            val entry = emulator(directory, "Console").copy(titleByRom = mapOf("Game.rom" to "Custom Title"))
+            val entry =
+                emulator(directory, "Console")
+                    .copy(titleByRom = mapOf("Game.rom" to "Custom Title"))
             val rom = File(directory, "Game.rom").apply { writeText("ROM") }
             val (viewModel, manager) = viewModel(drive, directory, listOf(entry))
 
@@ -164,11 +182,19 @@ class CloudFolderEditTest {
         }
     }
 
-    private fun emulator(directory: File, name: String) = EmulatorSystem(
-        name, "echo", romsDirectory = directory.path, extensions = listOf("rom"),
-    )
+    private fun emulator(directory: File, name: String) =
+        EmulatorSystem(
+            name,
+            "echo",
+            romsDirectory = directory.path,
+            extensions = listOf("rom"),
+        )
 
-    private suspend fun viewModel(drive: MigrationDrive, directory: File, entries: List<GameEntry>): Pair<AppViewModel, ConfigManager> {
+    private suspend fun viewModel(
+        drive: MigrationDrive,
+        directory: File,
+        entries: List<GameEntry>,
+    ): Pair<AppViewModel, ConfigManager> {
         val manager = ConfigManager(File(directory, "config.json"))
         manager.save(AppConfig(GoogleDriveConfig("client", "secret", "refresh"), entries))
         val viewModel = AppViewModel(configManager = manager, httpClient = drive.client)

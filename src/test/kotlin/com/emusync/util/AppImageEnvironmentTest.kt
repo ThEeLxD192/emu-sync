@@ -1,24 +1,27 @@
 package com.emusync.util
 
-import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import org.junit.jupiter.api.Test
 
 class AppImageEnvironmentTest {
     @Test
     fun `removes appimage paths and variables while preserving other library paths`() {
-        val environment = mutableMapOf(
-            "APPDIR" to "/tmp/.mount_EmuSync123",
-            "ARGV0" to "EmuSync",
-            "OWD" to "/home/user",
-            "LD_LIBRARY_PATH" to listOf(
-                "/tmp/.mount_EmuSync123/lib/app",
-                "/usr/lib",
-                "/tmp/.mount_OtherApp456/usr/lib",
-                "/opt/emulator/lib",
-            ).joinToString(File.pathSeparator),
-        )
+        val environment =
+            mutableMapOf(
+                "APPDIR" to "/tmp/.mount_EmuSync123",
+                "ARGV0" to "EmuSync",
+                "OWD" to "/home/user",
+                "LD_LIBRARY_PATH" to
+                    listOf(
+                            "/tmp/.mount_EmuSync123/lib/app",
+                            "/usr/lib",
+                            "/tmp/.mount_OtherApp456/usr/lib",
+                            "/opt/emulator/lib",
+                        )
+                        .joinToString(File.pathSeparator),
+            )
 
         AppImageEnvironment.clean(environment)
 
@@ -33,9 +36,7 @@ class AppImageEnvironmentTest {
 
     @Test
     fun `removes library path when it contains only appimage runtime paths`() {
-        val environment = mutableMapOf(
-            "LD_LIBRARY_PATH" to "/tmp/.mount_EmuSync123/lib/app",
-        )
+        val environment = mutableMapOf("LD_LIBRARY_PATH" to "/tmp/.mount_EmuSync123/lib/app")
 
         AppImageEnvironment.clean(environment)
 

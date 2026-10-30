@@ -22,9 +22,14 @@ fun planDirectorySync(
     localNewerAction: LocalNewerAction = LocalNewerAction.RESOLVE_CONFLICT,
 ): List<PlannedFileAction> {
     val localByPath = localFiles.associateBy { it.relativePath }
-    val cloudByPath = cloudFiles.groupBy { it.relativePath }.mapValues { (_, files) ->
-        files.sortedWith(compareBy<CloudFileState> { Instant.parse(it.modifiedTimeIso) }.thenBy { it.id })
-    }
+    val cloudByPath =
+        cloudFiles
+            .groupBy { it.relativePath }
+            .mapValues { (_, files) ->
+                files.sortedWith(
+                    compareBy<CloudFileState> { Instant.parse(it.modifiedTimeIso) }.thenBy { it.id }
+                )
+            }
     return (localByPath.keys + cloudByPath.keys).sorted().map { relativePath ->
         val local = localByPath[relativePath]
         val cloudCandidates = cloudByPath[relativePath].orEmpty()
@@ -34,11 +39,12 @@ fun planDirectorySync(
             local = local,
             cloud = cloud,
             duplicateCloudFiles = cloudCandidates.dropLast(1),
-            decision = planSyncDecision(
-                localModifiedTimeMs = local?.modifiedTimeMs,
-                cloudModifiedTimeIso = cloud?.modifiedTimeIso,
-                localNewerAction = localNewerAction,
-            ),
+            decision =
+                planSyncDecision(
+                    localModifiedTimeMs = local?.modifiedTimeMs,
+                    cloudModifiedTimeIso = cloud?.modifiedTimeIso,
+                    localNewerAction = localNewerAction,
+                ),
         )
     }
 }
