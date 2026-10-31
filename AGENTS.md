@@ -4,9 +4,9 @@
 
 EmuSync es una aplicación Kotlin/Compose Desktop para Linux y Windows. La migración
 acordada usa módulos Gradle JVM y conserva el comportamiento y los formatos actuales.
-La primera entrega fue esta guía y la skill local de pruebas. H1 está verificado
-técnicamente y espera confirmación de commit; H2–H8 siguen pendientes. Documentar
-un hito no significa ejecutarlo.
+La primera entrega fue esta guía y la skill local de pruebas. H0 y H1 están
+completados; H2 está verificado técnicamente y espera confirmación de commit.
+H3–H8 siguen pendientes. Documentar un hito no significa ejecutarlo.
 
 Línea base inspeccionada el 2026-10-30, sobre `484012f`:
 
@@ -44,7 +44,15 @@ src/main/kotlin/
 src/main/resources/          # Iconos y metadatos AppStream
 src/test/kotlin/com/emusync/  # Pruebas y fixtures de esas funcionalidades
 config/                      # Configuración de Detekt
-gradle/wrapper/              # Gradle Wrapper
+gradle/
+  wrapper/                   # Gradle Wrapper
+  libs.versions.toml         # Versiones compartidas, sin cambios respecto a la base
+build-logic/                 # Convenciones JVM/calidad; build incluido
+  src/main/kotlin/           # Plugins precompilados .gradle.kts
+domain/, application/        # Módulos vacíos preparados para H3/H5
+data/{local,drive,updates}/  # Módulos vacíos preparados para H4/H6
+platform/desktop/            # Módulo vacío preparado para H6
+presentation/, desktopApp/   # Módulos vacíos preparados para H7
 scripts/                     # Distribución, versión, hooks y sus pruebas
 .githooks/                   # Hook de precommit versionado
 .github/workflows/           # Validación y releases en Linux/Windows
@@ -151,8 +159,10 @@ entrada agregados o delegados. Mantener reportes de todos los módulos en CI.
 - Spotless/ktfmt bloquea por formato. Detekt sigue informativo (`ignoreFailures=true`),
   con aceptación de cero hallazgos. No relajar reglas ni añadir supresiones para
   completar hitos; conservar y revisar las supresiones justificadas existentes.
-- Los reportes se encuentran actualmente en `build/test-results/test`,
-  `build/reports/tests/test` y `build/reports/detekt`. Distinguir resultados recientes
+- Los reportes de la raíz se conservan en `build/test-results/test`,
+  `build/reports/tests/test` y `build/reports/detekt`; los módulos usan esas rutas
+  bajo su directorio. CI recoge los reportes recursivamente, incluido `build-logic`.
+  Distinguir resultados recientes
   de reportes previos, tareas `UP-TO-DATE` y comprobaciones que no se pudieron ejecutar.
 
 ## Compatibilidad y flujo de trabajo
@@ -243,22 +253,88 @@ Evidencia (2026-10-30, Linux; base `21e8e56`):
   renderizada ni Windows nativo; las simulaciones de plataforma no sustituyen esa
   validación de H6/H8. La matriz registra además límites ambientales y de recursos.
 
-**H1 completado técnicamente. Commit H1: pendiente de confirmación explícita.**
+**H1 completado. Commit H1: `8c0f90c` (`test: audit and consolidate behavioral tests`).**
 
 ### H2 — Base Gradle multimódulo
 
-- [ ] Centralizar versiones actuales en catálogo y convenciones en `build-logic`.
-- [ ] Preparar la inclusión incremental de módulos con toolchain Java 25.
-- [ ] Mantener tareas raíz agregadas y calidad sobre todos los source sets pertinentes.
-- [ ] Verificar caché de configuración y adaptar hooks, Docker y CI a la estructura añadida.
-- [ ] Diagnosticar el aviso de deprecaciones con `--warning-mode all` y registrar su
+- [x] Centralizar versiones actuales en catálogo y convenciones en `build-logic`.
+- [x] Preparar la inclusión incremental de módulos con toolchain Java 25.
+- [x] Mantener tareas raíz agregadas y calidad sobre todos los source sets pertinentes.
+- [x] Verificar caché de configuración y adaptar hooks, Docker y CI a la estructura añadida.
+- [x] Diagnosticar el aviso de deprecaciones con `--warning-mode all` y registrar su
   origen y resolución o limitación del plugin, manteniendo las versiones acordadas.
-- [ ] **H2 completado.**
+- [x] **H2 completado.**
 
 Aceptación: comandos existentes operativos, sin cambio de versiones y sin perder
 análisis de producción, pruebas o fixtures. Los módulos reciben código en H3–H7.
 
-Evidencia: pendiente. Commit: pendiente.
+Evidencia (2026-10-30, Linux; base `8c0f90c`):
+
+- `gradle/libs.versions.toml` centraliza Java, Kotlin, Compose, Ktor, serialización,
+  corrutinas, JUnit, Detekt, Spotless y ktfmt con las versiones anteriores. El wrapper
+  conserva Gradle 9.8.2. Los grafos `runtimeClasspath` y `testRuntimeClasspath`,
+  obtenidos con `./gradlew :dependencies --configuration ... --no-daemon` antes y
+  después, conservan exactamente las mismas 117 y 132 coordenadas/versiones resueltas.
+- [Convenciones y uso](build-logic/README.md): build incluido con `emusync.kotlin-jvm`
+  y `emusync.quality`, toolchain Java 25, JUnit Platform y análisis de cada compilación
+  JVM, incluidas fixtures. Se excluyen del agregado las tareas Detekt `*SourceSet`
+  que repetirían esas fuentes sin resolución de tipos; no se alteran reglas ni
+  supresiones. Spotless formatea también los scripts de convenciones; `qualityCheck`
+  valida los plugins mediante `build-logic:check`.
+- Ocho módulos incluidos con build propio, sin fuentes ni dependencias entre ellos.
+  La raíz mantiene fuentes, recursos, versión, identificadores y empaquetado; `test`,
+  `qualityCheck` y `check` agregan los módulos. Los contenedores `:data` y `:platform`
+  no tienen build propio. No se ejecutaron extracciones de H3–H7.
+- `./gradlew test --tests 'com.emusync.drive.SyncPlannerTest' --no-daemon`:
+  `BUILD SUCCESSFUL` en 18 s, tres casos aprobados y 0,040 s JUnit. La entrada
+  focalizada existente sigue operativa con los módulos vacíos.
+- `./gradlew :qualityCheck --configuration-cache --no-daemon`, dos ejecuciones:
+  primera correcta en 48 s, 62 tareas accionables (48 ejecutadas y 14 UP-TO-DATE);
+  segunda correcta en 18 s, 53 tareas (dos ejecutadas y 51 UP-TO-DATE), con
+  `Configuration cache entry reused`. En la segunda se ejecutaron detektMain/Test:
+  ambos SARIF con cero hallazgos.
+- `./gradlew :test --rerun :check --warning-mode all --no-daemon`:
+  `BUILD SUCCESSFUL` en 50 s; 67 tareas accionables, tres ejecutadas y 64 UP-TO-DATE.
+  Se forzó una ejecución nueva de los 427 casos: 425 aprobados, cero fallos/errores
+  y dos omisiones PowerShell en Linux; suma JUnit 11,233 s, 56 XML. En este cierre,
+  Spotless, validación de plugins y Detekt reutilizaron sus resultados correctos;
+  los módulos vacíos tienen tareas NO-SOURCE, sin tests ficticios.
+- Ese `check` ejecutó los nueve grupos PASS de hooks y los cuatro de
+  `scripts/tests/gradle-conventions-test.sh`. El proyecto desechable demostró
+  agregación desde `:test`/`:qualityCheck`, análisis main/test/fixtures, regla de
+  seguridad con tipos y configuración de pruebas, bytecode Java 25 y reutilización
+  de caché. Una aserción fallida y un fixture sin formato bloquearon sus respectivas
+  tareas raíz. El hallazgo GlobalCoroutineUsage es deliberado y solo existe en la
+  copia temporal. [Matriz actualizada](.agents/skills/kotlin-valuable-tests/references/test-audit.md).
+- La regresión de hooks falló antes de corregir los disparadores con
+  `build-logic/gradle.properties did not run Gradle`. Después verificó también
+  catálogo, recursos de convenciones y scripts de módulos con contenido preparado
+  GOOD y trabajo BAD, sin alterar los hashes del índice ni del trabajo.
+- `./gradlew packageReleaseAppImage --no-daemon`: correcto en 8 s; ocho tareas,
+  tres ejecutadas y cinco UP-TO-DATE. Se preparó la distribución en
+  `build/compose/binaries/main-release/app`. No se generó un AppImage independiente
+  con appimagetool ni se ejecutaron MSI/EXE o la interfaz gráfica.
+- `docker compose build`, `docker compose config --quiet` y comprobación de la
+  imagen con `docker run`: correctos. Docker recibe catálogo, convenciones y módulos,
+  excluye caches/builds anidados y conserva Java 25. Compose monta la configuración y
+  módulos añadidos. No se ejecutó el script completo de empaquetado en contenedor.
+  CI conserva Linux/Windows y recoge recursivamente informes de todos los módulos
+  y validación de plugins; no se ha ejecutado CI remoto ni Windows nativo.
+- El diagnóstico de `help dependencies --configuration runtimeClasspath` con
+  `--warning-mode all --no-configuration-cache --no-daemon` y
+  `-Dorg.gradle.deprecation.trace=true` identificó
+  `Configuration.setVisible` en `DetektBasePlugin.kt:60` del plugin
+  `dev.detekt:detekt-gradle-plugin:2.0.0-alpha.6`; Gradle anuncia retirada en 11.
+  Se registra esta limitación conservando la versión acordada, sin ocultar avisos.
+- Las primeras comprobaciones focalizada/de paquete fallaron por AccessDenied al
+  reemplazar artefactos locales de `build/` propiedad de root. Se corrigió únicamente
+  la propiedad de ese directorio generado y ambas se ejecutaron después correctamente;
+  no se modificaron fuentes ni índice por esa reparación.
+- Sintaxis Bash, YAML/Compose, enlaces incorporados, versiones, visibilidad Git y
+  `git diff --check` revisados. `src`, scripts de distribución/versionado y workflow
+  de release no cambiaron. No se repitió la suite tras editar únicamente seguimiento.
+
+**H2 completado técnicamente. Commit H2: pendiente de confirmación explícita.**
 
 ### H3 — Dominio, tipos y contratos
 

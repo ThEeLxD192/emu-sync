@@ -1,6 +1,6 @@
 # Auditoría de pruebas de EmuSync
 
-Estado: **H1 completado técnicamente el 2026-10-30; commit pendiente de confirmación**.
+Estado: **H1 completado el 2026-10-30; commit `8c0f90c`**.
 Auditoría sobre `21e8e56` (H0), sin cambios de producción, dependencias ni módulos.
 La matriz por escenario está en [escenarios auditados](test-audit-cases.md).
 
@@ -53,7 +53,7 @@ Todos los métodos retirados estaban en `config/ConfigManagerTest.kt`. Nivel:
 reglas de localización con proveedores controlados y archivos temporales. Contrato:
 prioridad de configuración. Riesgo medio: abrir otra configuración al arrancar.
 Evidencia: E1 ejecutó los reemplazos y E2 toda la suite. Fecha: 2026-10-30;
-commit H1 pendiente.
+commit H1 `8c0f90c`.
 
 | Método retirado | Protección equivalente en `ConfigLocationTest` | Motivo y fallo que sigue detectándose |
 | --- | --- | --- |
@@ -124,7 +124,7 @@ porque detectan fallos distintos.
 ## Ejecuciones
 
 Fecha local: **2026-10-30**, Linux, Java 25. Sin cuentas ni credenciales reales.
-Commit base `21e8e56`; cambios H1 pendientes de autorización de commit.
+Commit base `21e8e56`; entrega H1 registrada en `8c0f90c`.
 
 **E1 — suites afectadas y formato:**
 
@@ -195,4 +195,21 @@ editar únicamente este seguimiento.
 - [x] Las suites afectadas pasan y las omisiones tienen causa y plataforma identificadas.
 - [x] Se registran cantidad/tiempos posteriores sin tratarlos como objetivo de reducción.
 
-Commit H1: pendiente de confirmación explícita del usuario.
+Commit H1: `8c0f90c`, confirmado por el usuario.
+
+## H2 — Garantías de infraestructura añadidas
+
+La suite de aplicación conserva sus 427 casos. La nueva base Gradle añade pruebas
+externas a JUnit de aplicación; no se cuentan como cobertura de lógica de negocio.
+
+| Ubicación / escenario | Contrato y riesgo | Nivel / decisión / evidencia |
+| --- | --- | --- |
+| `scripts/tests/git-hooks-test.sh`: catálogo, propiedades/recursos de build-logic y scripts de módulo | Los cambios preparados activan calidad y se valida su contenido GOOD pese al BAD sin preparar; índice y trabajo conservan sus hashes. Detecta que nuevas convenciones salten el hook. | Git real con gradlew falso; conservar. Antes de ampliar el hook falló con `build-logic/gradle.properties did not run Gradle`; después pasó. Es el noveno grupo PASS, además de los ocho de H1. |
+| `scripts/tests/gradle-conventions-test.sh`: agregados y source sets | `:test` ejecuta una prueba de módulo con fixture; `:qualityCheck` produce SARIF de main, test y fixtures. El resultado GlobalCoroutineUsage deliberado demuestra la regla de seguridad en fixtures y no aparece FunctionNaming; bytecode major 69 confirma Java 25. | Integración Gradle en copia desechable; conservar. No basta un dry-run de módulos vacíos. |
+| Mismo script: segunda ejecución | Las mismas tareas reutilizan la caché de configuración. Detecta capturas incompatibles en convenciones o agregados. | Gradle real; conservar. Se comprueba `Configuration cache entry reused`. |
+| Mismo script: aserción de módulo inválida | Una aserción fallida hace fallar `:test` raíz y el XML del módulo registra un fallo. Detecta pérdida de agregación o descubrimiento JUnit. | Gradle/JUnit reales; conservar. El fallo se inyecta solo en la copia. |
+| Mismo script: fixture sin formato | Un archivo Kotlin sin formato en testFixtures hace fallar `:qualityCheck` raíz mediante `:domain:spotlessKotlinCheck`. Detecta dejar fixtures fuera del formato o del agregado. | Gradle/Spotless reales; conservar. La copia se elimina al salir y no modifica fuentes ni índice del usuario. |
+
+Las cuatro comprobaciones de convenciones se ejecutan desde `check`, sin invocar
+`check` de nuevo en la copia. La evidencia y limitaciones de H2 se registran en
+[AGENTS.md](../../../../AGENTS.md); los resultados de H1 anteriores son históricos.

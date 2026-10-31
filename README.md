@@ -81,8 +81,11 @@ You can configure Google Drive credentials directly inside the app by clicking *
 ### Code Quality
 
 Use JDK 25 and Git Bash on Windows. The pinned Spotless/ktfmt formatter applies to
-application code, tests and Gradle Kotlin scripts. Detekt analyzes production and
-tests with type resolution, with settings adapted to Compose and test scenarios.
+application code, tests, fixtures and Gradle Kotlin scripts. Detekt analyzes each
+JVM compilation with type resolution, with settings adapted to Compose and tests.
+Versions live in `gradle/libs.versions.toml`; shared configuration lives in
+[`build-logic`](build-logic/README.md). The eight modules are prepared for incremental
+extraction; the application and packaging currently remain in the root project.
 
 ```bash
 # Install the versioned pre-commit hook once per clone
@@ -111,8 +114,10 @@ adjacent comment explaining why that rule does not apply. The target policy for
 production code is to handle nullable values explicitly instead of using `!!`;
 existing violations will be resolved incrementally. Document important contracts
 and design decisions with KDoc.
-Reports are written to `build/reports/detekt/` and uploaded by CI even when analysis
-findings do not fail the build.
+Reports are written to each project's `build/reports/detekt/` and uploaded by CI
+even when analysis findings do not fail the build. Root `test`, `qualityCheck` and
+`check` aggregate the modules. `check` also verifies conventions in a disposable
+project, including test fixtures, failure propagation and configuration cache reuse.
 
 Git hooks can be bypassed and must be installed in each clone. Configure GitHub
 branch protection to require the Linux and Windows validation jobs before merging.

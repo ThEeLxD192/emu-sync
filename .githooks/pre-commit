@@ -7,7 +7,7 @@ cd "$repo_root"
 relevant=false
 while IFS= read -r -d '' path; do
     case "$path" in
-        *.kt|*.kts|gradle.properties|gradlew|gradlew.bat|gradle/*|config/detekt*.yml|.editorconfig|.gitattributes|.githooks/*|scripts/*quality*|scripts/install-git-hooks.sh|scripts/tests/git-hooks-test.sh|.github/workflows/ci.yml)
+        *.kt|*.kts|gradle.properties|*/gradle.properties|build-logic/*|gradlew|gradlew.bat|gradle/*|config/detekt*.yml|.editorconfig|.gitattributes|.githooks/*|scripts/*quality*|scripts/install-git-hooks.sh|scripts/tests/*|.github/workflows/ci.yml)
             relevant=true
             break
             ;;

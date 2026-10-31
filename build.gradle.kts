@@ -1,57 +1,21 @@
-import dev.detekt.gradle.Detekt
-import dev.detekt.gradle.extensions.FailOnSeverity
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
-val ktorVersion = providers.gradleProperty("ktorVersion").get()
-val serializationVersion = providers.gradleProperty("serializationVersion").get()
-val coroutinesVersion = providers.gradleProperty("coroutinesVersion").get()
-
 plugins {
-    kotlin("jvm")
-    kotlin("plugin.serialization")
-    id("org.jetbrains.compose")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("dev.detekt") version "2.0.0-alpha.6"
-    id("com.diffplug.spotless") version "8.10.4"
+    id("emusync.kotlin-jvm")
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.compose)
+    alias(libs.plugins.kotlin.compose)
 }
 
-kotlin {
-    jvmToolchain(25)
+// Grouping projects (:data and :platform) have no build file or source sets.
+val modules = subprojects.filter { it.buildFile.isFile }.map { it.path }
+
+tasks.named("qualityCheck") {
+    dependsOn(modules.map { "$it:qualityCheck" })
+    dependsOn(gradle.includedBuild("build-logic").task(":check"))
 }
 
-spotless {
-    kotlin {
-        target("src/**/*.kt")
-        ktfmt("0.64").kotlinlangStyle()
-    }
-    kotlinGradle {
-        target("*.gradle.kts")
-        ktfmt("0.64").kotlinlangStyle()
-    }
-}
-
-detekt {
-    buildUponDefaultConfig.set(true)
-    config.setFrom("config/detekt.yml")
-    failOnSeverity.set(FailOnSeverity.Warning)
-    // Adoption phase: findings are reported; formatter violations still block the build.
-    ignoreFailures.set(true)
-}
-
-tasks.withType<Detekt>().configureEach {
-    if (name == "detektTest") config.setFrom("config/detekt.yml", "config/detekt-test.yml")
-    reports {
-        html.required.set(true)
-        sarif.required.set(true)
-    }
-}
-
-val qualityCheck =
-    tasks.register("qualityCheck") {
-        group = "verification"
-        description = "Checks Kotlin formatting and analyzes production and test code."
-        dependsOn("spotlessCheck", "detektMain", "detektTest")
-    }
+tasks.named("test") { dependsOn(modules.map { "$it:test" }) }
 
 tasks.register<Exec>("installGitHooks") {
     group = "build setup"
@@ -68,49 +32,32 @@ val verifyGitHooks =
         commandLine("bash", "scripts/tests/git-hooks-test.sh")
     }
 
-tasks.named("check") {
-    dependsOn(qualityCheck)
-    dependsOn(verifyGitHooks)
-}
+val verifyGradleConventions =
+    tasks.register<Exec>("verifyGradleConventions") {
+        group = "verification"
+        description =
+            "Tests JVM conventions, aggregation and configuration cache in a disposable build."
+        workingDir(rootDir)
+        commandLine("bash", "scripts/tests/gradle-conventions-test.sh")
+    }
 
-// The typed analysis tasks cover both source sets, including rules needing type resolution.
-tasks.named("detekt") {
-    dependsOn("detektMain", "detektTest")
-    enabled = false
+tasks.named("check") {
+    dependsOn(modules.map { "$it:check" })
+    dependsOn(verifyGitHooks)
+    dependsOn(verifyGradleConventions)
 }
 
 dependencies {
-    // Compose Desktop
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
-
-    // Ktor Client
-    implementation("io.ktor:ktor-client-core:$ktorVersion")
-    implementation("io.ktor:ktor-client-cio:$ktorVersion")
-    implementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
-
-    // Kotlin Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
-
-    // Kotlin Serialization
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:$serializationVersion")
-
-    // Test dependencies
-    testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:$coroutinesVersion")
-    testImplementation("io.ktor:ktor-client-mock:$ktorVersion")
-}
-
-tasks.withType<Test> {
-    useJUnitPlatform()
-    jvmArgs("--enable-native-access=ALL-UNNAMED")
-    testLogging {
-        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
-    }
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.cio)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.serialization.json)
+    implementation(libs.coroutines.core)
+    implementation(libs.serialization.json)
+    testImplementation(libs.ktor.client.mock)
 }
 
 compose.desktop {
@@ -120,7 +67,7 @@ compose.desktop {
         javaHome =
             javaToolchains
                 .launcherFor {
-                    languageVersion.set(JavaLanguageVersion.of(25))
+                    languageVersion.set(JavaLanguageVersion.of(libs.versions.java.get().toInt()))
                 }
                 .get()
                 .metadata

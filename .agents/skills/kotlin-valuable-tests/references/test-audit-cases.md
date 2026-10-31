@@ -1,6 +1,6 @@
 # Escenarios auditados de H1
 
-Fecha: 2026-10-30. Fuentes revisadas sobre `21e8e56` y cambios H1 pendientes de commit.
+Fecha: 2026-10-30. Fuentes revisadas sobre `21e8e56`; entrega H1 registrada en `8c0f90c`.
 
 Esta es la matriz por escenario de [la auditoría](test-audit.md). Cada fila identifica
 el método exacto y su contrato observable en inglés. Riesgo, fallo plausible, punto

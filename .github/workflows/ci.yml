@@ -40,9 +40,10 @@ jobs:
         with:
           name: test-reports-${{ matrix.platform }}
           path: |
-            build/test-results/test/
-            build/reports/tests/test/
-            build/reports/detekt/
+            **/build/test-results/
+            **/build/reports/tests/
+            **/build/reports/detekt/
+            **/build/reports/plugin-development/
           if-no-files-found: ignore
           retention-days: 7
 

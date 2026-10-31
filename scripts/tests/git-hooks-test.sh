@@ -23,6 +23,9 @@ set -euo pipefail
 [[ "$*" == 'qualityCheck --console=plain --no-daemon' ]]
 printf 'called\n' >> "$EMUSYNC_HOOK_TEST_LOG"
 pwd > "$EMUSYNC_HOOK_TEST_SNAPSHOT"
+if [[ -n ${EMUSYNC_HOOK_TEST_EXPECTED_PATH:-} ]]; then
+    [[ $(cat "$EMUSYNC_HOOK_TEST_EXPECTED_PATH") == GOOD ]]
+fi
 if [[ ${EMUSYNC_HOOK_TEST_INTERRUPT:-0} == 1 ]]; then
     kill -TERM "$PPID"
     exit 0
@@ -83,6 +86,27 @@ bash .githooks/pre-commit
 [[ -s "$EMUSYNC_HOOK_TEST_LOG" ]] || fail 'quality configuration did not run Gradle'
 assert_cleaned
 echo 'PASS: configuration changes trigger quality checks'
+
+for config_path in \
+    gradle/libs.versions.toml \
+    build-logic/gradle.properties \
+    build-logic/src/main/resources/META-INF/gradle-plugins/emusync.properties \
+    domain/build.gradle.kts \
+    data/local/build.gradle.kts; do
+    prepare
+    mkdir -p "$(dirname "$config_path")"
+    printf 'GOOD\n' > "$config_path"
+    git add "$config_path"
+    printf 'BAD\n' > "$config_path"
+    index_before=$(git write-tree)
+    work_before=$(git hash-object "$config_path")
+    EMUSYNC_HOOK_TEST_EXPECTED_PATH="$config_path" bash .githooks/pre-commit
+    [[ -s "$EMUSYNC_HOOK_TEST_LOG" ]] || fail "$config_path did not run Gradle"
+    [[ $(git write-tree) == "$index_before" ]] || fail "$config_path changed the index"
+    [[ $(git hash-object "$config_path") == "$work_before" ]] || fail "$config_path changed working content"
+    assert_cleaned
+done
+echo 'PASS: catalogs, build conventions and module scripts validate only staged content'
 
 prepare
 git add config/detekt.yml
