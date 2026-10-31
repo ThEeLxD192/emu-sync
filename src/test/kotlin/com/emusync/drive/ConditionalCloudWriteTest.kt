@@ -7,7 +7,11 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.toByteArray
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.http.*
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import java.io.File
 import java.net.InetSocketAddress
@@ -15,8 +19,13 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.test.*
-import kotlinx.coroutines.*
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
@@ -260,6 +269,8 @@ class ConditionalCloudWriteTest {
     }
 
     @Test
+    // Real IO threads let both HTTP writers reach the server barrier concurrently.
+    @Suppress("InjectDispatcher")
     fun `two actual CIO writers with the same observed version have only one winner`(
         @TempDir directory: File
     ) = runTest {
@@ -326,9 +337,14 @@ class ConditionalCloudWriteTest {
                         listOf(first, second)
                             .map { file ->
                                 async(Dispatchers.IO) {
-                                    runCatching {
-                                        api.update("token", observed(), file, "save.dat")
-                                    }
+                                    recoverDriveFailure(
+                                        action = {
+                                            Result.success(
+                                                api.update("token", observed(), file, "save.dat")
+                                            )
+                                        },
+                                        recover = { Result.failure(it) },
+                                    )
                                 }
                             }
                             .awaitAll()

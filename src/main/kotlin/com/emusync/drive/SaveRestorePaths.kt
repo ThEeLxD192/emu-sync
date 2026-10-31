@@ -9,21 +9,18 @@ import java.nio.file.Path
 
 private val WINDOWS_DRIVE_PATH = Regex("^[A-Za-z]:.*")
 
-internal fun remotePathSegments(remoteName: String): List<String>? {
-    if (remoteName.isBlank() || remoteName != remoteName.trim() || '\u0000' in remoteName)
-        return null
-    if (
+internal fun remotePathSegments(remoteName: String): List<String>? =
+    when {
+        remoteName.isBlank() || remoteName != remoteName.trim() || '\u0000' in remoteName -> null
         remoteName.startsWith('/') ||
             remoteName.startsWith('\\') ||
-            WINDOWS_DRIVE_PATH.matches(remoteName)
-    )
-        return null
-    val segments = remoteName.split(Regex("[/\\\\]"), limit = 0)
-    return segments.takeIf {
-        it.isNotEmpty() &&
-            it.none { segment -> segment.isBlank() || segment == "." || segment == ".." }
+            WINDOWS_DRIVE_PATH.matches(remoteName) -> null
+        else ->
+            remoteName.split(Regex("[/\\\\]"), limit = 0).takeIf {
+                it.isNotEmpty() &&
+                    it.none { segment -> segment.isBlank() || segment == "." || segment == ".." }
+            }
     }
-}
 
 /**
  * Resolves a Drive file name below [destinationRoot].
@@ -31,6 +28,8 @@ internal fun remotePathSegments(remoteName: String): List<String>? {
  * Drive names are untrusted input. Both slash styles are treated as separators so a name created on
  * another operating system cannot escape the save directory.
  */
+// Each guard rejects a distinct traversal, symlink or canonical-path escape before any write.
+@Suppress("ReturnCount")
 fun resolveRemoteFile(destinationRoot: File, remoteName: String): File? {
     val segments = remotePathSegments(remoteName) ?: return null
 

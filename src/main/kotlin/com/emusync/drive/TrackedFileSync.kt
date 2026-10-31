@@ -3,7 +3,7 @@ package com.emusync.drive
 import java.io.File
 import java.nio.file.Files
 import java.time.Instant
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -35,33 +35,41 @@ internal fun planTrackedSync(
     remote: DriveFile?,
     previous: SyncedSave?,
 ): SyncDecision {
-    if (localSha256 == null)
-        return if (remote == null) SyncDecision.IN_SYNC else SyncDecision.DOWNLOAD_CLOUD
-    if (remote == null) return SyncDecision.UPLOAD_LOCAL
-    if (remote.sha256Checksum?.equals(localSha256, ignoreCase = true) == true)
-        return SyncDecision.IN_SYNC
-    if (previous == null) return SyncDecision.CONFLICT
-    val localChanged = localSha256 != previous.localSha256
-    val remoteChanged =
-        remote.id != previous.remoteId ||
-            when {
-                remote.sha256Checksum != null ->
-                    !remote.sha256Checksum.equals(
-                        previous.remoteSha256 ?: previous.localSha256,
-                        ignoreCase = true,
-                    )
-                remote.version != null && previous.remoteVersion != null ->
-                    remote.version != previous.remoteVersion
-                else ->
-                    Instant.parse(remote.modifiedTime) != Instant.parse(previous.remoteModifiedTime)
-            }
     return when {
+        localSha256 == null ->
+            if (remote == null) SyncDecision.IN_SYNC else SyncDecision.DOWNLOAD_CLOUD
+        remote == null -> SyncDecision.UPLOAD_LOCAL
+        remote.sha256Checksum?.equals(localSha256, ignoreCase = true) == true ->
+            SyncDecision.IN_SYNC
+        previous == null -> SyncDecision.CONFLICT
+        else ->
+            changedSaveDecision(
+                localSha256 != previous.localSha256,
+                remoteChanged(remote, previous),
+            )
+    }
+}
+
+private fun changedSaveDecision(localChanged: Boolean, remoteChanged: Boolean): SyncDecision =
+    when {
         localChanged && remoteChanged -> SyncDecision.CONFLICT
         localChanged -> SyncDecision.UPLOAD_LOCAL
         remoteChanged -> SyncDecision.DOWNLOAD_CLOUD
         else -> SyncDecision.IN_SYNC
     }
-}
+
+private fun remoteChanged(remote: DriveFile, previous: SyncedSave): Boolean =
+    remote.id != previous.remoteId ||
+        when {
+            remote.sha256Checksum != null ->
+                !remote.sha256Checksum.equals(
+                    previous.remoteSha256 ?: previous.localSha256,
+                    ignoreCase = true,
+                )
+            remote.version != null && previous.remoteVersion != null ->
+                remote.version != previous.remoteVersion
+            else -> Instant.parse(remote.modifiedTime) != Instant.parse(previous.remoteModifiedTime)
+        }
 
 /**
  * Performs transfers from stable snapshots and advances history only after successful operations.
@@ -69,6 +77,7 @@ internal fun planTrackedSync(
 internal class TrackedFileSync(
     private val transfer: DriveTransfer,
     private val history: SyncHistoryStore,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     suspend fun plan(
         local: File,
@@ -76,25 +85,28 @@ internal class TrackedFileSync(
         folderId: String,
         remoteName: String,
     ): SyncDecision =
-        withContext(Dispatchers.IO) {
-            try {
-                val digest = local.takeIf { it.isFile }?.let(::sha256)
-                planTrackedSync(
-                    digest,
-                    remote,
-                    history.get(history.key(local, folderId, remoteName)),
-                )
-            } catch (failure: Exception) {
-                if (failure is CancellationException || failure is SaveSyncException) throw failure
-                throw SaveSyncException(
-                    "Could not inspect ${local.name} safely. Retry synchronization before playing.",
-                    failure,
-                )
-            }
+        withContext(ioDispatcher) {
+            recoverDriveFailure(
+                action = {
+                    val digest = local.takeIf { it.isFile }?.let(::sha256)
+                    planTrackedSync(
+                        digest,
+                        remote,
+                        history.get(history.key(local, folderId, remoteName)),
+                    )
+                },
+                recover = { failure ->
+                    if (failure is SaveSyncException) throw failure
+                    throw SaveSyncException(
+                        "Could not inspect ${local.name} safely. Retry synchronization before playing.",
+                        failure,
+                    )
+                },
+            )
         }
 
     suspend fun remember(local: File, remote: DriveFile, folderId: String, remoteName: String) =
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             val digest = sha256(local)
             val key = history.key(local, folderId, remoteName)
             if (planTrackedSync(digest, remote, history.get(key)) != SyncDecision.IN_SYNC) {
@@ -113,61 +125,38 @@ internal class TrackedFileSync(
         remoteName: String,
     ) {
         val expectedLocalHash =
-            withContext(Dispatchers.IO) { local.takeIf { it.isFile }?.let(::sha256) }
-        val staging =
-            try {
-                withContext(Dispatchers.IO) {
-                    Files.createDirectories(local.absoluteFile.parentFile.toPath())
-                    Files.createTempFile(
-                        local.absoluteFile.parentFile.toPath(),
-                        ".${local.name}.",
-                        ".restore",
-                    )
-                }
-            } catch (failure: Exception) {
-                if (failure is CancellationException) throw failure
-                throw SaveSyncException(
-                    "Could not prepare a safe restore for ${local.name}.",
-                    failure,
-                )
-            }
+            withContext(ioDispatcher) { local.takeIf { it.isFile }?.let(::sha256) }
+        val staging = prepareRestore(local)
         try {
-            transfer.download(
-                token,
-                remote.id,
-                staging.toFile(),
-                remote.modifiedTime,
-                progressFileName = local.name,
-            )
-            withContext(Dispatchers.IO) {
-                val digest = sha256(staging.toFile())
-                if (
-                    remote.sha256Checksum != null &&
-                        !remote.sha256Checksum.equals(digest, ignoreCase = true)
-                ) {
-                    throw SaveSyncException(
-                        "Cloud content changed while downloading ${local.name}. The local save was not replaced."
+            recoverDriveFailure(
+                action = {
+                    transfer.download(
+                        token,
+                        remote.id,
+                        staging.toFile(),
+                        remote.modifiedTime,
+                        progressFileName = local.name,
                     )
-                }
-                if (local.takeIf { it.isFile }?.let(::sha256) != expectedLocalHash) {
+                    withContext(ioDispatcher) {
+                        val digest = sha256(staging.toFile())
+                        verifyRestore(remote, digest, local, expectedLocalHash)
+                        val key = history.key(local, folderId, remoteName)
+                        if (expectedLocalHash != null && expectedLocalHash != digest)
+                            history.backup(key, local, expectedLocalHash)
+                        moveReplacing(staging, local.toPath())
+                        history.record(key, digest, remote)
+                    }
+                },
+                recover = { failure ->
+                    if (failure is SaveSyncException) throw failure
                     throw SaveSyncException(
-                        "${local.name} changed while downloading. Its new local progress was kept."
+                        "Could not restore ${local.name}. Retry synchronization before playing.",
+                        failure,
                     )
-                }
-                val key = history.key(local, folderId, remoteName)
-                if (expectedLocalHash != null && expectedLocalHash != digest)
-                    history.backup(key, local, expectedLocalHash)
-                moveReplacing(staging, local.toPath())
-                history.record(key, digest, remote)
-            }
-        } catch (failure: Exception) {
-            if (failure is CancellationException || failure is SaveSyncException) throw failure
-            throw SaveSyncException(
-                "Could not restore ${local.name}. Retry synchronization before playing.",
-                failure,
+                },
             )
         } finally {
-            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+            withContext(kotlinx.coroutines.NonCancellable + ioDispatcher) {
                 Files.deleteIfExists(staging)
             }
         }
@@ -181,31 +170,15 @@ internal class TrackedFileSync(
         remoteName: String,
     ) {
         val directory =
-            withContext(Dispatchers.IO) { Files.createTempDirectory("emusync-save-upload-") }
+            withContext(ioDispatcher) { Files.createTempDirectory("emusync-save-upload-") }
         val snapshot = directory.resolve(local.name).toFile()
         try {
-            val digest =
-                withContext(Dispatchers.IO) {
-                    Files.copy(local.toPath(), snapshot.toPath())
-                    sha256(snapshot).also {
-                        if (sha256(local) != it)
-                            throw SaveSyncException(
-                                "${local.name} changed while preparing its upload. Retry synchronization."
-                            )
-                    }
-                }
+            val digest = withContext(ioDispatcher) { prepareSnapshot(local, snapshot) }
             val result =
                 if (remote == null) transfer.upload(token, snapshot, remoteName, folderId)
                 else transfer.updateIfUnchanged(token, remote, snapshot, remoteName)
-            withContext(Dispatchers.IO) {
-                if (
-                    result.sha256Checksum != null &&
-                        !result.sha256Checksum.equals(digest, ignoreCase = true)
-                ) {
-                    throw SaveSyncException(
-                        "The uploaded content of ${local.name} could not be verified. Local progress was kept."
-                    )
-                }
+            withContext(ioDispatcher) {
+                verifyUpload(result.sha256Checksum, digest, local)
                 val uploaded =
                     DriveFile(
                         result.id,
@@ -222,10 +195,69 @@ internal class TrackedFileSync(
                 local.setLastModified(Instant.parse(result.modifiedTime).toEpochMilli())
             }
         } finally {
-            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+            withContext(kotlinx.coroutines.NonCancellable + ioDispatcher) {
                 Files.deleteIfExists(snapshot.toPath())
                 Files.deleteIfExists(directory)
             }
+        }
+    }
+
+    private suspend fun prepareRestore(local: File): java.nio.file.Path =
+        recoverDriveFailure(
+            action = {
+                withContext(ioDispatcher) {
+                    Files.createDirectories(local.absoluteFile.parentFile.toPath())
+                    Files.createTempFile(
+                        local.absoluteFile.parentFile.toPath(),
+                        ".${local.name}.",
+                        ".restore",
+                    )
+                }
+            },
+            recover = { failure ->
+                throw SaveSyncException(
+                    "Could not prepare a safe restore for ${local.name}.",
+                    failure,
+                )
+            },
+        )
+
+    private fun verifyRestore(
+        remote: DriveFile,
+        digest: String,
+        local: File,
+        expectedLocalHash: String?,
+    ) {
+        if (
+            remote.sha256Checksum != null &&
+                !remote.sha256Checksum.equals(digest, ignoreCase = true)
+        ) {
+            throw SaveSyncException(
+                "Cloud content changed while downloading ${local.name}. The local save was not replaced."
+            )
+        }
+        if (local.takeIf { it.isFile }?.let(::sha256) != expectedLocalHash) {
+            throw SaveSyncException(
+                "${local.name} changed while downloading. Its new local progress was kept."
+            )
+        }
+    }
+
+    private fun prepareSnapshot(local: File, snapshot: File): String {
+        Files.copy(local.toPath(), snapshot.toPath())
+        return sha256(snapshot).also {
+            if (sha256(local) != it)
+                throw SaveSyncException(
+                    "${local.name} changed while preparing its upload. Retry synchronization."
+                )
+        }
+    }
+
+    private fun verifyUpload(checksum: String?, digest: String, local: File) {
+        if (checksum != null && !checksum.equals(digest, ignoreCase = true)) {
+            throw SaveSyncException(
+                "The uploaded content of ${local.name} could not be verified. Local progress was kept."
+            )
         }
     }
 }

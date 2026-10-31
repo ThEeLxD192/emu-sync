@@ -5,11 +5,9 @@ import com.emusync.model.AppConfig
 import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
 import io.ktor.client.HttpClient
-import java.awt.Desktop
 import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
-import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.MessageDigest
@@ -17,7 +15,6 @@ import java.security.SecureRandom
 import java.util.Base64
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -347,61 +344,9 @@ class OAuthFlow(
                 "Missing 'googleDrive' section in config.json. " +
                     "Please add clientId and clientSecret from Google Cloud Console."
             }
-        var expected = configManager.snapshotGoogleDrive(config)
-        fun requireCurrentConnection() {
-            if (configManager.snapshotGoogleDrive(config) != expected) {
-                throw DriveApiException(
-                    "The Google Drive connection changed during authorization. Connect again to continue."
-                )
-            }
-        }
-        if (expected.credentials != driveConfig) {
-            throw DriveApiException(
-                "The Google Drive connection changed. Start synchronization again."
-            )
-        }
-
-        val auth = DriveAuth(client)
-
-        // Fast path: we already have a refresh token → try to refresh
-        if (!driveConfig.refreshToken.isNullOrBlank()) {
-            try {
-                val tokenResponse =
-                    auth.refreshAccessToken(
-                        clientId = driveConfig.clientId,
-                        clientSecret = driveConfig.clientSecret,
-                        refreshToken = driveConfig.refreshToken,
-                    )
-                requireCurrentConnection()
-                return tokenResponse.accessToken
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                requireCurrentConnection()
-                val message = e.message ?: ""
-                if (e is DriveApiException && e.errorCode == "invalid_grant") {
-                    // Refresh token expired or revoked (common in Google "Testing" mode).
-                    // Clear the bad token.
-                    if (
-                        !configManager.compareAndSetGoogleDrive(
-                            expected,
-                            driveConfig.copy(refreshToken = null),
-                            config,
-                        )
-                    ) {
-                        throw DriveApiException(
-                            "The Google Drive connection changed during authorization. Connect again to continue."
-                        )
-                    }
-                    expected =
-                        expected.copy(
-                            credentials = driveConfig.copy(refreshToken = null),
-                            revision = expected.revision + 1,
-                        )
-                } else {
-                    // Network failure, DNS resolution failure, socket timeout (offline mode)
-                    throw DriveApiException("Drive offline or unreachable: $message", e)
-                }
-            }
+        val connection = OAuthConnection(config, configManager, driveConfig, DriveAuth(client))
+        connection.refresh()?.let {
+            return it
         }
 
         // If interactive browser flow is NOT permitted (e.g. during game launch):
@@ -412,7 +357,7 @@ class OAuthFlow(
         }
 
         // Slow path: first-time authorization via loopback with timeout
-        requireCurrentConnection()
+        connection.requireCurrent()
         val code =
             withTimeoutOrNull(60_000) {
                 authorizationCodeProvider?.invoke(driveConfig.clientId)
@@ -421,30 +366,8 @@ class OAuthFlow(
                 ?: throw DriveApiException(
                     "Google Drive authorization timed out. Try connecting again."
                 )
-        requireCurrentConnection()
-
-        val tokens =
-            auth.exchangeCodeForTokens(
-                clientId = driveConfig.clientId,
-                clientSecret = driveConfig.clientSecret,
-                code = code,
-                redirectUri = REDIRECT_URI,
-            )
-
-        // Persist the refresh token so we don't need to re-authorize next time
-        if (
-            !configManager.compareAndSetGoogleDrive(
-                expected,
-                driveConfig.copy(refreshToken = tokens.refreshToken),
-                config,
-            )
-        ) {
-            throw DriveApiException(
-                "The Google Drive connection changed during authorization. Connect again to continue."
-            )
-        }
-
-        return tokens.accessToken
+        connection.requireCurrent()
+        return connection.exchange(code, REDIRECT_URI)
     }
 
     /**
@@ -488,47 +411,20 @@ class OAuthFlow(
             server.start()
 
             // Open the browser
-            try {
-                val os = System.getProperty("os.name", "").lowercase()
-                val isWindows = os.contains("windows")
-
-                if (isWindows) {
-                    try {
-                        if (
-                            Desktop.isDesktopSupported() &&
-                                Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)
-                        ) {
-                            Desktop.getDesktop().browse(URI(authUrl))
-                        } else {
-                            ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", authUrl)
-                                .start()
-                        }
-                    } catch (_: Throwable) {
-                        try {
-                            ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", authUrl)
-                                .start()
-                        } catch (_: Throwable) {
-                            ProcessBuilder("cmd", "/c", "start", "\"\"", authUrl.replace("&", "^&"))
-                                .start()
-                        }
-                    }
-                } else {
-                    if (
-                        Desktop.isDesktopSupported() &&
-                            Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)
-                    ) {
-                        Desktop.getDesktop().browse(URI(authUrl))
-                    } else {
-                        // Fallback for headless environments (SteamOS Game Mode)
-                        Runtime.getRuntime().exec(arrayOf("xdg-open", authUrl))
-                    }
-                }
-            } catch (e: Exception) {
-                server.stop(0)
-                continuation.resumeWithException(
-                    DriveApiException("Could not open browser. Please visit manually:\n$authUrl", e)
-                )
-            }
+            recoverDriveFailure(
+                action = {
+                    openOAuthBrowser(authUrl)
+                },
+                recover = { e ->
+                    server.stop(0)
+                    continuation.resumeWithException(
+                        DriveApiException(
+                            "Could not open browser. Please visit manually:\n$authUrl",
+                            e,
+                        )
+                    )
+                },
+            )
         }
     }
 
@@ -575,13 +471,17 @@ class OAuthFlow(
         if (!hasValidState(params, expectedState))
             throw DriveApiException("OAuth callback state is missing or invalid")
 
+        requireProviderSuccess(params)
+
+        return params["code"]?.takeIf { it.isNotBlank() }
+            ?: throw DriveApiException("No authorization code received")
+    }
+
+    private fun requireProviderSuccess(params: Map<String, String>) {
         params["error"]?.let { error ->
             val description = params["error_description"]?.takeIf { it.isNotBlank() }
             throw DriveApiException(description ?: "Authorization was cancelled or denied: $error")
         }
-
-        return params["code"]?.takeIf { it.isNotBlank() }
-            ?: throw DriveApiException("No authorization code received")
     }
 
     private fun hasValidState(params: Map<String, String>, expectedState: String): Boolean {
@@ -621,7 +521,8 @@ class OAuthFlow(
             (if (terminalCallback && result.isSuccess) SUCCESS_HTML else ERROR_HTML).toByteArray()
         exchange.responseHeaders.add("Content-Type", "text/html; charset=utf-8")
         exchange.sendResponseHeaders(
-            if (terminalCallback && result.isSuccess) 200 else 400,
+            if (terminalCallback && result.isSuccess) java.net.HttpURLConnection.HTTP_OK
+            else java.net.HttpURLConnection.HTTP_BAD_REQUEST,
             responseBytes.size.toLong(),
         )
         exchange.responseBody.use { it.write(responseBytes) }

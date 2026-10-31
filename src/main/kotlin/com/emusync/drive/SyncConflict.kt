@@ -39,16 +39,15 @@ fun planSyncDecision(
     conflictThresholdSeconds: Long = 5L,
     localNewerAction: LocalNewerAction = LocalNewerAction.RESOLVE_CONFLICT,
 ): SyncDecision {
-    if (localModifiedTimeMs == null && cloudModifiedTimeIso == null) return SyncDecision.IN_SYNC
-    if (localModifiedTimeMs == null) return SyncDecision.DOWNLOAD_CLOUD
-    if (cloudModifiedTimeIso == null) return SyncDecision.UPLOAD_LOCAL
-
-    val cloudModifiedTimeMs = Instant.parse(cloudModifiedTimeIso).toEpochMilli()
-    if (localNewerAction == LocalNewerAction.UPLOAD && localModifiedTimeMs > cloudModifiedTimeMs) {
-        return SyncDecision.UPLOAD_LOCAL
+    return when {
+        localModifiedTimeMs == null && cloudModifiedTimeIso == null -> SyncDecision.IN_SYNC
+        localModifiedTimeMs == null -> SyncDecision.DOWNLOAD_CLOUD
+        cloudModifiedTimeIso == null -> SyncDecision.UPLOAD_LOCAL
+        localNewerAction == LocalNewerAction.UPLOAD &&
+            localModifiedTimeMs > Instant.parse(cloudModifiedTimeIso).toEpochMilli() ->
+            SyncDecision.UPLOAD_LOCAL
+        else -> resolveConflict(localModifiedTimeMs, cloudModifiedTimeIso, conflictThresholdSeconds)
     }
-
-    return resolveConflict(localModifiedTimeMs, cloudModifiedTimeIso, conflictThresholdSeconds)
 }
 
 /**
@@ -89,6 +88,7 @@ fun resolveConflict(
  *
  * @param localModifiedTimeMs Local file's `lastModified()` in epoch milliseconds.
  * @param cloudModifiedTimeIso ISO 8601 string from Drive API (e.g. "2024-01-15T10:30:00.000Z").
+ * @param conflictThresholdSeconds Maximum timestamp difference considered in sync.
  */
 fun resolveConflict(
     localModifiedTimeMs: Long,

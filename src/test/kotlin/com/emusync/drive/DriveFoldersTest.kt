@@ -31,7 +31,7 @@ class DriveFoldersTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
                         requests.add("$url | q=$q")
 
                         when {
@@ -109,7 +109,7 @@ class DriveFoldersTest {
                     }
                     engine {
                         addHandler { request ->
-                            val q = request.url.parameters["q"] ?: ""
+                            val q = (request.url.parameters["q"]).orEmpty()
                             when {
                                 q.contains("name = 'EmuSync'") -> {
                                     respond(
@@ -163,7 +163,7 @@ class DriveFoldersTest {
                 }
                 engine {
                     addHandler { request ->
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
                         queries.add(q)
                         when {
                             q.contains("name = 'EmuSync'") -> {

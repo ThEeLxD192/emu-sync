@@ -41,6 +41,9 @@ class PostPlayAuthorizationTest {
             checkPostPlayAuthorization(directory, unlinkDuringPlay = true)
         }
 
+    // Keep this scenario's HTTP route matrix together so request order and assertions remain
+    // visible.
+    @Suppress("CyclomaticComplexMethod")
     private suspend fun checkPostPlayAuthorization(directory: File, unlinkDuringPlay: Boolean) {
         val save = File(directory, "save.dat").apply { writeText("BEFORE PLAY") }
         val java =

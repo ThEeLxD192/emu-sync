@@ -87,7 +87,15 @@ class DriveFolders(private val client: HttpClient) {
      */
     suspend fun findPath(accessToken: String, pathSegments: List<String>): String? {
         val root = searchFolder(accessToken, ROOT_FOLDER_NAME, parentId = null) ?: return null
-        var currentParentId = root.id
+        return findChildPath(accessToken, root.id, pathSegments)
+    }
+
+    private suspend fun findChildPath(
+        accessToken: String,
+        parentId: String,
+        pathSegments: List<String>,
+    ): String? {
+        var currentParentId = parentId
         for (segment in pathSegments) {
             val trimmed = segment.trim()
             if (trimmed.isNotBlank()) {
@@ -106,21 +114,10 @@ class DriveFolders(private val client: HttpClient) {
         parentId: String?,
     ): String {
         val cacheKey = "${parentId ?: "root"}:$folderName"
-        folderCache[cacheKey]?.let {
-            return it
-        }
-
-        // Search for existing folder
-        val existing = searchFolder(accessToken, folderName, parentId)
-        if (existing != null) {
-            folderCache[cacheKey] = existing.id
-            return existing.id
-        }
-
-        // Create the folder
-        val createdId = createFolder(accessToken, folderName, parentId)
-        folderCache[cacheKey] = createdId
-        return createdId
+        return folderCache[cacheKey]
+            ?: (searchFolder(accessToken, folderName, parentId)?.id
+                    ?: createFolder(accessToken, folderName, parentId))
+                .also { folderCache[cacheKey] = it }
     }
 
     /** Searches for a folder by exact name, optionally under a parent folder. */

@@ -48,16 +48,17 @@ class OAuthPersistenceTest {
             requests++
             if (requests == 1)
                 respond("""{"error":"invalid_grant"}""", HttpStatusCode.BadRequest, headers)
-            else respond(tokens(), headers = headers)
+            else respond(tokenResponse, headers = headers)
         }
         try {
             val flow =
                 OAuthFlow(client) {
                     assertNull(manager.load().googleDrive?.refreshToken)
-                    manager.update {
-                        it.copy(
+                    manager.update { current ->
+                        current.copy(
                             entries =
-                                it.entries + NativePCGame("Added during reauthentication", "echo")
+                                current.entries +
+                                    NativePCGame("Added during reauthentication", "echo")
                         )
                     }
                     "new-code"
@@ -79,7 +80,7 @@ class OAuthPersistenceTest {
         val manager = manager(directory)
         val waiting = CompletableDeferred<Unit>()
         val code = CompletableDeferred<String>()
-        val client = client { respond(tokens(), headers = headers) }
+        val client = client { respond(tokenResponse, headers = headers) }
         try {
             val flow =
                 OAuthFlow(client) {
@@ -108,7 +109,9 @@ class OAuthPersistenceTest {
             original.copy(googleDrive = original.googleDrive!!.copy(refreshToken = "expired"))
         val manager = manager(directory, config)
         val client = client {
-            manager.update { it.copy(entries = it.entries + NativePCGame("New entry", "echo")) }
+            manager.update { current ->
+                current.copy(entries = current.entries + NativePCGame("New entry", "echo"))
+            }
             respond("""{"error":"invalid_grant"}""", HttpStatusCode.BadRequest, headers)
         }
         try {
@@ -128,7 +131,9 @@ class OAuthPersistenceTest {
                 original.copy(googleDrive = original.googleDrive!!.copy(refreshToken = "expired"))
             val manager = manager(directory, config)
             val client = client {
-                manager.updateGoogleDrive { it!!.copy(refreshToken = "replacement") }
+                manager.updateGoogleDrive { credentials ->
+                    checkNotNull(credentials).copy(refreshToken = "replacement")
+                }
                 respond("""{"error":"invalid_grant"}""", HttpStatusCode.BadRequest, headers)
             }
             try {
@@ -155,10 +160,17 @@ class OAuthPersistenceTest {
                     code.await()
                 }
             val authorization = async {
-                runCatching { flow.authorize(original, manager, allowInteractive = true) }
+                recoverDriveFailure(
+                    action = {
+                        Result.success(flow.authorize(original, manager, allowInteractive = true))
+                    },
+                    recover = { Result.failure(it) },
+                )
             }
             waiting.await()
-            manager.updateGoogleDrive { it!!.copy(refreshToken = null) }
+            manager.updateGoogleDrive { credentials ->
+                checkNotNull(credentials).copy(refreshToken = null)
+            }
             code.complete("late-code")
 
             assertTrue(authorization.await().exceptionOrNull() is DriveApiException)
@@ -173,8 +185,10 @@ class OAuthPersistenceTest {
         runTest {
             val manager = manager(directory)
             val client = client {
-                manager.updateGoogleDrive { it!!.copy(refreshToken = null) }
-                respond(tokens(), headers = headers)
+                manager.updateGoogleDrive { credentials ->
+                    checkNotNull(credentials).copy(refreshToken = null)
+                }
+                respond(tokenResponse, headers = headers)
             }
             try {
                 assertFailsWith<DriveApiException> {
@@ -268,7 +282,7 @@ class OAuthPersistenceTest {
         }
     }
 
-    private fun tokens() =
+    private val tokenResponse =
         """{"access_token":"access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer"}"""
 
     private fun manager(directory: File, config: AppConfig = original) =

@@ -145,6 +145,9 @@ class PostSyncFailureTest {
     }
 
     @Test
+    // Keep this scenario's HTTP route matrix together so request order and assertions remain
+    // visible.
+    @Suppress("CyclomaticComplexMethod")
     fun `retry retries transient upload while keeping name collision blocked`(
         @TempDir tempDir: File
     ) = runTest {
@@ -283,6 +286,9 @@ class PostSyncFailureTest {
 
     @ParameterizedTest
     @EnumSource(value = SyncDecision::class, names = ["UPLOAD_LOCAL", "DOWNLOAD_CLOUD"])
+    // Keep this scenario's HTTP route matrix together so request order and assertions remain
+    // visible.
+    @Suppress("CyclomaticComplexMethod")
     fun `directory retry resolves a newer cloud conflict using the selected copy`(
         cloudNewerChoice: SyncDecision,
         @TempDir tempDir: File,

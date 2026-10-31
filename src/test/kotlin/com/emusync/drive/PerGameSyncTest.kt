@@ -214,6 +214,9 @@ class PerGameSyncTest {
     }
 
     @Test
+    // Keep this scenario's HTTP route matrix together so request order and assertions remain
+    // visible.
+    @Suppress("CyclomaticComplexMethod")
     fun `syncEntry uploads individual game saves into game subfolder on Google Drive`(
         @TempDir tempDir: File
     ) = runTest {
@@ -262,7 +265,7 @@ class PerGameSyncTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
 
                         when {
                             // OAuth token
@@ -323,11 +326,12 @@ class PerGameSyncTest {
                                         metadata["name"]?.jsonPrimitive?.content ?: "unknown"
                                     currentUploadName = driveName
                                     val parent =
-                                        metadata["parents"]
-                                            ?.jsonArray
-                                            ?.single()
-                                            ?.jsonPrimitive
-                                            ?.content ?: ""
+                                        (metadata["parents"]
+                                                ?.jsonArray
+                                                ?.single()
+                                                ?.jsonPrimitive
+                                                ?.content)
+                                            .orEmpty()
                                     uploadedFiles.add(parent to driveName)
                                 }
                                 respond(
@@ -422,7 +426,7 @@ class PerGameSyncTest {
                     engine {
                         addHandler { request ->
                             val url = request.url.toString()
-                            val q = request.url.parameters["q"] ?: ""
+                            val q = (request.url.parameters["q"]).orEmpty()
 
                             when {
                                 url.contains("oauth2.googleapis.com/token") -> {
@@ -545,7 +549,7 @@ class PerGameSyncTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
 
                         when {
                             url.contains("oauth2.googleapis.com/token") -> {
@@ -658,7 +662,7 @@ class PerGameSyncTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
 
                         when {
                             url.contains("oauth2.googleapis.com/token") -> {
@@ -802,7 +806,7 @@ class PerGameSyncTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
                         when {
                             url.contains("oauth2.googleapis.com/token") ->
                                 respond(
@@ -882,6 +886,9 @@ class PerGameSyncTest {
     }
 
     @Test
+    // Keep this scenario's HTTP route matrix together so request order and assertions remain
+    // visible.
+    @Suppress("CyclomaticComplexMethod")
     fun `rename uploads nested directory saves with their relative cloud paths`(
         @TempDir tempDir: File
     ) = runTest {
@@ -931,7 +938,7 @@ class PerGameSyncTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
                         when {
                             request.url.encodedPath.startsWith("/drive/v2/files/") ->
                                 respond(
@@ -1010,7 +1017,7 @@ class PerGameSyncTest {
                                             )
                                             .jsonObject
                                     currentUploadName =
-                                        metadata["name"]?.jsonPrimitive?.content ?: ""
+                                        (metadata["name"]?.jsonPrimitive?.content).orEmpty()
                                     uploadOperations += "POST:$currentUploadName"
                                 }
                                 respond(
@@ -1111,7 +1118,7 @@ class PerGameSyncTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
                         when {
                             url.contains("oauth2.googleapis.com/token") ->
                                 respond(
@@ -1237,7 +1244,7 @@ class PerGameSyncTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
                         when {
                             url.contains("oauth2.googleapis.com/token") -> {
                                 respond(
@@ -1392,7 +1399,7 @@ class PerGameSyncTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
                         when {
                             url.contains("oauth2.googleapis.com/token") -> {
                                 respond(
@@ -1497,7 +1504,7 @@ class PerGameSyncTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
                         when {
                             url.contains("oauth2.googleapis.com/token") -> {
                                 respond(

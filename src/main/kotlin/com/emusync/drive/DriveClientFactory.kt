@@ -27,9 +27,11 @@ object DriveClientFactory {
                 )
             }
             install(HttpTimeout) {
-                connectTimeoutMillis = 3_000 // 3 seconds to establish connection
-                requestTimeoutMillis = 15_000 // Metadata/API requests should fail promptly
-                socketTimeoutMillis = 60_000 // Transfers fail only after sustained inactivity
+                connectTimeoutMillis = CONNECT_TIMEOUT_MS // 3 seconds to establish connection
+                requestTimeoutMillis =
+                    METADATA_TIMEOUT_MS // Metadata/API requests should fail promptly
+                socketTimeoutMillis =
+                    TRANSFER_SOCKET_TIMEOUT_MS // Transfers fail only after sustained inactivity
             }
         }
 }

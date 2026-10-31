@@ -129,6 +129,9 @@ class DirectorySyncTest {
     }
 
     @Test
+    // Keep this scenario's HTTP route matrix together so request order and assertions remain
+    // visible.
+    @Suppress("CyclomaticComplexMethod")
     fun `migrated per ROM unknown directory restores before play and uploads after play`(
         @TempDir tempDir: File
     ) = runTest {
@@ -195,7 +198,7 @@ class DirectorySyncTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
                         when {
                             request.url.encodedPath.startsWith("/drive/v2/files/") -> {
                                 val id = request.url.segments.last()
@@ -290,7 +293,7 @@ class DirectorySyncTest {
                                             )
                                             .jsonObject
                                     currentUploadName =
-                                        metadata["name"]?.jsonPrimitive?.content ?: ""
+                                        (metadata["name"]?.jsonPrimitive?.content).orEmpty()
                                     uploadRequests += "POST:$currentUploadName"
                                 }
                                 respond(
@@ -419,6 +422,9 @@ class DirectorySyncTest {
     }
 
     @Test
+    // Keep this scenario's HTTP route matrix together so request order and assertions remain
+    // visible.
+    @Suppress("CyclomaticComplexMethod")
     fun `migrated missing per ROM extensionless file restores exact Drive match before play`(
         @TempDir tempDir: File
     ) = runTest {
@@ -478,7 +484,7 @@ class DirectorySyncTest {
                 engine {
                     addHandler { request ->
                         val url = request.url.toString()
-                        val q = request.url.parameters["q"] ?: ""
+                        val q = (request.url.parameters["q"]).orEmpty()
                         when {
                             request.url.encodedPath.startsWith("/drive/v2/files/") ->
                                 respond(
@@ -560,7 +566,7 @@ class DirectorySyncTest {
                                             )
                                             .jsonObject
                                     currentUploadName =
-                                        metadata["name"]?.jsonPrimitive?.content ?: ""
+                                        (metadata["name"]?.jsonPrimitive?.content).orEmpty()
                                     uploadRequests += "POST:$currentUploadName"
                                 }
                                 respond(
@@ -613,6 +619,9 @@ class DirectorySyncTest {
         assertEquals(setOf("PUT:legacy-save-id"), uploadRequests.toSet())
     }
 
+    // Keep this scenario's HTTP route matrix together so request order and assertions remain
+    // visible.
+    @Suppress("CyclomaticComplexMethod")
     private fun createMockDriveClient(
         cloudFiles: List<Pair<String, String>>, // Pair(fileName, modifiedTimeIso)
         fileContents: Map<String, ByteArray> = emptyMap(),
@@ -627,7 +636,7 @@ class DirectorySyncTest {
             engine {
                 addHandler { request ->
                     val url = request.url.toString()
-                    val q = request.url.parameters["q"] ?: ""
+                    val q = (request.url.parameters["q"]).orEmpty()
                     when {
                         request.url.encodedPath.startsWith("/drive/v2/files/") -> {
                             val id = request.url.segments.last()
@@ -1315,11 +1324,10 @@ class DirectorySyncTest {
 
         val saveDir2 = File(tempDir, "Saves/trophies/CUSA13795").apply { mkdirs() }
         val time2 = "2026-03-01T12:05:00.000Z"
-        val trophyFile =
-            File(saveDir2, "unlocked.txt").apply {
-                writeText("TROPHIES")
-                setLastModified(Instant.parse(time2).toEpochMilli())
-            }
+        File(saveDir2, "unlocked.txt").apply {
+            writeText("TROPHIES")
+            setLastModified(Instant.parse(time2).toEpochMilli())
+        }
 
         val entry =
             NativePCGame(

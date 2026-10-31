@@ -12,6 +12,7 @@ import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 internal class SaveSyncException(message: String, cause: Throwable? = null) :
@@ -68,10 +69,7 @@ internal class SyncHistoryStore(
             if (state.saves[key] != checkpoint) {
                 writeAtomically(
                     stateFile,
-                    json.encodeToString(
-                        SyncHistory.serializer(),
-                        state.copy(saves = state.saves + (key to checkpoint)),
-                    ),
+                    json.encodeToString(state.copy(saves = state.saves + (key to checkpoint))),
                 )
             }
         }
@@ -80,76 +78,93 @@ internal class SyncHistoryStore(
         synchronized(lock) {
             val location = File(backupDirectory, key)
             val versionDirectory = File(location, digest)
-            try {
-                Files.createDirectories(versionDirectory.toPath())
-                restrict(versionDirectory.toPath(), "rwx------")
-                val destination = File(versionDirectory, file.name)
-                if (destination.exists()) {
-                    if (sha256(destination) != digest)
-                        throw IOException("An existing recovery copy was modified")
-                } else {
-                    val temporary =
-                        Files.createTempFile(versionDirectory.toPath(), ".save.", ".tmp")
-                    try {
-                        Files.copy(file.toPath(), temporary, StandardCopyOption.REPLACE_EXISTING)
-                        restrict(temporary, "rw-------")
-                        if (sha256(temporary.toFile()) != digest)
-                            throw IOException("The local save changed while creating its backup")
-                        moveReplacing(temporary, destination.toPath())
-                    } finally {
-                        Files.deleteIfExists(temporary)
+            recoverDriveFailure(
+                action = {
+                    Files.createDirectories(versionDirectory.toPath())
+                    restrict(versionDirectory.toPath(), "rwx------")
+                    val destination = File(versionDirectory, file.name)
+                    if (destination.exists()) {
+                        if (sha256(destination) != digest)
+                            throw IOException("An existing recovery copy was modified")
+                    } else {
+                        val temporary =
+                            Files.createTempFile(versionDirectory.toPath(), ".save.", ".tmp")
+                        try {
+                            Files.copy(
+                                file.toPath(),
+                                temporary,
+                                StandardCopyOption.REPLACE_EXISTING,
+                            )
+                            restrict(temporary, "rw-------")
+                            if (sha256(temporary.toFile()) != digest)
+                                throw IOException(
+                                    "The local save changed while creating its backup"
+                                )
+                            moveReplacing(temporary, destination.toPath())
+                        } finally {
+                            Files.deleteIfExists(temporary)
+                        }
                     }
-                }
-                writeAtomically(
-                    File(location, "source.json"),
-                    json.encodeToString(
-                        kotlinx.serialization.serializer<Map<String, String>>(),
-                        mapOf("originalPath" to file.absolutePath),
-                    ),
-                )
-            } catch (failure: Exception) {
-                throw SaveSyncException(
-                    "Could not preserve a recovery copy of ${file.name}. The local save was not replaced.",
-                    failure,
-                )
-            }
+                    writeAtomically(
+                        File(location, "source.json"),
+                        json.encodeToString(
+                            kotlinx.serialization.serializer<Map<String, String>>(),
+                            mapOf("originalPath" to file.absolutePath),
+                        ),
+                    )
+                },
+                recover = { failure ->
+                    throw SaveSyncException(
+                        "Could not preserve a recovery copy of ${file.name}. The local save was not replaced.",
+                        failure,
+                    )
+                },
+            )
         }
 
     private fun read(): SyncHistory {
         if (!stateFile.exists()) return SyncHistory()
-        try {
-            val state = json.decodeFromString<SyncHistory>(stateFile.readText())
-            if (state.formatVersion != 1)
-                throw IOException("Unsupported synchronization history format")
-            return state
-        } catch (failure: Exception) {
-            throw SaveSyncException(
-                "Could not read synchronization history at ${stateFile.absolutePath}. No save was overwritten.",
-                failure,
-            )
-        }
+        recoverDriveFailure(
+            action = {
+                val state = json.decodeFromString<SyncHistory>(stateFile.readText())
+                if (state.formatVersion != 1)
+                    throw IOException("Unsupported synchronization history format")
+                return state
+            },
+            recover = { failure ->
+                throw SaveSyncException(
+                    "Could not read synchronization history at ${stateFile.absolutePath}. No save was overwritten.",
+                    failure,
+                )
+            },
+        )
     }
 
     private fun writeAtomically(file: File, contents: String) {
         var temporary: Path? = null
         try {
-            Files.createDirectories(file.absoluteFile.parentFile.toPath())
-            temporary =
-                Files.createTempFile(
-                    file.absoluteFile.parentFile.toPath(),
-                    ".${file.name}.",
-                    ".tmp",
-                )
-            Files.writeString(temporary, contents)
-            restrict(temporary, "rw-------")
-            FileChannel.open(temporary, StandardOpenOption.WRITE).use { it.force(true) }
-            beforeReplace(temporary)
-            moveReplacing(temporary, file.toPath())
-            temporary = null
-        } catch (failure: Exception) {
-            throw SaveSyncException(
-                "Could not persist synchronization history at ${file.absolutePath}.",
-                failure,
+            recoverDriveFailure(
+                action = {
+                    Files.createDirectories(file.absoluteFile.parentFile.toPath())
+                    temporary =
+                        Files.createTempFile(
+                            file.absoluteFile.parentFile.toPath(),
+                            ".${file.name}.",
+                            ".tmp",
+                        )
+                    Files.writeString(temporary, contents)
+                    restrict(temporary, "rw-------")
+                    FileChannel.open(temporary, StandardOpenOption.WRITE).use { it.force(true) }
+                    beforeReplace(temporary)
+                    moveReplacing(temporary, file.toPath())
+                    temporary = null
+                },
+                recover = { failure ->
+                    throw SaveSyncException(
+                        "Could not persist synchronization history at ${file.absolutePath}.",
+                        failure,
+                    )
+                },
             )
         } finally {
             temporary?.let { Files.deleteIfExists(it) }
@@ -171,11 +186,13 @@ internal fun sha256(file: File): String {
             digest.update(buffer, 0, count)
         }
     }
-    return digest.digest().joinToString("") { "%02x".format(it) }
+    return digest.digest().joinToString("") { "%02x".format(java.util.Locale.ROOT, it) }
 }
 
 internal fun sha256(bytes: ByteArray): String =
-    MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {
+        "%02x".format(java.util.Locale.ROOT, it)
+    }
 
 internal fun moveReplacing(source: Path, target: Path) {
     try {

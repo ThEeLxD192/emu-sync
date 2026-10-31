@@ -29,6 +29,9 @@ import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
+// These socket integration tests deliberately use real IO threads and wall-clock waits.
+// Virtual time would skip the delays that exercise CIO timeout and cancellation behavior.
+@Suppress("InjectDispatcher", "SleepInsteadOfDelay")
 class DriveTransferCioTest {
 
     @Test
