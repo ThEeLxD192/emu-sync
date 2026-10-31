@@ -1,7 +1,7 @@
 package com.emusync.ui.dialogs
 
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

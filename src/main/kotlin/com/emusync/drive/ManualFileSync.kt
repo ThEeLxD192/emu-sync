@@ -1,16 +1,14 @@
 package com.emusync.drive
 
-import com.emusync.model.GameEntry
-import com.emusync.ui.AppStatus
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.sync.SaveConflict
+import com.emusync.domain.sync.SyncDecision
 import java.io.File
 import java.time.Instant
 
 internal class ManualFileSync(private val context: SyncContext) {
     private val trackedSync
         get() = context.trackedSync
-
-    private val onStatus
-        get() = context.onStatus
 
     suspend fun syncDirectoryManual(
         token: String,
@@ -136,21 +134,13 @@ internal class ManualFileSync(private val context: SyncContext) {
         remote: DriveFile,
         displayName: String,
     ): SyncDecision =
-        kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-            onStatus(
-                AppStatus.Conflict(
-                    localDate = SyncOrchestrator.formatTimestamp(local.lastModified()),
-                    cloudDate =
-                        SyncOrchestrator.formatTimestamp(
-                            Instant.parse(remote.modifiedTime).toEpochMilli()
-                        ),
-                    gameName = displayName,
-                    onResolve = { choice ->
-                        if (continuation.isActive) continuation.resumeWith(Result.success(choice))
-                    },
-                )
+        context.requestConflict(
+            SaveConflict(
+                localModifiedTimeMs = local.lastModified(),
+                cloudModifiedTimeMs = Instant.parse(remote.modifiedTime).toEpochMilli(),
+                gameName = displayName,
             )
-        }
+        )
 
     suspend fun applyFileDecision(token: String, file: PlannedSave, decision: SyncDecision?) {
         val local = file.local

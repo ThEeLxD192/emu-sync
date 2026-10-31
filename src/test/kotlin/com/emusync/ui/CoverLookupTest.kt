@@ -1,7 +1,7 @@
 package com.emusync.ui
 
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.NativePCGame
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.NativePCGame
 import java.io.File
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test

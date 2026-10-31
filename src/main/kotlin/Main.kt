@@ -33,7 +33,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.emusync.config.ConfigManager
-import com.emusync.model.GameEntry
+import com.emusync.domain.library.GameEntry
 import com.emusync.ui.AppViewModel
 import com.emusync.ui.CloudSyncStatus
 import com.emusync.ui.GameItem

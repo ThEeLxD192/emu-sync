@@ -1,5 +1,10 @@
 package com.emusync.config
 
+import com.emusync.config.dto.ConfigDocument
+import com.emusync.config.dto.toConfig
+import com.emusync.config.dto.toDocument
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.LibraryStore
 import com.emusync.model.AppConfig
 import com.emusync.model.GoogleDriveConfig
 import com.emusync.model.migrateLegacySaveTargets
@@ -14,8 +19,6 @@ import java.nio.file.attribute.PosixFilePermission
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-
-internal data class GoogleDriveSnapshot(val credentials: GoogleDriveConfig?, val revision: Long)
 
 private class ConfigState(var driveRevision: Long = 0L)
 
@@ -35,7 +38,7 @@ private class ConfigState(var driveRevision: Long = 0L)
 class ConfigManager(
     val configFile: File = resolveDefaultConfigFile(),
     private val beforeReplace: (Path) -> Unit = {},
-) {
+) : LibraryStore {
     private val state =
         configStates.computeIfAbsent(configFile.absoluteFile.normalize().path) { ConfigState() }
 
@@ -80,7 +83,7 @@ class ConfigManager(
                 return@synchronized defaultConfig
             }
             val content = configFile.readText()
-            val decoded = json.decodeFromString<AppConfig>(content)
+            val decoded = json.decodeFromString<ConfigDocument>(content).toConfig()
             val migrated =
                 decoded.copy(entries = decoded.entries.map { it.migrateLegacySaveTargets() })
             if (migrated != decoded) save(migrated)
@@ -101,7 +104,7 @@ class ConfigManager(
             check(parent.exists() || parent.mkdirs()) {
                 "Could not create configuration directory: $parent"
             }
-            val content = json.encodeToString(config)
+            val content = json.encodeToString(config.toDocument())
             var temporary: Path? = null
             try {
                 temporary = Files.createTempFile(parent.toPath(), ".${configFile.name}.", ".tmp")
@@ -134,6 +137,14 @@ class ConfigManager(
                 temporary?.let { Files.deleteIfExists(it) }
             }
         }
+
+    override fun loadEntries(): List<GameEntry> = load().entries
+
+    override fun updateEntries(transform: (List<GameEntry>) -> List<GameEntry>): List<GameEntry> =
+        update {
+            it.copy(entries = transform(it.entries))
+        }
+        .entries
 
     /** Applies a change to the current file while serializing other in-process updates. */
     fun update(transform: (AppConfig) -> AppConfig): AppConfig =

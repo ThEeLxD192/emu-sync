@@ -213,3 +213,39 @@ externas a JUnit de aplicación; no se cuentan como cobertura de lógica de nego
 Las cuatro comprobaciones de convenciones se ejecutan desde `check`, sin invocar
 `check` de nuevo en la copia. La evidencia y limitaciones de H2 se registran en
 [AGENTS.md](../../../../AGENTS.md); los resultados de H1 anteriores son históricos.
+
+## H3 — Dominio y límites neutrales
+
+Fecha: 2026-10-30, Linux; base `5e3d6f7` (H2). No se retira ningún escenario de H1.
+El [catálogo](test-audit-cases.md) enlaza ahora cada escenario con su ubicación actual.
+Las 47 reglas de seis suites pasan a `domain`: SyncConflictTest (13), SyncPlannerTest
+(3), GameTitleUtilsTest (14), GameEntryGroupTest (5), CloudPathsTest (4) y
+TrackedSyncPlannerTest (8). Las cuatro reglas de carpetas dejan de construir clientes
+HTTP; las ocho reglas por contenido reciben huellas y metadatos neutrales literales.
+Las comprobaciones de filesystem, protocolo, transporte y procesos permanecen en raíz.
+Los dos casos JSON de agrupación se conservan en `config/ConfigGroupsTest.kt`.
+
+| Límite cambiado | Garantía y evidencia |
+| --- | --- |
+| DTO de configuración ↔ biblioteca neutral | ConfigFormatCompatibilityTest añade un documento literal con todos los campos no predeterminados de ambas entradas. Compara modelos esperados independientes y JSON escrito, incluidos claves, enums, argumentos, mapas e identificadores. Las pruebas legacy y de escritura atómica siguen en ConfigManagerTest. |
+| Persistencia por capacidad | ConfigUpdatesTest mantiene dos instancias y adiciones concurrentes, ahora mediante LibraryStore. Exige 20 entradas distintas y credenciales intactas. No se añade una prueba de delegación. |
+| Eventos de conflicto y respuestas tardías | SyncResponsesTest consume SaveSynchronizer directamente: cancela una operación, recibe otra solicitud igual por valor y contesta a la antigua con UPLOAD_LOCAL. No cambia ninguna copia; solo la respuesta vigente DOWNLOAD_CLOUD restaura la nube. Detecta confundir igualdad por valor con la solicitud pendiente. |
+| Traducción UI y reintentos | Las integraciones existentes pasan por createSaveSynchronizer/playWithSync de presentación; siguen comprobando textos/fechas mostradas, bloqueo de setup, configuración modificada, reintentos parciales y autorización posterior. Esa traducción ya no está en Drive. |
+| Plataforma | GameRunnerTest conserva sus procesos/argv reales y usa GameLaunchRequest. No se sustituye el límite real por un mock al implementar GameLauncher. |
+
+Se añaden solo los dos escenarios de conversión JSON y respuesta tardía: **428 métodos,
+429 casos, 61 suites y un fixture**, distribuidos en 62 archivos Kotlin de pruebas.
+Los resultados de H1/H2 registrados antes de esta sección son históricos.
+
+La ejecución focalizada de DTO, respuestas, sincronización rastreada y runner ejecutó
+29 casos de raíz (7,803 s JUnit) y los 47 de dominio (0,111 s), todos aprobados.
+El cierre `./gradlew spotlessApply :domain:spotlessApply check --no-daemon` pasó en
+57 s: raíz ejecutada con 382 casos, 380 aprobados y dos omitidos por PowerShell
+(14,069 s); dominio UP-TO-DATE de la ejecución focalizada. Ambos SARIF main/test de
+raíz y dominio contienen cero hallazgos. No hay supresiones nuevas ni reglas relajadas.
+Se ejecutaron los nueve grupos de hooks y los cuatro de convenciones. Comandos,
+empaquetado y limitaciones completos en [AGENTS.md](../../../../AGENTS.md).
+
+No hay evidencia nativa Windows ni cuentas reales, y las integraciones visuales no
+son pruebas de renderizado. La composición/adaptadores aún presentes en raíz se
+extraerán en sus hitos; las pruebas de integración seguirán a su propietario.

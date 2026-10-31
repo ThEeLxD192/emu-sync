@@ -1,7 +1,8 @@
 package com.emusync.drive
 
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
+import com.emusync.domain.sync.remotePathSegments
 import java.io.File
 
 internal fun SaveTarget.isDirectory(

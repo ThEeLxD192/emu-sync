@@ -1,7 +1,7 @@
 package com.emusync.steam
 
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.NativePCGame
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.NativePCGame
 import com.emusync.util.shellArgument
 import java.io.File
 import java.io.IOException

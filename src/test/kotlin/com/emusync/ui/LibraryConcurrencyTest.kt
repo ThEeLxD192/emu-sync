@@ -1,15 +1,15 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
 import com.emusync.drive.SaveMappingDrive
 import com.emusync.drive.sha256
 import com.emusync.model.AppConfig
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.GameEntry
 import com.emusync.model.GoogleDriveConfig
-import com.emusync.model.NativePCGame
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond

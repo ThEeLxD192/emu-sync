@@ -1,8 +1,9 @@
 package com.emusync.drive
 
-import com.emusync.model.GameEntry
-import com.emusync.model.SaveTarget as ConfiguredSaveTarget
-import com.emusync.ui.CloudSyncStatus
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.SaveTarget as ConfiguredSaveTarget
+import com.emusync.domain.sync.EntrySyncStatus
+import com.emusync.domain.sync.SyncDecision
 import java.io.File
 
 /** Reads local/remote observations without advancing synchronization history. */
@@ -10,15 +11,15 @@ internal class SyncStatusChecker(
     private val context: SyncContext,
     private val paths: SaveTargetResolver,
 ) {
-    suspend fun checkEntrySyncStatus(entry: GameEntry): CloudSyncStatus {
+    suspend fun checkEntrySyncStatus(entry: GameEntry): EntrySyncStatus {
         val drive = context.config.googleDrive
         if (drive == null || drive.refreshToken.isNullOrBlank())
-            return CloudSyncStatus.NOT_CONFIGURED
+            return EntrySyncStatus.NOT_CONFIGURED
         val targets = paths.getSaveTargets(entry)
-        return if (targets.isEmpty()) CloudSyncStatus.IDLE else readStatus(targets)
+        return if (targets.isEmpty()) EntrySyncStatus.IDLE else readStatus(targets)
     }
 
-    private suspend fun readStatus(targets: List<SyncOrchestrator.SaveTarget>): CloudSyncStatus =
+    private suspend fun readStatus(targets: List<ResolvedSaveTarget>): EntrySyncStatus =
         recoverDriveFailure(
             action = {
                 val token =
@@ -46,11 +47,11 @@ internal class SyncStatusChecker(
                 }
                 observation.status()
             },
-            recover = { CloudSyncStatus.ERROR },
+            recover = { EntrySyncStatus.ERROR },
         )
 
     private suspend fun observeTarget(
-        target: SyncOrchestrator.SaveTarget,
+        target: ResolvedSaveTarget,
         folderId: String,
         cloudFiles: List<DriveFile>,
         configured: List<ConfiguredSaveTarget>,
@@ -80,7 +81,7 @@ internal class SyncStatusChecker(
     }
 
     private suspend fun observeDirectory(
-        target: SyncOrchestrator.SaveTarget,
+        target: ResolvedSaveTarget,
         folderId: String,
         remoteFiles: List<DriveFile>,
         reserved: Set<String>,
@@ -122,11 +123,11 @@ internal class SyncStatusChecker(
             }
         }
 
-        fun status(): CloudSyncStatus =
+        fun status(): EntrySyncStatus =
             when {
-                conflict || (localChanged && remoteChanged) -> CloudSyncStatus.CONFLICT
-                localChanged || remoteChanged -> CloudSyncStatus.OUT_OF_SYNC
-                else -> CloudSyncStatus.IN_SYNC
+                conflict || (localChanged && remoteChanged) -> EntrySyncStatus.CONFLICT
+                localChanged || remoteChanged -> EntrySyncStatus.OUT_OF_SYNC
+                else -> EntrySyncStatus.IN_SYNC
             }
     }
 }

@@ -51,7 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.emusync.drive.SyncDecision
+import com.emusync.domain.sync.SyncDecision
 import com.emusync.ui.AppStatus
 import com.emusync.ui.theme.EmuSyncColors
 import kotlinx.coroutines.launch

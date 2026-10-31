@@ -1,31 +1,7 @@
-package com.emusync.drive
+package com.emusync.domain.sync
 
 import java.time.Duration
 import java.time.Instant
-
-/** The result of comparing a local save file with its cloud counterpart. */
-enum class SyncDecision {
-    /** Local file is newer → should upload to Drive. */
-    UPLOAD_LOCAL,
-
-    /** Cloud file is newer → should download from Drive. */
-    DOWNLOAD_CLOUD,
-
-    /** Both have the same modification time → no action needed. */
-    IN_SYNC,
-
-    /** Timestamps are too close to call or both modified since last sync → ask the user. */
-    CONFLICT,
-}
-
-/** Determines how a newer local copy is handled by [planSyncDecision]. */
-enum class LocalNewerAction {
-    /** Ask for conflict resolution when the local copy is clearly newer. */
-    RESOLVE_CONFLICT,
-
-    /** Prefer local progress, as in the post-play upload step. */
-    UPLOAD,
-}
 
 /**
  * Selects the synchronization action for a local/cloud file pair.

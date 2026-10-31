@@ -5,8 +5,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import com.emusync.drive.remotePathSegments
-import com.emusync.model.SaveTargetType
+import com.emusync.domain.library.SaveTargetType
+import com.emusync.domain.sync.remotePathSegments
 
 @Composable
 internal fun CloudPathField(value: String, onValueChange: (String) -> Unit, type: SaveTargetType) {

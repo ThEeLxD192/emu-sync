@@ -1,12 +1,15 @@
 package com.emusync.drive
 
-import com.emusync.model.GameEntry
-import com.emusync.model.SaveTarget as ConfiguredSaveTarget
-import com.emusync.model.SaveTargetType
-import com.emusync.model.effectiveCloudFolder
-import com.emusync.model.effectiveSaveTargets
-import com.emusync.ui.AppStatus
-import com.emusync.ui.GameItem
+import com.emusync.domain.execution.GameLaunchRequest
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.SaveTarget as ConfiguredSaveTarget
+import com.emusync.domain.library.SaveTargetType
+import com.emusync.domain.library.effectiveCloudFolder
+import com.emusync.domain.sync.SaveSetup
+import com.emusync.domain.sync.SaveSetupRequest
+import com.emusync.domain.sync.SyncEvent
+import com.emusync.domain.sync.SyncGame
+import com.emusync.domain.sync.cloudPathSegments
 import java.io.File
 
 /** Coordinates preparation and launch; retries and post-play uploads belong to PostGameSync. */
@@ -22,63 +25,39 @@ internal class GameSyncLifecycle(
     private val search
         get() = context.search
 
-    /**
-     * Plays an item after any required restore, then uploads verified local progress.
-     *
-     * @param item The selected game.
-     * @param resolveConfiguredItem Refreshes the item after save destinations are configured.
-     * @param onRequestSaveSetup Requests destinations or returns an empty list when cancelled.
-     */
-    suspend fun playWithSync(
-        item: GameItem,
-        resolveConfiguredItem: (GameItem) -> GameItem = { it },
-        onRequestSaveSetup: SaveSetupRequest = { _, _, _ -> emptyList() },
-    ) {
+    suspend fun playWithSync(game: SyncGame, setup: SaveSetup) {
         recoverDriveFailure(
             action = {
                 val prepared =
                     PlayPreparation(
-                        item,
-                        item.effectiveSaveTargets,
-                        paths.getCloudPathSegments(item),
+                        game,
+                        game.effectiveSaveTargets,
+                        paths.getCloudPathSegments(game),
                     )
                 val hasDrive = context.config.googleDrive != null
-                val ready =
-                    !hasDrive || preparePlay(prepared, resolveConfiguredItem, onRequestSaveSetup)
-                if (
-                    ready &&
-                        launchPrepared(
-                            prepared,
-                            hasDrive,
-                            resolveConfiguredItem,
-                            onRequestSaveSetup,
-                        )
-                )
-                    context.onStatus(AppStatus.Idle)
+                val ready = !hasDrive || preparePlay(prepared, setup)
+                if (ready && launchPrepared(prepared, hasDrive, setup))
+                    context.onStatus(SyncEvent.Idle)
             },
-            recover = { context.onStatus(AppStatus.Error("Error: ${it.message}")) },
+            recover = { context.onStatus(SyncEvent.Error("Error: ${it.message}")) },
         )
     }
 
-    private suspend fun preparePlay(
-        prepared: PlayPreparation,
-        resolve: (GameItem) -> GameItem,
-        request: SaveSetupRequest,
-    ): Boolean =
+    private suspend fun preparePlay(prepared: PlayPreparation, setup: SaveSetup): Boolean =
         recoverDriveFailure(
             action = {
-                context.onStatus(AppStatus.Syncing("Checking cloud saves..."))
+                context.onStatus(SyncEvent.Syncing("Checking cloud saves..."))
                 val token =
                     context.oauthFlow.authorize(
                         context.config,
                         context.configManager,
                         allowInteractive = false,
                     )
-                if (!ensureSaveSetup(token, prepared, resolve, request)) false
+                if (!ensureSaveSetup(token, prepared, setup)) false
                 else {
                     if (prepared.targets.isNotEmpty()) {
                         context.onStatus(
-                            AppStatus.Syncing(
+                            SyncEvent.Syncing(
                                 "Syncing saves for ${prepared.item.effectiveTitle}..."
                             )
                         )
@@ -111,8 +90,7 @@ internal class GameSyncLifecycle(
     private suspend fun ensureSaveSetup(
         token: String,
         prepared: PlayPreparation,
-        resolve: (GameItem) -> GameItem,
-        request: SaveSetupRequest,
+        setup: SaveSetup,
     ): Boolean {
         if (prepared.targets.isNotEmpty()) return true
         val folderId = folders.findPath(token, prepared.cloudPath)
@@ -120,14 +98,13 @@ internal class GameSyncLifecycle(
             if (folderId != null) search.listFilesInFolder(token, folderId) else emptyList()
         return if (cloudFiles.isEmpty()) true
         else {
-            context.onStatus(AppStatus.Idle)
-            val notice =
-                "Cloud save data was found for this game. Choose one destination folder; only these listed files will be synchronized for this game."
-            val requested = request(prepared.item, notice, cloudFiles.map { it.name })
-            if (requested.isEmpty()) false
+            context.onStatus(SyncEvent.Idle)
+            val requested =
+                setup.request(SaveSetupRequest(prepared.item, cloudFiles.map { it.name }))
+            if (requested.targets.isEmpty()) false
             else {
-                prepared.targets = requested
-                prepared.item = resolve(prepared.item)
+                prepared.targets = requested.targets
+                prepared.item = requested.game
                 prepared.cloudPath = paths.getCloudPathSegments(prepared.item)
                 true
             }
@@ -137,29 +114,30 @@ internal class GameSyncLifecycle(
     private suspend fun launchPrepared(
         prepared: PlayPreparation,
         hasDrive: Boolean,
-        resolve: (GameItem) -> GameItem,
-        request: SaveSetupRequest,
+        setup: SaveSetup,
     ): Boolean {
-        context.onStatus(AppStatus.Playing)
+        context.onStatus(SyncEvent.Playing)
         val entry = prepared.item.entry
-        val result = context.runner.launch(entry, prepared.item.romFile, entry.steamAppId)
+        val result =
+            context.runner.launch(GameLaunchRequest(entry, prepared.item.romPath, entry.steamAppId))
         if (result.exitCode != 0) {
             context.onStatus(
-                AppStatus.Error(
+                SyncEvent.Error(
                     "${prepared.item.effectiveTitle} did not start or its process could not be tracked. Cloud upload was not attempted."
                 )
             )
             return false
         }
         if (prepared.targets.isEmpty()) {
-            prepared.targets = request(prepared.item, null, emptyList())
-            prepared.item = resolve(prepared.item)
+            val requested = setup.request(SaveSetupRequest(prepared.item))
+            prepared.targets = requested.targets
+            prepared.item = requested.game
         }
         return !hasDrive || postGame.uploadAfterPlay(prepared.item, prepared.targets)
     }
 
     private data class PlayPreparation(
-        var item: GameItem,
+        var item: SyncGame,
         var targets: List<ConfiguredSaveTarget>,
         var cloudPath: List<String>,
     )

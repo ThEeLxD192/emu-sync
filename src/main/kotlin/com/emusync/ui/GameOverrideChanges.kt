@@ -1,6 +1,6 @@
 package com.emusync.ui
 
-import com.emusync.model.SaveTarget
+import com.emusync.domain.library.SaveTarget
 
 internal data class GameOverrideChanges(
     val targets: List<SaveTarget>,

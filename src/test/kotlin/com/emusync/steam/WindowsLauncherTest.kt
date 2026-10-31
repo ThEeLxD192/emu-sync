@@ -1,6 +1,6 @@
 package com.emusync.steam
 
-import com.emusync.model.EmulatorSystem
+import com.emusync.domain.library.EmulatorSystem
 import java.io.File
 import java.util.Base64
 import java.util.concurrent.TimeUnit

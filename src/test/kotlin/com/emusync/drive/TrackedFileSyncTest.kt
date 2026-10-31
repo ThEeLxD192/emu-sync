@@ -1,14 +1,17 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
+import com.emusync.domain.sync.EntrySyncStatus
+import com.emusync.domain.sync.SyncDecision
 import com.emusync.model.AppConfig
 import com.emusync.model.GoogleDriveConfig
-import com.emusync.model.NativePCGame
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
 import com.emusync.ui.AppStatus
-import com.emusync.ui.CloudSyncStatus
 import com.emusync.ui.GameItem
+import com.emusync.ui.createSaveSynchronizer
+import com.emusync.ui.playWithSync
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -37,86 +40,6 @@ class TrackedFileSyncTest {
         DriveFile("remote", "save.dat", date, sha256Checksum = hash, version = version)
 
     private fun previous() = SyncedSave(original, "remote", time, original, "1")
-
-    @Test
-    fun `bootstrap requires evidence of equal content even with equal timestamps`() {
-        assertEquals(SyncDecision.CONFLICT, planTrackedSync(localChange, remote(), null))
-        assertEquals(SyncDecision.CONFLICT, planTrackedSync(original, remote(hash = null), null))
-        assertEquals(SyncDecision.IN_SYNC, planTrackedSync(original, remote(), null))
-    }
-
-    @Test
-    fun `clock ordering does not conceal local changes`() {
-        assertEquals(SyncDecision.UPLOAD_LOCAL, planTrackedSync(localChange, remote(), previous()))
-    }
-
-    @Test
-    fun `remote content change is detected even when timestamps and versions match`() {
-        assertEquals(
-            SyncDecision.DOWNLOAD_CLOUD,
-            planTrackedSync(original, remote(cloudChange), previous()),
-        )
-        assertEquals(
-            SyncDecision.CONFLICT,
-            planTrackedSync(localChange, remote(cloudChange), previous()),
-        )
-    }
-
-    @Test
-    fun `independent changes to the same content converge without a conflict`() {
-        assertEquals(
-            SyncDecision.IN_SYNC,
-            planTrackedSync(localChange, remote(localChange), previous()),
-        )
-    }
-
-    @Test
-    fun `metadata version is used when checksum is absent`() {
-        assertEquals(
-            SyncDecision.DOWNLOAD_CLOUD,
-            planTrackedSync(original, remote(null, "2"), previous()),
-        )
-        assertEquals(
-            SyncDecision.CONFLICT,
-            planTrackedSync(localChange, remote(null, "2"), previous()),
-        )
-    }
-
-    @Test
-    fun `legacy remote metadata compares exact timestamps without tolerance`() {
-        val checkpoint = previous().copy(remoteSha256 = null, remoteVersion = null)
-        assertEquals(
-            SyncDecision.IN_SYNC,
-            planTrackedSync(original, remote(null, null), checkpoint),
-        )
-        assertEquals(
-            SyncDecision.DOWNLOAD_CLOUD,
-            planTrackedSync(
-                original,
-                remote(null, null, "2026-10-01T12:00:00.001Z"),
-                checkpoint,
-            ),
-        )
-    }
-
-    @Test
-    fun `remote replacement with a different id is a change`() {
-        assertEquals(
-            SyncDecision.CONFLICT,
-            planTrackedSync(
-                localChange,
-                remote(null).copy(id = "replacement"),
-                previous(),
-            ),
-        )
-    }
-
-    @Test
-    fun `one missing copy is restored without propagating deletions`() {
-        assertEquals(SyncDecision.UPLOAD_LOCAL, planTrackedSync(original, null, previous()))
-        assertEquals(SyncDecision.DOWNLOAD_CLOUD, planTrackedSync(null, remote(), previous()))
-        assertEquals(SyncDecision.IN_SYNC, planTrackedSync(null, null, previous()))
-    }
 
     @Test
     fun `history survives restart and merges records from independent instances`(
@@ -351,7 +274,7 @@ class TrackedFileSyncTest {
                         status.onResolve(SyncDecision.DOWNLOAD_CLOUD)
                     }
                 }
-            assertEquals(CloudSyncStatus.CONFLICT, restarted.checkEntrySyncStatus(entryA))
+            assertEquals(EntrySyncStatus.CONFLICT, restarted.checkEntrySyncStatus(entryA))
             assertTrue(restarted.syncEntry(entryA))
             assertEquals(1, conflicts)
             assertEquals("CLOUD", first.readText())
@@ -364,7 +287,7 @@ class TrackedFileSyncTest {
                     .readText(),
             )
             assertEquals(
-                CloudSyncStatus.IN_SYNC,
+                EntrySyncStatus.IN_SYNC,
                 orchestrator(drive, configA, entryA).checkEntrySyncStatus(entryA),
             )
         }
@@ -379,7 +302,7 @@ class TrackedFileSyncTest {
                 val config = File(directory, "config.json")
                 val entry = game(local)
                 assertEquals(
-                    CloudSyncStatus.IN_SYNC,
+                    EntrySyncStatus.IN_SYNC,
                     orchestrator(drive, config, entry).checkEntrySyncStatus(entry),
                 )
                 assertFalse(SyncHistoryStore(config).stateFile.exists())
@@ -492,7 +415,7 @@ class TrackedFileSyncTest {
             if (it is AppStatus.Conflict) fail("Unexpected conflict")
         },
     ) =
-        SyncOrchestrator(
+        createSaveSynchronizer(
             drive.client,
             AppConfig(GoogleDriveConfig("client", "secret", "refresh"), listOf(entry)),
             ConfigManager(configFile),

@@ -1,16 +1,20 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
+import com.emusync.domain.library.scopeNewSaveTargets
+import com.emusync.domain.sync.EntrySyncStatus
+import com.emusync.domain.sync.SaveSynchronizer
+import com.emusync.domain.sync.SyncDecision
 import com.emusync.model.AppConfig
-import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
-import com.emusync.model.NativePCGame
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
-import com.emusync.model.scopeNewSaveTargets
 import com.emusync.ui.AppStatus
-import com.emusync.ui.CloudSyncStatus
 import com.emusync.ui.GameItem
+import com.emusync.ui.createSaveSynchronizer
+import com.emusync.ui.playWithSync
 import java.io.File
 import java.time.Instant
 import kotlin.test.assertEquals
@@ -143,37 +147,28 @@ class SaveTargetMappingTest {
     fun `ROM mapping with a different cloud prefix is distinct from the global fallback`(
         @TempDir directory: File
     ) {
-        SaveMappingDrive().use { drive ->
-            val path = File(directory, "same-local-root").path
-            val system =
-                EmulatorSystem(
-                    "Console",
-                    "echo",
-                    romsDirectory = directory.path,
-                    extensions = listOf("rom"),
-                    saveTargets = listOf(SaveTarget(path, SaveTargetType.DIRECTORY, "global")),
-                    saveTargetsByRom =
-                        mapOf(
-                            "Game.rom" to
-                                listOf(SaveTarget(path, SaveTargetType.DIRECTORY, "game-specific"))
-                        ),
-                )
-            val orchestrator =
-                SyncOrchestrator(
-                    drive.client,
-                    AppConfig(entries = listOf(system)),
-                    ConfigManager(File(directory, "config.json")),
-                ) {}
-
-            assertEquals(
-                listOf("Console", "Game"),
-                orchestrator.getCloudPathSegments(system, "Game.rom"),
+        val path = File(directory, "same-local-root").path
+        val system =
+            EmulatorSystem(
+                "Console",
+                "echo",
+                romsDirectory = directory.path,
+                extensions = listOf("rom"),
+                saveTargets = listOf(SaveTarget(path, SaveTargetType.DIRECTORY, "global")),
+                saveTargetsByRom =
+                    mapOf(
+                        "Game.rom" to
+                            listOf(SaveTarget(path, SaveTargetType.DIRECTORY, "game-specific"))
+                    ),
             )
-            assertEquals(
-                setOf("global", "game-specific"),
-                orchestrator.getSaveTargets(system).map { it.cloudPath }.toSet(),
-            )
-        }
+        assertEquals(
+            listOf("Console", "Game"),
+            SaveTargetResolver().getCloudPathSegments(system, "Game.rom"),
+        )
+        assertEquals(
+            setOf("global", "game-specific"),
+            SaveTargetResolver().getSaveTargets(system).map { it.cloudPath }.toSet(),
+        )
     }
 
     @Test
@@ -244,7 +239,7 @@ class SaveTargetMappingTest {
             val entry = entry(targets)
             val orchestrator = orchestrator(drive, directory, entry)
 
-            assertEquals(CloudSyncStatus.OUT_OF_SYNC, orchestrator.checkEntrySyncStatus(entry))
+            assertEquals(EntrySyncStatus.OUT_OF_SYNC, orchestrator.checkEntrySyncStatus(entry))
             assertTrue(orchestrator.syncEntry(entry))
 
             assertEquals("PROGRESS", File(targets[0].path, "slot/save.dat").readText())
@@ -253,7 +248,7 @@ class SaveTargetMappingTest {
             assertFalse(File(targets[1].path, "unmanaged").exists())
             assertEquals(setOf("progress", "trophies"), drive.downloads.toSet())
             assertTrue(drive.uploadedNames.isEmpty())
-            assertEquals(CloudSyncStatus.IN_SYNC, orchestrator.checkEntrySyncStatus(entry))
+            assertEquals(EntrySyncStatus.IN_SYNC, orchestrator.checkEntrySyncStatus(entry))
         }
     }
 
@@ -398,7 +393,7 @@ class SaveTargetMappingTest {
             val orchestrator = orchestrator(drive, directory, entry) { statuses += it }
 
             assertFalse(orchestrator.syncEntry(entry))
-            assertEquals(CloudSyncStatus.ERROR, orchestrator.checkEntrySyncStatus(entry))
+            assertEquals(EntrySyncStatus.ERROR, orchestrator.checkEntrySyncStatus(entry))
             orchestrator.playWithSync(GameItem("Game", entry))
 
             assertTrue(statuses.last() is AppStatus.Error)
@@ -574,8 +569,8 @@ class SaveTargetMappingTest {
         directory: File,
         entry: NativePCGame,
         onStatus: (AppStatus) -> Unit = {},
-    ): SyncOrchestrator =
-        SyncOrchestrator(
+    ): SaveSynchronizer =
+        createSaveSynchronizer(
             drive.client,
             configuration(entry),
             ConfigManager(File(directory, "config.json")),

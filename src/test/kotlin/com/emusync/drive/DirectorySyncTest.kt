@@ -1,15 +1,18 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
+import com.emusync.domain.sync.EntrySyncStatus
+import com.emusync.domain.sync.SyncDecision
 import com.emusync.model.AppConfig
-import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
-import com.emusync.model.NativePCGame
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
 import com.emusync.ui.AppStatus
-import com.emusync.ui.CloudSyncStatus
 import com.emusync.ui.GameItem
+import com.emusync.ui.createSaveSynchronizer
+import com.emusync.ui.playWithSync
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -88,7 +91,7 @@ class DirectorySyncTest {
         val configManager = ConfigManager(configFile.absolutePath)
         val config = driveConfig().copy(entries = listOf(entry))
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = createMockDriveClient(siblingCloudFiles(), siblingCloudContents()),
                 config = config,
                 configManager = configManager,
@@ -113,7 +116,7 @@ class DirectorySyncTest {
         val configManager = ConfigManager(configFile.absolutePath)
         val config = driveConfig().copy(entries = listOf(entry))
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = createMockDriveClient(siblingCloudFiles(), siblingCloudContents()),
                 config = config,
                 configManager = configManager,
@@ -319,7 +322,7 @@ class DirectorySyncTest {
 
         val preSyncRestored = mutableListOf<String>()
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = migratedConfig,
                 configManager = configManager,
@@ -390,7 +393,7 @@ class DirectorySyncTest {
         var writeCount = 0
         val statuses = mutableListOf<AppStatus>()
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client =
                     createMockDriveClient(
                         cloudFiles = listOf("SAVE_SLOT" to "2026-01-01T12:00:00.000Z"),
@@ -591,7 +594,7 @@ class DirectorySyncTest {
             }
 
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = migratedConfig,
                 configManager = configManager,
@@ -797,7 +800,7 @@ class DirectorySyncTest {
             createMockDriveClient(cloudFiles = listOf("BLUS30481/PARAM.SFO" to cloudTimestamp))
 
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = config,
                 configManager = configManager,
@@ -805,7 +808,7 @@ class DirectorySyncTest {
             )
 
         val status = orchestrator.checkEntrySyncStatus(entry)
-        assertTrue(status == CloudSyncStatus.OUT_OF_SYNC || status == CloudSyncStatus.CONFLICT)
+        assertTrue(status == EntrySyncStatus.OUT_OF_SYNC || status == EntrySyncStatus.CONFLICT)
     }
 
     @Test
@@ -851,7 +854,7 @@ class DirectorySyncTest {
             )
 
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = config,
                 configManager = configManager,
@@ -859,7 +862,7 @@ class DirectorySyncTest {
             )
 
         val status = orchestrator.checkEntrySyncStatus(entry)
-        assertEquals(CloudSyncStatus.IN_SYNC, status)
+        assertEquals(EntrySyncStatus.IN_SYNC, status)
     }
 
     @Test
@@ -881,7 +884,7 @@ class DirectorySyncTest {
         configManager.save(config)
 
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = HttpClient(MockEngine) { engine { addHandler { respondOk() } } },
                 config = config,
                 configManager = configManager,
@@ -889,7 +892,7 @@ class DirectorySyncTest {
             )
 
         val status = orchestrator.checkEntrySyncStatus(entry)
-        assertEquals(CloudSyncStatus.NOT_CONFIGURED, status)
+        assertEquals(EntrySyncStatus.NOT_CONFIGURED, status)
     }
 
     @Test
@@ -938,7 +941,7 @@ class DirectorySyncTest {
 
         val statuses = mutableListOf<AppStatus>()
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = config,
                 configManager = configManager,
@@ -1004,7 +1007,7 @@ class DirectorySyncTest {
 
         var conflictEncountered = false
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = config,
                 configManager = configManager,
@@ -1068,7 +1071,7 @@ class DirectorySyncTest {
             )
 
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = config,
                 configManager = configManager,
@@ -1083,7 +1086,7 @@ class DirectorySyncTest {
         assertEquals(Instant.parse(cloudTimestamp).toEpochMilli(), downloadedSfo.lastModified())
 
         val status = orchestrator.checkEntrySyncStatus(entry)
-        assertEquals(CloudSyncStatus.IN_SYNC, status)
+        assertEquals(EntrySyncStatus.IN_SYNC, status)
     }
 
     @Test
@@ -1128,7 +1131,7 @@ class DirectorySyncTest {
             )
 
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = config,
                 configManager = configManager,
@@ -1147,14 +1150,14 @@ class DirectorySyncTest {
                 fileContents = mapOf("file-0" to "LOCAL_CONTENT".toByteArray()),
             )
         val postUploadOrchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = postUploadClient,
                 config = config,
                 configManager = configManager,
                 onStatus = {},
             )
         val status = postUploadOrchestrator.checkEntrySyncStatus(entry)
-        assertEquals(CloudSyncStatus.IN_SYNC, status)
+        assertEquals(EntrySyncStatus.IN_SYNC, status)
     }
 
     @Test
@@ -1190,7 +1193,7 @@ class DirectorySyncTest {
                 onUpdate = updatedCloudIds::add,
             )
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = config,
                 configManager = configManager,
@@ -1237,7 +1240,7 @@ class DirectorySyncTest {
         val mockClient = createMockDriveClient(cloudFiles = emptyList())
 
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = config,
                 configManager = configManager,
@@ -1245,7 +1248,7 @@ class DirectorySyncTest {
             )
 
         val status = orchestrator.checkEntrySyncStatus(entry)
-        assertEquals(CloudSyncStatus.IN_SYNC, status)
+        assertEquals(EntrySyncStatus.IN_SYNC, status)
     }
 
     @Test
@@ -1277,7 +1280,7 @@ class DirectorySyncTest {
                 uploadResponseModTime = expectedDriveTimestamp,
             )
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = config,
                 configManager = configManager,
@@ -1296,14 +1299,14 @@ class DirectorySyncTest {
                 fileContents = mapOf("file-0" to "LOCAL_SAVE_DATA".toByteArray()),
             )
         val postUploadOrchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = postUploadClient,
                 config = config,
                 configManager = configManager,
                 onStatus = {},
             )
         val status = postUploadOrchestrator.checkEntrySyncStatus(entry)
-        assertEquals(CloudSyncStatus.IN_SYNC, status)
+        assertEquals(EntrySyncStatus.IN_SYNC, status)
     }
 
     @Test
@@ -1355,7 +1358,7 @@ class DirectorySyncTest {
 
         val client = createMockDriveClient(cloudFiles, cloudContents)
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = client,
                 config = config,
                 configManager = configManager,
@@ -1364,7 +1367,7 @@ class DirectorySyncTest {
 
         // 1. Initially both targets match the cloud files. Should be IN_SYNC.
         val initialStatus = orchestrator.checkEntrySyncStatus(entry)
-        assertEquals(CloudSyncStatus.IN_SYNC, initialStatus)
+        assertEquals(EntrySyncStatus.IN_SYNC, initialStatus)
 
         // 2. Perform manual sync. Ensure neither directory downloads the other's files!
         val syncResult = orchestrator.syncEntry(entry)
@@ -1395,7 +1398,7 @@ class DirectorySyncTest {
                 cloudContents + ("file-0" to "SAVEDATA_NEW".toByteArray()),
             )
         val updatedOrchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = updatedClient,
                 config = config,
                 configManager = configManager,
@@ -1405,7 +1408,7 @@ class DirectorySyncTest {
         // Now Dir 1 matches time3 on Drive, Dir 2 matches time2 on Drive.
         // It must be IN_SYNC, NOT falsely reported as OUT_OF_SYNC because of Dir 2!
         val postGameStatus = updatedOrchestrator.checkEntrySyncStatus(entry)
-        assertEquals(CloudSyncStatus.IN_SYNC, postGameStatus)
+        assertEquals(EntrySyncStatus.IN_SYNC, postGameStatus)
         assertFalse(
             File(saveDir2, "savedata0/SYS-DATA.sav").exists(),
             "Dir 2 must still not contain savedata0",

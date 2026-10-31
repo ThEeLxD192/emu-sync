@@ -1,6 +1,6 @@
 package com.emusync.drive
 
-import com.emusync.model.SaveTargetType
+import com.emusync.domain.library.SaveTargetType
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path

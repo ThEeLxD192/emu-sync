@@ -1,12 +1,11 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
-import com.emusync.drive.SyncOrchestrator
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.SaveTarget
 import com.emusync.model.AppConfig
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.GameEntry
-import com.emusync.model.NativePCGame
-import com.emusync.model.SaveTarget
 import com.emusync.scanner.scanRoms
 import io.ktor.client.HttpClient
 import java.util.concurrent.ConcurrentHashMap
@@ -161,7 +160,9 @@ internal class LibraryController(
         restoreUiOnCancellation(
             action = {
                 val status =
-                    SyncOrchestrator(client, cfg, configManager) {}.checkEntrySyncStatus(entry)
+                    createSaveSynchronizer(client, cfg, configManager) {}
+                        .checkEntrySyncStatus(entry)
+                        .toUiStatus()
                 refreshConnection()
                 state.update {
                     if (isCurrent(it))
@@ -192,7 +193,7 @@ internal class LibraryController(
                 )
             }
             val success =
-                SyncOrchestrator(client, cfg, configManager, ::publishStatus).syncEntry(entry)
+                createSaveSynchronizer(client, cfg, configManager, ::publishStatus).syncEntry(entry)
             refreshConnection()
             if (state.value.config?.googleDrive == cfg.googleDrive) {
                 state.update {
@@ -214,7 +215,7 @@ internal class LibraryController(
             val cfg = state.value.config ?: return@runIfIdle false
             if (cfg.entries.none { it == item.entry }) return@runIfIdle false
             var configuredItem = item
-            SyncOrchestrator(client, cfg, configManager, ::publishStatus).playWithSync(
+            createSaveSynchronizer(client, cfg, configManager, ::publishStatus).playWithSync(
                 item,
                 resolveConfiguredItem = { configuredItem },
             ) { requested, notice, names ->

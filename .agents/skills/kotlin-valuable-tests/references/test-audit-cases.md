@@ -12,9 +12,13 @@ en el nombre. Evidencia común: [E2](test-audit.md#ejecuciones); los cinco escen
 reescritos también se ejecutaron en E1. Protección equivalente: no aplica en las filas
 conservadas o reescritas; las cuatro retiradas tienen su tabla en la auditoría.
 
-426 métodos vigentes en 56 archivos de pruebas; `PostSyncFailureTest` ejecuta su
-escenario parametrizado para `UPLOAD_LOCAL` y `DOWNLOAD_CLOUD` (427 casos JUnit).
-El fixture sin tests `SaveMappingDrive.kt` se clasifica en la auditoría principal.
+H1 dejó 426 métodos en 56 archivos de pruebas y 427 casos JUnit. Tras H3 hay
+428 métodos en 61 archivos de pruebas, más `SaveMappingDrive.kt`: 62 archivos Kotlin
+en total. Se conservan los 427 casos originales y se añaden dos comprobaciones de
+los límites cambiados (429 casos). Las fuentes enlazadas reflejan su ubicación actual;
+los resultados de H1 anteriores siguen siendo evidencia histórica. Las integraciones
+que observan `AppStatus` usan ahora el adaptador de presentación; el caso nuevo de
+respuestas a conflictos consume `SaveSynchronizer` y eventos neutrales directamente.
 
 ## config/ConfigLocationTest.kt
 
@@ -54,7 +58,7 @@ Riesgo: crítica: perder configuración/credenciales, romper JSON legacy o infer
 
 ## config/ConfigUpdatesTest.kt
 
-Fuente: [ConfigUpdatesTest.kt](../../../../src/test/kotlin/com/emusync/config/ConfigUpdatesTest.kt). Punto de entrada: `ConfigManager.update / snapshotGoogleDrive / compareAndSetGoogleDrive`.
+Fuente: [ConfigUpdatesTest.kt](../../../../src/test/kotlin/com/emusync/config/ConfigUpdatesTest.kt). Punto de entrada: `LibraryStore.updateEntries / loadEntries; ConfigManager.snapshotGoogleDrive / compareAndSetGoogleDrive`.
 Nivel: integración local/concurrente. Dobles/límites: dos instancias, executor y barrera CountDownLatch.
 Riesgo: crítica: perder ediciones concurrentes o restaurar credenciales desconectadas.
 
@@ -249,17 +253,13 @@ Riesgo: alta: abrir login interactivo offline, borrar un token válido o ocultar
 
 ## drive/PerGameSyncTest.kt
 
-Fuente: [PerGameSyncTest.kt](../../../../src/test/kotlin/com/emusync/drive/PerGameSyncTest.kt). Punto de entrada: `SyncOrchestrator.getCloudPathSegments / syncEntry / playWithSync / renameGameCloudData`.
+Fuente: [PerGameSyncTest.kt](../../../../src/test/kotlin/com/emusync/drive/PerGameSyncTest.kt). Punto de entrada: `SaveTargetResolver / SyncOrchestrator.syncEntry / playWithSync / renameGameCloudData`.
 Nivel: reglas e integración de flujo. Dobles/límites: MockEngine, archivos temporales y callbacks de conflicto/configuración/lanzamiento.
 Riesgo: crítica: subir datos de otro juego, aplanar rutas o lanzar tras cancelar la restauración.
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
 | `unknown missing target ignores exact cloud name owned by sibling target` | conservar: garantía observable específica de este escenario |
-| `getCloudPathSegments respects game title for EmulatorSystem with savePathsByRom` | conservar: garantía observable específica de este escenario |
-| `global save paths use emulator cloud folder despite empty or copied rom overrides` | conservar: garantía observable específica de este escenario |
-| `getCloudPathSegments handles custom title in titleByRom` | conservar: garantía observable específica de este escenario |
-| `getCloudPathSegments for NativePCGame in a group uses group and game name` | conservar: garantía observable específica de este escenario |
 | `syncEntry uploads individual game saves into game subfolder on Google Drive` | conservar: garantía observable específica de este escenario |
 | `playWithSync postSync uploads into game-scoped subfolder` | conservar: garantía observable específica de este escenario |
 | `renameGameCloudData renames cloud folder when destination does not exist yet` | conservar: garantía observable específica de este escenario |
@@ -339,9 +339,9 @@ Riesgo: crítica: confundir prefijos portables, reclamar archivos no asignados o
 | `invalid cloud path does not silently fall back to playing offline` | conservar: garantía observable específica de este escenario |
 | `new directory scopes are distinct even with the same basename and explicit prefixes` | conservar: garantía observable específica de este escenario |
 
-## drive/SyncConflictTest.kt
+## domain/sync/SyncConflictTest.kt
 
-Fuente: [SyncConflictTest.kt](../../../../src/test/kotlin/com/emusync/drive/SyncConflictTest.kt). Punto de entrada: `resolveConflict / planSyncDecision`.
+Fuente: [SyncConflictTest.kt](../../../../domain/src/test/kotlin/com/emusync/domain/sync/SyncConflictTest.kt). Punto de entrada: `resolveConflict / planSyncDecision`.
 Nivel: unitaria. Dobles/límites: fechas constantes y esperados explícitos.
 Riesgo: crítica: invertir dirección, truncar fracciones o equivocarse en el límite de tolerancia.
 
@@ -361,9 +361,9 @@ Riesgo: crítica: invertir dirección, truncar fracciones o equivocarse en el l�
 | `plan delegates to timestamp conflict policy when both copies exist` | conservar: garantía observable específica de este escenario |
 | `post-play policy uploads even when local timestamp is inside conflict window` | conservar: garantía observable específica de este escenario |
 
-## drive/SyncPlannerTest.kt
+## domain/sync/SyncPlannerTest.kt
 
-Fuente: [SyncPlannerTest.kt](../../../../src/test/kotlin/com/emusync/drive/SyncPlannerTest.kt). Punto de entrada: `planDirectorySync`.
+Fuente: [SyncPlannerTest.kt](../../../../domain/src/test/kotlin/com/emusync/domain/sync/SyncPlannerTest.kt). Punto de entrada: `planDirectorySync`.
 Nivel: unitaria. Dobles/límites: estados de archivos inmutables y fechas constantes.
 Riesgo: crítica: acciones no deterministas, duplicado equivocado o no subir progreso posterior al juego.
 
@@ -375,20 +375,12 @@ Riesgo: crítica: acciones no deterministas, duplicado equivocado o no subir pro
 
 ## drive/TrackedFileSyncTest.kt
 
-Fuente: [TrackedFileSyncTest.kt](../../../../src/test/kotlin/com/emusync/drive/TrackedFileSyncTest.kt). Punto de entrada: `planTrackedSync / TrackedFileSync / SyncHistoryStore / SyncOrchestrator`.
+Fuente: [TrackedFileSyncTest.kt](../../../../src/test/kotlin/com/emusync/drive/TrackedFileSyncTest.kt). Punto de entrada: `TrackedFileSync / SyncHistoryStore / SyncOrchestrator`.
 Nivel: reglas e integración local/flujo. Dobles/límites: SaveMappingDrive, disco real, snapshots y fallos de backup/historial.
 Riesgo: crítica: ocultar cambios offline, adelantar historial tras un fallo o reemplazar progreso sin recuperación.
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
-| `bootstrap requires evidence of equal content even with equal timestamps` | conservar: garantía observable específica de este escenario |
-| `clock ordering does not conceal local changes` | conservar: garantía observable específica de este escenario |
-| `remote content change is detected even when timestamps and versions match` | conservar: garantía observable específica de este escenario |
-| `independent changes to the same content converge without a conflict` | conservar: garantía observable específica de este escenario |
-| `metadata version is used when checksum is absent` | conservar: garantía observable específica de este escenario |
-| `legacy remote metadata compares exact timestamps without tolerance` | conservar: garantía observable específica de este escenario |
-| `remote replacement with a different id is a change` | conservar: garantía observable específica de este escenario |
-| `one missing copy is restored without propagating deletions` | conservar: garantía observable específica de este escenario |
 | `history survives restart and merges records from independent instances` | conservar: garantía observable específica de este escenario |
 | `failed history replacement retains the previous complete index` | conservar: garantía observable específica de este escenario |
 | `corrupt or unsupported history fails safely and is never reset silently` | conservar: garantía observable específica de este escenario |
@@ -404,19 +396,14 @@ Riesgo: crítica: ocultar cambios offline, adelantar historial tras un fallo o r
 | `corrupt history aborts launch instead of falling back to offline play` | conservar: garantía observable específica de este escenario |
 | `failed explicit local resolution aborts launch and leaves both copies intact` | conservar: garantía observable específica de este escenario |
 
-## model/GameEntryGroupTest.kt
+## config/ConfigGroupsTest.kt
 
-Fuente: [GameEntryGroupTest.kt](../../../../src/test/kotlin/com/emusync/model/GameEntryGroupTest.kt). Punto de entrada: `GameEntry.effectiveCloudFolder / ConfigManager.load/save`.
+Fuente: [ConfigGroupsTest.kt](../../../../src/test/kotlin/com/emusync/config/ConfigGroupsTest.kt). Punto de entrada: `ConfigManager.load/save con DTO y conversiones explícitas`.
 Nivel: reglas y persistencia. Dobles/límites: entradas reales; JSON legacy literal y TempDir en persistencia.
 Riesgo: alta: cambiar la carpeta compartida o romper group/cloudFolder al persistir.
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
-| `effectiveCloudFolder defaults to name when group and cloudFolder are null` | conservar: garantía observable específica de este escenario |
-| `effectiveCloudFolder uses group when group is set and cloudFolder is null` | conservar: garantía observable específica de este escenario |
-| `effectiveCloudFolder uses cloudFolder over group when both are set` | conservar: garantía observable específica de este escenario |
-| `effectiveCloudFolder trims whitespace and falls back appropriately` | conservar: garantía observable específica de este escenario |
-| `multiple emulators with same group share the exact same effectiveCloudFolder` | conservar: garantía observable específica de este escenario |
 | `ConfigManager serializes and deserializes group and cloudFolder` | conservar: garantía observable específica de este escenario |
 | `ConfigManager deserializes legacy JSON without group or cloudFolder` | conservar: garantía observable específica de este escenario |
 
@@ -432,9 +419,9 @@ Riesgo: crítica: perder prioridad de overrides o inferir un tipo incorrecto par
 | `missing save paths preserve declared types and explicit cloud names` | conservar: garantía observable específica de este escenario |
 | `ROM target lookup preserves typed exact stem and legacy fallback priority` | reescribir: esperar SaveTarget UNKNOWN explícito para ambas rutas legacy ausentes; no llamar al helper de producción para construir el esperado |
 
-## model/GameTitleUtilsTest.kt
+## domain/library/GameTitleUtilsTest.kt
 
-Fuente: [GameTitleUtilsTest.kt](../../../../src/test/kotlin/com/emusync/model/GameTitleUtilsTest.kt). Punto de entrada: `cleanGameTitle / normalizeGameKey / EmulatorSystem.getEffectiveTitle`.
+Fuente: [GameTitleUtilsTest.kt](../../../../domain/src/test/kotlin/com/emusync/domain/library/GameTitleUtilsTest.kt). Punto de entrada: `cleanGameTitle / normalizeGameKey / EmulatorSystem.getEffectiveTitle`.
 Nivel: unitaria. Dobles/límites: nombres/overrides literales, sin I/O.
 Riesgo: media: borrar indicadores de disco o elegir otro título al cambiar de dispositivo.
 
@@ -945,3 +932,70 @@ Riesgo: alta: perder argumentos vacíos, separadores Windows, escapes o aceptar 
 | `parse rejects a trailing escape inside a quoted argument` | conservar: garantía observable específica de este escenario |
 | `parse preserves empty arguments and joins adjacent quoted and unquoted fragments` | conservar: garantía observable específica de este escenario |
 | `format quotes only arguments that require it` | conservar: garantía observable específica de este escenario |
+
+## domain/sync/CloudPathsTest.kt
+
+Fuente: [CloudPathsTest.kt](../../../../domain/src/test/kotlin/com/emusync/domain/sync/CloudPathsTest.kt). Punto de entrada: `cloudPathSegments`.
+Nivel: unitaria, sin HTTP ni filesystem; destinos observados suministrados como datos.
+Riesgo: alta: cambiar carpetas remotas legacy o confundir saves globales con overrides.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `getCloudPathSegments respects game title for EmulatorSystem with savePathsByRom` | conservar: garantía observable específica de este escenario |
+| `global save paths use emulator cloud folder despite empty or copied rom overrides` | conservar: garantía observable específica de este escenario |
+| `getCloudPathSegments handles custom title in titleByRom` | conservar: garantía observable específica de este escenario |
+| `getCloudPathSegments for NativePCGame in a group uses group and game name` | conservar: garantía observable específica de este escenario |
+
+
+## domain/sync/TrackedSyncPlannerTest.kt
+
+Fuente: [TrackedSyncPlannerTest.kt](../../../../domain/src/test/kotlin/com/emusync/domain/sync/TrackedSyncPlannerTest.kt). Punto de entrada: `planTrackedSync`.
+Nivel: unitaria, huellas y metadatos literales, sin DTO Drive ni cálculo de hashes.
+Riesgo: crítica: sobrescribir cambios divergentes, confiar en relojes o propagar borrados.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `bootstrap requires evidence of equal content even with equal timestamps` | conservar: garantía observable específica de este escenario |
+| `clock ordering does not conceal local changes` | conservar: garantía observable específica de este escenario |
+| `remote content change is detected even when timestamps and versions match` | conservar: garantía observable específica de este escenario |
+| `independent changes to the same content converge without a conflict` | conservar: garantía observable específica de este escenario |
+| `metadata version is used when checksum is absent` | conservar: garantía observable específica de este escenario |
+| `legacy remote metadata compares exact timestamps without tolerance` | conservar: garantía observable específica de este escenario |
+| `remote replacement with a different id is a change` | conservar: garantía observable específica de este escenario |
+| `one missing copy is restored without propagating deletions` | conservar: garantía observable específica de este escenario |
+
+
+## domain/library/GameEntryGroupTest.kt
+
+Fuente: [GameEntryGroupTest.kt](../../../../domain/src/test/kotlin/com/emusync/domain/library/GameEntryGroupTest.kt). Punto de entrada: `GameEntry.effectiveCloudFolder`.
+Nivel: unitaria, entradas literales sin I/O.
+Riesgo: alta: cambiar la prioridad de carpetas o la ubicación compartida.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `effectiveCloudFolder defaults to name when group and cloudFolder are null` | conservar: garantía observable específica de este escenario |
+| `effectiveCloudFolder uses group when group is set and cloudFolder is null` | conservar: garantía observable específica de este escenario |
+| `effectiveCloudFolder uses cloudFolder over group when both are set` | conservar: garantía observable específica de este escenario |
+| `effectiveCloudFolder trims whitespace and falls back appropriately` | conservar: garantía observable específica de este escenario |
+| `multiple emulators with same group share the exact same effectiveCloudFolder` | conservar: garantía observable específica de este escenario |
+
+
+## config/ConfigFormatCompatibilityTest.kt
+
+Fuente: [ConfigFormatCompatibilityTest.kt](../../../../src/test/kotlin/com/emusync/config/ConfigFormatCompatibilityTest.kt). Punto de entrada: `ConfigManager.load/save`.
+Nivel: integración local; documento JSON literal, esperado neutral independiente y TempDir.
+Riesgo: crítica: perder campos o cambiar claves, discriminadores y enums al separar DTO.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `legacy document preserves every entry field and serialized save type across domain conversion` | añadir en H3: compara ambos modelos completos y el JSON escrito contra el documento literal, incluidos overrides, identificadores y file/directory/unknown |
+
+## drive/SyncResponsesTest.kt
+
+Fuente: [SyncResponsesTest.kt](../../../../src/test/kotlin/com/emusync/drive/SyncResponsesTest.kt). Punto de entrada: `SaveSynchronizer.syncEntry / resolveConflict`.
+Nivel: integración del contrato neutral; SaveMappingDrive con MockEngine, canal de conflictos, cancelación y archivos reales en TempDir.
+Riesgo: crítica: una respuesta de una operación cancelada sobrescribe la partida de otra operación.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `cancelled conflict reply cannot resolve an identical later request or write saves` | añadir en H3: respuesta obsoleta UPLOAD_LOCAL sin efectos; solo la solicitud vigente autoriza DOWNLOAD_CLOUD y conserva el contenido remoto |

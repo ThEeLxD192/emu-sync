@@ -1,8 +1,8 @@
 package com.emusync.ui.dialogs
 
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
 import com.emusync.ui.GameItem
 import java.io.File
 import kotlin.test.assertEquals

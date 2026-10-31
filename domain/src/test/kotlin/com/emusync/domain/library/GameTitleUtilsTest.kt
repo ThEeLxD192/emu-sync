@@ -1,4 +1,4 @@
-package com.emusync.model
+package com.emusync.domain.library
 
 import kotlin.test.assertEquals
 import org.junit.jupiter.api.Test

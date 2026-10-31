@@ -1,7 +1,7 @@
 package com.emusync.drive
 
-import com.emusync.model.GameEntry
-import com.emusync.ui.AppStatus
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.sync.SyncEvent
 
 internal class ManualEntrySync(
     private val context: SyncContext,
@@ -37,11 +37,11 @@ internal class ManualEntrySync(
 
                 val targets = paths.getSaveTargets(entry)
                 syncTargets(entry, token, targets)
-                onStatus(AppStatus.Idle)
+                onStatus(SyncEvent.Idle)
                 true
             },
             recover = { e ->
-                onStatus(AppStatus.Error("Sync error: ${e.message}"))
+                onStatus(SyncEvent.Error("Sync error: ${e.message}"))
                 false
             },
         )
@@ -50,18 +50,18 @@ internal class ManualEntrySync(
     private suspend fun connect(): String? {
         if (config.googleDrive?.refreshToken.isNullOrBlank()) {
             onStatus(
-                AppStatus.Error(
+                SyncEvent.Error(
                     "Google Drive is not connected. Click 'Connect Drive' in the top bar to sign in."
                 )
             )
             return null
         }
-        onStatus(AppStatus.Syncing("Connecting to Google Drive..."))
+        onStatus(SyncEvent.Syncing("Connecting to Google Drive..."))
         return recoverDriveFailure(
             action = { oauthFlow.authorize(config, configManager, allowInteractive = false) },
             recover = { failure ->
                 onStatus(
-                    AppStatus.Error(
+                    SyncEvent.Error(
                         "Could not connect to Google Drive (${failure.message ?: "session expired"}). Please reconnect your account by clicking 'Connect Drive'."
                     )
                 )
@@ -73,7 +73,7 @@ internal class ManualEntrySync(
     private suspend fun syncTargets(
         entry: GameEntry,
         token: String,
-        targets: List<SyncOrchestrator.SaveTarget>,
+        targets: List<ResolvedSaveTarget>,
     ) {
         val targetsByFolder = targets.groupBy { it.cloudPathSegments }
         for ((cloudPath, folderTargets) in targetsByFolder) {
@@ -89,14 +89,14 @@ internal class ManualEntrySync(
     private suspend fun syncFolder(
         entry: GameEntry,
         token: String,
-        folderTargets: List<SyncOrchestrator.SaveTarget>,
+        folderTargets: List<ResolvedSaveTarget>,
         folderId: String,
         cloudFiles: List<DriveFile>,
     ) {
         val configuredTargets = folderTargets.map { it.configured() }
         for (target in folderTargets) {
             val savePath = target.file
-            onStatus(AppStatus.Syncing("Syncing ${target.displayName}..."))
+            onStatus(SyncEvent.Syncing("Syncing ${target.displayName}..."))
             val reservedSiblingNames =
                 reservedCloudNames(target.configured(), configuredTargets, cloudFiles)
             val isDirectory = target.configured().isDirectory(cloudFiles, configuredTargets)

@@ -1,9 +1,9 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.NativePCGame
 import com.emusync.model.AppConfig
 import com.emusync.model.GoogleDriveConfig
-import com.emusync.model.NativePCGame
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope

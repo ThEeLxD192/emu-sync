@@ -1,6 +1,6 @@
 package com.emusync.ui.components
 
-import com.emusync.model.GameEntry
+import com.emusync.domain.library.GameEntry
 
 sealed interface SidebarUnit {
     data class GroupUnit(val groupName: String, val entries: List<GameEntry>) : SidebarUnit

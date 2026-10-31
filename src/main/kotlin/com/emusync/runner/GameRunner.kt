@@ -1,8 +1,11 @@
 package com.emusync.runner
 
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.GameEntry
-import com.emusync.model.NativePCGame
+import com.emusync.domain.execution.GameLaunchRequest
+import com.emusync.domain.execution.GameLauncher
+import com.emusync.domain.execution.GameResult
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.NativePCGame
 import com.emusync.steam.SteamShortcutManager
 import com.emusync.util.AppImageEnvironment
 import com.emusync.util.ArgumentsCodec
@@ -13,36 +16,25 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
- * Result of a game execution.
- *
- * @property exitCode The process exit code (0 = normal exit, or 0 for external polling).
- * @property durationMs How long the game ran, in milliseconds.
- */
-data class GameResult(
-    val exitCode: Int,
-    val durationMs: Long,
-)
-
-/**
  * Universal game launcher that handles both emulator-based and native PC games.
  *
  * Supports two launch modes:
  * - **Direct**: Spawns the process directly via [ProcessBuilder] (default).
  * - **Via Steam**: Uses `steam://rungameid/<appId>` so Steam applies the configured controller
- *   layout. Used when [steamAppId] is provided.
+ *   layout. Used when the launch request specifies a Steam app ID.
  *
  * Usage:
  * ```
  * val runner = GameRunner()
  *
  * // Direct launch
- * val result = runner.launch(gbaSystem, romFile = File("/roms/pokemon.gba"))
+ * val result = runner.launch(GameLaunchRequest(gbaSystem, romPath = "/roms/pokemon.gba"))
  *
  * // Launch via Steam (applies controller layout)
- * val result = runner.launch(gbaSystem, romFile = romFile, steamAppId = 123456)
+ * val result = runner.launch(GameLaunchRequest(gbaSystem, romPath = romFile.path, steamAppId = 123456))
  * ```
  */
-class GameRunner(private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO) {
+class GameRunner(private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO) : GameLauncher {
     private val processes = ProcessMonitor()
     private val tracker =
         ExternalProcessTracker(processes::matchingProcessIds, processes::isSteamShaderCompiling)
@@ -71,18 +63,15 @@ class GameRunner(private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO)
     /**
      * Launches a game and suspends until it finishes.
      *
-     * @param entry The [GameEntry] to launch.
-     * @param romFile Required for [EmulatorSystem]. Ignored for [NativePCGame].
-     * @param steamAppId If non-null, launches through Steam to apply controller layout.
+     * @param request Entry, optional ROM path and optional Steam app ID for the session.
      * @return [GameResult] with exit code and duration.
      */
-    suspend fun launch(
-        entry: GameEntry,
-        romFile: File? = null,
-        steamAppId: Int? = null,
-    ): GameResult =
+    override suspend fun launch(request: GameLaunchRequest): GameResult =
         withContext(ioDispatcher) {
             val startTime = System.currentTimeMillis()
+            val entry = request.entry
+            val romFile = request.romPath?.let(::File)
+            val steamAppId = request.steamAppId
 
             val success =
                 if (steamAppId != null) {

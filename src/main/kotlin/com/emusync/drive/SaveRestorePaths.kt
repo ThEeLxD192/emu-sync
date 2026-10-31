@@ -1,26 +1,12 @@
 package com.emusync.drive
 
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
+import com.emusync.domain.sync.remotePathSegments
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
-
-private val WINDOWS_DRIVE_PATH = Regex("^[A-Za-z]:.*")
-
-internal fun remotePathSegments(remoteName: String): List<String>? =
-    when {
-        remoteName.isBlank() || remoteName != remoteName.trim() || '\u0000' in remoteName -> null
-        remoteName.startsWith('/') ||
-            remoteName.startsWith('\\') ||
-            WINDOWS_DRIVE_PATH.matches(remoteName) -> null
-        else ->
-            remoteName.split(Regex("[/\\\\]"), limit = 0).takeIf {
-                it.isNotEmpty() &&
-                    it.none { segment -> segment.isBlank() || segment == "." || segment == ".." }
-            }
-    }
 
 /**
  * Resolves a Drive file name below [destinationRoot].

@@ -1,10 +1,10 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.effectiveCloudFolder
 import com.emusync.model.AppConfig
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.NativePCGame
-import com.emusync.model.effectiveCloudFolder
 import com.emusync.model.inferLegacySaveTarget
 import com.emusync.steam.SteamShortcutManager
 import io.ktor.client.HttpClient

@@ -1,7 +1,8 @@
 package com.emusync.runner
 
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.NativePCGame
+import com.emusync.domain.execution.GameLaunchRequest
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.NativePCGame
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -56,7 +57,7 @@ class GameRunnerTest {
 
         val exception =
             assertThrows<IllegalArgumentException> {
-                runner.launch(emu, romFile = null)
+                runner.launch(GameLaunchRequest(emu))
             }
         assertTrue(exception.message!!.contains("A ROM file must be provided"))
     }
@@ -75,7 +76,7 @@ class GameRunnerTest {
                     extensions = listOf("bin"),
                 )
 
-            val result = runner.launch(emu, romFile = testFile)
+            val result = runner.launch(GameLaunchRequest(emu, romPath = testFile.path))
             assertEquals(0, result.exitCode)
             assertTrue(result.durationMs >= 0)
         }
@@ -90,7 +91,7 @@ class GameRunnerTest {
                 savePaths = emptyList(),
             )
 
-        val result = runner.launch(nativeGame)
+        val result = runner.launch(GameLaunchRequest(nativeGame))
         assertEquals(0, result.exitCode)
         assertTrue(result.durationMs >= 0)
     }
@@ -167,7 +168,7 @@ class GameRunnerTest {
                 }
 
             val start = System.currentTimeMillis()
-            val result = runner.launch(nativeGame)
+            val result = runner.launch(GameLaunchRequest(nativeGame))
             val elapsed = System.currentTimeMillis() - start
 
             assertEquals(0, result.exitCode)
@@ -202,7 +203,7 @@ class GameRunnerTest {
 
         try {
             val started = System.currentTimeMillis()
-            val result = runner.launch(game)
+            val result = runner.launch(GameLaunchRequest(game))
             val elapsed = System.currentTimeMillis() - started
 
             assertEquals(0, result.exitCode)
@@ -413,7 +414,7 @@ class GameRunnerTest {
                 fullscreenArgs = "--label \"value with spaces\"",
                 arguments = listOf("--load={ROM}"),
             )
-        assertEquals(0, runner.launch(entry, rom).exitCode)
+        assertEquals(0, runner.launch(GameLaunchRequest(entry, rom.path)).exitCode)
         assertEquals(
             listOf("--label", "value with spaces", "--load=${rom.path}"),
             output.readBytes().decodeToString().split('\u0000').dropLast(1),

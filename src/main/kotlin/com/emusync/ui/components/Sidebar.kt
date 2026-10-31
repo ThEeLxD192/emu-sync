@@ -53,9 +53,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.GameEntry
-import com.emusync.model.NativePCGame
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.NativePCGame
 import com.emusync.ui.theme.EmuSyncColors
 import java.awt.Cursor
 

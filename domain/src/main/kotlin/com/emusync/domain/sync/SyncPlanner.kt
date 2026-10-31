@@ -1,19 +1,6 @@
-package com.emusync.drive
+package com.emusync.domain.sync
 
 import java.time.Instant
-
-/** Immutable metadata used to plan a sync without performing file or network I/O. */
-data class LocalFileState(val relativePath: String, val modifiedTimeMs: Long)
-
-data class CloudFileState(val id: String, val relativePath: String, val modifiedTimeIso: String)
-
-data class PlannedFileAction(
-    val relativePath: String,
-    val local: LocalFileState?,
-    val cloud: CloudFileState?,
-    val duplicateCloudFiles: List<CloudFileState>,
-    val decision: SyncDecision,
-)
 
 /** Produces one deterministic action for every local or cloud file in a save target. */
 fun planDirectorySync(

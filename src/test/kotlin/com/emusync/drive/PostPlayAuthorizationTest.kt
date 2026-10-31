@@ -1,13 +1,15 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
 import com.emusync.model.AppConfig
 import com.emusync.model.GoogleDriveConfig
-import com.emusync.model.NativePCGame
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
+import com.emusync.ui.createSaveSynchronizer
+import com.emusync.ui.playWithSync
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -123,7 +125,7 @@ class PostPlayAuthorizationTest {
         val statuses = mutableListOf<AppStatus>()
         try {
             val orchestrator =
-                SyncOrchestrator(client, config, manager) { status ->
+                createSaveSynchronizer(client, config, manager) { status ->
                     statuses += status
                     if (status == AppStatus.Playing) {
                         played = true

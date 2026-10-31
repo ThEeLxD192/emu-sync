@@ -1,11 +1,11 @@
 package com.emusync.config
 
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
 import com.emusync.model.AppConfig
-import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
-import com.emusync.model.NativePCGame
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files

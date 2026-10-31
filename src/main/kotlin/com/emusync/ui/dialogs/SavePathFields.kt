@@ -23,8 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.SaveTargetType
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.SaveTargetType
 import com.emusync.ui.GameItem
 import com.emusync.ui.components.CloudPathField
 import com.emusync.ui.components.PickerType

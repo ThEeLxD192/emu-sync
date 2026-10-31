@@ -44,7 +44,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.emusync.model.SaveTarget
+import com.emusync.domain.library.SaveTarget
 import com.emusync.ui.GameItem
 import com.emusync.ui.components.PickerType
 import com.emusync.ui.components.loadGameCover
@@ -162,7 +162,9 @@ private fun GameEditFormState.GameTitleFields(game: GameItem) {
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             val cleanSuggestion =
-                com.emusync.model.cleanGameTitle(game.romFile?.nameWithoutExtension ?: game.name)
+                com.emusync.domain.library.cleanGameTitle(
+                    game.romFile?.nameWithoutExtension ?: game.name
+                )
             if (customTitle != cleanSuggestion) {
                 TextButton(onClick = { customTitle = cleanSuggestion }) {
                     Text(
@@ -192,7 +194,7 @@ private fun GameEditFormState.GameTitleFields(game: GameItem) {
         placeholder = {
             Text(
                 text =
-                    com.emusync.model.cleanGameTitle(
+                    com.emusync.domain.library.cleanGameTitle(
                         game.romFile?.nameWithoutExtension ?: game.name
                     ),
                 color = EmuSyncColors.OnSurfaceDim.copy(alpha = 0.5f),

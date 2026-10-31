@@ -1,10 +1,9 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
-import com.emusync.drive.SyncOrchestrator
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.GameEntry
 import com.emusync.model.AppConfig
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.GameEntry
 import com.emusync.steam.SteamShortcutManager
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -139,7 +138,7 @@ internal class EntryEditor(
     ): Boolean =
         if (config.googleDrive == null) true
         else
-            SyncOrchestrator(client, config, configManager, callbacks.publishStatus)
+            createSaveSynchronizer(client, config, configManager, callbacks.publishStatus)
                 .renameEntryCloudData(oldEntry, edited)
 
     private suspend fun publishEditedEntry(oldEntry: GameEntry, edited: GameEntry) {
@@ -178,7 +177,7 @@ internal class EntryEditor(
         return if (newTitle == oldTitle || edited !is EmulatorSystem || config?.googleDrive == null)
             true
         else
-            SyncOrchestrator(client, config, configManager, callbacks.publishStatus)
+            createSaveSynchronizer(client, config, configManager, callbacks.publishStatus)
                 .renameGameCloudData(
                     entry = edited,
                     romName = current.romFile?.name ?: current.name,

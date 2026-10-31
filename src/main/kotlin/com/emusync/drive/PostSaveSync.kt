@@ -1,8 +1,9 @@
 package com.emusync.drive
 
-import com.emusync.model.GameEntry
-import com.emusync.model.SaveTargetType
-import com.emusync.model.effectiveCloudFolder
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.SaveTargetType
+import com.emusync.domain.library.effectiveCloudFolder
+import com.emusync.domain.sync.SyncDecision
 import java.io.File
 
 internal class PostSaveSync(private val context: SyncContext, private val manual: ManualFileSync) {

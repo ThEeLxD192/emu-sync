@@ -1,4 +1,4 @@
-package com.emusync.model
+package com.emusync.domain.library
 
 /**
  * Cleans a raw ROM filename into a display-friendly game title.

@@ -3,11 +3,11 @@ package com.emusync.ui.dialogs
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
+import com.emusync.domain.library.scopeNewSaveTargets
 import com.emusync.drive.resolveCloudRestorePaths
 import com.emusync.drive.resolveCloudRestoreTargets
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
-import com.emusync.model.scopeNewSaveTargets
 import com.emusync.ui.GameItem
 
 internal data class GameEditResult(

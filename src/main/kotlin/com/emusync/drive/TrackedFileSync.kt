@@ -1,5 +1,7 @@
 package com.emusync.drive
 
+import com.emusync.domain.sync.SyncDecision
+import com.emusync.domain.sync.planTrackedSync
 import java.io.File
 import java.nio.file.Files
 import java.time.Instant
@@ -28,50 +30,6 @@ internal fun canonicalCloudFiles(files: List<DriveFile>): List<DriveFile> =
         }
 
 /**
- * Chooses from verified content and the last common observation, without trusting clock ordering.
- */
-internal fun planTrackedSync(
-    localSha256: String?,
-    remote: DriveFile?,
-    previous: SyncedSave?,
-): SyncDecision {
-    return when {
-        localSha256 == null ->
-            if (remote == null) SyncDecision.IN_SYNC else SyncDecision.DOWNLOAD_CLOUD
-        remote == null -> SyncDecision.UPLOAD_LOCAL
-        remote.sha256Checksum?.equals(localSha256, ignoreCase = true) == true ->
-            SyncDecision.IN_SYNC
-        previous == null -> SyncDecision.CONFLICT
-        else ->
-            changedSaveDecision(
-                localSha256 != previous.localSha256,
-                remoteChanged(remote, previous),
-            )
-    }
-}
-
-private fun changedSaveDecision(localChanged: Boolean, remoteChanged: Boolean): SyncDecision =
-    when {
-        localChanged && remoteChanged -> SyncDecision.CONFLICT
-        localChanged -> SyncDecision.UPLOAD_LOCAL
-        remoteChanged -> SyncDecision.DOWNLOAD_CLOUD
-        else -> SyncDecision.IN_SYNC
-    }
-
-private fun remoteChanged(remote: DriveFile, previous: SyncedSave): Boolean =
-    remote.id != previous.remoteId ||
-        when {
-            remote.sha256Checksum != null ->
-                !remote.sha256Checksum.equals(
-                    previous.remoteSha256 ?: previous.localSha256,
-                    ignoreCase = true,
-                )
-            remote.version != null && previous.remoteVersion != null ->
-                remote.version != previous.remoteVersion
-            else -> Instant.parse(remote.modifiedTime) != Instant.parse(previous.remoteModifiedTime)
-        }
-
-/**
  * Performs transfers from stable snapshots and advances history only after successful operations.
  */
 internal class TrackedFileSync(
@@ -91,8 +49,8 @@ internal class TrackedFileSync(
                     val digest = local.takeIf { it.isFile }?.let(::sha256)
                     planTrackedSync(
                         digest,
-                        remote,
-                        history.get(history.key(local, folderId, remoteName)),
+                        remote?.toSyncState(),
+                        history.get(history.key(local, folderId, remoteName))?.toCheckpoint(),
                     )
                 },
                 recover = { failure ->
@@ -109,7 +67,10 @@ internal class TrackedFileSync(
         withContext(ioDispatcher) {
             val digest = sha256(local)
             val key = history.key(local, folderId, remoteName)
-            if (planTrackedSync(digest, remote, history.get(key)) != SyncDecision.IN_SYNC) {
+            if (
+                planTrackedSync(digest, remote.toSyncState(), history.get(key)?.toCheckpoint()) !=
+                    SyncDecision.IN_SYNC
+            ) {
                 throw SaveSyncException(
                     "${local.name} changed during synchronization. Retry before replacing either copy."
                 )

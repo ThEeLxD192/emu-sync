@@ -4,9 +4,9 @@
 
 EmuSync es una aplicación Kotlin/Compose Desktop para Linux y Windows. La migración
 acordada usa módulos Gradle JVM y conserva el comportamiento y los formatos actuales.
-La primera entrega fue esta guía y la skill local de pruebas. H0 y H1 están
-completados; H2 está verificado técnicamente y espera confirmación de commit.
-H3–H8 siguen pendientes. Documentar un hito no significa ejecutarlo.
+La primera entrega fue esta guía y la skill local de pruebas. H0–H2 están
+completados. H3 está verificado técnicamente y espera confirmación de commit;
+H4–H8 siguen pendientes. Documentar un hito no significa ejecutarlo.
 
 Línea base inspeccionada el 2026-10-30, sobre `484012f`:
 
@@ -29,8 +29,8 @@ src/main/kotlin/
   Main.kt                    # Arranque y composición de la aplicación
   com/emusync/
     AppInfo.kt               # Información y versión de la aplicación
-    config/                  # Configuración y persistencia
-    model/                   # Configuración serializable y modelos de entradas
+    config/                  # Persistencia y DTO JSON, con conversiones explícitas
+    model/                   # Configuración agregada y resolución local de destinos legacy
     drive/                   # OAuth, Drive, reglas y flujos de sincronización
     runner/                  # Lanzamiento y seguimiento de procesos
     scanner/                 # Descubrimiento de ROMs
@@ -49,7 +49,9 @@ gradle/
   libs.versions.toml         # Versiones compartidas, sin cambios respecto a la base
 build-logic/                 # Convenciones JVM/calidad; build incluido
   src/main/kotlin/           # Plugins precompilados .gradle.kts
-domain/, application/        # Módulos vacíos preparados para H3/H5
+domain/                      # Biblioteca, reglas de sync y contratos neutrales (H3)
+  src/{main,test}/kotlin/     # com/emusync/domain/{library,sync,execution}
+application/                 # Módulo vacío preparado para H5
 data/{local,drive,updates}/  # Módulos vacíos preparados para H4/H6
 platform/desktop/            # Módulo vacío preparado para H6
 presentation/, desktopApp/   # Módulos vacíos preparados para H7
@@ -139,7 +141,7 @@ el repositorio; no necesita una instalación global ni otras skills comunitarias
 Comandos actuales, ejecutados desde la raíz:
 
 ```bash
-./gradlew test --tests 'com.emusync.drive.SyncPlannerTest' --no-daemon
+./gradlew :domain:test --tests 'com.emusync.domain.sync.SyncPlannerTest' --no-daemon
 ./gradlew qualityCheck --no-daemon
 ./gradlew check --no-daemon
 ./gradlew packageReleaseAppImage --no-daemon
@@ -334,20 +336,84 @@ Evidencia (2026-10-30, Linux; base `8c0f90c`):
   `git diff --check` revisados. `src`, scripts de distribución/versionado y workflow
   de release no cambiaron. No se repitió la suite tras editar únicamente seguimiento.
 
-**H2 completado técnicamente. Commit H2: pendiente de confirmación explícita.**
+**H2 completado. Commit H2: `5e3d6f7` (`build: prepare incremental JVM modules and shared conventions`).**
 
 ### H3 — Dominio, tipos y contratos
 
-- [ ] Extraer reglas/modelos neutrales, separando tipos reutilizables en sus archivos.
-- [ ] Definir contratos pequeños para persistencia, nube y capacidades de plataforma.
-- [ ] Romper la dependencia de sincronización hacia tipos y diálogos de UI.
-- [ ] Mover las pruebas de reglas junto al dominio y verificar sus contratos.
-- [ ] **H3 completado.**
+- [x] Extraer reglas/modelos neutrales, separando tipos reutilizables en sus archivos.
+- [x] Definir contratos pequeños para persistencia, nube y capacidades de plataforma.
+- [x] Romper la dependencia de sincronización hacia tipos y diálogos de UI.
+- [x] Mover las pruebas de reglas junto al dominio y verificar sus contratos.
+- [x] **H3 completado.**
 
 Aceptación: `domain` compila sin UI, Ktor ni adaptadores concretos; las dependencias
 de paquetes UI/Drive ya no son circulares y los flujos actuales siguen compilando.
 
-Evidencia: pendiente. Commit: pendiente.
+Evidencia (2026-10-30, Linux; base H2 `5e3d6f7`):
+
+- `domain` contiene modelos de biblioteca, destinos y títulos, reglas de carpetas,
+  validación léxica de rutas, planificación temporal y planificación por contenido e
+  historial. Cada tipo reutilizable tiene su archivo. No realiza I/O; el grafo
+  `runtimeClasspath` solo contiene Kotlin stdlib 2.4.21 y annotations 13.0, sin Compose,
+  Ktor, serialización ni dependencia de la raíz. Se mantienen las versiones acordadas.
+- Contratos por capacidad: `LibraryStore`, `CloudFolderStore`, `GameLauncher` y
+  `SaveSynchronizer`. Los implementan los componentes existentes de la raíz; las
+  operaciones de carpetas y lanzamiento se consumen con sus tipos de contrato.
+  Credenciales, recursos y composición concreta siguen en la raíz para H4–H7;
+  no se adelantó la extracción de adaptadores ni de casos de uso.
+- Se separaron DTO internos de configuración y conversiones explícitas. El documento
+  literal de `ConfigFormatCompatibilityTest` comprueba todos los campos de ambos
+  tipos de entrada, overrides, identificadores y valores `file/directory/unknown`,
+  tanto al leer como al escribir. Las migraciones legacy, revisiones OAuth, historial
+  y escrituras atómicas conservan sus regresiones. La prueba de actualizaciones
+  concurrentes consume ahora `LibraryStore` y verifica también las credenciales.
+- Drive ya no importa presentación. Recibe `SyncGame`, solicitudes/resultados de
+  destinos y eventos neutrales; los conflictos contienen tiempos numéricos y los
+  fallos posteriores no contienen callbacks. `ui/SyncPresentation.kt` traduce al
+  estado visual y conserva los callbacks de diálogos, selección y reintento en UI.
+  Las respuestas de conflictos se vinculan a su solicitud exacta; la regresión
+  nueva cancela una solicitud y demuestra que su respuesta no resuelve otra idéntica
+  ni modifica partidas. Se retiraron las antiguas delegaciones públicas de reglas
+  en `SyncOrchestrator`; los consumidores usan al propietario correspondiente.
+- Se movieron 47 escenarios existentes a seis suites de dominio, sin retiradas ni
+  pruebas añadidas por movimientos. Las integraciones de disco/Drive/UI/procesos
+  permanecen en la raíz hasta su hito propietario. Se añaden únicamente las dos
+  comprobaciones de los límites anteriores: 428 métodos, 429 casos JUnit, 61 suites
+  y un fixture adicional. [Matriz y catálogo actualizados](.agents/skills/kotlin-valuable-tests/references/test-audit.md).
+- `./gradlew :domain:spotlessApply spotlessApply :domain:test :test
+  --tests 'com.emusync.config.ConfigFormatCompatibilityTest'
+  --tests 'com.emusync.drive.SyncResponsesTest'
+  --tests 'com.emusync.drive.TrackedFileSyncTest'
+  --tests 'com.emusync.runner.GameRunnerTest' qualityCheck --no-daemon`:
+  `BUILD SUCCESSFUL` en 26 s; 88 tareas, 16 ejecutadas y 72 UP-TO-DATE.
+  Dominio: 47 casos ejecutados, todos aprobados (0,111 s JUnit).
+  Raíz focalizada: 29 casos aprobados (7,803 s JUnit). Detekt señaló una variable
+  de preparación que dejó de usarse al retirar una delegación; se eliminó antes
+  del cierre, sin supresiones ni cambios de reglas.
+- `./gradlew spotlessApply :domain:spotlessApply check --no-daemon`:
+  `BUILD SUCCESSFUL` en 57 s; 90 tareas, 15 ejecutadas y 75 UP-TO-DATE.
+  Raíz completa ejecutada: 382 casos, 380 aprobados, cero fallos/errores y las dos
+  omisiones PowerShell en Linux; 55 XML, 14,069 s JUnit. Dominio reutilizó los 47
+  casos anteriores con `UP-TO-DATE`, no los ejecutó otra vez. Evidencia vigente
+  combinada: 429 casos, 427 aprobados y dos omitidos. Detekt main/test de raíz y
+  dominio: cero hallazgos; main de ambos y test raíz ejecutados, test dominio
+  UP-TO-DATE. Hooks: nueve grupos PASS; convenciones: cuatro PASS, incluidos
+  agregación, fixtures, Java 25, caché y bloqueos deliberados en la copia desechable.
+- `./gradlew :domain:dependencies --configuration runtimeClasspath
+  packageReleaseAppImage --no-daemon`: correcto en 8 s; 20 tareas, dos ejecutadas
+  y 18 UP-TO-DATE. Se comprobó el grafo neutral indicado y se preparó la distribución
+  en `build/compose/binaries/main-release/app`. El nuevo JAR de dominio se verifica
+  en el staging y su classpath. No se generó un AppImage independiente con
+  appimagetool ni se ejecutaron MSI/EXE.
+- Catálogo contrastado con los 428 métodos y sus fuentes actuales, archivos de tipos,
+  imports neutrales, staging, enlaces añadidos/movidos y `git diff --check`: correctos.
+  El enlace README → LICENSE ya apuntaba a un archivo ausente en la base H2;
+  se distingue de los enlaces modificados y no se cambia en este hito.
+- Se conserva la limitación del plugin Detekt diagnosticada en H2. No se ejecutaron
+  cuentas cloud reales, UI gráfica, CI remoto ni Windows nativo. No se movieron
+  recursos/versiones ni se publicaron paquetes; H4–H8 siguen pendientes.
+
+**H3 completado técnicamente. Commit H3: pendiente de confirmación explícita.**
 
 ### H4 — Persistencia local y Google Drive
 

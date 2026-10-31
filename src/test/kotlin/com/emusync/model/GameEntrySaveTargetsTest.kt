@@ -1,5 +1,9 @@
 package com.emusync.model
 
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
 import java.io.File
 import kotlin.test.assertEquals
 import org.junit.jupiter.api.Test

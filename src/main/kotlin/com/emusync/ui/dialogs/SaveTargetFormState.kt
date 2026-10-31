@@ -3,9 +3,9 @@ package com.emusync.ui.dialogs
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.emusync.drive.remotePathSegments
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
+import com.emusync.domain.sync.remotePathSegments
 import java.io.File
 
 /** Keeps each save path, its chosen type and its cloud name aligned as rows are edited. */

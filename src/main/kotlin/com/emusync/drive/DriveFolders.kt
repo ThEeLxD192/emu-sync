@@ -1,5 +1,6 @@
 package com.emusync.drive
 
+import com.emusync.domain.sync.CloudFolderStore
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.delete
@@ -32,7 +33,7 @@ import kotlinx.serialization.Serializable
  *     └── Profile.dat
  * ```
  */
-class DriveFolders(private val client: HttpClient) {
+class DriveFolders(private val client: HttpClient) : CloudFolderStore {
 
     companion object {
         private const val FILES_URL = "https://www.googleapis.com/drive/v3/files"
@@ -69,7 +70,7 @@ class DriveFolders(private val client: HttpClient) {
      * @param pathSegments List of folder names representing the hierarchy under [ROOT_FOLDER_NAME].
      * @return The Drive folder ID of the leaf subfolder.
      */
-    suspend fun ensurePath(accessToken: String, pathSegments: List<String>): String {
+    override suspend fun ensurePath(accessToken: String, pathSegments: List<String>): String {
         var currentParentId = findOrCreateFolder(accessToken, ROOT_FOLDER_NAME, parentId = null)
         for (segment in pathSegments) {
             val trimmed = segment.trim()
@@ -85,7 +86,7 @@ class DriveFolders(private val client: HttpClient) {
      * Finds the folder ID for the given hierarchical path starting from [ROOT_FOLDER_NAME], or
      * returns null if any segment in the path does not exist on Drive.
      */
-    suspend fun findPath(accessToken: String, pathSegments: List<String>): String? {
+    override suspend fun findPath(accessToken: String, pathSegments: List<String>): String? {
         val root = searchFolder(accessToken, ROOT_FOLDER_NAME, parentId = null) ?: return null
         return findChildPath(accessToken, root.id, pathSegments)
     }
@@ -200,12 +201,12 @@ class DriveFolders(private val client: HttpClient) {
      * @param addParentId Optional new parent folder ID to add.
      * @param removeParentId Optional old parent folder ID to remove.
      */
-    suspend fun renameFolder(
+    override suspend fun renameFolder(
         accessToken: String,
         folderId: String,
         newName: String,
-        addParentId: String? = null,
-        removeParentId: String? = null,
+        addParentId: String?,
+        removeParentId: String?,
     ) {
         val escapedJsonName = newName.replace("\\", "\\\\").replace("\"", "\\\"")
         val metadata = """{"name": "$escapedJsonName"}"""
@@ -232,7 +233,7 @@ class DriveFolders(private val client: HttpClient) {
     }
 
     /** Moves a file between folders on Google Drive. */
-    suspend fun moveFile(
+    override suspend fun moveFile(
         accessToken: String,
         fileId: String,
         addParentId: String,

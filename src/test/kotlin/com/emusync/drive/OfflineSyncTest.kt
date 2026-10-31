@@ -1,11 +1,13 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.EmulatorSystem
 import com.emusync.model.AppConfig
-import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
+import com.emusync.ui.createSaveSynchronizer
+import com.emusync.ui.playWithSync
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respondError
@@ -138,7 +140,7 @@ class OfflineSyncTest {
 
         val statuses = mutableListOf<AppStatus>()
         val orchestrator =
-            SyncOrchestrator(
+            createSaveSynchronizer(
                 client = mockClient,
                 config = config,
                 configManager = configManager,

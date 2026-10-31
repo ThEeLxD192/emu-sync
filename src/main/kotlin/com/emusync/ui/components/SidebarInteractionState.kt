@@ -10,7 +10,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.emusync.model.GameEntry
+import com.emusync.domain.library.GameEntry
 import kotlin.math.roundToInt
 
 private const val DRAGGED_ROW_Z_INDEX = 10f

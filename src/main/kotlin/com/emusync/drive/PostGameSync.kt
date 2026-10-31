@@ -1,8 +1,9 @@
 package com.emusync.drive
 
-import com.emusync.model.SaveTarget as ConfiguredSaveTarget
-import com.emusync.ui.AppStatus
-import com.emusync.ui.GameItem
+import com.emusync.domain.library.SaveTarget as ConfiguredSaveTarget
+import com.emusync.domain.sync.PostSyncFailure
+import com.emusync.domain.sync.SyncEvent
+import com.emusync.domain.sync.SyncGame
 import java.io.File
 import java.util.logging.Level
 
@@ -35,17 +36,17 @@ internal class PostGameSync(
         }
     }
 
-    suspend fun uploadAfterPlay(item: GameItem, syncTargets: List<ConfiguredSaveTarget>): Boolean =
+    suspend fun uploadAfterPlay(item: SyncGame, syncTargets: List<ConfiguredSaveTarget>): Boolean =
         uploadBatch(item, syncTargets, null, UploadSummary(0, emptyList()), syncTargets)
 
     private suspend fun uploadBatch(
-        item: GameItem,
+        item: SyncGame,
         syncTargets: List<ConfiguredSaveTarget>,
         retryTargets: List<SaveUploadTarget>?,
         summary: UploadSummary,
         mappingTargets: List<ConfiguredSaveTarget>,
     ): Boolean {
-        context.onStatus(AppStatus.Syncing("Uploading saves for ${item.effectiveTitle}..."))
+        context.onStatus(SyncEvent.Syncing("Uploading saves for ${item.effectiveTitle}..."))
         recoverDriveFailure(
             action = {
                 // Games can outlive an access token. Authorize again before uploading.
@@ -66,7 +67,7 @@ internal class PostGameSync(
             },
             recover = { failure ->
                 if (failure is SaveTargetMappingException) {
-                    context.onStatus(AppStatus.Error(failure.message ?: "Invalid save mapping"))
+                    context.onStatus(SyncEvent.Error(failure.message ?: "Invalid save mapping"))
                     return false
                 }
                 summary.configured += syncTargets.filterNot { it in summary.configured }
@@ -78,7 +79,7 @@ internal class PostGameSync(
     }
 
     private suspend fun uploadRetries(
-        item: GameItem,
+        item: SyncGame,
         targets: List<SaveUploadTarget>,
         session: UploadSession,
         summary: UploadSummary,
@@ -107,7 +108,7 @@ internal class PostGameSync(
     }
 
     private suspend fun uploadConfigured(
-        item: GameItem,
+        item: SyncGame,
         targets: List<ConfiguredSaveTarget>,
         mappingTargets: List<ConfiguredSaveTarget>,
         session: UploadSession,
@@ -142,14 +143,14 @@ internal class PostGameSync(
     }
 
     private fun finishUpload(
-        item: GameItem,
+        item: SyncGame,
         summary: UploadSummary,
         mappingTargets: List<ConfiguredSaveTarget>,
     ): Boolean {
         val blocked = summary.blockedReasons.distinct()
         return if (summary.configured.isEmpty() && summary.files.isEmpty()) {
-            if (blocked.isNotEmpty()) context.onStatus(AppStatus.Error(blocked.joinToString("\n")))
-            else context.onStatus(AppStatus.Idle)
+            if (blocked.isNotEmpty()) context.onStatus(SyncEvent.Error(blocked.joinToString("\n")))
+            else context.onStatus(SyncEvent.Idle)
             blocked.isEmpty()
         } else {
             reportFailure(item, summary, mappingTargets, blocked)
@@ -158,7 +159,7 @@ internal class PostGameSync(
     }
 
     private fun reportFailure(
-        item: GameItem,
+        item: SyncGame,
         summary: UploadSummary,
         mappingTargets: List<ConfiguredSaveTarget>,
         blocked: List<String>,
@@ -175,22 +176,22 @@ internal class PostGameSync(
             "Post-game Drive sync failed for {0}: {1}",
             arrayOf(item.effectiveTitle, reason),
         )
-        context.onStatus(
-            AppStatus.PostSyncFailed(
+        context.reportPostSyncFailure(
+            PostSyncFailure(
                 gameName = item.effectiveTitle,
                 reason = reason,
                 completedSaveCount = summary.completedCount,
                 pendingSaveCount = summary.configured.size + summary.files.size + blocked.size,
-                onRetry = {
-                    uploadBatch(
-                        item,
-                        summary.configured,
-                        summary.files,
-                        UploadSummary(summary.completedCount, blocked),
-                        mappingTargets,
-                    )
-                },
-            )
+            ),
+            retry = {
+                uploadBatch(
+                    item,
+                    summary.configured,
+                    summary.files,
+                    UploadSummary(summary.completedCount, blocked),
+                    mappingTargets,
+                )
+            },
         )
     }
 }

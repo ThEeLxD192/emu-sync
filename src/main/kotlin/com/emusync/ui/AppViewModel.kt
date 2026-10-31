@@ -1,13 +1,13 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.SaveTarget
 import com.emusync.drive.DriveClientFactory
 import com.emusync.drive.OAuthFlow
 import com.emusync.drive.SaveTargetMappingException
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.GameEntry
-import com.emusync.model.NativePCGame
-import com.emusync.model.SaveTarget
 import com.emusync.runner.GameRunner
 import com.emusync.steam.SteamShortcutManager
 import com.emusync.update.UpdateInfo

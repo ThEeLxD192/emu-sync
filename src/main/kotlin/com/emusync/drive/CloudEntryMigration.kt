@@ -1,11 +1,11 @@
 package com.emusync.drive
 
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.GameEntry
-import com.emusync.model.NativePCGame
-import com.emusync.model.SaveTarget as ConfiguredSaveTarget
-import com.emusync.model.effectiveCloudFolder
-import com.emusync.ui.AppStatus
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.SaveTarget as ConfiguredSaveTarget
+import com.emusync.domain.library.effectiveCloudFolder
+import com.emusync.domain.sync.SyncEvent
 import java.io.File
 import java.util.logging.Level
 
@@ -47,7 +47,7 @@ internal class CloudEntryMigration(
      *     - Refuses duplicate names and moves non-conflicting files with rollback on failure.
      *     - Keeps the old folder as a recovery location.
      *     - Performs conflict check between local save files and cloud saves in new folder.
-     *     - Prompts user with [AppStatus.Conflict] if needed so they decide local vs cloud.
+     *     - Prompts user with [SyncEvent.Conflict] if needed so they decide local vs cloud.
      */
     suspend fun renameGameCloudData(
         entry: GameEntry,
@@ -64,7 +64,7 @@ internal class CloudEntryMigration(
 
         return recoverDriveFailure(
             action = {
-                onStatus(AppStatus.Syncing("Checking cloud folder for $newTitle..."))
+                onStatus(SyncEvent.Syncing("Checking cloud folder for $newTitle..."))
                 val token = authorizeRename()
                 if (token == null) false
                 else
@@ -77,7 +77,7 @@ internal class CloudEntryMigration(
                     )
             },
             recover = { e ->
-                onStatus(AppStatus.Error("Cloud rename error: ${e.message}"))
+                onStatus(SyncEvent.Error("Cloud rename error: ${e.message}"))
                 false
             },
         )
@@ -98,9 +98,9 @@ internal class CloudEntryMigration(
             // Case 1: Old folder exists, but new folder does NOT exist yet -> Rename old
             // folder!
             oldFolderId != null && newFolderId == null -> {
-                onStatus(AppStatus.Syncing("Renaming cloud folder to $newTitle..."))
+                onStatus(SyncEvent.Syncing("Renaming cloud folder to $newTitle..."))
                 folderMigrator.migrate(token, oldCloudPath, newCloudPath)
-                onStatus(AppStatus.Idle)
+                onStatus(SyncEvent.Idle)
                 true
             }
 
@@ -108,7 +108,7 @@ internal class CloudEntryMigration(
             // conflict
             // and let user decide!
             newFolderId != null -> {
-                onStatus(AppStatus.Syncing("Checking cloud files in $newTitle..."))
+                onStatus(SyncEvent.Syncing("Checking cloud files in $newTitle..."))
 
                 // Preflight duplicates before moving anything or changing local saves.
                 if (oldFolderId != null && oldFolderId != newFolderId) {
@@ -118,13 +118,13 @@ internal class CloudEntryMigration(
                 // Now check conflict between local save paths and newFolderId
                 syncRenamedFolder(token, entry, newTitle, localSaveTargets, newFolderId)
 
-                onStatus(AppStatus.Idle)
+                onStatus(SyncEvent.Idle)
                 true
             }
 
             // Case 3: Neither old nor new folder exists in Drive
             else -> {
-                onStatus(AppStatus.Idle)
+                onStatus(SyncEvent.Idle)
                 true
             }
         }
@@ -176,7 +176,7 @@ internal class CloudEntryMigration(
         recoverDriveFailure(
             action = { oauthFlow.authorize(config, configManager, allowInteractive = false) },
             recover = { failure ->
-                onStatus(AppStatus.Error("Drive authentication failed: ${failure.message}"))
+                onStatus(SyncEvent.Error("Drive authentication failed: ${failure.message}"))
                 null
             },
         )
@@ -216,7 +216,7 @@ internal class CloudEntryMigration(
                 }
         if (shared) {
             onStatus(
-                AppStatus.Error(
+                SyncEvent.Error(
                     "The cloud folder '${oldPath.joinToString("/")}' is shared with another entry. " +
                         "Keep the existing cloud folder when editing this entry to protect their saves."
                 )
@@ -234,15 +234,15 @@ internal class CloudEntryMigration(
     ): Boolean {
         return recoverDriveFailure(
             action = {
-                onStatus(AppStatus.Syncing("Moving cloud saves for ${newEntry.name}..."))
+                onStatus(SyncEvent.Syncing("Moving cloud saves for ${newEntry.name}..."))
                 val token = oauthFlow.authorize(config, configManager, allowInteractive = false)
                 folderMigrator.migrate(token, oldPath, newPath)
-                onStatus(AppStatus.Idle)
+                onStatus(SyncEvent.Idle)
                 true
             },
             recover = { e ->
                 logger.log(Level.WARNING, "Cloud entry migration failed", e)
-                onStatus(AppStatus.Error("Cloud rename error: ${e.message}"))
+                onStatus(SyncEvent.Error("Cloud rename error: ${e.message}"))
                 false
             },
         )

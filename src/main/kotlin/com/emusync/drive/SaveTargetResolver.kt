@@ -1,88 +1,54 @@
 package com.emusync.drive
 
-import com.emusync.drive.SyncOrchestrator.SaveTarget
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.GameEntry
-import com.emusync.model.NativePCGame
-import com.emusync.model.effectiveCloudFolder
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.effectiveCloudFolder
+import com.emusync.domain.sync.SyncGame
+import com.emusync.domain.sync.cloudPathSegments
+import com.emusync.domain.sync.sanitizeCloudFolderName
 import com.emusync.model.effectiveSaveTargets
 import com.emusync.model.effectiveSaveTargetsForRom
-import com.emusync.ui.GameItem
 import java.io.File
 
 internal class SaveTargetResolver {
-    fun sanitizeCloudFolderName(name: String): String {
-        return name.replace('/', '-').replace('\\', '-').trim().ifBlank { "Unknown" }
-    }
-
     fun getCloudPathSegments(
         entry: GameEntry,
         romName: String? = null,
         gameTitle: String? = null,
-    ): List<String> {
-        val baseFolder = entry.effectiveCloudFolder
-        return when (entry) {
-            is EmulatorSystem -> {
-                val globalPaths =
-                    entry
-                        .effectiveSaveTargets()
-                        .map { normalizeSavePath(it.path) to it.cloudPath }
-                        .toSet()
-                val romPaths =
-                    romName
-                        ?.let { name ->
-                            entry.effectiveSaveTargetsForRom(name)
-                        }
-                        .orEmpty()
-                val hasDistinctRomPath = romPaths.any {
-                    (normalizeSavePath(it.path) to it.cloudPath) !in globalPaths
-                }
+    ): List<String> =
+        cloudPathSegments(
+            entry,
+            romName,
+            gameTitle,
+            entry.effectiveSaveTargets(),
+            (entry as? EmulatorSystem)
+                ?.let { system -> romName?.let { system.effectiveSaveTargetsForRom(it) } }
+                .orEmpty(),
+        )
 
-                // A configured global save path uses the emulator folder unless this ROM has
-                // a real, distinct path of its own. Empty or copied global-path entries are
-                // legacy per-ROM override records, not per-game save configuration.
-                if (romName != null && (hasDistinctRomPath || globalPaths.isEmpty())) {
-                    val title = gameTitle ?: entry.getEffectiveTitle(romName, romName)
-                    listOf(baseFolder, sanitizeCloudFolderName(title))
-                } else {
-                    listOf(baseFolder)
-                }
-            }
-            is NativePCGame -> {
-                if (entry.group != null && entry.cloudFolder == null) {
-                    listOf(baseFolder, sanitizeCloudFolderName(entry.name))
-                } else {
-                    listOf(baseFolder)
-                }
-            }
-        }
-    }
-
-    private fun normalizeSavePath(path: String): String =
-        path.trim().replace('\\', '/').trimEnd('/').ifBlank { "/" }
-
-    fun getCloudPathSegments(item: GameItem): List<String> {
-        val romName = item.romFile?.name ?: item.name
+    fun getCloudPathSegments(item: SyncGame): List<String> {
+        val romName = item.romPath?.let { File(it).name } ?: item.name
         return getCloudPathSegments(item.entry, romName, item.effectiveTitle)
     }
 
-    fun getSaveTargets(entry: GameEntry): List<SaveTarget> {
+    fun getSaveTargets(entry: GameEntry): List<ResolvedSaveTarget> {
         return when (entry) {
             is NativePCGame -> {
                 val cloudPath = getCloudPathSegments(entry)
                 entry.effectiveSaveTargets().map {
-                    SaveTarget(File(it.path), it.type, cloudPath, entry.name, it.cloudPath)
+                    ResolvedSaveTarget(File(it.path), it.type, cloudPath, entry.name, it.cloudPath)
                 }
             }
             is EmulatorSystem -> {
-                val targets = mutableListOf<SaveTarget>()
+                val targets = mutableListOf<ResolvedSaveTarget>()
 
                 // 1. Global emulator save paths (if any)
                 if (entry.effectiveSaveTargets().isNotEmpty()) {
                     val globalPath = listOf(entry.effectiveCloudFolder)
                     for (target in entry.effectiveSaveTargets()) {
                         targets.add(
-                            SaveTarget(
+                            ResolvedSaveTarget(
                                 File(target.path),
                                 target.type,
                                 globalPath,
@@ -101,7 +67,7 @@ internal class SaveTargetResolver {
                         listOf(entry.effectiveCloudFolder, sanitizeCloudFolderName(title))
                     for (target in entry.effectiveSaveTargetsForRom(romName)) {
                         targets.add(
-                            SaveTarget(
+                            ResolvedSaveTarget(
                                 File(target.path),
                                 target.type,
                                 romCloudPath,
@@ -115,10 +81,5 @@ internal class SaveTargetResolver {
                 targets.distinctBy { it.file.absolutePath to it.cloudPath }
             }
         }
-    }
-
-    /** Helper to retrieve all configured save paths for an entry. */
-    fun getAllSavePaths(entry: GameEntry): List<File> {
-        return getSaveTargets(entry).map { it.file }
     }
 }

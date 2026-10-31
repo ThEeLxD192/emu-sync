@@ -1,13 +1,13 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.NativePCGame
+import com.emusync.domain.library.effectiveCloudFolder
 import com.emusync.drive.MigrationDrive
 import com.emusync.model.AppConfig
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.GameEntry
 import com.emusync.model.GoogleDriveConfig
-import com.emusync.model.NativePCGame
-import com.emusync.model.effectiveCloudFolder
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

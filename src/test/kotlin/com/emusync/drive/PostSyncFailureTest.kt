@@ -1,13 +1,16 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetType
+import com.emusync.domain.sync.SyncDecision
 import com.emusync.model.AppConfig
-import com.emusync.model.EmulatorSystem
 import com.emusync.model.GoogleDriveConfig
-import com.emusync.model.SaveTarget
-import com.emusync.model.SaveTargetType
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
+import com.emusync.ui.createSaveSynchronizer
+import com.emusync.ui.playWithSync
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -118,7 +121,7 @@ class PostSyncFailureTest {
                 }
             }
         val statuses = mutableListOf<AppStatus>()
-        val orchestrator = SyncOrchestrator(client, config, configManager, statuses::add)
+        val orchestrator = createSaveSynchronizer(client, config, configManager, statuses::add)
 
         orchestrator.playWithSync(GameItem("Game", entry, rom))
 
@@ -252,7 +255,7 @@ class PostSyncFailureTest {
                 }
             }
         val statuses = mutableListOf<AppStatus>()
-        val orchestrator = SyncOrchestrator(client, config, configManager, statuses::add)
+        val orchestrator = createSaveSynchronizer(client, config, configManager, statuses::add)
 
         orchestrator.playWithSync(GameItem("Game", entry, rom))
 
@@ -462,7 +465,7 @@ class PostSyncFailureTest {
             }
         val statuses = mutableListOf<AppStatus>()
         val orchestrator =
-            SyncOrchestrator(client, config, configManager) { status ->
+            createSaveSynchronizer(client, config, configManager) { status ->
                 statuses += status
                 if (status is AppStatus.Conflict) {
                     val choice =

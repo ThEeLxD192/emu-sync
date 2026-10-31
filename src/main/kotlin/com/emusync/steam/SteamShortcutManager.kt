@@ -1,8 +1,8 @@
 package com.emusync.steam
 
-import com.emusync.model.EmulatorSystem
-import com.emusync.model.GameEntry
-import com.emusync.model.NativePCGame
+import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.NativePCGame
 import com.emusync.util.ArgumentsCodec
 import com.emusync.util.shellArgument
 import java.io.File

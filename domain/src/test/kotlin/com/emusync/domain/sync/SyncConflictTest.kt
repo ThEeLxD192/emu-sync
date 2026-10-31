@@ -1,4 +1,4 @@
-package com.emusync.drive
+package com.emusync.domain.sync
 
 import java.time.Instant
 import kotlin.test.assertEquals

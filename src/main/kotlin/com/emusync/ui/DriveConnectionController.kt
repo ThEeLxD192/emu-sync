@@ -1,9 +1,9 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.library.GameEntry
 import com.emusync.drive.OAuthFlow
 import com.emusync.model.AppConfig
-import com.emusync.model.GameEntry
 import com.emusync.model.GoogleDriveConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update

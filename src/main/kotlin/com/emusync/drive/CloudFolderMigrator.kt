@@ -1,12 +1,13 @@
 package com.emusync.drive
 
+import com.emusync.domain.sync.CloudFolderStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 /** Moves cloud data without overwriting duplicate names or deleting recovery copies. */
 internal class CloudFolderMigrator(
-    private val folders: DriveFolders,
+    private val folders: CloudFolderStore,
     private val search: DriveSearch,
 ) {
     suspend fun migrate(token: String, oldPath: List<String>, newPath: List<String>) {
