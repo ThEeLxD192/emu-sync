@@ -7,6 +7,7 @@ import com.emusync.steam.SteamShortcutManager
 import com.emusync.util.AppImageEnvironment
 import com.emusync.util.ArgumentsCodec
 import java.io.File
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -41,16 +42,18 @@ data class GameResult(
  * val result = runner.launch(gbaSystem, romFile = romFile, steamAppId = 123456)
  * ```
  */
-class GameRunner {
+class GameRunner(private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO) {
+    private val processes = ProcessMonitor()
+    private val tracker =
+        ExternalProcessTracker(processes::matchingProcessIds, processes::isSteamShaderCompiling)
 
-    private data class LaunchRequest(
-        val process: Process? = null,
-        val desktopHandoffSucceeded: Boolean = false,
-    )
+    companion object {
+        private const val STEAM_HANDOFF_DELAY_MS = 5_000L
+    }
 
     /** Opens an emulator's own interface without supplying a ROM or waiting for it to exit. */
-    suspend fun openEmulator(entry: EmulatorSystem) =
-        withContext(Dispatchers.IO) {
+    suspend fun openEmulator(entry: EmulatorSystem): Process =
+        withContext(ioDispatcher) {
             val command = buildList {
                 add(entry.executablePath)
                 addAll(entry.arguments.filterNot { it.contains("{ROM}") })
@@ -78,7 +81,7 @@ class GameRunner {
         romFile: File? = null,
         steamAppId: Int? = null,
     ): GameResult =
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             val startTime = System.currentTimeMillis()
 
             val success =
@@ -151,36 +154,9 @@ class GameRunner {
             )
         } else {
             // Fallback: wait a reasonable time if we can't detect the process
-            delay(5000)
+            delay(STEAM_HANDOFF_DELAY_MS)
             true
         }
-    }
-
-    /** Launches a steam:// URI in a cross-platform manner. */
-    private fun launchSteamUri(uri: String): LaunchRequest? {
-        val os = System.getProperty("os.name", "").lowercase()
-        try {
-            val process =
-                if (os.contains("win")) {
-                    ProcessBuilder("cmd", "/c", "start", uri).start()
-                } else {
-                    ProcessBuilder("steam", uri).start()
-                }
-            return LaunchRequest(process = process)
-        } catch (_: Exception) {
-            try {
-                if (
-                    java.awt.Desktop.isDesktopSupported() &&
-                        java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.BROWSE)
-                ) {
-                    java.awt.Desktop.getDesktop().browse(java.net.URI(uri))
-                    return LaunchRequest(desktopHandoffSucceeded = true)
-                }
-            } catch (_: Exception) {
-                // Ignore fallback failure
-            }
-        }
-        return null
     }
 
     /**
@@ -265,161 +241,57 @@ class GameRunner {
         exitPollIntervalMs: Long = 2_000L,
         reuseConfirmationDelayMs: Long = 1_000L,
     ): Boolean =
-        withContext(Dispatchers.IO) {
-            // Step 1: Wait for appearance (base timeout 60s, dynamically extended while Steam
-            // shaders compile)
-            val trackedProcessIds = mutableSetOf<Long>()
-            var appeared = false
-            var appearanceStart = System.currentTimeMillis()
-            var successfulLaunchRequestAt: Long? = null
-
-            while (System.currentTimeMillis() - appearanceStart < appearanceTimeoutMs) {
-                val newMatches = matchingProcessIds(processName) - existingProcessIds
-                if (newMatches.isNotEmpty()) {
-                    trackedProcessIds += newMatches
-                    appeared = true
-                    break
-                }
-
-                val launchExitCode =
-                    if (launchRequest?.isAlive == false) {
-                        runCatching { launchRequest.exitValue() }.getOrNull()
-                    } else {
-                        null
-                    }
-                if (launchRequest?.isAlive == false) {
-                    when {
-                        launchExitCode == null -> Unit
-                        launchExitCode != 0 -> break
-                    }
-                }
-
-                if (launchHandoffSucceeded || launchExitCode == 0) {
-                    val now = System.currentTimeMillis()
-                    val confirmedAt =
-                        successfulLaunchRequestAt ?: now.also { successfulLaunchRequestAt = it }
-                    if (now - confirmedAt >= reuseConfirmationDelayMs) {
-                        val reusedMatches =
-                            matchingProcessIds(processName).intersect(existingProcessIds)
-                        if (reusedMatches.isNotEmpty()) {
-                            trackedProcessIds += reusedMatches
-                            appeared = true
-                            break
-                        }
-                    }
-                } else {
-                    successfulLaunchRequestAt = null
-                }
-
-                // If Steam is compiling Vulkan shaders in the background, reset timeout window
-                if (isSteamShaderCompiling()) {
-                    appearanceStart = System.currentTimeMillis()
-                }
-
-                kotlinx.coroutines.delay(pollIntervalMs)
-            }
-
-            // Step 2: Wait for disappearance (indefinite, only if the process appeared)
-            if (trackedProcessIds.isNotEmpty()) {
-                while (true) {
-                    val activeMatches =
-                        matchingProcessIds(processName).filterTo(mutableSetOf()) {
-                            it !in existingProcessIds || it in trackedProcessIds
-                        }
-                    trackedProcessIds += activeMatches
-                    trackedProcessIds.removeIf { pid ->
-                        ProcessHandle.of(pid).map { it.isAlive }.orElse(false).not()
-                    }
-                    if (trackedProcessIds.isEmpty()) break
-                    kotlinx.coroutines.delay(exitPollIntervalMs)
-                }
-            }
-            appeared
+        withContext(ioDispatcher) {
+            tracker.waitForProcess(
+                ProcessLaunch(
+                    processName,
+                    existingProcessIds,
+                    launchRequest,
+                    launchHandoffSucceeded,
+                ),
+                ProcessPolling(
+                    appearanceTimeoutMs,
+                    pollIntervalMs,
+                    exitPollIntervalMs,
+                    reuseConfirmationDelayMs,
+                ),
+            )
         }
 
-    /**
-     * Checks if Steam's Vulkan shader pre-compilation tool (fossilize_replay) is currently active.
-     */
-    internal fun isSteamShaderCompiling(): Boolean {
-        return isProcessRunning("fossilize_replay") || isProcessRunning("fossilize_replay64")
-    }
+    internal fun isSteamShaderCompiling(): Boolean = processes.isSteamShaderCompiling()
 
-    /**
-     * Checks if a process with [name] is currently running on the system.
-     *
-     * Uses Java 9+ [ProcessHandle] as the primary cross-platform mechanism (Windows, Linux, macOS).
-     * Falls back to platform-specific CLI tools (tasklist on Windows, pgrep on Linux/macOS) if
-     * needed.
-     */
-    internal fun isProcessRunning(name: String): Boolean {
-        val cleanName = name.trim().removeSurrounding("\"")
-        if (cleanName.isBlank()) return false
-        try {
-            return matchingProcessIds(cleanName).isNotEmpty()
-        } catch (_: Exception) {
-            // Proceed to fallback
-        }
+    internal fun isProcessRunning(name: String): Boolean = processes.isProcessRunning(name)
 
-        // 2. OS-specific fallback CLI tools
-        return fallbackProcessCheck(cleanName)
-    }
+    internal fun matchingProcessIds(name: String): Set<Long> = processes.matchingProcessIds(name)
+}
 
-    internal fun matchingProcessIds(name: String): Set<Long> {
-        val cleanName = File(name.trim().removeSurrounding("\"")).name
-        if (cleanName.isBlank()) return emptySet()
-        val targetWithoutExtension = File(cleanName).nameWithoutExtension
+private data class LaunchRequest(
+    val process: Process? = null,
+    val desktopHandoffSucceeded: Boolean = false,
+)
 
-        return ProcessHandle.allProcesses()
-            .filter { it.isAlive && processMatches(it, cleanName, targetWithoutExtension) }
-            .map { it.pid() }
-            .toList()
-            .toSet()
-    }
-
-    private fun processMatches(
-        handle: ProcessHandle,
-        targetName: String,
-        targetWithoutExtension: String,
-    ): Boolean {
-        val info = handle.info()
-        val commandName = info.command().orElse(null)?.let { File(it).name }
-        if (
-            commandName != null &&
-                (commandName.equals(targetName, ignoreCase = true) ||
-                    File(commandName)
-                        .nameWithoutExtension
-                        .equals(targetWithoutExtension, ignoreCase = true))
-        )
-            return true
-
-        return info.arguments().orElse(emptyArray()).any { argument ->
-            val argumentName = File(argument.trim().removeSurrounding("\"")).name
-            argumentName.equals(targetName, ignoreCase = true) ||
-                File(argumentName)
-                    .nameWithoutExtension
-                    .equals(targetWithoutExtension, ignoreCase = true)
-        }
-    }
-
-    private fun fallbackProcessCheck(cleanName: String): Boolean {
-        val os = System.getProperty("os.name", "").lowercase()
-        return try {
+/** Launches a steam:// URI in a cross-platform manner. */
+private fun launchSteamUri(uri: String): LaunchRequest? {
+    val os = System.getProperty("os.name", "").lowercase()
+    try {
+        val process =
             if (os.contains("win")) {
-                val targetExe =
-                    if (cleanName.endsWith(".exe", ignoreCase = true)) cleanName
-                    else "$cleanName.exe"
-                val pb = ProcessBuilder("tasklist", "/FI", "IMAGENAME eq $targetExe", "/NH")
-                val process = pb.start()
-                val output = process.inputStream.bufferedReader().readText()
-                process.waitFor()
-                output.contains(targetExe, ignoreCase = true)
+                ProcessBuilder("cmd", "/c", "start", uri).start()
             } else {
-                val process =
-                    ProcessBuilder("pgrep", "-x", File(cleanName).nameWithoutExtension).start()
-                process.waitFor() == 0
+                ProcessBuilder("steam", uri).start()
             }
+        return LaunchRequest(process = process)
+    } catch (_: Exception) {
+        return try {
+            if (
+                java.awt.Desktop.isDesktopSupported() &&
+                    java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.BROWSE)
+            ) {
+                java.awt.Desktop.getDesktop().browse(java.net.URI(uri))
+                LaunchRequest(desktopHandoffSucceeded = true)
+            } else null
         } catch (_: Exception) {
-            false
+            null
         }
     }
 }

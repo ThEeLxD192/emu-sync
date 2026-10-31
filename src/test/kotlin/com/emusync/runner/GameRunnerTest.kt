@@ -5,7 +5,12 @@ import com.emusync.model.NativePCGame
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -34,12 +39,7 @@ class GameRunnerTest {
             )
 
         runner.openEmulator(emulator)
-        // A real child process needs wall-clock time; runTest's virtual delays do not wait for it.
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            kotlinx.coroutines.withTimeout(3_000) {
-                while (!argsFile.exists()) kotlinx.coroutines.delay(20)
-            }
-        }
+        awaitArgumentsFile(argsFile)
 
         assertEquals("--gui", argsFile.readText().trim())
     }
@@ -230,12 +230,7 @@ class GameRunnerTest {
         val existingGame = ProcessBuilder(gameScript.absolutePath, "1.2").start()
 
         try {
-            var existingProcessIds = emptySet<Long>()
-            for (attempt in 0 until 50) {
-                existingProcessIds = runner.matchingProcessIds(gameScript.name)
-                if (existingProcessIds.isNotEmpty()) break
-                kotlinx.coroutines.delay(10)
-            }
+            val existingProcessIds = awaitProcessIds(gameScript.name)
             assertTrue(
                 existingProcessIds.isNotEmpty(),
                 "The existing game process should be detectable",
@@ -282,12 +277,7 @@ class GameRunnerTest {
             val existingGame = ProcessBuilder(gameScript.absolutePath, "1.2").start()
 
             try {
-                var existingProcessIds = emptySet<Long>()
-                for (attempt in 0 until 50) {
-                    existingProcessIds = runner.matchingProcessIds(gameScript.name)
-                    if (existingProcessIds.isNotEmpty()) break
-                    kotlinx.coroutines.delay(10)
-                }
+                val existingProcessIds = awaitProcessIds(gameScript.name)
                 assertTrue(
                     existingProcessIds.isNotEmpty(),
                     "The existing game process should be detectable",
@@ -334,12 +324,7 @@ class GameRunnerTest {
         val existingGame = ProcessBuilder(gameScript.absolutePath, "2").start()
 
         try {
-            var existingProcessIds = emptySet<Long>()
-            for (attempt in 0 until 50) {
-                existingProcessIds = runner.matchingProcessIds(gameScript.name)
-                if (existingProcessIds.isNotEmpty()) break
-                kotlinx.coroutines.delay(10)
-            }
+            val existingProcessIds = awaitProcessIds(gameScript.name)
             assertTrue(
                 existingProcessIds.isNotEmpty(),
                 "The existing game process should be detectable",
@@ -434,4 +419,29 @@ class GameRunnerTest {
             output.readBytes().decodeToString().split('\u0000').dropLast(1),
         )
     }
+
+    // Real child processes need wall-clock polling rather than runTest's virtual delays.
+    private suspend fun awaitArgumentsFile(
+        file: File,
+        ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ) =
+        withContext(ioDispatcher) {
+            withTimeout(3_000) {
+                while (!file.exists()) delay(20)
+            }
+        }
+
+    private suspend fun awaitProcessIds(
+        name: String,
+        ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ): Set<Long> =
+        withContext(ioDispatcher) {
+            var matches = runner.matchingProcessIds(name)
+            repeat(50) {
+                if (matches.isNotEmpty()) return@withContext matches
+                delay(10)
+                matches = runner.matchingProcessIds(name)
+            }
+            matches
+        }
 }
