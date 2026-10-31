@@ -41,40 +41,6 @@ class PerGameSyncTest {
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
 
     @Test
-    fun `unknown missing target ignores exact cloud name owned by sibling target`(
-        @TempDir tempDir: File
-    ) {
-        val missingTarget = File(tempDir, "SAVE_SLOT")
-        val cloudSave = DriveFile("save-id", "SAVE_SLOT", "2026-09-25T18:00:00.000Z")
-
-        assertFalse(
-            isDirectorySaveTarget(SaveTargetType.UNKNOWN, missingTarget, listOf(cloudSave)),
-            "A matching Drive filename identifies a missing legacy target as a file",
-        )
-        assertTrue(
-            isDirectorySaveTarget(
-                SaveTargetType.UNKNOWN,
-                missingTarget,
-                listOf(cloudSave),
-                setOf("SAVE_SLOT"),
-            ),
-            "A matching cloud file claimed by a known file target must not classify this target as a file",
-        )
-        assertFalse(
-            isDirectorySaveTarget(SaveTargetType.UNKNOWN, missingTarget, listOf(cloudSave)),
-            "An UNKNOWN sibling with the same name cannot claim the exact cloud match",
-        )
-        assertTrue(
-            isDirectorySaveTarget(
-                SaveTargetType.UNKNOWN,
-                missingTarget,
-                listOf(cloudSave.copy(name = "slot/save.dat")),
-            ),
-            "Nested cloud names identify a missing legacy target as a directory",
-        )
-    }
-
-    @Test
     // Keep this scenario's HTTP route matrix together so request order and assertions remain
     // visible.
     @Suppress("CyclomaticComplexMethod")

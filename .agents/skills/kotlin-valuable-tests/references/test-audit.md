@@ -286,3 +286,46 @@ testFixtures, y sin avisos de errores de resolución de tipos. Hooks: nueve PASS
 Los comandos y límites completos están en [AGENTS.md](../../../../AGENTS.md). El staging
 Linux no equivale a un AppImage independiente ni a Windows nativo; no hay cuentas reales
 ni CI remoto. Los resultados de H1–H3 anteriores siguen siendo evidencia histórica.
+
+## Extracción H5 — casos de uso y límites de coordinación
+
+Fecha: 2026-10-31; base H4 `27d8eb1`. H5 mueve los flujos a application, con dominio
+como única dependencia de proyecto. Los servicios reciben capacidades prestadas;
+la composición y los propietarios HTTP siguen en la raíz hasta H7. No hay nuevas
+pruebas por el movimiento ni escenarios retirados.
+
+| Cambio de límite | Contrato, riesgo y protección conservada |
+| --- | --- |
+| CloudFile, listado y rutas locales neutrales | SaveTargetMappingTest, DirectorySyncTest, PerGameSyncTest y TrackedFileSyncTest conservan adaptadores reales, rutas anidadas, ownership, bytes, historial y recuperación. DriveFileListing traduce los metadatos y DesktopSaveAccess conserva observaciones, recorrido y resolución segura; application no ejecuta I/O concreto. |
+| Validación interna de destinos | Los dos casos de alias/archivo padre en SaveRestorePathsTest entran ahora por SaveSynchronizer.syncEntry, comprueban rechazo y ausencia de transferencias/escrituras. No requieren publicar el validador ni accesos especiales entre módulos. |
+| Reglas junto a application | Dos escenarios existentes pasan a SaveTargetClassificationTest y SaveTargetResolverTest con MemorySaveAccess: ruta ausente, reserva de nombres por hermanos y distinción de prefijos ROM/global. Se conservan sus expectativas y los escenarios de disco permanecen en raíz. |
+| Exclusión, revisión y cancelación | LibraryConcurrencyTest y UiCancellationTest siguen entrando por AppViewModel y verifican rechazo de operaciones simultáneas, propagación de cancelación, liberación del bloqueo y descarte de consultas viejas. OperationCoordinator y EntrySyncChecks poseen ahora esas garantías neutrales. |
+| Conflictos y reintentos | SyncResponsesTest conserva la solicitud exacta con eventos neutrales; PostSyncFailureTest conserva fallos parciales y reintento solo de destinos pendientes. Las integraciones de UI conservan el rechazo de callbacks antiguos y la respuesta de setup vinculada a su diálogo. |
+| Edición, migración y conexión | CloudFolderEditTest, CloudFolderMigrationTest, AppViewModelGameOverrideTest y DriveConnectionTest conservan migración antes de persistir, rollback, carpetas compartidas, overrides, revisión OAuth y resultados tardíos. Las excepciones de migración son neutrales SaveSyncException; las pruebas conservan razón y efectos observables. |
+| Actualizaciones | UpdateConcurrencyTest conserva descarga única, consulta tardía, cancelación/reintento, limpieza, tamaño esperado y bloqueo de reinicio durante juego. La restauración compara el valor visual anterior al traducir desde UpdateState; la comprobación de consulta tardía mantiene la identidad visual para detectar reemplazos. Transporte/instalación siguen cubiertos con implementaciones reales en la raíz hasta H6. |
+
+Balance H5: **430 métodos, 431 casos JUnit, 67 suites y nueve fixtures en 76 archivos
+Kotlin**. No se añade ni retira ningún escenario. El catálogo mueve únicamente las
+dos filas de reglas a sus fuentes nuevas; las integraciones permanecen localizables.
+
+La comprobación afectada de Drive/UI y application pasó en 28 s (88 tareas: 36
+ejecutadas, 52 UP-TO-DATE). El cierre `./gradlew spotlessApply check
+:application:dependencies --configuration runtimeClasspath packageReleaseAppImage
+--no-daemon` pasó en 58 s (113 tareas: 12 ejecutadas, 101 UP-TO-DATE). Ejecutó raíz:
+308 casos, 306 aprobados y dos omitidos PowerShell, 11,548 s JUnit. Application (dos,
+0,077 s), dominio (50, 0,376 s), local (31, 0,546 s) y Drive (40, 3,841 s)
+reutilizaron resultados correctos de las comprobaciones afectadas de esta integración.
+Evidencia vigente combinada: 429 aprobados, cero fallos/errores y dos omitidos;
+no son 431 ejecuciones nuevas en el cierre.
+
+Once SARIF limpios, incluido testFixtures de Drive. Main/test de raíz ejecutados;
+los módulos reutilizaron sus análisis recientes limpios. Hooks: nueve PASS;
+convenciones: cuatro PASS. Sin supresiones nuevas ni reglas relajadas. Los errores
+de compilación por imports y los hallazgos estructurales intermedios quedaron
+corregidos antes de ese cierre. El grafo application carece de Compose, Ktor,
+serialización, adaptadores y dependencia de raíz. El staging incluye su JAR y
+classpath, sin fixtures ni clases de sync duplicadas en raíz.
+
+Comandos, propietarios y limitaciones completos en [AGENTS.md](../../../../AGENTS.md).
+No se ejecutaron Windows nativo, UI gráfica, cuentas reales, Docker o CI remoto,
+ni se generó AppImage independiente. H6–H8 siguen pendientes.

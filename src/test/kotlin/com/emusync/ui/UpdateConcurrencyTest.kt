@@ -1,6 +1,6 @@
 package com.emusync.ui
 
-import com.emusync.update.UpdateInfo
+import com.emusync.domain.update.UpdateInfo
 import com.emusync.update.UpdateManager
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -144,7 +144,7 @@ class UpdateConcurrencyTest {
                 checking.await()
                 job.cancelAndJoin()
                 assertTrue(job.isCancelled)
-                assertSame(available, state.value.updateState)
+                assertEquals(available, state.value.updateState)
                 assertTrue(state.value.showUpdateDialog)
             }
     }

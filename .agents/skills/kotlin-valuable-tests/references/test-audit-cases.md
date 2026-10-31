@@ -22,6 +22,9 @@ H4 añade solo la compatibilidad literal del historial y la revisión del almac�
 credenciales inyectado; no retira escenarios. Las integraciones
 que observan `AppStatus` usan ahora el adaptador de presentación; el caso nuevo de
 respuestas a conflictos consume `SaveSynchronizer` y eventos neutrales directamente.
+Tras H5 se conservan esos 430 métodos y 431 casos en 67 suites y 76 archivos Kotlin
+(nueve fixtures): dos escenarios de reglas pasan a application; las integraciones
+con adaptadores siguen en la raíz hasta desktopApp.
 
 ## data/local/config/ConfigLocationTest.kt
 
@@ -250,13 +253,12 @@ Riesgo: alta: abrir login interactivo offline, borrar un token válido o ocultar
 
 ## drive/PerGameSyncTest.kt
 
-Fuente: [PerGameSyncTest.kt](../../../../src/test/kotlin/com/emusync/drive/PerGameSyncTest.kt). Punto de entrada: `SaveTargetResolver / SyncOrchestrator.syncEntry / playWithSync / renameGameCloudData`.
+Fuente: [PerGameSyncTest.kt](../../../../src/test/kotlin/com/emusync/drive/PerGameSyncTest.kt). Punto de entrada: `SyncOrchestrator.syncEntry / playWithSync / renameGameCloudData`.
 Nivel: reglas e integración de flujo. Dobles/límites: MockEngine, archivos temporales y callbacks de conflicto/configuración/lanzamiento.
 Riesgo: crítica: subir datos de otro juego, aplanar rutas o lanzar tras cancelar la restauración.
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
-| `unknown missing target ignores exact cloud name owned by sibling target` | conservar: garantía observable específica de este escenario |
 | `syncEntry uploads individual game saves into game subfolder on Google Drive` | conservar: garantía observable específica de este escenario |
 | `playWithSync postSync uploads into game-scoped subfolder` | conservar: garantía observable específica de este escenario |
 | `renameGameCloudData renames cloud folder when destination does not exist yet` | conservar: garantía observable específica de este escenario |
@@ -321,7 +323,6 @@ Riesgo: crítica: confundir prefijos portables, reclamar archivos no asignados o
 | `directory restore rejects a remote file that is also a parent path` | conservar: garantía observable específica de este escenario |
 | `legacy target migration preserves cloud paths globally and per ROM` | conservar: garantía observable específica de este escenario |
 | `loading legacy directories keeps their original flat cloud layout` | conservar: garantía observable específica de este escenario |
-| `ROM mapping with a different cloud prefix is distinct from the global fallback` | conservar: garantía observable específica de este escenario |
 | `individual nested restore keeps exact keys before play and when uploading` | conservar: garantía observable específica de este escenario |
 | `two missing directory roots restore identical relative names to their own destinations` | conservar: garantía observable específica de este escenario |
 | `saved mapping survives changing local paths and reversing directory order` | conservar: garantía observable específica de este escenario |
@@ -1041,3 +1042,28 @@ Riesgo: crítica: aceptar un token de una conexión reemplazada aunque sus crede
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
 | `refresh rejects a changed store revision even when credential values are identical` | añadir en H4: sustituye la conexión durante HTTP y exige rechazo, una sola petición y credenciales conservadas |
+
+## application/sync/SaveTargetClassificationTest.kt
+
+Fuente: [SaveTargetClassificationTest.kt](../../../../application/src/test/kotlin/com/emusync/application/sync/SaveTargetClassificationTest.kt). Punto de entrada: `SaveTargetMapping.isDirectorySaveTarget`.
+Nivel: regla de clasificación. Dobles/límites: MemorySaveAccess declara una ruta ausente sin I/O.
+Riesgo: crítica: interpretar como archivo un directorio cuyo nombre remoto pertenece a otro destino.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `unknown missing target ignores exact cloud name owned by sibling target` | trasladar de PerGameSyncTest en H5: mismas cuatro expectativas de propiedad y tipo; sin necesidad de disco |
+
+## application/sync/SaveTargetResolverTest.kt
+
+Fuente: [SaveTargetResolverTest.kt](../../../../application/src/test/kotlin/com/emusync/application/sync/SaveTargetResolverTest.kt). Punto de entrada: `SaveTargetResolver.getCloudPathSegments / getSaveTargets`.
+Nivel: regla de destinos. Dobles/límites: MemorySaveAccess con rutas ausentes y tipos explícitos.
+Riesgo: crítica: perder el destino de una ROM al compartir ruta local con un destino global.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `ROM mapping with a different cloud prefix is distinct from the global fallback` | trasladar de SaveTargetMappingTest en H5: conserva ruta remota y ambos prefijos independientes |
+
+Fixture H5: [MemorySaveAccess.kt](../../../../application/src/test/kotlin/com/emusync/application/sync/MemorySaveAccess.kt)
+representa exclusivamente observaciones de rutas ausentes. Sus dos consumidores anteriores
+no prueban disco, symlinks ni inferencia real; esas garantías siguen en las integraciones
+de SaveRestorePathsTest, SaveTargetMappingTest y TrackedFileSyncTest con DesktopSaveAccess.

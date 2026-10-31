@@ -1,191 +1,92 @@
 package com.emusync.ui
 
+import com.emusync.application.library.EditLibrary
+import com.emusync.application.library.EntryEditResult
+import com.emusync.application.library.GameOverrideChanges
+import com.emusync.composition.composeSaveSynchronizer
 import com.emusync.config.ConfigManager
-import com.emusync.domain.config.AppConfig
-import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
+import com.emusync.domain.sync.SaveSynchronizer
+import com.emusync.domain.sync.SaveSynchronizerFactory
+import com.emusync.domain.sync.SyncEvent
+import com.emusync.steam.DesktopSteamLibrary
 import com.emusync.steam.SteamShortcutManager
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 
-internal data class EntryEditCallbacks(
-    val selectEntry: suspend (GameEntry) -> Unit,
-    val clearSelection: () -> Unit,
-    val publishStatus: (AppStatus) -> Unit,
-)
-
-/** Persists edits only after cloud migration succeeds, retaining unrelated concurrent edits. */
+/** Maps persisted library changes and neutral synchronization events to selection and UI state. */
 internal class EntryEditor(
     private val state: MutableStateFlow<AppUiState>,
-    private val configManager: ConfigManager,
-    private val client: HttpClient,
-    private val steamManager: SteamShortcutManager,
+    configManager: ConfigManager,
+    client: HttpClient,
+    steamManager: SteamShortcutManager,
     private val callbacks: EntryEditCallbacks,
 ) {
+    private val edits =
+        EditLibrary(
+            configManager,
+            SaveSynchronizerFactory { config, onStatus ->
+                // Conflict callbacks stay at the presentation boundary.
+                lateinit var sync: SaveSynchronizer
+                sync =
+                    composeSaveSynchronizer(client, config, configManager) { event ->
+                        callbacks.publishStatus(event.toUiStatus(sync))
+                        if (event !is SyncEvent.Error) onStatus(event)
+                    }
+                sync
+            },
+            DesktopSteamLibrary(steamManager),
+        ) { event ->
+            if (event is SyncEvent.Error) callbacks.publishStatus(AppStatus.Error(event.message))
+        }
+
     fun reorderEntries(fromIndex: Int, toIndex: Int) {
-        val cfg = state.value.config ?: return
-        val currentEntries = cfg.entries.toMutableList()
-        if (
-            fromIndex !in currentEntries.indices ||
-                toIndex !in currentEntries.indices ||
-                fromIndex == toIndex
-        ) {
-            return
-        }
-
-        val movedItem = currentEntries.removeAt(fromIndex)
-        currentEntries.add(toIndex, movedItem)
-
-        val updatedConfig = configManager.update { current ->
-            val byName = current.entries.associateBy { it.name }
-            val ordered = currentEntries.mapNotNull { byName[it.name] }
-            current.copy(
-                entries =
-                    ordered +
-                        current.entries.filter { candidate ->
-                            ordered.none { it.name == candidate.name }
-                        }
-            )
-        }
-        state.update { it.copy(config = updatedConfig) }
+        val config = state.value.config ?: return
+        val updated = edits.reorderEntries(config, fromIndex, toIndex)
+        state.update { it.copy(config = updated) }
     }
 
-    fun reorderEntriesList(newEntries: List<GameEntry>) {
-        val cfg = state.value.config ?: return
-        if (cfg.entries == newEntries) return
-
-        val updatedConfig = configManager.update { current ->
-            val byName = current.entries.associateBy { it.name }
-            val ordered = newEntries.mapNotNull { byName[it.name] }.distinctBy { it.name }
-            current.copy(
-                entries =
-                    ordered +
-                        current.entries.filter { candidate ->
-                            ordered.none { it.name == candidate.name }
-                        }
-            )
-        }
-        state.update { it.copy(config = updatedConfig) }
+    fun reorderEntriesList(entries: List<GameEntry>) {
+        if (state.value.config == null || state.value.config?.entries == entries) return
+        val updated = edits.reorderEntriesList(entries)
+        state.update { it.copy(config = updated) }
     }
 
     suspend fun addEntry(entry: GameEntry) {
-        if (state.value.config == null) return
-        if (
-            entry.name.isBlank() ||
-                state.value.config?.entries?.any { it.name == entry.name } == true
-        ) {
-            callbacks.publishStatus(
-                AppStatus.Error("Choose a non-empty category name that is not already in use.")
-            )
-            return
-        }
-        val updatedConfig = configManager.update { it.copy(entries = it.entries + entry) }
-        state.update { it.copy(config = updatedConfig) }
+        val config = state.value.config ?: return
+        val updated = edits.addEntry(config, entry) ?: return
+        state.update { it.copy(config = updated) }
         callbacks.selectEntry(entry)
     }
 
     fun deleteEntry(entry: GameEntry) {
         if (state.value.config == null) return
-        val updatedConfig = configManager.update { current ->
-            current.copy(entries = current.entries.filter { it.name != entry.name })
-        }
-        state.update { it.copy(config = updatedConfig) }
-        if (state.value.selectedEntry === entry || state.value.selectedEntry?.name == entry.name) {
-            callbacks.clearSelection()
-        }
+        val updated = edits.deleteEntry(entry)
+        state.update { it.copy(config = updated) }
+        if (state.value.selectedEntry?.name == entry.name) callbacks.clearSelection()
     }
 
     suspend fun editEntry(oldEntry: GameEntry, newEntry: GameEntry): Boolean {
         val config = state.value.config ?: return false
-        return if (validateEdit(config, oldEntry, newEntry)) {
-            val edited = preserveSharedCloudRoot(config, oldEntry, newEntry)
-            if (migrateEntry(config, oldEntry, edited)) {
-                publishEditedEntry(oldEntry, edited)
-                refreshSteamLauncher(edited)
-                true
-            } else false
-        } else false
+        return publish(oldEntry, edits.editEntry(config, oldEntry, newEntry))
     }
 
     suspend fun editGameOverride(game: GameItem, changes: GameOverrideChanges): Boolean {
-        val latestEntry =
-            state.value.config?.entries?.find { it.name == game.entry.name } ?: return false
-        val current = game.copy(entry = latestEntry)
-        val edited = buildGameEntry(current, changes)
-        return if (edited != null && migrateGameTitle(current, edited, changes))
-            editEntry(current.entry, edited)
-        else false
-    }
-
-    private fun validateEdit(config: AppConfig, oldEntry: GameEntry, newEntry: GameEntry): Boolean =
-        when {
-            config.entries.none { it.name == oldEntry.name } -> false
-            newEntry.name.isBlank() ||
-                config.entries.any { it.name != oldEntry.name && it.name == newEntry.name } -> {
-                callbacks.publishStatus(
-                    AppStatus.Error("Choose a non-empty category name that is not already in use.")
-                )
-                false
-            }
-            else -> true
-        }
-
-    private suspend fun migrateEntry(
-        config: AppConfig,
-        oldEntry: GameEntry,
-        edited: GameEntry,
-    ): Boolean =
-        if (config.cloudCredentials == null) true
+        val config = state.value.config ?: return false
+        val latest = config.entries.find { it.name == game.entry.name }
+        return if (latest == null) false
         else
-            createSaveSynchronizer(client, config, configManager, callbacks.publishStatus)
-                .renameEntryCloudData(oldEntry, edited)
-
-    private suspend fun publishEditedEntry(oldEntry: GameEntry, edited: GameEntry) {
-        val updated = configManager.update { current ->
-            current.copy(
-                entries = current.entries.map { if (it.name == oldEntry.name) edited else it }
-            )
-        }
-        state.update { it.copy(config = updated) }
-        if (
-            state.value.selectedEntry === oldEntry ||
-                state.value.selectedEntry?.name == oldEntry.name
-        )
-            callbacks.selectEntry(edited)
-    }
-
-    private fun refreshSteamLauncher(entry: GameEntry) {
-        if (entry.steamAppId != null)
-            recoverUiFailure(
-                action = {
-                    steamManager.registerEntry(entry)
-                    Unit
-                },
-                recover = { Unit },
+            publish(
+                latest,
+                edits.editGameOverride(config, game.copy(entry = latest).toSyncGame(), changes),
             )
     }
 
-    private suspend fun migrateGameTitle(
-        current: GameItem,
-        edited: GameEntry,
-        changes: GameOverrideChanges,
-    ): Boolean {
-        val oldTitle = current.effectiveTitle
-        val newTitle = current.copy(entry = edited).effectiveTitle
-        val config = state.value.config
-        return if (
-            newTitle == oldTitle || edited !is EmulatorSystem || config?.cloudCredentials == null
-        )
-            true
-        else
-            createSaveSynchronizer(client, config, configManager, callbacks.publishStatus)
-                .renameGameCloudData(
-                    entry = edited,
-                    romName = current.romFile?.name ?: current.name,
-                    oldTitle = oldTitle,
-                    newTitle = newTitle,
-                    localSaveTargets = changes.targets.ifEmpty { current.effectiveSaveTargets },
-                )
+    private suspend fun publish(oldEntry: GameEntry, result: EntryEditResult?): Boolean {
+        if (result == null) return false
+        state.update { it.copy(config = result.config) }
+        if (state.value.selectedEntry?.name == oldEntry.name) callbacks.selectEntry(result.entry)
+        return true
     }
 }

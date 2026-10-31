@@ -1,5 +1,6 @@
 package com.emusync.drive
 
+import com.emusync.composition.composeSaveSynchronizer
 import com.emusync.config.ConfigManager
 import com.emusync.domain.config.AppConfig
 import com.emusync.domain.config.OAuthCredentials
@@ -45,7 +46,7 @@ class SyncResponsesTest {
                 )
             val conflicts = Channel<SaveConflict>(Channel.UNLIMITED)
             val sync: SaveSynchronizer =
-                SyncOrchestrator(
+                composeSaveSynchronizer(
                     drive.client,
                     AppConfig(OAuthCredentials("client", "secret", "refresh"), listOf(entry)),
                     ConfigManager(File(directory, "config.json")),

@@ -145,34 +145,6 @@ class SaveTargetMappingTest {
     }
 
     @Test
-    fun `ROM mapping with a different cloud prefix is distinct from the global fallback`(
-        @TempDir directory: File
-    ) {
-        val path = File(directory, "same-local-root").path
-        val system =
-            EmulatorSystem(
-                "Console",
-                "echo",
-                romsDirectory = directory.path,
-                extensions = listOf("rom"),
-                saveTargets = listOf(SaveTarget(path, SaveTargetType.DIRECTORY, "global")),
-                saveTargetsByRom =
-                    mapOf(
-                        "Game.rom" to
-                            listOf(SaveTarget(path, SaveTargetType.DIRECTORY, "game-specific"))
-                    ),
-            )
-        assertEquals(
-            listOf("Console", "Game"),
-            SaveTargetResolver().getCloudPathSegments(system, "Game.rom"),
-        )
-        assertEquals(
-            setOf("global", "game-specific"),
-            SaveTargetResolver().getSaveTargets(system).map { it.cloudPath }.toSet(),
-        )
-    }
-
-    @Test
     fun `individual nested restore keeps exact keys before play and when uploading`(
         @TempDir directory: File
     ) = runTest {

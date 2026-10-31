@@ -37,9 +37,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.emusync.AppInfo
+import com.emusync.domain.update.UpdateInfo
 import com.emusync.ui.UpdateUiState
 import com.emusync.ui.theme.EmuSyncColors
-import com.emusync.update.UpdateInfo
 import java.io.File
 
 @Composable

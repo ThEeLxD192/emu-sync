@@ -1,18 +1,21 @@
 package com.emusync.ui
 
+import com.emusync.application.library.GameOverrideChanges
+import com.emusync.application.library.LoadLibrary
+import com.emusync.application.sync.SaveTargetMappingException
 import com.emusync.config.ConfigManager
 import com.emusync.domain.execution.BrowserLauncher
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.update.UpdateInfo
 import com.emusync.drive.DriveClientFactory
 import com.emusync.drive.OAuthFlow
-import com.emusync.drive.SaveTargetMappingException
 import com.emusync.runner.GameRunner
 import com.emusync.runner.openOAuthBrowser
+import com.emusync.steam.DesktopSteamLibrary
 import com.emusync.steam.SteamShortcutManager
-import com.emusync.update.UpdateInfo
 import com.emusync.update.UpdateManager
 import io.ktor.client.HttpClient
 import java.io.File
@@ -99,40 +102,8 @@ class AppViewModel(
         recoverUiFailure(
             action = {
                 _uiState.update { it.copy(status = AppStatus.Loading) }
-                val cfg = configManager.load()
-
-                val steamShortcuts = steamManager.migrateLegacyLaunchers(cfg.entries)
-                var configChanged = false
-                val synchronizedEntries =
-                    cfg.entries.map { entry ->
-                        val matchingShortcut = steamShortcuts.find {
-                            it.appName == "[EmuSync] ${entry.name}"
-                        }
-                        if (
-                            matchingShortcut != null && entry.steamAppId != matchingShortcut.appId
-                        ) {
-                            configChanged = true
-                            when (entry) {
-                                is EmulatorSystem -> entry.copy(steamAppId = matchingShortcut.appId)
-                                is NativePCGame -> entry.copy(steamAppId = matchingShortcut.appId)
-                            }
-                        } else if (matchingShortcut == null && entry.steamAppId != null) {
-                            configChanged = true
-                            when (entry) {
-                                is EmulatorSystem -> entry.copy(steamAppId = null)
-                                is NativePCGame -> entry.copy(steamAppId = null)
-                            }
-                        } else {
-                            entry
-                        }
-                    }
-
                 val finalConfig =
-                    if (configChanged) {
-                        configManager.update { it.copy(entries = synchronizedEntries) }
-                    } else {
-                        cfg
-                    }
+                    LoadLibrary(configManager, DesktopSteamLibrary(steamManager)).load()
 
                 _uiState.update { it.copy(config = finalConfig, status = AppStatus.Idle) }
 

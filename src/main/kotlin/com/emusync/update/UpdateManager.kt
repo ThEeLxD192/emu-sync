@@ -1,6 +1,7 @@
 package com.emusync.update
 
 import com.emusync.AppInfo
+import com.emusync.domain.update.UpdateInfo
 import com.emusync.util.AppImageEnvironment
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -40,15 +41,6 @@ data class GitHubRelease(
     val prerelease: Boolean = false,
     val draft: Boolean = false,
     val assets: List<GitHubAsset> = emptyList(),
-)
-
-data class UpdateInfo(
-    val version: String,
-    val tagName: String,
-    val releaseNotes: String,
-    val downloadUrl: String,
-    val assetSize: Long,
-    val assetName: String = "",
 )
 
 open class UpdateManager(

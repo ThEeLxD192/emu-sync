@@ -1,5 +1,6 @@
 package com.emusync.drive
 
+import com.emusync.application.sync.CloudFolderMigrator
 import com.emusync.config.ConfigManager
 import com.emusync.domain.config.AppConfig
 import com.emusync.domain.config.OAuthCredentials
@@ -110,7 +111,7 @@ class CloudFolderMigrationTest {
                 drive.folder("old-game", "Game", "source")
                 drive.folder("new-game", "Game", "destination")
 
-                assertFailsWith<DriveApiException> {
+                assertFailsWith<com.emusync.domain.sync.SaveSyncException> {
                     migrator(drive).migrate("token", listOf("Old"), listOf("New"))
                 }
 
@@ -129,7 +130,7 @@ class CloudFolderMigrationTest {
             drive.file("first", "save.dat", "source")
             drive.file("second", "save.dat", "source")
 
-            assertFailsWith<DriveApiException> {
+            assertFailsWith<com.emusync.domain.sync.SaveSyncException> {
                 migrator(drive).migrate("token", listOf("Old"), listOf("New"))
             }
             assertTrue(drive.moves.isEmpty())
@@ -188,7 +189,7 @@ class CloudFolderMigrationTest {
             drive.failMove = { it.id == "second" || it.to == "source" }
 
             val failure =
-                assertFailsWith<DriveApiException> {
+                assertFailsWith<com.emusync.domain.sync.SaveSyncException> {
                     migrator(drive).migrate("token", listOf("Old"), listOf("New"))
                 }
 
@@ -265,7 +266,7 @@ class CloudFolderMigrationTest {
     }
 
     private fun migrator(drive: MigrationDrive) =
-        CloudFolderMigrator(DriveFolders(drive.client), DriveSearch(drive.client))
+        CloudFolderMigrator(DriveFolders(drive.client), DriveFileListing(DriveSearch(drive.client)))
 
     private fun orchestrator(
         drive: MigrationDrive,

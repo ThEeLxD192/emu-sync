@@ -1,5 +1,10 @@
 package com.emusync.drive
 
+import com.emusync.composition.composeSaveSynchronizer
+import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
+import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.local.saves.resolveCloudRestorePaths
 import com.emusync.local.saves.resolveCloudRestoreTargets
@@ -8,8 +13,10 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -40,22 +47,40 @@ class SaveRestorePathsTest {
     @Test
     fun `different remote names resolving to one local file are rejected before restoration`(
         @TempDir tempDir: File
-    ) {
+    ) = runTest {
         val targets =
             resolveCloudRestoreTargets(tempDir.path, listOf("slot/save.dat", "slot\\save.dat"))
 
-        kotlin.test.assertFailsWith<SaveTargetMappingException> {
-            validateSaveTargetMappings(targets, emptyList())
+        SaveMappingDrive().use { drive ->
+            val entry = NativePCGame("Game", "echo", saveTargets = targets)
+            val sync =
+                composeSaveSynchronizer(
+                    drive.client,
+                    AppConfig(OAuthCredentials("client", "secret", "refresh"), listOf(entry)),
+                    ConfigManager(File(tempDir, "config.json")),
+                ) {}
+            assertFalse(sync.syncEntry(entry))
+            assertTrue(drive.downloads.isEmpty())
+            assertTrue(drive.uploadedNames.isEmpty())
         }
         assertTrue(tempDir.list().isNullOrEmpty())
     }
 
     @Test
-    fun `remote file cannot also become a parent directory`(@TempDir tempDir: File) {
+    fun `remote file cannot also become a parent directory`(@TempDir tempDir: File) = runTest {
         val targets = resolveCloudRestoreTargets(tempDir.path, listOf("slot", "slot/save.dat"))
 
-        kotlin.test.assertFailsWith<SaveTargetMappingException> {
-            validateSaveTargetMappings(targets, emptyList())
+        SaveMappingDrive().use { drive ->
+            val entry = NativePCGame("Game", "echo", saveTargets = targets)
+            val sync =
+                composeSaveSynchronizer(
+                    drive.client,
+                    AppConfig(OAuthCredentials("client", "secret", "refresh"), listOf(entry)),
+                    ConfigManager(File(tempDir, "config.json")),
+                ) {}
+            assertFalse(sync.syncEntry(entry))
+            assertTrue(drive.downloads.isEmpty())
+            assertTrue(drive.uploadedNames.isEmpty())
         }
         assertTrue(tempDir.list().isNullOrEmpty())
     }

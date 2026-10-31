@@ -49,6 +49,7 @@ tasks.named("check") {
 
 dependencies {
     implementation(project(":domain"))
+    implementation(project(":application"))
     implementation(project(":data:local"))
     implementation(project(":data:drive"))
     implementation(compose.desktop.currentOs)

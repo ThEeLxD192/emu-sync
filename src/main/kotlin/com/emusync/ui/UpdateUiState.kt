@@ -1,6 +1,6 @@
 package com.emusync.ui
 
-import com.emusync.update.UpdateInfo
+import com.emusync.domain.update.UpdateInfo
 import java.io.File
 
 /** UI State for in-app updates. */

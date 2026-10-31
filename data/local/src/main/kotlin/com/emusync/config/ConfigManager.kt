@@ -4,6 +4,7 @@ import com.emusync.config.dto.ConfigDocument
 import com.emusync.config.dto.toConfig
 import com.emusync.config.dto.toDocument
 import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.ConfigurationStore
 import com.emusync.domain.config.CredentialSnapshot
 import com.emusync.domain.config.CredentialStore
 import com.emusync.domain.config.OAuthCredentials
@@ -40,7 +41,7 @@ private class ConfigState(var driveRevision: Long = 0L)
 class ConfigManager(
     val configFile: File = resolveDefaultConfigFile(),
     private val beforeReplace: (Path) -> Unit = {},
-) : LibraryStore, CredentialStore {
+) : LibraryStore, CredentialStore, ConfigurationStore {
     private val state =
         configStates.computeIfAbsent(configFile.absoluteFile.normalize().path) { ConfigState() }
 
@@ -142,6 +143,10 @@ class ConfigManager(
 
     override fun loadEntries(): List<GameEntry> = load().entries
 
+    override fun loadConfig() = load()
+
+    override fun updateConfig(transform: (AppConfig) -> AppConfig) = update(transform)
+
     override fun updateEntries(transform: (List<GameEntry>) -> List<GameEntry>): List<GameEntry> =
         update {
             it.copy(entries = transform(it.entries))
@@ -158,7 +163,7 @@ class ConfigManager(
         }
 
     /** Explicit connection actions also invalidate authorizations already in flight. */
-    fun updateCredentials(transform: (OAuthCredentials?) -> OAuthCredentials?): AppConfig =
+    override fun updateCredentials(transform: (OAuthCredentials?) -> OAuthCredentials?): AppConfig =
         synchronized(state) {
             val updated = update { it.copy(cloudCredentials = transform(it.cloudCredentials)) }
             state.driveRevision++

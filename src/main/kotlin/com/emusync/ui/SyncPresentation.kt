@@ -1,5 +1,6 @@
 package com.emusync.ui
 
+import com.emusync.composition.composeSaveSynchronizer
 import com.emusync.config.ConfigManager
 import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.SaveTarget
@@ -9,7 +10,6 @@ import com.emusync.domain.sync.SaveSetupResult
 import com.emusync.domain.sync.SaveSynchronizer
 import com.emusync.domain.sync.SyncEvent
 import com.emusync.domain.sync.SyncGame
-import com.emusync.drive.SyncOrchestrator
 import io.ktor.client.HttpClient
 import java.time.Instant
 import java.time.ZoneId
@@ -43,13 +43,13 @@ internal fun createSaveSynchronizer(
 ): SaveSynchronizer {
     lateinit var sync: SaveSynchronizer
     sync =
-        SyncOrchestrator(client, config, configManager) { event ->
+        composeSaveSynchronizer(client, config, configManager) { event ->
             onStatus(event.toUiStatus(sync))
         }
     return sync
 }
 
-private fun SyncEvent.toUiStatus(sync: SaveSynchronizer): AppStatus =
+internal fun SyncEvent.toUiStatus(sync: SaveSynchronizer): AppStatus =
     when (this) {
         SyncEvent.Idle -> AppStatus.Idle
         SyncEvent.Playing -> AppStatus.Playing

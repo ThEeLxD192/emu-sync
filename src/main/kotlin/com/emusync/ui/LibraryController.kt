@@ -1,14 +1,16 @@
 package com.emusync.ui
 
+import com.emusync.application.library.EntrySyncChecks
+import com.emusync.composition.composeSaveSynchronizer
 import com.emusync.config.ConfigManager
 import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.sync.SaveSynchronizerFactory
 import com.emusync.scanner.scanRoms
 import io.ktor.client.HttpClient
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,12 +24,6 @@ internal suspend fun loadLibraryGames(entry: GameEntry): List<GameItem> =
             }
         is NativePCGame -> listOf(GameItem(entry.name, entry))
     }
-
-internal data class LibraryCallbacks(
-    val loadGames: suspend (GameEntry) -> List<GameItem>,
-    val refreshConnection: () -> Unit,
-    val saveGameSetup: suspend (GameItem, AppViewModel.SaveSetupResult) -> Unit,
-)
 
 /**
  * Coordinates library loading, save synchronization and game sessions independently of
@@ -50,8 +46,13 @@ internal class LibraryController(
         get() = callbacks.saveGameSetup
 
     private val selectionGeneration = AtomicLong()
-    private val checkGeneration = AtomicLong()
-    private val checks = ConcurrentHashMap<String, Long>()
+    private val checks =
+        EntrySyncChecks(
+            operations.operations,
+            SaveSynchronizerFactory { config, onStatus ->
+                composeSaveSynchronizer(client, config, configManager, onStatus)
+            },
+        )
     private val setupLock = Any()
     private var pendingSetup: CompletableDeferred<AppViewModel.SaveSetupResult>? = null
 
@@ -132,9 +133,7 @@ internal class LibraryController(
     }
 
     private suspend fun checkSyncStatus(entry: GameEntry, cfg: AppConfig) {
-        val request = checkGeneration.incrementAndGet()
-        checks[entry.name] = request
-        val revision = operations.revision
+        val request = checks.begin(entry, cfg)
         if (cfg.cloudCredentials?.refreshToken.isNullOrBlank()) {
             state.update {
                 it.copy(
@@ -144,12 +143,7 @@ internal class LibraryController(
             }
             return
         }
-        fun isCurrent(current: AppUiState) =
-            checks[entry.name] == request &&
-                operations.revision == revision &&
-                !operations.isBusy &&
-                current.config?.cloudCredentials == cfg.cloudCredentials &&
-                current.config?.entries?.any { it == entry } == true
+        fun isCurrent(current: AppUiState) = checks.isCurrent(request, current.config)
         state.update {
             if (isCurrent(it))
                 it.copy(
@@ -159,10 +153,7 @@ internal class LibraryController(
         }
         restoreUiOnCancellation(
             action = {
-                val status =
-                    createSaveSynchronizer(client, cfg, configManager) {}
-                        .checkEntrySyncStatus(entry)
-                        .toUiStatus()
+                val status = checks.read(request).toUiStatus()
                 refreshConnection()
                 state.update {
                     if (isCurrent(it))

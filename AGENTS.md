@@ -4,8 +4,8 @@
 
 EmuSync es una aplicación Kotlin/Compose Desktop para Linux y Windows. La migración
 acordada usa módulos Gradle JVM y conserva el comportamiento y los formatos actuales.
-La primera entrega fue esta guía y la skill local de pruebas. H0–H3 están
-completados. H4 está verificado técnicamente y espera confirmación de commit; H5–H8 siguen
+La primera entrega fue esta guía y la skill local de pruebas. H0–H4 están
+completados. H5 está verificado técnicamente y espera confirmación de commit; H6–H8 siguen
 pendientes. Documentar un hito no significa ejecutarlo.
 
 Línea base inspeccionada el 2026-10-30, sobre `484012f`:
@@ -29,7 +29,7 @@ src/main/kotlin/
   Main.kt                    # Arranque y composición de la aplicación
   com/emusync/
     AppInfo.kt               # Información y versión de la aplicación
-    drive/                   # Coordinación de sync y migraciones; extracción H5 pendiente
+    composition/             # Construcción temporal de servicios; traslado a desktopApp en H7
     runner/                  # Procesos y navegador; extracción H6 pendiente
     scanner/                 # Descubrimiento de ROMs
     steam/                   # VDF, accesos directos y lanzadores
@@ -48,8 +48,10 @@ gradle/
 build-logic/                 # Convenciones JVM/calidad; build incluido
   src/main/kotlin/           # Plugins precompilados .gradle.kts
 domain/                      # Biblioteca, reglas de sync y contratos neutrales (H3)
-  src/{main,test}/kotlin/     # com/emusync/domain/{config,library,sync,operation,execution}
-application/                 # Módulo vacío preparado para H5
+  src/{main,test}/kotlin/     # com/emusync/domain/{config,library,sync,operation,execution,update}
+application/                 # Casos de uso y coordinación neutral (H5)
+  src/main/kotlin/            # com/emusync/application/{sync,library,connection,operation,update}
+  src/test/kotlin/            # Reglas de destinos junto a sus consumidores
 data/local/                  # Configuración/DTO y saves: historial, snapshots, backups y rutas
   src/{main,test}/kotlin/     # com/emusync/config y com/emusync/local/saves
 data/drive/                  # OAuth, búsquedas, carpetas y transferencias de Google Drive
@@ -506,20 +508,97 @@ Evidencia (2026-10-30–31, Linux; base H3 `0def750`):
   CI remoto, AppImage independiente con appimagetool ni MSI/EXE o Windows nativo.
   La limitación de Detekt/Gradle registrada en H2 sigue vigente. H5–H8 no se ejecutaron.
 
-**H4 completado técnicamente. Commit H4: pendiente de confirmación explícita.**
+**H4 completado. Commit H4: `27d8eb1` (`refactor: extract local persistence and Drive adapters`).**
 
 ### H5 — Casos de uso
 
-- [ ] Extraer ejecución, sincronización previa/posterior y operaciones manuales.
-- [ ] Extraer edición y migración de entradas, conexión y coordinación de actualizaciones.
-- [ ] Expresar progreso, resultados y resolución de conflictos con contratos neutrales.
-- [ ] Verificar exclusión de operaciones, cancelación, reintentos y resultados obsoletos.
-- [ ] **H5 completado.**
+- [x] Extraer ejecución, sincronización previa/posterior y operaciones manuales.
+- [x] Extraer edición y migración de entradas, conexión y coordinación de actualizaciones.
+- [x] Expresar progreso, resultados y resolución de conflictos con contratos neutrales.
+- [x] Verificar exclusión de operaciones, cancelación, reintentos y resultados obsoletos.
+- [x] **H5 completado.**
 
 Aceptación: `application` solo depende de `domain`; no construye clientes HTTP ni
 adaptadores, y no depende de tipos visuales. Los controladores delegan los flujos.
 
-Evidencia: pendiente. Commit: pendiente.
+Evidencia (2026-10-31, Linux; base H4 `27d8eb1`):
+
+- `application` coordina sincronización manual, consulta de estado, preparación y
+  ejecución de partidas, subida posterior, conflictos, reintentos y migraciones de
+  carpetas. Sus servicios reciben capacidades prestadas por constructor; no crean
+  HTTP, OAuth, historial ni procesos. El grafo `runtimeClasspath` contiene únicamente
+  `domain`, Kotlin 2.4.21, corrutinas 1.10.1 y annotations; no tiene Compose, Ktor,
+  serialización, adaptadores ni dependencia de la raíz.
+- `EditLibrary` conserva validación, overrides, orden y persistencia posterior a la
+  migración; `LoadLibrary` coordina los identificadores de Steam. `CloudConnection`
+  guarda/desvincula credenciales y autoriza mediante el almacén con revisiones.
+  `UpdateCoordinator` conserva exclusión de descargas, cancelación, descarte de
+  consultas tardías, tamaño esperado, limpieza de temporales y bloqueo del reinicio
+  durante una partida. Los controladores traducen resultados neutrales y publican
+  selección, diálogos y estado visual; las respuestas de conflicto y setup siguen
+  vinculadas a su solicitud exacta en el límite correspondiente.
+- Nuevas capacidades neutrales de configuración, autorización, listado remoto,
+  observación de rutas locales, Steam y actualizaciones. `CloudFile` separa el DTO
+  Drive; la selección segura de duplicados es ahora una regla de dominio.
+  `DesktopSaveAccess` mantiene en local las observaciones, recorrido y resolución
+  segura de rutas, incluidos symlinks y alias. `OperationCoordinator` mantiene la
+  exclusión y revisión de mutaciones; `EntrySyncChecks` rechaza resultados anteriores
+  a otro chequeo, edición, cambio de conexión o mutación de partidas.
+- Se retiró toda la coordinación de `src/main/kotlin/com/emusync/drive`, sin fachadas
+  de sus clases antiguas. La composición temporal de sincronización vive en
+  `com/emusync/composition`; los clientes HTTP continúan prestados y su propietario
+  actual los cierra. Steam, procesos, staging/instalación de actualizaciones y los
+  constructores concretos de UI siguen en la raíz hasta H6/H7. No se adelantaron esos
+  hitos ni se cambiaron recursos, metadatos, formatos o versiones.
+- Se trasladaron dos escenarios de reglas a `application`, con observaciones locales
+  controladas y sin I/O. Las pruebas de alias de restauración entran ahora por la
+  sincronización manual pública con adaptadores reales, sin publicar helpers ni
+  accesos especiales del compilador. Se conservan las integraciones de disco, Drive,
+  transporte, procesos, UI, cancelación y reintentos. La restauración del estado de
+  actualización se compara por valor al traducir tipos; la regresión de respuesta
+  tardía sigue exigiendo conservar la instancia visual lista para reiniciar.
+  Sin escenarios añadidos ni retirados: 430 métodos, 431 casos, 67 suites y 76
+  archivos Kotlin de pruebas/fixtures (nueve fixtures).
+  [Matriz y catálogo actualizados](.agents/skills/kotlin-valuable-tests/references/test-audit.md).
+- Comprobación afectada: `./gradlew :application:test :test --tests
+  'com.emusync.drive.*' --tests 'com.emusync.ui.*' qualityCheck --no-daemon` pasó
+  en 28 s (88 tareas, 36 ejecutadas y 52 UP-TO-DATE). Ejecutó las pruebas afectadas;
+  los hallazgos de Detekt sobre parámetros, agrupación de funciones, tipos implícitos
+  e imports se corrigieron antes del cierre, sin reglas relajadas ni supresiones nuevas.
+  Los intentos intermedios de compilación detectaron imports retirados durante la
+  reorganización; quedaron restaurados y verificados por el cierre completo.
+- Comando final:
+
+  ```bash
+  ./gradlew spotlessApply check \
+    :application:dependencies --configuration runtimeClasspath \
+    packageReleaseAppImage --no-daemon
+  ```
+
+  `BUILD SUCCESSFUL` en 58 s; 113 tareas, 12 ejecutadas y 101 UP-TO-DATE.
+  Raíz ejecutada completa: 308 casos, 306 aprobados, cero fallos/errores y dos
+  omitidos por PowerShell; 43 XML y 11,548 s JUnit. Application (dos casos,
+  0,077 s), dominio (50, 0,376 s), local (31, 0,546 s) y Drive (40, 3,841 s)
+  reutilizaron resultados correctos de comprobaciones afectadas de esta integración.
+  Evidencia combinada: 429 aprobados, cero fallos/errores y dos omitidos; no equivale
+  a ejecutar de nuevo los 431 casos en ese comando.
+- Once reportes SARIF con cero hallazgos, incluido testFixtures de Drive, sin errores
+  de resolución de tipos en el cierre. Main/test de raíz se ejecutaron; los módulos
+  reutilizaron sus análisis limpios recientes. Hooks: nueve grupos PASS; convenciones:
+  cuatro PASS, incluidos fixtures, Java 25, caché y bloqueos deliberados. Las tareas
+  raíz siguen agregando pruebas, calidad y check de todos los módulos.
+- El paquete preparó `build/compose/binaries/main-release/app`; se verificaron el
+  classpath y las clases de application/dominio/local/Drive, la ausencia de fixtures
+  en runtime y la retirada de las antiguas clases de sync del JAR raíz. Docker y CI
+  ya incluyen application y sus reportes desde H2; no cambian sus rutas consumidoras.
+  No se generó AppImage independiente con appimagetool ni se ejecutaron UI gráfica,
+  Docker, cuentas cloud reales, CI remoto, MSI/EXE o Windows nativo. La limitación
+  Detekt/Gradle registrada en H2 continúa. H6–H8 siguen pendientes.
+- Imports y dependencias de módulos, catálogo de escenarios, enlaces locales nuevos,
+  tipos reutilizables, staging y `git diff --check`: revisados. No se repite la suite
+  tras editar únicamente seguimiento.
+
+**H5 completado técnicamente. Commit H5: pendiente de confirmación explícita.**
 
 ### H6 — Plataforma y actualizaciones
 

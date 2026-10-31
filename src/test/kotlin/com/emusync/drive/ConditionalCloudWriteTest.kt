@@ -2,6 +2,7 @@ package com.emusync.drive
 
 import com.emusync.domain.sync.SaveSyncException
 import com.emusync.domain.sync.SyncDecision
+import com.emusync.domain.sync.canonicalCloudFiles
 import com.emusync.local.saves.SyncHistoryStore
 import com.emusync.local.saves.TrackedFileSync
 import io.ktor.client.engine.mock.toByteArray
@@ -85,7 +86,9 @@ class ConditionalCloudWriteTest {
             sync.upload("token", (first).path, null, "game", "save.dat")
             sync.upload("token", (second).path, null, "game", "save.dat")
             assertEquals(setOf("FIRST", "SECOND"), drive.contents.values.toSet())
-            assertFailsWith<SaveSyncException> { canonicalCloudFiles(drive.files.values.toList()) }
+            assertFailsWith<SaveSyncException> {
+                canonicalCloudFiles(drive.files.values.map { it.toCloudFile() })
+            }
             assertEquals(2, drive.files.size)
             assertEquals("FIRST", first.readText())
             assertEquals("SECOND", second.readText())
@@ -94,7 +97,7 @@ class ConditionalCloudWriteTest {
 
     @Test
     fun `identical duplicate content remains safe to compare but unknown content does not`() {
-        val file = observed()
+        val file = observed().toCloudFile()
         assertEquals(1, canonicalCloudFiles(listOf(file, file.copy(id = "other"))).size)
         assertFailsWith<SaveSyncException> {
             canonicalCloudFiles(listOf(file, file.copy(id = "other", sha256Checksum = null)))
