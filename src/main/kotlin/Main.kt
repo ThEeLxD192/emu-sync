@@ -1,32 +1,17 @@
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.CloudSync
-import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -39,24 +24,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.toComposeImageBitmap
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.emusync.AppInfo
 import com.emusync.config.ConfigManager
 import com.emusync.model.GameEntry
 import com.emusync.ui.AppViewModel
 import com.emusync.ui.CloudSyncStatus
 import com.emusync.ui.GameItem
-import com.emusync.ui.UpdateUiState
+import com.emusync.ui.components.AppHeader
 import com.emusync.ui.components.GameGrid
 import com.emusync.ui.components.Sidebar
 import com.emusync.ui.dialogs.AddEntryDialog
@@ -126,157 +107,15 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
             color = EmuSyncColors.Background,
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // ── Header ──────────────────────────────────────────
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp)
-                ) {
-                    Text(
-                        text = "EmuSync",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = EmuSyncColors.Primary,
-                        letterSpacing = 0.5.sp,
-                        modifier = Modifier.align(Alignment.CenterStart),
-                    )
-                    Row(
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        // Google Drive status indicator / Connect action
-                        val googleDrive = uiState.config?.googleDrive
-                        val isLinked =
-                            googleDrive != null && !googleDrive.refreshToken.isNullOrBlank()
-                        if (isLinked) {
-                            Surface(
-                                onClick = { showDriveSetupDialog = true },
-                                shape = RoundedCornerShape(8.dp),
-                                color = EmuSyncColors.SurfaceVariant,
-                                modifier = Modifier.padding(end = 12.dp),
-                            ) {
-                                Row(
-                                    modifier =
-                                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Cloud,
-                                        contentDescription = "Drive Connected",
-                                        tint = EmuSyncColors.Success,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = "Drive Linked",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = EmuSyncColors.OnSurface,
-                                    )
-                                }
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = {
-                                    if (
-                                        googleDrive?.clientId.isNullOrBlank() ||
-                                            googleDrive.clientSecret.isNullOrBlank()
-                                    ) {
-                                        showDriveSetupDialog = true
-                                    } else {
-                                        scope.launch {
-                                            val result = viewModel.loginGoogleDrive()
-                                            steamMessage = result
-                                        }
-                                    }
-                                },
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                modifier = Modifier.padding(end = 12.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CloudSync,
-                                    contentDescription = "Connect Google Drive",
-                                    tint = EmuSyncColors.Primary,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text("Connect Drive", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-
-                        // Update notification chip
-                        val updateState = uiState.updateState
-                        if (updateState is UpdateUiState.Available) {
-                            Surface(
-                                onClick = { viewModel.showUpdateDialog() },
-                                shape = RoundedCornerShape(8.dp),
-                                color = EmuSyncColors.Primary,
-                                modifier = Modifier.padding(end = 12.dp),
-                            ) {
-                                Row(
-                                    modifier =
-                                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.SystemUpdate,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = "Update v${updateState.info.version}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                }
-                            }
-                        } else if (updateState is UpdateUiState.ReadyToRestart) {
-                            Surface(
-                                onClick = { viewModel.showUpdateDialog() },
-                                shape = RoundedCornerShape(8.dp),
-                                color = EmuSyncColors.Success,
-                                modifier = Modifier.padding(end = 12.dp),
-                            ) {
-                                Row(
-                                    modifier =
-                                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.RestartAlt,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = "Restart EmuSync",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                }
-                            }
-                        }
-
-                        Text(
-                            text = "v${AppInfo.VERSION}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = EmuSyncColors.OnSurfaceDim,
-                            modifier = Modifier.padding(end = 16.dp),
-                        )
-                        Button(
-                            onClick = onExit,
-                            colors =
-                                ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.error
-                                ),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        ) {
-                            Text("Safe Close")
-                        }
-                    }
-                }
+                AppHeader(
+                    state = uiState,
+                    onShowDriveSetup = { showDriveSetupDialog = true },
+                    onConnectDrive = {
+                        scope.launch { steamMessage = viewModel.loginGoogleDrive() }
+                    },
+                    onShowUpdateDialog = { viewModel.showUpdateDialog() },
+                    onExit = onExit,
+                )
 
                 HorizontalDivider(
                     color = EmuSyncColors.Divider,
@@ -287,7 +126,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                 Row(modifier = Modifier.fillMaxSize()) {
                     // Left sidebar (categories)
                     Sidebar(
-                        entries = uiState.config?.entries ?: emptyList(),
+                        entries = uiState.config?.entries.orEmpty(),
                         selectedEntry = uiState.selectedEntry,
                         onEntrySelected = { entry ->
                             scope.launch { viewModel.selectEntry(entry) }
@@ -374,7 +213,8 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                     uiState.config
                         ?.entries
                         ?.mapNotNull { it.group?.trim()?.takeIf { g -> g.isNotBlank() } }
-                        ?.distinct() ?: emptyList()
+                        ?.distinct()
+                        .orEmpty()
                 AddEntryDialog(
                     initialEntry = entryToEdit,
                     existingGroups = existingGroups,
@@ -383,12 +223,13 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
                         entryToEdit = null
                     },
                     onSave = { newEntry ->
+                        val originalEntry = entryToEdit
                         showAddDialog = false
                         scope.launch {
-                            if (entryToEdit == null) {
+                            if (originalEntry == null) {
                                 viewModel.addEntry(newEntry)
                             } else {
-                                viewModel.editEntry(entryToEdit!!, newEntry)
+                                viewModel.editEntry(originalEntry, newEntry)
                             }
                             entryToEdit = null
                         }
