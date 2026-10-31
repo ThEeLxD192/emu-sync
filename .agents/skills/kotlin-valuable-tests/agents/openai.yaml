@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kotlin Valuable Tests"
+  short_description: "Pruebas Kotlin centradas en contratos y riesgos"
+  default_prompt: "Usa $kotlin-valuable-tests para revisar qué fallos de producción detectan estas pruebas y proponer mejoras justificadas."
