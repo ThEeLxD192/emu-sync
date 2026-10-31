@@ -3,16 +3,35 @@ package com.emusync.ui
 import com.emusync.config.ConfigManager
 import com.emusync.drive.SaveMappingDrive
 import com.emusync.drive.sha256
-import com.emusync.model.*
+import com.emusync.model.AppConfig
+import com.emusync.model.EmulatorSystem
+import com.emusync.model.GameEntry
+import com.emusync.model.GoogleDriveConfig
+import com.emusync.model.NativePCGame
+import com.emusync.model.SaveTarget
+import com.emusync.model.SaveTargetType
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.http.*
+import io.ktor.http.HttpHeaders
+import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import java.io.File
-import kotlin.test.*
-import kotlinx.coroutines.*
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertNotSame
+import kotlin.test.assertNull
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -372,7 +391,7 @@ class LibraryConcurrencyTest {
                 saveTargets = listOf(SaveTarget(local.path, SaveTargetType.FILE)),
             )
         val config = AppConfig(GoogleDriveConfig("client", "secret", "refresh"), listOf(game))
-        val manager = ConfigManager(File(directory, "config.json")).apply { save(config) }
+        ConfigManager(File(directory, "config.json")).save(config)
         val state = MutableStateFlow(AppUiState(config = config))
         val operations = LibraryOperationCoordinator(state)
         val firstRequest = CompletableDeferred<Unit>()
@@ -458,8 +477,6 @@ class LibraryConcurrencyTest {
             ConfigManager(File(directory, "config.json")),
             client,
             operations,
-            ::loadLibraryGames,
-            {},
-            { _, _ -> },
+            LibraryCallbacks(::loadLibraryGames, {}, { _, _ -> }),
         )
 }

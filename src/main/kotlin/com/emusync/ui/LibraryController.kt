@@ -2,6 +2,7 @@ package com.emusync.ui
 
 import com.emusync.config.ConfigManager
 import com.emusync.drive.SyncOrchestrator
+import com.emusync.model.AppConfig
 import com.emusync.model.EmulatorSystem
 import com.emusync.model.GameEntry
 import com.emusync.model.NativePCGame
@@ -10,7 +11,6 @@ import com.emusync.scanner.scanRoms
 import io.ktor.client.HttpClient
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -24,6 +24,12 @@ internal suspend fun loadLibraryGames(entry: GameEntry): List<GameItem> =
         is NativePCGame -> listOf(GameItem(entry.name, entry))
     }
 
+internal data class LibraryCallbacks(
+    val loadGames: suspend (GameEntry) -> List<GameItem>,
+    val refreshConnection: () -> Unit,
+    val saveGameSetup: suspend (GameItem, AppViewModel.SaveSetupResult) -> Unit,
+)
+
 /**
  * Coordinates library loading, save synchronization and game sessions independently of
  * presentation.
@@ -33,10 +39,17 @@ internal class LibraryController(
     private val configManager: ConfigManager,
     private val client: HttpClient,
     private val operations: LibraryOperationCoordinator,
-    private val loadGames: suspend (GameEntry) -> List<GameItem>,
-    private val refreshConnection: () -> Unit,
-    private val saveGameSetup: suspend (GameItem, AppViewModel.SaveSetupResult) -> Unit,
+    private val callbacks: LibraryCallbacks,
 ) {
+    private val loadGames
+        get() = callbacks.loadGames
+
+    private val refreshConnection
+        get() = callbacks.refreshConnection
+
+    private val saveGameSetup
+        get() = callbacks.saveGameSetup
+
     private val selectionGeneration = AtomicLong()
     private val checkGeneration = AtomicLong()
     private val checks = ConcurrentHashMap<String, Long>()
@@ -52,40 +65,58 @@ internal class LibraryController(
                 selectedEntry = entry,
                 gameItems = emptyList(),
                 entrySyncStatus =
-                    it.entrySyncStatus +
-                        (entry.name to
-                            when {
-                                !linked -> CloudSyncStatus.NOT_CONFIGURED
-                                operations.isBusy ->
-                                    it.entrySyncStatus[entry.name] ?: CloudSyncStatus.IDLE
-                                else -> CloudSyncStatus.CHECKING
-                            }),
+                    it.entrySyncStatus + (entry.name to initialSyncStatus(it, entry, linked)),
             )
         }
-        try {
-            val items = loadGames(entry)
-            state.update {
-                if (selectionGeneration.get() == request && it.selectedEntry == entry)
-                    it.copy(isLoading = false, gameItems = items)
-                else it
-            }
-            if (
-                selectionGeneration.get() == request && state.value.selectedEntry == entry && linked
-            )
-                checkSyncForEntry(entry)
-        } catch (failure: Exception) {
-            state.update {
-                if (selectionGeneration.get() != request || it.selectedEntry != entry) it
-                else
-                    it.copy(
-                        isLoading = false,
-                        status =
-                            if (failure is CancellationException) it.status
-                            else
-                                AppStatus.Error("Could not load ${entry.name}: ${failure.message}"),
-                    )
-            }
-            if (failure is CancellationException) throw failure
+        restoreUiOnCancellation(
+            action = {
+                recoverUiFailure(
+                    action = {
+                        val items = loadGames(entry)
+                        state.update {
+                            if (selectionGeneration.get() == request && it.selectedEntry == entry)
+                                it.copy(isLoading = false, gameItems = items)
+                            else it
+                        }
+                        if (
+                            selectionGeneration.get() == request &&
+                                state.value.selectedEntry == entry &&
+                                linked
+                        )
+                            checkSyncForEntry(entry)
+                    },
+                    recover = { failure ->
+                        finishFailedScan(
+                            request,
+                            entry,
+                            "Could not load ${entry.name}: ${failure.message}",
+                        )
+                    },
+                )
+            },
+            restore = { finishFailedScan(request, entry, null) },
+        )
+    }
+
+    private fun initialSyncStatus(
+        current: AppUiState,
+        entry: GameEntry,
+        linked: Boolean,
+    ): CloudSyncStatus =
+        when {
+            !linked -> CloudSyncStatus.NOT_CONFIGURED
+            operations.isBusy -> current.entrySyncStatus[entry.name] ?: CloudSyncStatus.IDLE
+            else -> CloudSyncStatus.CHECKING
+        }
+
+    private fun finishFailedScan(request: Long, entry: GameEntry, errorMessage: String?) {
+        state.update {
+            if (selectionGeneration.get() != request || it.selectedEntry != entry) it
+            else
+                it.copy(
+                    isLoading = false,
+                    status = errorMessage?.let(AppStatus::Error) ?: it.status,
+                )
         }
     }
 
@@ -96,9 +127,12 @@ internal class LibraryController(
     }
 
     suspend fun checkSyncForEntry(entry: GameEntry) {
-        if (operations.isBusy) return
-        val cfg = state.value.config ?: return
-        if (cfg.entries.none { it == entry }) return
+        val config = state.value.config
+        if (!operations.isBusy && config != null && config.entries.any { it == entry })
+            checkSyncStatus(entry, config)
+    }
+
+    private suspend fun checkSyncStatus(entry: GameEntry, cfg: AppConfig) {
         val request = checkGeneration.incrementAndGet()
         checks[entry.name] = request
         val revision = operations.revision
@@ -124,24 +158,28 @@ internal class LibraryController(
                 )
             else it
         }
-        try {
-            val status = SyncOrchestrator(client, cfg, configManager) {}.checkEntrySyncStatus(entry)
-            refreshConnection()
-            state.update {
-                if (isCurrent(it))
-                    it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to status))
-                else it
-            }
-        } catch (cancelled: CancellationException) {
-            state.update {
-                if (isCurrent(it))
-                    it.copy(
-                        entrySyncStatus = it.entrySyncStatus + (entry.name to CloudSyncStatus.IDLE)
-                    )
-                else it
-            }
-            throw cancelled
-        }
+        restoreUiOnCancellation(
+            action = {
+                val status =
+                    SyncOrchestrator(client, cfg, configManager) {}.checkEntrySyncStatus(entry)
+                refreshConnection()
+                state.update {
+                    if (isCurrent(it))
+                        it.copy(entrySyncStatus = it.entrySyncStatus + (entry.name to status))
+                    else it
+                }
+            },
+            restore = {
+                state.update {
+                    if (isCurrent(it))
+                        it.copy(
+                            entrySyncStatus =
+                                it.entrySyncStatus + (entry.name to CloudSyncStatus.IDLE)
+                        )
+                    else it
+                }
+            },
+        )
     }
 
     suspend fun syncEntryNow(entry: GameEntry) {

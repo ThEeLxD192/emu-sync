@@ -1,7 +1,6 @@
 package com.emusync.ui
 
 import java.util.concurrent.atomic.AtomicLong
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
@@ -29,18 +28,21 @@ internal class LibraryOperationCoordinator(private val state: MutableStateFlow<A
             )
         }
         try {
-            return block()
-        } catch (cancelled: CancellationException) {
-            state.update {
-                it.copy(
-                    status = AppStatus.Idle,
-                    entrySyncStatus =
-                        it.entrySyncStatus.mapValues { (_, status) ->
-                            if (status == CloudSyncStatus.SYNCING) CloudSyncStatus.IDLE else status
-                        },
-                )
-            }
-            throw cancelled
+            return restoreUiOnCancellation(
+                action = { block() },
+                restore = {
+                    state.update {
+                        it.copy(
+                            status = AppStatus.Idle,
+                            entrySyncStatus =
+                                it.entrySyncStatus.mapValues { (_, status) ->
+                                    if (status == CloudSyncStatus.SYNCING) CloudSyncStatus.IDLE
+                                    else status
+                                },
+                        )
+                    }
+                },
+            )
         } finally {
             generation.incrementAndGet()
             state.update { it.copy(isOperationInProgress = false) }

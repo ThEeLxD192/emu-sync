@@ -5,7 +5,7 @@ import com.emusync.update.UpdateManager
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicLong
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 internal class UpdateController(
     private val state: MutableStateFlow<AppUiState>,
     private val manager: UpdateManager,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val downloadMutex = Mutex()
     private val generation = AtomicLong()
@@ -33,21 +34,25 @@ internal class UpdateController(
                 showUpdateDialog = it.showUpdateDialog || manual,
             )
         }
-        try {
-            val info = manager.checkForUpdates()
-            state.update {
-                if (generation.get() != request || downloadMutex.isLocked) it
-                else
-                    it.copy(updateState = info?.let(UpdateUiState::Available) ?: UpdateUiState.Idle)
-            }
-        } catch (cancelled: CancellationException) {
-            state.update {
-                if (generation.get() == request && !downloadMutex.isLocked)
-                    it.copy(updateState = previous)
-                else it
-            }
-            throw cancelled
-        }
+        restoreUiOnCancellation(
+            action = {
+                val info = manager.checkForUpdates()
+                state.update {
+                    if (generation.get() != request || downloadMutex.isLocked) it
+                    else
+                        it.copy(
+                            updateState = info?.let(UpdateUiState::Available) ?: UpdateUiState.Idle
+                        )
+                }
+            },
+            restore = {
+                state.update {
+                    if (generation.get() == request && !downloadMutex.isLocked)
+                        it.copy(updateState = previous)
+                    else it
+                }
+            },
+        )
     }
 
     suspend fun download(info: UpdateInfo) {
@@ -58,55 +63,70 @@ internal class UpdateController(
         var keepDownload = false
         state.update { it.copy(updateState = UpdateUiState.Downloading(0f, info)) }
         try {
-            val windows = manager.isWindows()
-            val extension =
-                File(info.assetName).extension.ifBlank { if (windows) "msi" else "AppImage" }
-            destination =
-                withContext(Dispatchers.IO) {
-                    val currentParent =
-                        if (!windows)
-                            manager.getCurrentAppImagePath()?.let {
-                                File(it).absoluteFile.parentFile
+            restoreUiOnCancellation(
+                action = {
+                    recoverUiFailure(
+                        action = {
+                            val downloaded = prepareDestination(info)
+                            destination = downloaded
+                            manager
+                                .downloadUpdate(info.downloadUrl, downloaded) { progress ->
+                                    state.update {
+                                        it.copy(
+                                            updateState = UpdateUiState.Downloading(progress, info)
+                                        )
+                                    }
+                                }
+                                .getOrThrow()
+                            check(info.assetSize <= 0 || downloaded.length() == info.assetSize) {
+                                "The update size does not match the release: expected ${info.assetSize} bytes, received ${downloaded.length()}"
                             }
-                        else null
-                    val directory =
-                        currentParent?.takeIf { it.canWrite() }
-                            ?: File(System.getProperty("java.io.tmpdir"))
-                    Files.createTempFile(directory.toPath(), ".EmuSync-update-", ".$extension")
-                        .toFile()
-                }
-            manager
-                .downloadUpdate(info.downloadUrl, destination) { progress ->
-                    state.update {
-                        it.copy(updateState = UpdateUiState.Downloading(progress, info))
-                    }
-                }
-                .getOrThrow()
-            check(info.assetSize <= 0 || destination.length() == info.assetSize) {
-                "The update size does not match the release: expected ${info.assetSize} bytes, received ${destination.length()}"
-            }
-            keepDownload = true
-            state.update {
-                it.copy(
-                    updateState =
-                        UpdateUiState.ReadyToRestart(destination, manager.isSteamGameMode())
-                )
-            }
-        } catch (cancelled: CancellationException) {
-            state.update { it.copy(updateState = UpdateUiState.Available(info)) }
-            throw cancelled
-        } catch (failure: Exception) {
-            state.update {
-                it.copy(
-                    updateState =
-                        UpdateUiState.Error(
-                            "Failed to download update: ${failure.message ?: "Connection error"}"
-                        )
-                )
-            }
+                            keepDownload = true
+                            state.update {
+                                it.copy(
+                                    updateState =
+                                        UpdateUiState.ReadyToRestart(
+                                            downloaded,
+                                            manager.isSteamGameMode(),
+                                        )
+                                )
+                            }
+                        },
+                        recover = { failure ->
+                            state.update {
+                                it.copy(
+                                    updateState =
+                                        UpdateUiState.Error(
+                                            "Failed to download update: ${failure.message ?: "Connection error"}"
+                                        )
+                                )
+                            }
+                        },
+                    )
+                },
+                restore = { state.update { it.copy(updateState = UpdateUiState.Available(info)) } },
+            )
         } finally {
             if (!keepDownload) destination?.delete()
             downloadMutex.unlock()
+        }
+    }
+
+    private suspend fun prepareDestination(info: UpdateInfo): File {
+        val windows = manager.isWindows()
+        val extension =
+            File(info.assetName).extension.ifBlank { if (windows) "msi" else "AppImage" }
+        return withContext(ioDispatcher) {
+            val currentParent =
+                if (!windows)
+                    manager.getCurrentAppImagePath()?.let {
+                        File(it).absoluteFile.parentFile
+                    }
+                else null
+            val directory =
+                currentParent?.takeIf { it.canWrite() }
+                    ?: File(System.getProperty("java.io.tmpdir"))
+            Files.createTempFile(directory.toPath(), ".EmuSync-update-", ".$extension").toFile()
         }
     }
 
