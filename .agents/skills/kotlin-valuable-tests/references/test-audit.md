@@ -377,3 +377,48 @@ cuentas reales ni appimagetool. Se mantienen las dos omisiones por PowerShell.
 Las simulaciones de Windows no cierran su validación ni el hito. Comandos, tiempos
 y límites completos en [AGENTS.md](../../../../AGENTS.md). No se repite la suite
 por estos cambios documentales.
+
+
+## Extracción H7 — presentación y aplicación de escritorio
+
+Fecha: 2026-10-31; base H6 `d54561a`. Implementación verificada en Linux; validación
+nativa Windows pendiente. Se actualiza también el hash autorizado de H6, sin cambiar
+su pendiente de Windows. H8 no se ejecuta.
+
+Se conservan los 432 escenarios existentes y sus aserciones. Las fuentes de UI y sus
+integraciones pasan a presentation; únicamente los source sets de prueba dependen de
+adaptadores de datos/plataforma. Los fixtures montan colaboradores reales mediante los
+contratos, sin depender de desktopApp, duplicar lógica de reglas o publicar helpers
+internos. Las consultas legacy y la restauración siguen entrando por LocalSaveTargets;
+no se reemplazan los controles de disco/symlinks por validaciones meramente léxicas.
+
+Se añade DesktopApplicationTest: riesgo alto de fuga o cierre prematuro de los clientes
+HTTP al separar la UI de su propietario. Entra por el viewModel compuesto y por close;
+ambos clientes reales con MockEngine responden antes y sus jobs terminan después.
+AppViewModelTest cierra también sus clientes en AfterEach. Se añade GameItemTest:
+la capacidad inyectada no participa en la identidad visual, y copy(entry) resuelve los
+nuevos destinos. La prueba de pertenencia a un conjunto falló antes de conservar
+la igualdad/hash de nombre, entrada y ROM y pasó después. No se añaden pruebas por
+movimientos o tipos separados ni se retiran escenarios. Balance: **433 métodos,
+434 casos, 70 suites, 11 fixtures y 81 archivos Kotlin**.
+
+La comprobación focalizada previa a la corrección de identidad de presentation/desktopApp
+pasó en 26 s: 194 casos aprobados. Tras reproducir y corregir ese fallo, el cierre
+check/paquete pasó en 57 s (113 tareas: 14 ejecutadas y 99 UP-TO-DATE): ejecutó los 194
+casos actuales de presentación y el de desktopApp, reutilizando las otras suites
+correctas de esta integración. Evidencia combinada: **432 aprobados, cero fallos/errores
+y dos omitidos PowerShell**. Los informes
+históricos de la raíz sin fuentes ya no se cuentan como una suite actual. Diecisiete
+SARIF de módulos sin hallazgos; sin reglas relajadas ni supresiones nuevas. Hooks:
+nueve grupos PASS, ampliados a presentation/desktopApp; convenciones: cuatro PASS.
+La tarea raíz qualityCheck también reutilizó la caché de configuración en cuatro segundos.
+
+Las pruebas de versión en copias aisladas verifican ambos consumidores y outputs para
+patch/minor/major. Staging local final con classpath de los ocho módulos y recursos de
+un único propietario, sin clases duplicadas ni fixtures. Docker generó además un
+AppImage independiente con las fuentes finales; no se probó su UI gráfica. El dry-run
+MSI/EXE solo verifica las delegaciones y no cierra Windows. Comandos, tiempos, diferencias
+entre ejecuciones y limitaciones completas en [AGENTS.md](../../../../AGENTS.md).
+
+El precommit sobre la exportación final del índice pasó en un minuto: 95 tareas
+ejecutadas, sin modificar el trabajo ni el índice para pasar sus comprobaciones.

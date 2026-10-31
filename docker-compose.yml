@@ -8,7 +8,6 @@ services:
     volumes:
       # Mount root directory to /out to deposit final AppImage executables
       - .:/out
-      - ./src:/app/src
       - ./scripts:/app/scripts
       - ./build-logic:/app/build-logic
       - ./gradle:/app/gradle

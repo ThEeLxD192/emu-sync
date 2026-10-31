@@ -15,7 +15,7 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR"
 
 # Copy Compose Desktop runtime and application binaries
-cp -r build/compose/binaries/main-release/app/EmuSync/* "$APP_DIR/"
+cp -r desktopApp/build/compose/binaries/main-release/app/EmuSync/* "$APP_DIR/"
 
 # Create AppRun bootstrap script
 cat << 'EOF' > "$APP_DIR/AppRun"
@@ -26,8 +26,8 @@ EOF
 chmod +x "$APP_DIR/AppRun"
 
 # Copy application icons and desktop metadata
-cp src/main/resources/icon.png "$APP_DIR/icon.png"
-cp src/main/resources/icon.png "$APP_DIR/EmuSync.png"
+cp desktopApp/src/main/resources/icon.png "$APP_DIR/icon.png"
+cp desktopApp/src/main/resources/icon.png "$APP_DIR/EmuSync.png"
 cat << 'EOF' > "$APP_DIR/$APP_ID.desktop"
 [Desktop Entry]
 Type=Application
@@ -43,9 +43,9 @@ chmod +x "$APP_DIR/$APP_ID.desktop"
 # Include AppStream metadata and the desktop entry in their standard locations.
 mkdir -p "$APP_DIR/usr/share/metainfo" "$APP_DIR/usr/share/applications" \
     "$APP_DIR/usr/share/pixmaps"
-cp "src/main/resources/$APP_ID.appdata.xml" "$APP_DIR/usr/share/metainfo/"
+cp "desktopApp/src/main/resources/$APP_ID.appdata.xml" "$APP_DIR/usr/share/metainfo/"
 cp "$APP_DIR/$APP_ID.desktop" "$APP_DIR/usr/share/applications/"
-cp src/main/resources/icon.png "$APP_DIR/usr/share/pixmaps/EmuSync.png"
+cp desktopApp/src/main/resources/icon.png "$APP_DIR/usr/share/pixmaps/EmuSync.png"
 appstreamcli validate --no-net "$APP_DIR/usr/share/metainfo/$APP_ID.appdata.xml"
 
 # Package AppImage with appimagetool into /out (mapped to root directory)

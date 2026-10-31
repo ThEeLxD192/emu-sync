@@ -16,7 +16,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "emu-sync"
 
-// H2 prepares empty JVM modules. Production code moves in H3-H7.
+// JVM modules follow the dependency graph documented in AGENTS.md.
 include(
     ":domain",
     ":application",

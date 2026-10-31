@@ -3,8 +3,8 @@ set -e
 
 BUMP_TYPE="${1:-patch}"
 
-APP_INFO_FILE="src/main/kotlin/com/emusync/AppInfo.kt"
-BUILD_GRADLE_FILE="build.gradle.kts"
+APP_INFO_FILE="desktopApp/src/main/kotlin/com/emusync/AppInfo.kt"
+BUILD_GRADLE_FILE="desktopApp/build.gradle.kts"
 
 if [ ! -f "$APP_INFO_FILE" ]; then
     echo "Error: $APP_INFO_FILE not found." >&2

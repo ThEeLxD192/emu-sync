@@ -11,8 +11,10 @@ el plugin Kotlin de los proyectos conserva la versión del catálogo.
   y fixtures reciben `config/detekt-test.yml`. Detekt sigue informativo y el formato
   bloquea. No se añaden baselines ni supresiones.
 
-Los ocho módulos de H2 tienen solo un `build.gradle.kts`; recibirán fuentes y
-relaciones de dependencia en H3–H7. La raíz conserva aplicación, recursos y paquetes.
+Los ocho módulos tienen fuentes y dependencias según la arquitectura de AGENTS.md.
+`desktopApp` conserva aplicación, recursos y paquetes; `presentation` contiene Compose
+y sus controladores. La raíz no tiene fuentes y mantiene los comandos agregados de
+calidad/pruebas y las delegaciones de ejecución/empaquetado a `desktopApp`.
 Los proyectos contenedores `:data` y `:platform` no tienen fuentes ni build propio.
 Los agregados raíz incorporan todos los subproyectos con build propio.
 

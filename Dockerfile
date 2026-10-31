@@ -49,7 +49,6 @@ COPY .editorconfig .gitattributes ./
 RUN chmod +x gradlew
 
 # Copy source code, resources, and build scripts
-COPY src ./src
 COPY scripts ./scripts
 COPY .githooks ./.githooks
 COPY config.example.json ./

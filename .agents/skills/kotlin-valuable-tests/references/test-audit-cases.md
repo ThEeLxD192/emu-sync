@@ -28,6 +28,9 @@ con adaptadores siguen en la raíz hasta desktopApp.
 Tras H6 hay 431 métodos, 432 casos y 68 suites en 77 archivos Kotlin (nueve fixtures).
 Se traslada plataforma con sus pruebas, se divide la suite mixta de actualizaciones
 y se añade únicamente la regresión de preparación Steam inyectada.
+Tras H7 hay 433 métodos, 434 casos y 70 suites en 81 archivos Kotlin (11 fixtures).
+Las pruebas visuales e integraciones viven en presentation y el ciclo de vida del
+propietario de recursos se comprueba en desktopApp; no se retiran escenarios.
 
 ## data/local/config/ConfigLocationTest.kt
 
@@ -79,7 +82,7 @@ Riesgo: crítica: perder ediciones concurrentes o restaurar credenciales descone
 
 ## drive/CloudFolderMigrationTest.kt
 
-Fuente: [CloudFolderMigrationTest.kt](../../../../src/test/kotlin/com/emusync/drive/CloudFolderMigrationTest.kt). Punto de entrada: `SyncOrchestrator.renameEntryCloudData / renameGameCloudData`.
+Fuente: [CloudFolderMigrationTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/CloudFolderMigrationTest.kt). Punto de entrada: `SyncOrchestrator.renameEntryCloudData / renameGameCloudData`.
 Nivel: integración de flujo. Dobles/límites: MigrationDrive con MockEngine y fallos/mutaciones controlados.
 Riesgo: crítica: perder partidas en un merge, mover datos ajenos o no recuperar tras cancelación.
 
@@ -98,7 +101,7 @@ Riesgo: crítica: perder partidas en un merge, mover datos ajenos o no recuperar
 
 ## drive/ConditionalCloudWriteTest.kt
 
-Fuente: [ConditionalCloudWriteTest.kt](../../../../src/test/kotlin/com/emusync/drive/ConditionalCloudWriteTest.kt). Punto de entrada: `DriveConditionalUpdate.update / canonicalCloudFiles / sincronización rastreada`.
+Fuente: [ConditionalCloudWriteTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/ConditionalCloudWriteTest.kt). Punto de entrada: `DriveConditionalUpdate.update / canonicalCloudFiles / sincronización rastreada`.
 Nivel: protocolo e integración. Dobles/límites: MockEngine, SaveMappingDrive; CIO y servidor loopback en el caso de dos escritores.
 Riesgo: crítica: sobrescribir una versión remota concurrente o seleccionar duplicados divergentes.
 
@@ -110,7 +113,7 @@ Riesgo: crítica: sobrescribir una versión remota concurrente o seleccionar dup
 
 ## drive/DirectorySyncTest.kt
 
-Fuente: [DirectorySyncTest.kt](../../../../src/test/kotlin/com/emusync/drive/DirectorySyncTest.kt). Punto de entrada: `SyncOrchestrator.playWithSync / syncEntry / checkEntrySyncStatus`.
+Fuente: [DirectorySyncTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/DirectorySyncTest.kt). Punto de entrada: `SyncOrchestrator.playWithSync / syncEntry / checkEntrySyncStatus`.
 Nivel: integración de flujo. Dobles/límites: archivos/configuración reales; MockEngine y callbacks de conflicto/lanzamiento.
 Riesgo: crítica: mezclar destinos, perder estructura/timestamps o sobrescribir el hermano de un directorio.
 
@@ -225,7 +228,7 @@ Riesgo: crítica: aceptar un callback sin estado válido o exponer el listener f
 
 ## drive/OAuthPersistenceTest.kt
 
-Fuente: [OAuthPersistenceTest.kt](../../../../src/test/kotlin/com/emusync/drive/OAuthPersistenceTest.kt). Punto de entrada: `OAuthFlow.authorize con ConfigManager`.
+Fuente: [OAuthPersistenceTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/OAuthPersistenceTest.kt). Punto de entrada: `OAuthFlow.authorize con ConfigManager`.
 Nivel: integración de autenticación. Dobles/límites: configuración real, MockEngine y autorización/barreras controladas.
 Riesgo: crítica: aplicar un token obsoleto, borrar uno nuevo o perder ediciones durante OAuth.
 
@@ -244,7 +247,7 @@ Riesgo: crítica: aplicar un token obsoleto, borrar uno nuevo o perder ediciones
 
 ## drive/OfflineSyncTest.kt
 
-Fuente: [OfflineSyncTest.kt](../../../../src/test/kotlin/com/emusync/drive/OfflineSyncTest.kt). Punto de entrada: `OAuthFlow.authorize / SyncOrchestrator.playWithSync`.
+Fuente: [OfflineSyncTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/OfflineSyncTest.kt). Punto de entrada: `OAuthFlow.authorize / SyncOrchestrator.playWithSync`.
 Nivel: protocolo y flujo. Dobles/límites: MockEngine con fallo de red, configuración y callback de juego.
 Riesgo: alta: abrir login interactivo offline, borrar un token válido o ocultar partidas pendientes.
 
@@ -256,7 +259,7 @@ Riesgo: alta: abrir login interactivo offline, borrar un token válido o ocultar
 
 ## drive/PerGameSyncTest.kt
 
-Fuente: [PerGameSyncTest.kt](../../../../src/test/kotlin/com/emusync/drive/PerGameSyncTest.kt). Punto de entrada: `SyncOrchestrator.syncEntry / playWithSync / renameGameCloudData`.
+Fuente: [PerGameSyncTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/PerGameSyncTest.kt). Punto de entrada: `SyncOrchestrator.syncEntry / playWithSync / renameGameCloudData`.
 Nivel: reglas e integración de flujo. Dobles/límites: MockEngine, archivos temporales y callbacks de conflicto/configuración/lanzamiento.
 Riesgo: crítica: subir datos de otro juego, aplanar rutas o lanzar tras cancelar la restauración.
 
@@ -275,7 +278,7 @@ Riesgo: crítica: subir datos de otro juego, aplanar rutas o lanzar tras cancela
 
 ## drive/PostPlayAuthorizationTest.kt
 
-Fuente: [PostPlayAuthorizationTest.kt](../../../../src/test/kotlin/com/emusync/drive/PostPlayAuthorizationTest.kt). Punto de entrada: `SyncOrchestrator.playWithSync`.
+Fuente: [PostPlayAuthorizationTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/PostPlayAuthorizationTest.kt). Punto de entrada: `SyncOrchestrator.playWithSync`.
 Nivel: integración de flujo. Dobles/límites: MockEngine con tokens renovados/rechazados y desconexión durante el juego.
 Riesgo: crítica: subir partidas usando una conexión desconectada o un token caducado.
 
@@ -286,7 +289,7 @@ Riesgo: crítica: subir partidas usando una conexión desconectada o un token ca
 
 ## drive/PostSyncFailureTest.kt
 
-Fuente: [PostSyncFailureTest.kt](../../../../src/test/kotlin/com/emusync/drive/PostSyncFailureTest.kt). Punto de entrada: `SyncOrchestrator.playWithSync y callback de reintento`.
+Fuente: [PostSyncFailureTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/PostSyncFailureTest.kt). Punto de entrada: `SyncOrchestrator.playWithSync y callback de reintento`.
 Nivel: integración de flujo. Dobles/límites: MockEngine con fallos parciales y elección de conflicto; dos valores EnumSource.
 Riesgo: crítica: repetir partidas ya subidas, relanzar el juego o forzar la copia equivocada.
 
@@ -298,7 +301,7 @@ Riesgo: crítica: repetir partidas ya subidas, relanzar el juego o forzar la cop
 
 ## drive/SaveRestorePathsTest.kt
 
-Fuente: [SaveRestorePathsTest.kt](../../../../src/test/kotlin/com/emusync/drive/SaveRestorePathsTest.kt). Punto de entrada: `resolveCloudRestoreTargets / resolveCloudRestorePaths / resolveRemoteFile`.
+Fuente: [SaveRestorePathsTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/SaveRestorePathsTest.kt). Punto de entrada: `resolveCloudRestoreTargets / resolveCloudRestorePaths / resolveRemoteFile`.
 Nivel: reglas con filesystem. Dobles/límites: TempDir y symlink real para escape de ruta.
 Riesgo: crítica: escribir fuera del destino o colapsar dos claves remotas en un archivo.
 
@@ -316,7 +319,7 @@ Riesgo: crítica: escribir fuera del destino o colapsar dos claves remotas en un
 
 ## drive/SaveTargetMappingTest.kt
 
-Fuente: [SaveTargetMappingTest.kt](../../../../src/test/kotlin/com/emusync/drive/SaveTargetMappingTest.kt). Punto de entrada: `SyncOrchestrator.syncEntry / playWithSync / scopeNewSaveTargets / ConfigManager.load`.
+Fuente: [SaveTargetMappingTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/SaveTargetMappingTest.kt). Punto de entrada: `SyncOrchestrator.syncEntry / playWithSync / scopeNewSaveTargets / ConfigManager.load`.
 Nivel: integración de flujo y reglas. Dobles/límites: SaveMappingDrive, configuración/disco reales y callbacks.
 Riesgo: crítica: confundir prefijos portables, reclamar archivos no asignados o lanzar con rutas inválidas.
 
@@ -376,7 +379,7 @@ Riesgo: crítica: acciones no deterministas, duplicado equivocado o no subir pro
 
 ## drive/TrackedFileSyncTest.kt
 
-Fuente: [TrackedFileSyncTest.kt](../../../../src/test/kotlin/com/emusync/drive/TrackedFileSyncTest.kt). Punto de entrada: `TrackedFileSync / SyncHistoryStore / SyncOrchestrator`.
+Fuente: [TrackedFileSyncTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/TrackedFileSyncTest.kt). Punto de entrada: `TrackedFileSync / SyncHistoryStore / SyncOrchestrator`.
 Nivel: reglas e integración local/flujo. Dobles/límites: SaveMappingDrive, disco real, snapshots y fallos de backup/historial.
 Riesgo: crítica: ocultar cambios offline, adelantar historial tras un fallo o reemplazar progreso sin recuperación.
 
@@ -590,7 +593,7 @@ Riesgo: alta: elegir una instalación vacía o ignorar registro nativo tras el r
 
 ## ui/AppViewModelTest.kt
 
-Fuente: [AppViewModelTest.kt](../../../../src/test/kotlin/com/emusync/ui/AppViewModelTest.kt). Punto de entrada: `AppViewModel y uiState`.
+Fuente: [AppViewModelTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/AppViewModelTest.kt). Punto de entrada: `AppViewModel y uiState`.
 Nivel: integración de presentación. Dobles/límites: configuración/scanner reales; MockEngine y contratos de actualizaciones controlados.
 Riesgo: alta: UI y configuración divergentes, perder overrides o no informar fallo de reinicio.
 
@@ -612,7 +615,7 @@ Riesgo: alta: UI y configuración divergentes, perder overrides o no informar fa
 
 ## ui/CloudFolderEditTest.kt
 
-Fuente: [CloudFolderEditTest.kt](../../../../src/test/kotlin/com/emusync/ui/CloudFolderEditTest.kt). Punto de entrada: `AppViewModel.editEntry / editGameOverride`.
+Fuente: [CloudFolderEditTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/CloudFolderEditTest.kt). Punto de entrada: `AppViewModel.editEntry / editGameOverride`.
 Nivel: integración de presentación/flujo. Dobles/límites: MigrationDrive, disco y respuestas de migración controlados.
 Riesgo: crítica: persistir una edición bloqueada o mover la carpeta compartida de otros juegos.
 
@@ -628,7 +631,7 @@ Riesgo: crítica: persistir una edición bloqueada o mover la carpeta compartida
 
 ## ui/CoverLookupTest.kt
 
-Fuente: [CoverLookupTest.kt](../../../../src/test/kotlin/com/emusync/ui/CoverLookupTest.kt). Punto de entrada: `GameItem.coverFile`.
+Fuente: [CoverLookupTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/CoverLookupTest.kt). Punto de entrada: `GameItem.coverFile`.
 Nivel: integración local. Dobles/límites: archivos temporales y prioridades de ubicación explícitas.
 Riesgo: media: mostrar portada de otro origen ignorando override o fallback.
 
@@ -644,7 +647,7 @@ Riesgo: media: mostrar portada de otro origen ignorando override o fallback.
 
 ## ui/DriveConnectionTest.kt
 
-Fuente: [DriveConnectionTest.kt](../../../../src/test/kotlin/com/emusync/ui/DriveConnectionTest.kt). Punto de entrada: `AppViewModel.loginGoogleDrive / setupGoogleDrive / unlinkGoogleDrive`.
+Fuente: [DriveConnectionTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/DriveConnectionTest.kt). Punto de entrada: `AppViewModel.loginGoogleDrive / setupGoogleDrive / unlinkGoogleDrive`.
 Nivel: integración de presentación/autenticación. Dobles/límites: MockEngine, ConfigManager y autorización suspendida controlada.
 Riesgo: crítica: reconectar tras unlink, perder entradas o mostrar credenciales obsoletas.
 
@@ -681,7 +684,7 @@ Riesgo: media: reabrir otro diálogo tras cancelar o perder directorio/archivo i
 
 ## ui/GameCoverLoaderTest.kt
 
-Fuente: [GameCoverLoaderTest.kt](../../../../src/test/kotlin/com/emusync/ui/GameCoverLoaderTest.kt). Punto de entrada: `loadGameCover / loadGameCoverAsync`.
+Fuente: [GameCoverLoaderTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/GameCoverLoaderTest.kt). Punto de entrada: `loadGameCover / loadGameCoverAsync`.
 Nivel: integración local de imágenes. Dobles/límites: PNG reales, cache y dispatcher de runTest.
 Riesgo: media: portada obsoleta tras reemplazo o excepción al abrir imagen corrupta.
 
@@ -693,7 +696,7 @@ Riesgo: media: portada obsoleta tras reemplazo o excepción al abrir imagen corr
 
 ## ui/LibraryConcurrencyTest.kt
 
-Fuente: [LibraryConcurrencyTest.kt](../../../../src/test/kotlin/com/emusync/ui/LibraryConcurrencyTest.kt). Punto de entrada: `AppViewModel / LibraryController / LibraryOperationCoordinator`.
+Fuente: [LibraryConcurrencyTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/LibraryConcurrencyTest.kt). Punto de entrada: `AppViewModel / LibraryController / LibraryOperationCoordinator`.
 Nivel: integración de coordinación. Dobles/límites: CompletableDeferred, StateFlow, MockEngine/SaveMappingDrive y disco reales.
 Riesgo: crítica: operación duplicada, diálogo obsoleto o respuesta tardía que pisa el estado vigente.
 
@@ -716,7 +719,7 @@ Riesgo: crítica: operación duplicada, diálogo obsoleto o respuesta tardía qu
 
 ## ui/UiRecoveryTest.kt
 
-Fuente: [UiRecoveryTest.kt](../../../../src/test/kotlin/com/emusync/ui/UiRecoveryTest.kt). Punto de entrada: `recoverUiFailure / restoreUiOnCancellation`.
+Fuente: [UiRecoveryTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/UiRecoveryTest.kt). Punto de entrada: `recoverUiFailure / restoreUiOnCancellation`.
 Nivel: unitaria. Dobles/límites: excepciones/suspensión controladas con runTest.
 Riesgo: alta: consumir cancelación, perder la causa o dejar estado transitorio visible al llamador.
 
@@ -730,7 +733,7 @@ Riesgo: alta: consumir cancelación, perder la causa o dejar estado transitorio 
 
 ## ui/UpdateConcurrencyTest.kt
 
-Fuente: [UpdateConcurrencyTest.kt](../../../../src/test/kotlin/com/emusync/ui/UpdateConcurrencyTest.kt). Punto de entrada: `UpdateController.checkForUpdates / download / restart`.
+Fuente: [UpdateConcurrencyTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/UpdateConcurrencyTest.kt). Punto de entrada: `UpdateController.checkForUpdates / download / restart`.
 Nivel: integración de coordinación. Dobles/límites: MockEngine, CompletableDeferred y MutableStateFlow.
 Riesgo: crítica: descargar dos veces, aceptar bytes incompletos o reiniciar durante una partida.
 
@@ -757,7 +760,7 @@ Riesgo: media: dividir rutas con espacios o ignorar cancelación y abrir otro se
 
 ## ui/components/SidebarInteractionStateTest.kt
 
-Fuente: [SidebarInteractionStateTest.kt](../../../../src/test/kotlin/com/emusync/ui/components/SidebarInteractionStateTest.kt). Punto de entrada: `SidebarInteractionState.activateFolder / dragFolder / dragEntry / moveChildEntry`.
+Fuente: [SidebarInteractionStateTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/components/SidebarInteractionStateTest.kt). Punto de entrada: `SidebarInteractionState.activateFolder / dragFolder / dragEntry / moveChildEntry`.
 Nivel: unitaria. Dobles/límites: listas/filas reales y callbacks que registran selección/reordenación.
 Riesgo: media: partir un grupo, reordenar una entrada eliminada o cambiar orden ante índices inválidos.
 
@@ -774,7 +777,7 @@ Riesgo: media: partir un grupo, reordenar una entrada eliminada o cambiar orden 
 
 ## ui/components/SidebarTest.kt
 
-Fuente: [SidebarTest.kt](../../../../src/test/kotlin/com/emusync/ui/components/SidebarTest.kt). Punto de entrada: `computeSidebarRows / partitionIntoUnits / flattenUnits / moveTopLevelUnit / moveChildEntry`.
+Fuente: [SidebarTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/components/SidebarTest.kt). Punto de entrada: `computeSidebarRows / partitionIntoUnits / flattenUnits / moveTopLevelUnit / moveChildEntry`.
 Nivel: unitaria. Dobles/límites: entradas conocidas y listas de salida explícitas.
 Riesgo: media: ocultar cabeceras, perder selección o mezclar hijos al reordenar grupos.
 
@@ -792,7 +795,7 @@ Riesgo: media: ocultar cabeceras, perder selección o mezclar hijos al reordenar
 
 ## ui/dialogs/EntryFormStateTest.kt
 
-Fuente: [EntryFormStateTest.kt](../../../../src/test/kotlin/com/emusync/ui/dialogs/EntryFormStateTest.kt). Punto de entrada: `EntryFormState.buildEntry / applyTypeDefaults`.
+Fuente: [EntryFormStateTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/dialogs/EntryFormStateTest.kt). Punto de entrada: `EntryFormState.buildEntry / applyTypeDefaults`.
 Nivel: reglas de presentación. Dobles/límites: borradores reales y archivos temporales, sin Compose renderizado.
 Riesgo: alta: perder identificadores/overrides al editar o aceptar rutas/argumentos inválidos.
 
@@ -808,7 +811,7 @@ Riesgo: alta: perder identificadores/overrides al editar o aceptar rutas/argumen
 
 ## ui/dialogs/GameEditFormStateTest.kt
 
-Fuente: [GameEditFormStateTest.kt](../../../../src/test/kotlin/com/emusync/ui/dialogs/GameEditFormStateTest.kt). Punto de entrada: `GameEditFormState.result / canSave / restorePaths`.
+Fuente: [GameEditFormStateTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/dialogs/GameEditFormStateTest.kt). Punto de entrada: `GameEditFormState.result / canSave / restorePaths`.
 Nivel: reglas de presentación. Dobles/límites: GameItem y rutas temporales, sin red ni escritura de restauración.
 Riesgo: crítica: importar fallback global al juego, restaurar fuera del destino o perder claves remotas.
 
@@ -823,7 +826,7 @@ Riesgo: crítica: importar fallback global al juego, restaurar fuera del destino
 
 ## ui/dialogs/SaveTargetFormStateTest.kt
 
-Fuente: [SaveTargetFormStateTest.kt](../../../../src/test/kotlin/com/emusync/ui/dialogs/SaveTargetFormStateTest.kt). Punto de entrada: `SaveTargetFormState.buildTargets / actualización de filas / cloudPathsAreValid`.
+Fuente: [SaveTargetFormStateTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/dialogs/SaveTargetFormStateTest.kt). Punto de entrada: `SaveTargetFormState.buildTargets / actualización de filas / cloudPathsAreValid`.
 Nivel: reglas con filesystem. Dobles/límites: filas conocidas y archivos/directorios temporales.
 Riesgo: alta: desacoplar ruta/tipo/prefijo al borrar filas o aceptar traversal.
 
@@ -1000,7 +1003,7 @@ Riesgo: crítica: perder campos o cambiar claves, discriminadores y enums al sep
 
 ## drive/SyncResponsesTest.kt
 
-Fuente: [SyncResponsesTest.kt](../../../../src/test/kotlin/com/emusync/drive/SyncResponsesTest.kt). Punto de entrada: `SaveSynchronizer.syncEntry / resolveConflict`.
+Fuente: [SyncResponsesTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/SyncResponsesTest.kt). Punto de entrada: `SaveSynchronizer.syncEntry / resolveConflict`.
 Nivel: integración del contrato neutral; SaveMappingDrive con MockEngine, canal de conflictos, cancelación y archivos reales en TempDir.
 Riesgo: crítica: una respuesta de una operación cancelada sobrescribe la partida de otra operación.
 
@@ -1080,3 +1083,33 @@ Fixture H5: [MemorySaveAccess.kt](../../../../application/src/test/kotlin/com/em
 representa exclusivamente observaciones de rutas ausentes. Sus dos consumidores anteriores
 no prueban disco, symlinks ni inferencia real; esas garantías siguen en las integraciones
 de SaveRestorePathsTest, SaveTargetMappingTest y TrackedFileSyncTest con DesktopSaveAccess.
+
+## desktopApp/composition/DesktopApplicationTest.kt
+
+Fuente: [DesktopApplicationTest.kt](../../../../desktopApp/src/test/kotlin/com/emusync/composition/DesktopApplicationTest.kt).
+Punto de entrada: `DesktopApplication.viewModel / close`.
+Nivel: integración local. Dobles/límites: clientes HTTP MockEngine, directorio temporal;
+composición y cliente reales. Riesgo: alto: dejar clientes activos tras cerrar la ventana
+o cerrarlos antes de que termine su consumidor.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `desktop owner closes both HTTP clients after presentation has borrowed them` | añadir H7: ambos clientes responden durante el uso y sus jobs terminan al cerrar el propietario |
+
+Fixtures H7 de integración: [DesktopTestComposition.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/DesktopTestComposition.kt)
+y [TestSaveSynchronization.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/TestSaveSynchronization.kt).
+Montan contratos con adaptadores reales solo para los tests; no hay dependencia de
+presentation hacia desktopApp ni accesos especiales del compilador.
+
+## presentation/library/GameItemTest.kt
+
+Fuente: [GameItemTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/library/GameItemTest.kt).
+Punto de entrada: identidad de GameItem y copy(entry).
+Nivel: unidad con resolución local real en directorio temporal. Riesgo: medio: perder
+identidad visual al construir otro resolver o mantener los destinos antiguos tras editar.
+La prueba falló al introducir el resolver en la data class y pasó tras conservar
+la igualdad/hash originales, excluyendo la capacidad prestada.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `equivalent displayed games retain their identity across resolver instances and copies` | añadir H7: pertenencia al conjunto de selección con otro resolver, distinción por ROM/entrada y destinos nuevos al copiar |

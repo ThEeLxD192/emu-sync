@@ -86,8 +86,11 @@ JVM compilation with type resolution, with settings adapted to Compose and tests
 Versions live in `gradle/libs.versions.toml`; shared configuration lives in
 [`build-logic`](build-logic/README.md). The `domain` module owns neutral models, sync rules and capability contracts.
 `data:local` owns configuration, history and recovery; `data:drive` owns OAuth and
-Drive protocol/transfers. The five remaining modules await extraction. Flow
-coordination, presentation and packaging remain in the root project. See
+Drive protocol/transfers. `application` coordinates workflows through domain contracts; `data:updates` queries
+and downloads updates, and `platform:desktop` owns desktop integration. `presentation`
+contains Compose and UI controllers; `desktopApp` owns startup, dependency composition,
+resources and packaging. Root commands aggregate or delegate to these modules.
+Native Windows validation remains pending. See
 [the migration roadmap](AGENTS.md).
 
 ```bash

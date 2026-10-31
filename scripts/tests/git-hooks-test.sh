@@ -92,7 +92,9 @@ for config_path in \
     build-logic/gradle.properties \
     build-logic/src/main/resources/META-INF/gradle-plugins/emusync.properties \
     domain/build.gradle.kts \
-    data/local/build.gradle.kts; do
+    data/local/build.gradle.kts \
+    presentation/build.gradle.kts \
+    desktopApp/build.gradle.kts; do
     prepare
     mkdir -p "$(dirname "$config_path")"
     printf 'GOOD\n' > "$config_path"

@@ -8,6 +8,10 @@ import java.io.File
 
 class DesktopSteamLibrary(private val manager: SteamShortcutManager) :
     SteamLibrary, SteamLaunchPreparation {
+    override fun isAvailable() = manager.findShortcutsFile() != null
+
+    override fun isRegistered(entry: GameEntry) = manager.isRegistered(entry)
+
     override fun prepare(entry: EmulatorSystem, romPath: String) =
         manager.prepareLaunch(entry, File(romPath))
 

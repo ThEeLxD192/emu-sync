@@ -59,4 +59,4 @@ jobs:
         if: failure() && matrix.platform == 'Windows'
         shell: bash
         run: |
-          find build/compose/logs -type f -exec echo "=== {} ===" \; -exec cat {} \; || true
+          find desktopApp/build/compose/logs -type f -exec echo "=== {} ===" \; -exec cat {} \; || true

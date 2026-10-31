@@ -5,8 +5,10 @@
 EmuSync es una aplicación Kotlin/Compose Desktop para Linux y Windows. La migración
 acordada usa módulos Gradle JVM y conserva el comportamiento y los formatos actuales.
 La primera entrega fue esta guía y la skill local de pruebas. H0–H5 están
-completados. La implementación de H6 está verificada en Linux; quedan pendientes
-la validación nativa de Windows. El commit de H6 está autorizado; H7–H8 siguen pendientes.
+completados. Las implementaciones de H6 y H7 están verificadas en Linux; queda
+pendiente su validación nativa en Windows. H6 está registrado en `d54561a`; el commit
+de H7 espera confirmación explícita. H8 sigue pendiente. La instrucción del usuario
+autorizó avanzar con H7 conservando el pendiente de Windows de H6.
 Documentar un hito no significa ejecutarlo.
 
 Línea base inspeccionada el 2026-10-30, sobre `484012f`:
@@ -26,42 +28,38 @@ o que obliguen a eliminar pruebas para reducir su número.
 ## Estructura actual
 
 ```text
-src/main/kotlin/
-  Main.kt                    # Arranque y composición de la aplicación
-  com/emusync/
-    AppInfo.kt               # Información y versión de la aplicación
-    composition/             # Construcción temporal de servicios; traslado a desktopApp en H7
-    ui/                      # Estado y controladores
-      components/            # Componentes de interfaz
-      dialogs/               # Diálogos y estado de formularios
-      theme/                 # Colores y tema
-src/main/resources/          # Iconos y metadatos AppStream
-src/test/kotlin/com/emusync/  # Presentación e integraciones entre adaptadores
-config/                      # Configuración de Detekt
-gradle/
-  wrapper/                   # Gradle Wrapper
-  libs.versions.toml         # Versiones compartidas, sin cambios respecto a la base
 build-logic/                 # Convenciones JVM/calidad; build incluido
   src/main/kotlin/           # Plugins precompilados .gradle.kts
-domain/                      # Biblioteca, reglas de sync y contratos neutrales (H3)
-  src/{main,test}/kotlin/     # com/emusync/domain/{config,library,sync,operation,execution,update}
-application/                 # Casos de uso y coordinación neutral (H5)
-  src/main/kotlin/            # com/emusync/application/{sync,library,connection,operation,update}
-  src/test/kotlin/            # Reglas de destinos junto a sus consumidores
-data/local/                  # Configuración/DTO y saves: historial, snapshots, backups y rutas
-  src/{main,test}/kotlin/     # com/emusync/config y com/emusync/local/saves
-data/drive/                  # OAuth, búsquedas, carpetas y transferencias de Google Drive
-  src/{main,test}/kotlin/     # com/emusync/drive
-  src/testFixtures/kotlin/    # Árbol Drive compartido por pruebas de protocolo/integración
-data/updates/                # Consulta GitHub y descarga de actualizaciones (H6)
-  src/{main,test}/kotlin/     # com/emusync/update; DTO internos y cliente HTTP prestado
-platform/desktop/            # Adaptadores JVM de escritorio (H6)
-  src/{main,test}/kotlin/     # runner, steam, scanner, update, desktop/picker y entorno
-presentation/, desktopApp/   # Módulos vacíos preparados para H7
-scripts/                     # Distribución, versión, hooks y sus pruebas
-.githooks/                   # Hook de precommit versionado
-.github/workflows/           # Validación y releases en Linux/Windows
-.agents/skills/              # Skills locales versionadas
+gradle/                     # Wrapper y catálogo con las versiones acordadas
+config/                     # Configuración de Detekt
+domain/                     # Modelos, reglas neutrales y contratos
+  src/{main,test}/kotlin/    # com/emusync/domain/{config,library,sync,operation,execution,update}
+application/                # Casos de uso y coordinación neutral
+  src/{main,test}/kotlin/    # com/emusync/application/{sync,library,connection,operation,update}
+data/local/                 # Configuración/DTO, historial, snapshots, backups y rutas
+  src/{main,test}/kotlin/    # com/emusync/config y com/emusync/local/saves
+data/drive/                 # OAuth, búsquedas, carpetas y transferencias Google Drive
+  src/{main,test}/kotlin/    # com/emusync/drive
+  src/testFixtures/kotlin/   # Árbol Drive compartido por pruebas reales
+data/updates/               # Consulta GitHub y descarga de actualizaciones
+  src/{main,test}/kotlin/    # com/emusync/update; DTO internos y cliente prestado
+platform/desktop/           # Procesos, Steam, scanner, selectores, navegador e instalación
+  src/{main,test}/kotlin/    # Adaptadores JVM sin dependencias visuales
+presentation/               # Compose y controladores; solo application + domain en producción
+  src/main/kotlin/com/emusync/ui/
+    library/                # Biblioteca; components/, form/ y sync/ de esa funcionalidad
+    connection/             # Estado de conexión y formulario OAuth
+    updates/                # Controlador, estado y diálogo de actualizaciones
+    components/, sync/, theme/ # Cabecera, diálogos de estado y tema
+  src/test/kotlin/           # Presentación e integraciones con adaptadores reales de prueba
+desktopApp/                 # Arranque, composición manual y distribución
+  src/main/kotlin/           # Main.kt, com/emusync/AppInfo.kt y composition/
+  src/main/resources/        # Iconos y metadatos AppStream; propietario único
+  src/test/kotlin/           # Ciclo de vida de los recursos de la aplicación
+scripts/                    # Distribución, versión, hooks y sus pruebas
+.githooks/                  # Hook de precommit versionado
+.github/workflows/          # Validación y releases en Linux/Windows
+.agents/skills/             # Skills locales versionadas
 ```
 
 La raíz también contiene los archivos Gradle, Dockerfile, docker-compose.yml,
@@ -164,9 +162,10 @@ entrada agregados o delegados. Mantener reportes de todos los módulos en CI.
 - Spotless/ktfmt bloquea por formato. Detekt sigue informativo (`ignoreFailures=true`),
   con aceptación de cero hallazgos. No relajar reglas ni añadir supresiones para
   completar hitos; conservar y revisar las supresiones justificadas existentes.
-- Los reportes de la raíz se conservan en `build/test-results/test`,
-  `build/reports/tests/test` y `build/reports/detekt`; los módulos usan esas rutas
-  bajo su directorio. CI recoge los reportes recursivamente, incluido `build-logic`.
+- Los módulos usan `build/test-results/test`, `build/reports/tests/test` y
+  `build/reports/detekt` bajo su directorio. Desde H7 la raíz no tiene fuentes:
+  agrega tareas y conserva sus reportes previos como evidencia histórica, sin
+  producir resultados JUnit/Detekt nuevos propios. CI recoge los reportes recursivamente, incluido `build-logic`.
   Distinguir resultados recientes
   de reportes previos, tareas `UP-TO-DATE` y comprobaciones que no se pudieron ejecutar.
 
@@ -702,21 +701,123 @@ Evidencia (2026-10-31, Linux; base H5 `7f5c549`):
   únicamente documentación.
 
 **Implementación H6 verificada en Linux. Validación nativa Windows pendiente.
-Commit H6: autorizado (`refactor: extract desktop platform and update adapters`);
-hash pendiente de registrar en la próxima actualización del seguimiento.**
+Commit H6: `d54561a` (`refactor: extract desktop platform and update adapters`).**
 
 ### H7 — Presentación y composición Desktop
 
-- [ ] Agrupar presentación por biblioteca, conexión y actualizaciones.
-- [ ] Compartir componentes/reglas comunes de formularios mediante estado y callbacks.
-- [ ] Extraer `desktopApp`, recursos y composición manual de dependencias.
-- [ ] Actualizar rutas de distribución, versión, staging y artefactos con sus consumidores.
-- [ ] **H7 completado.**
+- [x] Agrupar presentación por biblioteca, conexión y actualizaciones.
+- [x] Compartir componentes/reglas comunes de formularios mediante estado y callbacks.
+- [x] Extraer `desktopApp`, recursos y composición manual de dependencias.
+- [x] Actualizar rutas de distribución, versión, staging y artefactos con sus consumidores.
+- [ ] **H7 completado.** Preparación Linux verificada; MSI/EXE nativos pendientes.
 
 Aceptación: UI sin dependencias concretas de Drive/HTTP, recursos con un propietario,
 comandos raíz compatibles y preparación de paquetes en Linux/Windows operativa.
 
-Evidencia: pendiente. Commit: pendiente.
+Evidencia (2026-10-31, Linux; base H6 `d54561a`):
+
+- `presentation` contiene Compose y sus controladores, organizados por biblioteca
+  (componentes, formularios y traducción de sync), conexión y actualizaciones.
+  Su producción solo depende de application/domain y las bibliotecas Compose/Kotlin;
+  no importa adaptadores concretos, Ktor, composición ni AppInfo. Recibe versión,
+  capacidades y callbacks desde desktopApp. StateFlow sigue siendo de solo lectura;
+  no se añade un framework de DI ni se cambian dependencias/versiones.
+- `LibraryServices` y `UpdateServices` agrupan capacidades prestadas. Los controladores
+  reciben ConfigurationStore, SteamLibrary, CloudConnection y SaveSynchronizerFactory.
+  SteamLibrary incorpora consulta de disponibilidad/registro; LocalSaveTargets
+  implementa SaveTargetAccess sobre los helpers existentes, conservando inferencia
+  legacy, actualización del tipo cuando aparece la ruta y rechazo de escapes/symlinks.
+  GameItem conserva esa capacidad al copiar una entrada y vuelve a resolver sus destinos.
+  La capacidad queda fuera de equals/hashCode: la identidad sigue siendo nombre,
+  entrada y ROM, como antes de la extracción.
+- Alta y edición comparten EntryFormState, SaveTargetFormState y el campo de rutas;
+  los callbacks de LibraryFormActions mantienen selección fuera del hilo visual.
+  Se conserva el texto de los botones y los tipos elegidos. La apertura de la carpeta
+  de configuración vive en plataforma y se solicita mediante callback. Los tipos
+  reutilizables EntryType, GameEditResult, SidebarUnit/Row y GameSaveSetup tienen
+  archivos propios; los helpers permanecen internos o privados cuando es posible.
+- `desktopApp` posee MainKt, AppInfo, iconos/AppStream y composición interna.
+  DesktopApplication crea y cierra los dos clientes HTTP; la UI toma prestadas sus
+  capacidades y la ventana cierra el propietario al salir. No hay scopes nuevos.
+  El test nuevo comprueba que ambos clientes siguen disponibles durante el uso de
+  presentación y que sus jobs terminan al cerrar ese propietario.
+- La raíz no tiene fuentes: conserva test/qualityCheck/check agregados y delega run,
+  preparación de distribuciones y packageReleaseAppImage/Msi/Exe a desktopApp.
+  Se actualizan juntos Dockerfile, Compose, scripts de distribución/versionado,
+  staging de Windows, diagnóstico CI y archivos del commit de versión del release.
+  Se preservan MainKt, versión 1.1.1, UUID Windows, ID AppStream y nombres de artefactos.
+  Los recursos movidos tienen exactamente los mismos bytes que en H6.
+- Se conservan los 432 casos anteriores y se añaden únicamente las regresiones de cierre
+  de recursos e identidad de GameItem: **433 métodos, 434 casos, 70 suites y 81 archivos
+  Kotlin de pruebas/fixtures**
+  (11 fixtures). Las integraciones permanecen con presentación y reciben adaptadores
+  reales desde fixtures de prueba: no dependen de desktopApp, no crean ciclos ni
+  requieren publicar helpers de producción para las pruebas. AppViewModelTest cierra
+  también sus clientes ante aserciones fallidas. [Catálogo y matriz actualizados](.agents/skills/kotlin-valuable-tests/references/test-audit.md).
+- La comprobación focalizada previa al ajuste de identidad `./gradlew :presentation:test :desktopApp:test
+  :presentation:qualityCheck :desktopApp:qualityCheck --no-daemon` pasó en 26 s;
+  51 tareas, 11 ejecutadas y 40 UP-TO-DATE. Ejecutó los 193 casos de presentación
+  (2,438 s JUnit) y el de desktopApp (0,301 s), todos aprobados.
+- Cierre:
+
+  ```bash
+  ./gradlew check packageReleaseAppImage --no-daemon
+  ```
+
+  `BUILD SUCCESSFUL` en 57 s; 113 tareas, 14 ejecutadas y 99 UP-TO-DATE.
+  Ejecutó presentación (194 casos), desktopApp (uno), su análisis, el paquete y
+  hooks/convenciones. Los otros módulos reutilizaron resultados correctos de esta
+  integración: el primer check completo había pasado en 54 s, ejecutando esas suites.
+  El grafo runtime de presentation se inspeccionó con `:presentation:dependencies
+  --configuration runtimeClasspath` en un cierre previo correcto de 50 s.
+  La prueba aislada nueva de GameItem había fallado antes de corregir su igualdad;
+  el cierre confirma su corrección y que las copias resuelven los destinos editados.
+
+  | Módulo | Casos | Resultado vigente | Tiempo JUnit |
+  | --- | ---: | --- | ---: |
+  | domain | 58 | Aprobados | 0,724 s |
+  | application | 2 | Aprobados | 0,121 s |
+  | data:local | 31 | Aprobados | 0,683 s |
+  | data:drive | 40 | Aprobados | 4,448 s |
+  | data:updates | 13 | Aprobados | 0,994 s |
+  | platform:desktop | 95 | 93 aprobados, dos omitidos PowerShell | 8,365 s |
+  | presentation | 194 | Aprobados | 4,107 s |
+  | desktopApp | 1 | Aprobado | 0,327 s |
+
+  Evidencia combinada: **432 aprobados, cero fallos/errores y dos omitidos**. No se
+  presenta la reutilización de los otros módulos como 434 ejecuciones nuevas ni se cuentan los
+  reportes históricos de la raíz. Diecisiete SARIF actuales limpios de los ocho
+  módulos, incluido testFixtures Drive. Sin reglas relajadas ni supresiones nuevas.
+- `./gradlew :qualityCheck --configuration-cache --no-daemon`, dos ejecuciones:
+  correctas en nueve y cuatro segundos; la segunda reutilizó la caché (86 tareas
+  UP-TO-DATE). Hooks: nueve grupos PASS; se comprobaron también los scripts Gradle
+  de presentation/desktopApp con índice GOOD y trabajo BAD, sin alterar ninguno.
+  Convenciones: cuatro PASS, con agregación, Java 25, fixtures, caché y fallos
+  deliberados en copias desechables. `bash .githooks/pre-commit` pasó también sobre la
+  exportación final del índice: BUILD SUCCESSFUL en un minuto, 95 tareas ejecutadas;
+  no se alteró el trabajo ni el índice para obtener ese resultado.
+- El paquete Linux se prepara en `desktopApp/build/compose/binaries/main-release/app`.
+  Staging: MainKt y los ocho JAR en el classpath, 577 clases EmuSync sin duplicados,
+  recursos presentes únicamente en el JAR de desktopApp y ningún fixture de prueba.
+  `docker compose config --quiet` y `docker compose build` pasaron. La imagen nueva,
+  ejecutada sin montar fuentes/builds del host y con salida en `/tmp/emusync-h7-appimage`,
+  ejecutó scripts/build-dist.sh, validó AppStream y generó un AppImage independiente
+  de 102 MiB. Se reconstruyó la imagen y se repitió el script sobre las fuentes finales
+  después de corregir la identidad de GameItem; ambos empaquetados pasaron.
+- bump-version.sh pasó en copias temporales con espacios: patch/minor/major producen
+  respectivamente 1.1.2/1.2.0/2.0.0 en ambos consumidores y en GITHUB_OUTPUT; la versión
+  del trabajo sigue en 1.1.1. El dry-run de `:packageReleaseMsi :packageReleaseExe`
+  resolvió ambas delegaciones raíz a desktopApp. **No ejecuta jpackage Windows**:
+  no hay validación nativa MSI/EXE en este host Linux. Por ello H7 sigue abierto
+  igual que H6; H8 no se ejecuta. No hubo UI gráfica, cuentas reales, CI remoto,
+  push ni publicación. Continúa la limitación Detekt/Gradle diagnosticada en H2.
+- La primera compilación se detuvo por archivos generados propiedad de root en los
+  builds anteriores. Se reparó solo su propiedad. Los errores intermedios de imports
+  tras el traslado y el hallazgo InjectDispatcher se corrigieron antes del cierre.
+  Catálogo, enlaces locales modificados, grafos, staging, sintaxis Bash y diff revisados.
+
+**Implementación H7 verificada en Linux. Validación nativa Windows pendiente.
+Commit H7: pendiente de confirmación (`refactor: extract presentation and desktop application`).**
 
 ### H8 — Validación final y cierre
 
