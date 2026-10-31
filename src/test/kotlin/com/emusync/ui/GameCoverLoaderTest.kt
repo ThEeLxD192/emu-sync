@@ -1,14 +1,32 @@
 package com.emusync.ui
 
 import com.emusync.ui.components.loadGameCover
+import com.emusync.ui.components.loadGameCoverAsync
 import java.awt.image.BufferedImage
 import java.io.File
 import javax.imageio.ImageIO
-import kotlin.test.*
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNotSame
+import kotlin.test.assertNull
+import kotlin.test.assertSame
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
 class GameCoverLoaderTest {
+    @Test
+    fun `async cover loading uses the same cache with an injected dispatcher`(
+        @TempDir directory: File
+    ) = runTest {
+        val file = File(directory, "cover.png")
+        ImageIO.write(BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB), "png", file)
+        val cached = assertNotNull(loadGameCover(file))
+
+        assertSame(cached, loadGameCoverAsync(file, StandardTestDispatcher(testScheduler)))
+    }
+
     @Test
     fun `replacing cover content at the same path invalidates the cached bitmap`(
         @TempDir directory: File

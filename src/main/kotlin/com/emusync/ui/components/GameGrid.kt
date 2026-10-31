@@ -71,8 +71,8 @@ import com.emusync.model.GameEntry
 import com.emusync.ui.CloudSyncStatus
 import com.emusync.ui.GameItem
 import com.emusync.ui.theme.EmuSyncColors
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+
+private const val EDIT_BUTTON_VISIBILITY_THRESHOLD = 0.01f
 
 /**
  * Main content area displaying games as cards in an adaptive grid. Features prominent custom cover
@@ -371,7 +371,7 @@ private fun GameCard(
 
     val coverBitmap =
         produceState<ImageBitmap?>(initialValue = null, key1 = item) {
-                value = withContext(Dispatchers.IO) { loadGameCover(item.coverFile) }
+                value = loadGameCoverAsync(item.coverFile)
             }
             .value
 
@@ -474,7 +474,7 @@ private fun GameCard(
 
             // Top-right edit button shown only on hover (smooth pure alpha fade, compact 22dp
             // circle)
-            if (onEdit != null && editAlpha > 0.01f) {
+            if (onEdit != null && editAlpha > EDIT_BUTTON_VISIBILITY_THRESHOLD) {
                 Box(
                     modifier =
                         Modifier.align(Alignment.TopEnd)

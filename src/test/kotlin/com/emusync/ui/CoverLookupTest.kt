@@ -103,8 +103,8 @@ class CoverLookupTest {
         val customCoversDir = File(tempDir, "custom").apply { mkdirs() }
 
         val romFile = File(romDir, "Pokemon Emerald.gba").apply { writeText("dummy") }
-        val sameFolderCover = File(romDir, "Pokemon Emerald.png").apply { writeText("same-folder") }
-        val fallbackCover = File(fallbackDir, "Pokemon Emerald.png").apply { writeText("fallback") }
+        File(romDir, "Pokemon Emerald.png").writeText("same-folder")
+        File(fallbackDir, "Pokemon Emerald.png").writeText("fallback")
         val individualCustomCover =
             File(customCoversDir, "emerald_special.jpg").apply { writeText("custom") }
 
@@ -131,7 +131,7 @@ class CoverLookupTest {
 
         val romFile = File(romDir, "Metroid Fusion.gba").apply { writeText("dummy") }
         val sameFolderCover = File(romDir, "Metroid Fusion.png").apply { writeText("same-folder") }
-        val fallbackCover = File(fallbackDir, "Metroid Fusion.png").apply { writeText("fallback") }
+        File(fallbackDir, "Metroid Fusion.png").writeText("fallback")
 
         val system =
             EmulatorSystem(
