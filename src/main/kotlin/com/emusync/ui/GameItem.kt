@@ -4,8 +4,8 @@ import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
-import com.emusync.model.effectiveSaveTargets
-import com.emusync.model.effectiveSaveTargetsForRom
+import com.emusync.local.saves.effectiveSaveTargets
+import com.emusync.local.saves.effectiveSaveTargetsForRom
 import java.io.File
 
 /**

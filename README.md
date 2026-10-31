@@ -84,9 +84,11 @@ Use JDK 25 and Git Bash on Windows. The pinned Spotless/ktfmt formatter applies 
 application code, tests, fixtures and Gradle Kotlin scripts. Detekt analyzes each
 JVM compilation with type resolution, with settings adapted to Compose and tests.
 Versions live in `gradle/libs.versions.toml`; shared configuration lives in
-[`build-logic`](build-logic/README.md). The `domain` module owns neutral library models, sync rules and external capability
-contracts. The other seven modules await extraction; adapters, presentation and
-packaging currently remain in the root project. See [the migration roadmap](AGENTS.md).
+[`build-logic`](build-logic/README.md). The `domain` module owns neutral models, sync rules and capability contracts.
+`data:local` owns configuration, history and recovery; `data:drive` owns OAuth and
+Drive protocol/transfers. The five remaining modules await extraction. Flow
+coordination, presentation and packaging remain in the root project. See
+[the migration roadmap](AGENTS.md).
 
 ```bash
 # Install the versioned pre-commit hook once per clone
@@ -97,6 +99,8 @@ packaging currently remain in the root project. See [the migration roadmap](AGEN
 
 # Run the extracted sync planner tests
 ./gradlew :domain:test --tests 'com.emusync.domain.sync.SyncPlannerTest'
+./gradlew :data:drive:test --tests 'com.emusync.drive.DriveTransferTest'
+./gradlew :data:local:test --tests 'com.emusync.config.ConfigManagerTest'
 
 # Check formatting and static analysis without running tests
 ./gradlew qualityCheck

@@ -1,27 +1,26 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.domain.sync.EntrySyncStatus
+import com.emusync.domain.sync.SaveSyncException
 import com.emusync.domain.sync.SyncDecision
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
+import com.emusync.local.saves.SyncHistoryStore
+import com.emusync.local.saves.TrackedFileSync
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
 import com.emusync.ui.createSaveSynchronizer
 import com.emusync.ui.playWithSync
 import java.io.File
-import java.io.IOException
-import java.nio.file.Files
-import java.nio.file.attribute.PosixFilePermissions
 import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
-import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -36,68 +35,6 @@ class TrackedFileSyncTest {
     private val localChange = sha256("LOCAL".toByteArray())
     private val cloudChange = sha256("CLOUD".toByteArray())
 
-    private fun remote(hash: String? = original, version: String? = "1", date: String = time) =
-        DriveFile("remote", "save.dat", date, sha256Checksum = hash, version = version)
-
-    private fun previous() = SyncedSave(original, "remote", time, original, "1")
-
-    @Test
-    fun `history survives restart and merges records from independent instances`(
-        @TempDir directory: File
-    ) {
-        val config = File(directory, "config.json")
-        val a = SyncHistoryStore(config)
-        val b = SyncHistoryStore(config)
-        val local = File(directory, "save.dat")
-        val key = a.key(local, "folder", "prefix/save.dat")
-        a.record(key, original, remote())
-        b.record("other", localChange, remote(localChange))
-        assertEquals(previous(), SyncHistoryStore(config).get(key))
-        assertEquals(localChange, a.get("other")?.localSha256)
-        assertNotEquals(key, a.key(local, "other-folder", "prefix/save.dat"))
-        assertNotEquals(key, a.key(local, "folder", "other/save.dat"))
-        assertNotEquals(
-            key,
-            a.key(File(directory, "elsewhere/save.dat"), "folder", "prefix/save.dat"),
-        )
-        assertEquals(key, a.key(File(directory, "nested/../save.dat"), "folder", "prefix/save.dat"))
-        assertFalse(a.stateFile.readText().contains(directory.absolutePath))
-        if (Files.getFileStore(directory.toPath()).supportsFileAttributeView("posix")) {
-            assertEquals(
-                PosixFilePermissions.fromString("rw-------"),
-                Files.getPosixFilePermissions(a.stateFile.toPath()),
-            )
-        }
-    }
-
-    @Test
-    fun `failed history replacement retains the previous complete index`(@TempDir directory: File) {
-        val config = File(directory, "config.json")
-        val normal = SyncHistoryStore(config)
-        normal.record("save", original, remote())
-        val before = normal.stateFile.readText()
-        val failing = SyncHistoryStore(config) { throw IOException("simulated disk failure") }
-        assertFailsWith<SaveSyncException> {
-            failing.record("save", localChange, remote(localChange))
-        }
-        assertEquals(before, normal.stateFile.readText())
-        assertEquals(original, normal.get("save")?.localSha256)
-        assertEquals(listOf(normal.stateFile.name), directory.listFiles()!!.map { it.name })
-    }
-
-    @Test
-    fun `corrupt or unsupported history fails safely and is never reset silently`(
-        @TempDir directory: File
-    ) {
-        val history = SyncHistoryStore(File(directory, "config.json"))
-        for (contents in listOf("broken JSON", """{"formatVersion":2,"saves":{}}""")) {
-            history.stateFile.writeText(contents)
-            assertFailsWith<SaveSyncException> { history.get("save") }
-            assertFailsWith<SaveSyncException> { history.record("save", original, remote()) }
-            assertEquals(contents, history.stateFile.readText())
-        }
-    }
-
     @Test
     fun `download preserves a deduplicated recovery copy and advances history`(
         @TempDir directory: File
@@ -107,14 +44,26 @@ class TrackedFileSyncTest {
             val local = File(directory, "save.dat").apply { writeText("LOCAL") }
             val history = SyncHistoryStore(File(directory, "config.json"))
             val tracker = TrackedFileSync(DriveTransfer(drive.client), history)
-            tracker.download("token", drive.files.getValue("remote"), local, "game", "save.dat")
+            tracker.download(
+                "token",
+                (drive.files.getValue("remote")).toSyncState(),
+                (local).path,
+                "game",
+                "save.dat",
+            )
             assertEquals("CLOUD", local.readText())
             assertEquals(
                 cloudChange,
                 history.get(history.key(local, "game", "save.dat"))?.localSha256,
             )
             local.writeText("LOCAL")
-            tracker.download("token", drive.files.getValue("remote"), local, "game", "save.dat")
+            tracker.download(
+                "token",
+                (drive.files.getValue("remote")).toSyncState(),
+                (local).path,
+                "game",
+                "save.dat",
+            )
             val backups =
                 history.backupDirectory
                     .walkTopDown()
@@ -140,7 +89,13 @@ class TrackedFileSyncTest {
             history.backupDirectory.writeText("cannot create a directory here")
             assertFailsWith<SaveSyncException> {
                 TrackedFileSync(DriveTransfer(drive.client), history)
-                    .download("token", drive.files.getValue("remote"), local, "game", "save.dat")
+                    .download(
+                        "token",
+                        (drive.files.getValue("remote")).toSyncState(),
+                        (local).path,
+                        "game",
+                        "save.dat",
+                    )
             }
             assertEquals("LOCAL", local.readText())
             assertNull(history.get(history.key(local, "game", "save.dat")))
@@ -159,11 +114,23 @@ class TrackedFileSyncTest {
             val metadata = drive.files.getValue("remote")
             drive.contents["remote"] = "UNEXPECTED"
             assertFailsWith<SaveSyncException> {
-                tracker.download("token", metadata, local, "game", "save.dat")
+                tracker.download(
+                    "token",
+                    (metadata).toSyncState(),
+                    (local).path,
+                    "game",
+                    "save.dat",
+                )
             }
             drive.beforeDownload = { throw CancellationException("cancelled") }
             assertFailsWith<CancellationException> {
-                tracker.download("token", metadata, local, "game", "save.dat")
+                tracker.download(
+                    "token",
+                    (metadata).toSyncState(),
+                    (local).path,
+                    "game",
+                    "save.dat",
+                )
             }
             assertEquals("LOCAL", local.readText())
             assertNull(history.get(history.key(local, "game", "save.dat")))
@@ -184,7 +151,13 @@ class TrackedFileSyncTest {
             drive.beforeDownload = { local.writeText("NEW LOCAL") }
             assertFailsWith<SaveSyncException> {
                 TrackedFileSync(DriveTransfer(drive.client), history)
-                    .download("token", drive.files.getValue("remote"), local, "game", "save.dat")
+                    .download(
+                        "token",
+                        (drive.files.getValue("remote")).toSyncState(),
+                        (local).path,
+                        "game",
+                        "save.dat",
+                    )
             }
             assertEquals("NEW LOCAL", local.readText())
             assertNull(history.get(history.key(local, "game", "save.dat")))
@@ -201,7 +174,7 @@ class TrackedFileSyncTest {
             val tracker = TrackedFileSync(DriveTransfer(drive.client), history)
             drive.beforeUpload = { local.writeText("NEW LOCAL") }
             assertFailsWith<SaveSyncException> {
-                tracker.upload("token", local, null, "game", "save.dat")
+                tracker.upload("token", (local).path, null, "game", "save.dat")
             }
             assertEquals("LOCAL", drive.contents.values.single())
             assertEquals("NEW LOCAL", local.readText())
@@ -211,7 +184,12 @@ class TrackedFileSyncTest {
             )
             assertEquals(
                 SyncDecision.UPLOAD_LOCAL,
-                tracker.plan(local, drive.files.values.single(), "game", "save.dat"),
+                tracker.plan(
+                    (local).path,
+                    drive.files.values.single().toSyncState(),
+                    "game",
+                    "save.dat",
+                ),
             )
         }
     }
@@ -225,11 +203,17 @@ class TrackedFileSyncTest {
             val local = File(directory, "save.dat").apply { writeText("LOCAL") }
             val history = SyncHistoryStore(File(directory, "config.json"))
             val key = history.key(local, "game", "save.dat")
-            history.record(key, original, drive.files.getValue("remote"))
+            history.record(key, original, (drive.files.getValue("remote")).toSyncState())
             drive.failOnce += "save.dat"
             assertFailsWith<DriveApiException> {
                 TrackedFileSync(DriveTransfer(drive.client), history)
-                    .upload("token", local, drive.files.getValue("remote"), "game", "save.dat")
+                    .upload(
+                        "token",
+                        (local).path,
+                        drive.files.getValue("remote").toSyncState(),
+                        "game",
+                        "save.dat",
+                    )
             }
             assertEquals(original, history.get(key)?.localSha256)
             assertEquals("LOCAL", local.readText())
@@ -417,7 +401,7 @@ class TrackedFileSyncTest {
     ) =
         createSaveSynchronizer(
             drive.client,
-            AppConfig(GoogleDriveConfig("client", "secret", "refresh"), listOf(entry)),
+            AppConfig(OAuthCredentials("client", "secret", "refresh"), listOf(entry)),
             ConfigManager(configFile),
             onStatus,
         )

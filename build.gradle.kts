@@ -49,6 +49,8 @@ tasks.named("check") {
 
 dependencies {
     implementation(project(":domain"))
+    implementation(project(":data:local"))
+    implementation(project(":data:drive"))
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
@@ -59,6 +61,7 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.serialization.json)
     testImplementation(libs.ktor.client.mock)
+    testImplementation(testFixtures(project(":data:drive")))
 }
 
 compose.desktop {

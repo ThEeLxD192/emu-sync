@@ -7,8 +7,8 @@ import com.emusync.domain.library.effectiveCloudFolder
 import com.emusync.domain.sync.SyncGame
 import com.emusync.domain.sync.cloudPathSegments
 import com.emusync.domain.sync.sanitizeCloudFolderName
-import com.emusync.model.effectiveSaveTargets
-import com.emusync.model.effectiveSaveTargetsForRom
+import com.emusync.local.saves.effectiveSaveTargets
+import com.emusync.local.saves.effectiveSaveTargetsForRom
 import java.io.File
 
 internal class SaveTargetResolver {

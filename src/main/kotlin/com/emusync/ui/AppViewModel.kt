@@ -1,6 +1,7 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.execution.BrowserLauncher
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
@@ -9,6 +10,7 @@ import com.emusync.drive.DriveClientFactory
 import com.emusync.drive.OAuthFlow
 import com.emusync.drive.SaveTargetMappingException
 import com.emusync.runner.GameRunner
+import com.emusync.runner.openOAuthBrowser
 import com.emusync.steam.SteamShortcutManager
 import com.emusync.update.UpdateInfo
 import com.emusync.update.UpdateManager
@@ -33,7 +35,12 @@ class AppViewModel(
     private val httpClient: HttpClient = DriveClientFactory.create(),
     private val updateManager: UpdateManager = UpdateManager(),
     private val gameRunner: GameRunner = GameRunner(),
-    oauthFlow: OAuthFlow = OAuthFlow(httpClient),
+    oauthFlow: OAuthFlow =
+        OAuthFlow(
+            httpClient,
+            credentialStore = configManager,
+            browser = BrowserLauncher(::openOAuthBrowser),
+        ),
     loadGames: suspend (GameEntry) -> List<GameItem> = ::loadLibraryGames,
 ) : AutoCloseable {
     private val _uiState = MutableStateFlow(AppUiState())

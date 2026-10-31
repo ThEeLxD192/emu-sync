@@ -1,11 +1,11 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.effectiveCloudFolder
-import com.emusync.model.AppConfig
-import com.emusync.model.inferLegacySaveTarget
+import com.emusync.local.saves.inferLegacySaveTarget
 import com.emusync.steam.SteamShortcutManager
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -210,24 +210,26 @@ class AppViewModelTest {
         assertEquals("Google Drive credentials saved.", msg)
 
         val updated = configManager.load()
-        assertEquals("my-client-id", updated.googleDrive?.clientId)
-        assertEquals("my-client-secret", updated.googleDrive?.clientSecret)
-        assertEquals(null, updated.googleDrive?.refreshToken)
+        assertEquals("my-client-id", updated.cloudCredentials?.clientId)
+        assertEquals("my-client-secret", updated.cloudCredentials?.clientSecret)
+        assertEquals(null, updated.cloudCredentials?.refreshToken)
 
         // Simulate having a refresh token
         configManager.save(
-            updated.copy(googleDrive = updated.googleDrive!!.copy(refreshToken = "valid-token"))
+            updated.copy(
+                cloudCredentials = updated.cloudCredentials!!.copy(refreshToken = "valid-token")
+            )
         )
         viewModel.loadConfig()
-        assertEquals("valid-token", viewModel.uiState.value.config?.googleDrive?.refreshToken)
+        assertEquals("valid-token", viewModel.uiState.value.config?.cloudCredentials?.refreshToken)
 
         // Unlink
         val unlinkMsg = viewModel.unlinkGoogleDrive()
         assertEquals("Google Drive disconnected.", unlinkMsg)
-        assertEquals(null, viewModel.uiState.value.config?.googleDrive?.refreshToken)
+        assertEquals(null, viewModel.uiState.value.config?.cloudCredentials?.refreshToken)
         val reloaded = configManager.load()
-        assertEquals(null, reloaded.googleDrive?.refreshToken)
-        assertEquals("my-client-id", reloaded.googleDrive?.clientId)
+        assertEquals(null, reloaded.cloudCredentials?.refreshToken)
+        assertEquals("my-client-id", reloaded.cloudCredentials?.clientId)
     }
 
     @Test

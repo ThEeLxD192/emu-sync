@@ -1,6 +1,8 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
@@ -8,8 +10,6 @@ import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.drive.SaveMappingDrive
 import com.emusync.drive.sha256
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -327,7 +327,7 @@ class LibraryConcurrencyTest {
         val game = launchableGame()
         val manager =
             ConfigManager(File(directory, "config.json")).apply {
-                save(AppConfig(GoogleDriveConfig("client", "secret", "refresh"), listOf(game)))
+                save(AppConfig(OAuthCredentials("client", "secret", "refresh"), listOf(game)))
             }
         SaveMappingDrive().use { drive ->
             drive.add("save", "save.dat", "CLOUD")
@@ -360,7 +360,7 @@ class LibraryConcurrencyTest {
         val manager =
             ConfigManager(File(directory, "config.json")).apply {
                 save(
-                    AppConfig(GoogleDriveConfig("client", "secret", "refresh"), listOf(game, other))
+                    AppConfig(OAuthCredentials("client", "secret", "refresh"), listOf(game, other))
                 )
             }
         SaveMappingDrive().use { drive ->
@@ -390,7 +390,7 @@ class LibraryConcurrencyTest {
                 "echo",
                 saveTargets = listOf(SaveTarget(local.path, SaveTargetType.FILE)),
             )
-        val config = AppConfig(GoogleDriveConfig("client", "secret", "refresh"), listOf(game))
+        val config = AppConfig(OAuthCredentials("client", "secret", "refresh"), listOf(game))
         ConfigManager(File(directory, "config.json")).save(config)
         val state = MutableStateFlow(AppUiState(config = config))
         val operations = LibraryOperationCoordinator(state)

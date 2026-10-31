@@ -281,7 +281,7 @@ fun EmuSyncApp(viewModel: AppViewModel, onExit: () -> Unit) {
             // ── Drive Setup Dialog ──────────────────────────────────
             if (showDriveSetupDialog) {
                 DriveSetupDialog(
-                    initialConfig = uiState.config?.googleDrive,
+                    initialConfig = uiState.config?.cloudCredentials,
                     configFile = viewModel.configFile,
                     onDismiss = { showDriveSetupDialog = false },
                     onSaveAndConnect = { clientId, clientSecret ->

@@ -16,13 +16,16 @@ H1 dejó 426 métodos en 56 archivos de pruebas y 427 casos JUnit. Tras H3 hay
 428 métodos en 61 archivos de pruebas, más `SaveMappingDrive.kt`: 62 archivos Kotlin
 en total. Se conservan los 427 casos originales y se añaden dos comprobaciones de
 los límites cambiados (429 casos). Las fuentes enlazadas reflejan su ubicación actual;
-los resultados de H1 anteriores siguen siendo evidencia histórica. Las integraciones
+los resultados de H1 anteriores siguen siendo evidencia histórica. Tras H4 hay
+430 métodos, 431 casos JUnit y 65 suites en 73 archivos Kotlin (ocho son fixtures).
+H4 añade solo la compatibilidad literal del historial y la revisión del almacén de
+credenciales inyectado; no retira escenarios. Las integraciones
 que observan `AppStatus` usan ahora el adaptador de presentación; el caso nuevo de
 respuestas a conflictos consume `SaveSynchronizer` y eventos neutrales directamente.
 
-## config/ConfigLocationTest.kt
+## data/local/config/ConfigLocationTest.kt
 
-Fuente: [ConfigLocationTest.kt](../../../../src/test/kotlin/com/emusync/config/ConfigLocationTest.kt). Punto de entrada: `resolveDefaultConfigFile / getDefaultPlatformConfigFile`.
+Fuente: [ConfigLocationTest.kt](../../../../data/local/src/test/kotlin/com/emusync/config/ConfigLocationTest.kt). Punto de entrada: `resolveDefaultConfigFile / getDefaultPlatformConfigFile`.
 Nivel: integración local. Dobles/límites: archivos temporales y proveedores de entorno/propiedades.
 Riesgo: media: elegir otra configuración o consultar proveedores de menor prioridad.
 
@@ -33,9 +36,9 @@ Riesgo: media: elegir otra configuración o consultar proveedores de menor prior
 | `absent blank or parentless AppImage path preserves working directory fallback` | conservar: garantía observable específica de este escenario |
 | `missing portable and working configurations use the platform directory` | conservar: garantía observable específica de este escenario |
 
-## config/ConfigManagerTest.kt
+## data/local/config/ConfigManagerTest.kt
 
-Fuente: [ConfigManagerTest.kt](../../../../src/test/kotlin/com/emusync/config/ConfigManagerTest.kt). Punto de entrada: `ConfigManager.load/save / getDefaultPlatformConfigFile`.
+Fuente: [ConfigManagerTest.kt](../../../../data/local/src/test/kotlin/com/emusync/config/ConfigManagerTest.kt). Punto de entrada: `ConfigManager.load/save / getDefaultPlatformConfigFile`.
 Nivel: integración local. Dobles/límites: JSON literal, archivos temporales y fallo de escritura inyectado.
 Riesgo: crítica: perder configuración/credenciales, romper JSON legacy o inferir incorrectamente destinos.
 
@@ -56,9 +59,9 @@ Riesgo: crítica: perder configuración/credenciales, romper JSON legacy o infer
 | `saved configuration is private on POSIX systems` | conservar: garantía observable específica de este escenario |
 | `existing directory target misconfigured as FILE resolves to DIRECTORY on load` | conservar: garantía observable específica de este escenario |
 
-## config/ConfigUpdatesTest.kt
+## data/local/config/ConfigUpdatesTest.kt
 
-Fuente: [ConfigUpdatesTest.kt](../../../../src/test/kotlin/com/emusync/config/ConfigUpdatesTest.kt). Punto de entrada: `LibraryStore.updateEntries / loadEntries; ConfigManager.snapshotGoogleDrive / compareAndSetGoogleDrive`.
+Fuente: [ConfigUpdatesTest.kt](../../../../data/local/src/test/kotlin/com/emusync/config/ConfigUpdatesTest.kt). Punto de entrada: `LibraryStore.updateEntries / loadEntries; CredentialStore.snapshotCredentials / compareAndSetCredentials`.
 Nivel: integración local/concurrente. Dobles/límites: dos instancias, executor y barrera CountDownLatch.
 Riesgo: crítica: perder ediciones concurrentes o restaurar credenciales desconectadas.
 
@@ -95,15 +98,9 @@ Riesgo: crítica: sobrescribir una versión remota concurrente o seleccionar dup
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
-| `update streams all snapshot bytes and sends the exact strong precondition` | conservar: garantía observable específica de este escenario |
-| `missing weak or wildcard version tokens never authorize an update` | conservar: garantía observable específica de este escenario |
-| `changes before metadata check are rejected before sending save bytes` | conservar: garantía observable específica de este escenario |
-| `unverifiable observed metadata does not fall back to timestamps` | conservar: garantía observable específica de este escenario |
-| `cloud precondition rejection is not retried unconditionally` | conservar: garantía observable específica de este escenario |
 | `concurrent remote change keeps local cloud and previous synchronization history` | conservar: garantía observable específica de este escenario |
 | `simultaneous initial creates retain both copies and divergent duplicates block selection` | conservar: garantía observable específica de este escenario |
 | `identical duplicate content remains safe to compare but unknown content does not` | conservar: garantía observable específica de este escenario |
-| `two actual CIO writers with the same observed version have only one winner` | conservar: garantía observable específica de este escenario |
 
 ## drive/DirectorySyncTest.kt
 
@@ -130,9 +127,9 @@ Riesgo: crítica: mezclar destinos, perder estructura/timestamps o sobrescribir 
 | `save target configured as FILE uploads directory contents if physical target is a directory` | conservar: garantía observable específica de este escenario |
 | `multiple directory targets isolate files and maintain in sync status` | conservar: garantía observable específica de este escenario |
 
-## drive/DriveFoldersTest.kt
+## data/drive/DriveFoldersTest.kt
 
-Fuente: [DriveFoldersTest.kt](../../../../src/test/kotlin/com/emusync/drive/DriveFoldersTest.kt). Punto de entrada: `DriveFolders.ensurePath / findPath / renameFolder / deleteFolder`.
+Fuente: [DriveFoldersTest.kt](../../../../data/drive/src/test/kotlin/com/emusync/drive/DriveFoldersTest.kt). Punto de entrada: `DriveFolders.ensurePath / findPath / renameFolder / deleteFolder`.
 Nivel: protocolo. Dobles/límites: HttpClient real con MockEngine y respuestas JSON controladas.
 Riesgo: alta: consultar/mutar la carpeta equivocada, escapar mal nombres o repetir creación.
 
@@ -144,9 +141,9 @@ Riesgo: alta: consultar/mutar la carpeta equivocada, escapar mal nombres o repet
 | `renameFolder sends PATCH with new name and parent parameters` | conservar: garantía observable específica de este escenario |
 | `deleteFolder sends DELETE request to folder endpoint` | conservar: garantía observable específica de este escenario |
 
-## drive/DriveRecoveryTest.kt
+## domain/operation/OperationRecoveryTest.kt
 
-Fuente: [DriveRecoveryTest.kt](../../../../src/test/kotlin/com/emusync/drive/DriveRecoveryTest.kt). Punto de entrada: `recoverDriveFailure`.
+Fuente: [OperationRecoveryTest.kt](../../../../domain/src/test/kotlin/com/emusync/domain/operation/OperationRecoveryTest.kt). Punto de entrada: `recoverOperationFailure`.
 Nivel: unitaria. Dobles/límites: excepciones y runTest, sin red.
 Riesgo: alta: consumir cancelación o recuperar perdiendo la causa/contexto.
 
@@ -156,9 +153,9 @@ Riesgo: alta: consumir cancelación o recuperar perdiendo la causa/contexto.
 | `cancellation escapes without invoking recovery` | conservar: garantía observable específica de este escenario |
 | `suspending actions retain the caller coroutine` | conservar: garantía observable específica de este escenario |
 
-## drive/DriveSearchTest.kt
+## data/drive/DriveSearchTest.kt
 
-Fuente: [DriveSearchTest.kt](../../../../src/test/kotlin/com/emusync/drive/DriveSearchTest.kt). Punto de entrada: `DriveSearch.listFilesInFolder / listChildrenInFolder`.
+Fuente: [DriveSearchTest.kt](../../../../data/drive/src/test/kotlin/com/emusync/drive/DriveSearchTest.kt). Punto de entrada: `DriveSearch.listFilesInFolder / listChildrenInFolder`.
 Nivel: protocolo. Dobles/límites: MigrationDrive o HttpClient con MockEngine.
 Riesgo: alta: omitir páginas o tratar carpetas como archivos de partida.
 
@@ -167,9 +164,9 @@ Riesgo: alta: omitir páginas o tratar carpetas como archivos de partida.
 | `save listings exclude folders while migration listings include them` | conservar: garantía observable específica de este escenario |
 | `listFilesInFolder follows next page tokens and combines results` | conservar: garantía observable específica de este escenario |
 
-## drive/DriveTransferCioTest.kt
+## data/drive/DriveTransferCioTest.kt
 
-Fuente: [DriveTransferCioTest.kt](../../../../src/test/kotlin/com/emusync/drive/DriveTransferCioTest.kt). Punto de entrada: `DriveTransfer.download / upload`.
+Fuente: [DriveTransferCioTest.kt](../../../../data/drive/src/test/kotlin/com/emusync/drive/DriveTransferCioTest.kt). Punto de entrada: `DriveTransfer.download / upload`.
 Nivel: integración de transporte. Dobles/límites: CIO real, servidor HTTP local y señales de hilos.
 Riesgo: crítica: cortar transferencias lentas, bloquear cancelación o corromper reanudación.
 
@@ -183,9 +180,9 @@ Riesgo: crítica: cortar transferencias lentas, bloquear cancelación o corrompe
 | `CIO resumable upload sends multiple chunks and follows range acknowledgements` | conservar: garantía observable específica de este escenario |
 | `CIO resumable upload restarts once after session expiry` | conservar: garantía observable específica de este escenario |
 
-## drive/DriveTransferTest.kt
+## data/drive/DriveTransferTest.kt
 
-Fuente: [DriveTransferTest.kt](../../../../src/test/kotlin/com/emusync/drive/DriveTransferTest.kt). Punto de entrada: `DriveTransfer.download / upload / update`.
+Fuente: [DriveTransferTest.kt](../../../../data/drive/src/test/kotlin/com/emusync/drive/DriveTransferTest.kt). Punto de entrada: `DriveTransfer.download / upload / update`.
 Nivel: protocolo con archivos. Dobles/límites: MockEngine, ByteChannel, disco temporal y progreso observable.
 Riesgo: crítica: perder el archivo anterior, enviar bytes/rangos erróneos o reintentar un fallo permanente.
 
@@ -206,9 +203,9 @@ Riesgo: crítica: perder el archivo anterior, enviar bytes/rangos erróneos o re
 | `upload handles empty save file` | conservar: garantía observable específica de este escenario |
 | `upload propagates permanent server errors instead of reporting success` | conservar: garantía observable específica de este escenario |
 
-## drive/OAuthFlowTest.kt
+## data/drive/OAuthFlowTest.kt
 
-Fuente: [OAuthFlowTest.kt](../../../../src/test/kotlin/com/emusync/drive/OAuthFlowTest.kt). Punto de entrada: `OAuthFlow.buildAuthUrl / validateCallback / callbackHandler / loopbackAddress`.
+Fuente: [OAuthFlowTest.kt](../../../../data/drive/src/test/kotlin/com/emusync/drive/OAuthFlowTest.kt). Punto de entrada: `OAuthFlow.buildAuthUrl / validateCallback / callbackHandler / loopbackAddress`.
 Nivel: unitaria y loopback. Dobles/límites: MockEngine que rechaza red; HttpServer/Socket locales para callbacks HTTP.
 Riesgo: crítica: aceptar un callback sin estado válido o exponer el listener fuera de loopback.
 
@@ -381,9 +378,6 @@ Riesgo: crítica: ocultar cambios offline, adelantar historial tras un fallo o r
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
-| `history survives restart and merges records from independent instances` | conservar: garantía observable específica de este escenario |
-| `failed history replacement retains the previous complete index` | conservar: garantía observable específica de este escenario |
-| `corrupt or unsupported history fails safely and is never reset silently` | conservar: garantía observable específica de este escenario |
 | `download preserves a deduplicated recovery copy and advances history` | conservar: garantía observable específica de este escenario |
 | `backup failure prevents replacement` | conservar: garantía observable específica de este escenario |
 | `checksum mismatch and cancelled downloads keep local data and history` | conservar: garantía observable específica de este escenario |
@@ -396,9 +390,9 @@ Riesgo: crítica: ocultar cambios offline, adelantar historial tras un fallo o r
 | `corrupt history aborts launch instead of falling back to offline play` | conservar: garantía observable específica de este escenario |
 | `failed explicit local resolution aborts launch and leaves both copies intact` | conservar: garantía observable específica de este escenario |
 
-## config/ConfigGroupsTest.kt
+## data/local/config/ConfigGroupsTest.kt
 
-Fuente: [ConfigGroupsTest.kt](../../../../src/test/kotlin/com/emusync/config/ConfigGroupsTest.kt). Punto de entrada: `ConfigManager.load/save con DTO y conversiones explícitas`.
+Fuente: [ConfigGroupsTest.kt](../../../../data/local/src/test/kotlin/com/emusync/config/ConfigGroupsTest.kt). Punto de entrada: `ConfigManager.load/save con DTO y conversiones explícitas`.
 Nivel: reglas y persistencia. Dobles/límites: entradas reales; JSON legacy literal y TempDir en persistencia.
 Riesgo: alta: cambiar la carpeta compartida o romper group/cloudFolder al persistir.
 
@@ -407,9 +401,9 @@ Riesgo: alta: cambiar la carpeta compartida o romper group/cloudFolder al persis
 | `ConfigManager serializes and deserializes group and cloudFolder` | conservar: garantía observable específica de este escenario |
 | `ConfigManager deserializes legacy JSON without group or cloudFolder` | conservar: garantía observable específica de este escenario |
 
-## model/GameEntrySaveTargetsTest.kt
+## data/local/saves/GameEntrySaveTargetsTest.kt
 
-Fuente: [GameEntrySaveTargetsTest.kt](../../../../src/test/kotlin/com/emusync/model/GameEntrySaveTargetsTest.kt). Punto de entrada: `effectiveSaveTargets / effectiveSaveTargetsForRom`.
+Fuente: [GameEntrySaveTargetsTest.kt](../../../../data/local/src/test/kotlin/com/emusync/local/saves/GameEntrySaveTargetsTest.kt). Punto de entrada: `effectiveSaveTargets / effectiveSaveTargetsForRom`.
 Nivel: reglas con filesystem. Dobles/límites: archivos/directorios reales y rutas ausentes en TempDir.
 Riesgo: crítica: perder prioridad de overrides o inferir un tipo incorrecto para rutas ausentes.
 
@@ -980,9 +974,9 @@ Riesgo: alta: cambiar la prioridad de carpetas o la ubicación compartida.
 | `multiple emulators with same group share the exact same effectiveCloudFolder` | conservar: garantía observable específica de este escenario |
 
 
-## config/ConfigFormatCompatibilityTest.kt
+## data/local/config/ConfigFormatCompatibilityTest.kt
 
-Fuente: [ConfigFormatCompatibilityTest.kt](../../../../src/test/kotlin/com/emusync/config/ConfigFormatCompatibilityTest.kt). Punto de entrada: `ConfigManager.load/save`.
+Fuente: [ConfigFormatCompatibilityTest.kt](../../../../data/local/src/test/kotlin/com/emusync/config/ConfigFormatCompatibilityTest.kt). Punto de entrada: `ConfigManager.load/save`.
 Nivel: integración local; documento JSON literal, esperado neutral independiente y TempDir.
 Riesgo: crítica: perder campos o cambiar claves, discriminadores y enums al separar DTO.
 
@@ -999,3 +993,51 @@ Riesgo: crítica: una respuesta de una operación cancelada sobrescribe la parti
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
 | `cancelled conflict reply cannot resolve an identical later request or write saves` | añadir en H3: respuesta obsoleta UPLOAD_LOCAL sin efectos; solo la solicitud vigente autoriza DOWNLOAD_CLOUD y conserva el contenido remoto |
+
+## data/local/saves/SyncHistoryStoreTest.kt
+
+Fuente: [SyncHistoryStoreTest.kt](../../../../data/local/src/test/kotlin/com/emusync/local/saves/SyncHistoryStoreTest.kt). Punto de entrada: `SyncHistoryStore.key / record / get`.
+Nivel: integración local, TempDir, fallo beforeReplace y metadatos neutrales.
+Riesgo: crítica: perder checkpoints, resets silenciosos o índices parciales.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `history survives restart and merges records from independent instances` | conservar: garantía observable específica de este escenario |
+| `failed history replacement retains the previous complete index` | conservar: garantía observable específica de este escenario |
+| `corrupt or unsupported history fails safely and is never reset silently` | conservar: garantía observable específica de este escenario |
+
+
+## data/drive/ConditionalCloudUpdateTest.kt
+
+Fuente: [ConditionalCloudUpdateTest.kt](../../../../data/drive/src/test/kotlin/com/emusync/drive/ConditionalCloudUpdateTest.kt). Punto de entrada: `DriveConditionalUpdate.update`.
+Nivel: protocolo MockEngine y transporte CIO real con servidor loopback en el escenario de dos escritores.
+Riesgo: crítica: sobrescritura remota concurrente sin precondición fuerte.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `update streams all snapshot bytes and sends the exact strong precondition` | conservar: garantía observable específica de este escenario |
+| `missing weak or wildcard version tokens never authorize an update` | conservar: garantía observable específica de este escenario |
+| `changes before metadata check are rejected before sending save bytes` | conservar: garantía observable específica de este escenario |
+| `unverifiable observed metadata does not fall back to timestamps` | conservar: garantía observable específica de este escenario |
+| `cloud precondition rejection is not retried unconditionally` | conservar: garantía observable específica de este escenario |
+| `two actual CIO writers with the same observed version have only one winner` | conservar: garantía observable específica de este escenario |
+
+## data/local/saves/SyncHistoryCompatibilityTest.kt
+
+Fuente: [SyncHistoryCompatibilityTest.kt](../../../../data/local/src/test/kotlin/com/emusync/local/saves/SyncHistoryCompatibilityTest.kt). Punto de entrada: `SyncHistoryStore.get / record`.
+Nivel: integración local; documento legacy literal y JSON esperado independiente.
+Riesgo: crítica: romper el historial existente al separar DTO y observaciones neutrales.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `version one history retains complete and legacy checkpoints when adding a neutral observation` | añadir en H4: conserva claves, versión, hashes, tiempos y metadatos ausentes; leer no reescribe y añadir una observación no altera registros previos |
+
+## data/drive/OAuthCredentialStoreTest.kt
+
+Fuente: [OAuthCredentialStoreTest.kt](../../../../data/drive/src/test/kotlin/com/emusync/drive/OAuthCredentialStoreTest.kt). Punto de entrada: `OAuthFlow.authorize con CredentialStore inyectado`.
+Nivel: contrato del adaptador, MockEngine y almacén neutral en memoria, sin data:local.
+Riesgo: crítica: aceptar un token de una conexión reemplazada aunque sus credenciales vuelvan a ser iguales.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `refresh rejects a changed store revision even when credential values are identical` | añadir en H4: sustituye la conexión durante HTTP y exige rechazo, una sola petición y credenciales conservadas |

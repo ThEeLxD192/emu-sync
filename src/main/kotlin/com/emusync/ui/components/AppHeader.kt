@@ -57,8 +57,9 @@ internal fun AppHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Google Drive status indicator / Connect action
-            val googleDrive = state.config?.googleDrive
-            val isLinked = googleDrive != null && !googleDrive.refreshToken.isNullOrBlank()
+            val cloudCredentials = state.config?.cloudCredentials
+            val isLinked =
+                cloudCredentials != null && !cloudCredentials.refreshToken.isNullOrBlank()
             if (isLinked) {
                 Surface(
                     onClick = { onShowDriveSetup() },
@@ -88,8 +89,8 @@ internal fun AppHeader(
                 OutlinedButton(
                     onClick = {
                         if (
-                            googleDrive?.clientId.isNullOrBlank() ||
-                                googleDrive.clientSecret.isBlank()
+                            cloudCredentials?.clientId.isNullOrBlank() ||
+                                cloudCredentials.clientSecret.isBlank()
                         ) {
                             onShowDriveSetup()
                         } else {

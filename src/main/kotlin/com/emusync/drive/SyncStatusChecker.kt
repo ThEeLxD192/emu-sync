@@ -2,8 +2,10 @@ package com.emusync.drive
 
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.SaveTarget as ConfiguredSaveTarget
+import com.emusync.domain.operation.recoverOperationFailure
 import com.emusync.domain.sync.EntrySyncStatus
 import com.emusync.domain.sync.SyncDecision
+import com.emusync.local.saves.resolveRemoteFile
 import java.io.File
 
 /** Reads local/remote observations without advancing synchronization history. */
@@ -12,7 +14,7 @@ internal class SyncStatusChecker(
     private val paths: SaveTargetResolver,
 ) {
     suspend fun checkEntrySyncStatus(entry: GameEntry): EntrySyncStatus {
-        val drive = context.config.googleDrive
+        val drive = context.config.cloudCredentials
         if (drive == null || drive.refreshToken.isNullOrBlank())
             return EntrySyncStatus.NOT_CONFIGURED
         val targets = paths.getSaveTargets(entry)
@@ -20,12 +22,11 @@ internal class SyncStatusChecker(
     }
 
     private suspend fun readStatus(targets: List<ResolvedSaveTarget>): EntrySyncStatus =
-        recoverDriveFailure(
+        recoverOperationFailure(
             action = {
                 val token =
                     context.oauthFlow.authorize(
                         context.config,
-                        context.configManager,
                         allowInteractive = false,
                     )
                 val observation = StatusObservation()
@@ -71,8 +72,8 @@ internal class SyncStatusChecker(
             val name = fileCloudName(target.configured())
             observation.record(
                 context.trackedSync.plan(
-                    target.file,
-                    cloudFiles.find { it.name == name },
+                    (target.file).path,
+                    (cloudFiles.find { it.name == name })?.toSyncState(),
                     folderId,
                     name,
                 )
@@ -95,8 +96,8 @@ internal class SyncStatusChecker(
             val local = resolveRemoteFile(root, remote.name) ?: continue
             observation.record(
                 context.trackedSync.plan(
-                    local,
-                    remote,
+                    (local).path,
+                    remote.toSyncState(),
                     folderId,
                     directoryCloudName(target.cloudPath, remote.name),
                 )

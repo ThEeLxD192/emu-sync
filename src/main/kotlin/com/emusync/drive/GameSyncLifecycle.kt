@@ -5,8 +5,10 @@ import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.SaveTarget as ConfiguredSaveTarget
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.domain.library.effectiveCloudFolder
+import com.emusync.domain.operation.recoverOperationFailure
 import com.emusync.domain.sync.SaveSetup
 import com.emusync.domain.sync.SaveSetupRequest
+import com.emusync.domain.sync.SaveSyncException
 import com.emusync.domain.sync.SyncEvent
 import com.emusync.domain.sync.SyncGame
 import com.emusync.domain.sync.cloudPathSegments
@@ -26,7 +28,7 @@ internal class GameSyncLifecycle(
         get() = context.search
 
     suspend fun playWithSync(game: SyncGame, setup: SaveSetup) {
-        recoverDriveFailure(
+        recoverOperationFailure(
             action = {
                 val prepared =
                     PlayPreparation(
@@ -34,7 +36,7 @@ internal class GameSyncLifecycle(
                         game.effectiveSaveTargets,
                         paths.getCloudPathSegments(game),
                     )
-                val hasDrive = context.config.googleDrive != null
+                val hasDrive = context.config.cloudCredentials != null
                 val ready = !hasDrive || preparePlay(prepared, setup)
                 if (ready && launchPrepared(prepared, hasDrive, setup))
                     context.onStatus(SyncEvent.Idle)
@@ -44,13 +46,12 @@ internal class GameSyncLifecycle(
     }
 
     private suspend fun preparePlay(prepared: PlayPreparation, setup: SaveSetup): Boolean =
-        recoverDriveFailure(
+        recoverOperationFailure(
             action = {
                 context.onStatus(SyncEvent.Syncing("Checking cloud saves..."))
                 val token =
                     context.oauthFlow.authorize(
                         context.config,
-                        context.configManager,
                         allowInteractive = false,
                     )
                 if (!ensureSaveSetup(token, prepared, setup)) false
@@ -154,7 +155,7 @@ internal class GameSyncLifecycle(
     ) {
         val folderId = folders.ensurePath(token, cloudPathSegments)
         val cloudFiles = canonicalCloudFiles(search.listFilesInFolder(token, folderId))
-        recoverDriveFailure(
+        recoverOperationFailure(
             action = {
                 if (
                     isDirectorySaveTarget(

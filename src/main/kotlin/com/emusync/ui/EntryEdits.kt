@@ -1,10 +1,10 @@
 package com.emusync.ui
 
+import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.effectiveCloudFolder
-import com.emusync.model.AppConfig
 
 /** Regrouping a shared root is a display edit; preserve its existing cloud location. */
 internal fun preserveSharedCloudRoot(

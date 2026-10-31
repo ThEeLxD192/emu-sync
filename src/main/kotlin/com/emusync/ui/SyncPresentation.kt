@@ -1,6 +1,7 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.sync.EntrySyncStatus
 import com.emusync.domain.sync.SaveSetup
@@ -9,7 +10,6 @@ import com.emusync.domain.sync.SaveSynchronizer
 import com.emusync.domain.sync.SyncEvent
 import com.emusync.domain.sync.SyncGame
 import com.emusync.drive.SyncOrchestrator
-import com.emusync.model.AppConfig
 import io.ktor.client.HttpClient
 import java.time.Instant
 import java.time.ZoneId

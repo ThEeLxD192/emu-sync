@@ -3,6 +3,7 @@ package com.emusync.drive
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.domain.sync.remotePathSegments
+import com.emusync.local.saves.resolveRemoteFile
 import java.io.File
 
 internal fun SaveTarget.isDirectory(

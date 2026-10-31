@@ -1,9 +1,10 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
+import com.emusync.domain.execution.BrowserLauncher
 import com.emusync.domain.library.EmulatorSystem
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
 import com.emusync.ui.createSaveSynchronizer
@@ -31,8 +32,8 @@ class OfflineSyncTest {
         val configManager = ConfigManager(configFile.absolutePath)
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = null,
@@ -48,11 +49,16 @@ class OfflineSyncTest {
                 }
             }
 
-        val oauthFlow = OAuthFlow(mockClient)
+        val oauthFlow =
+            OAuthFlow(
+                mockClient,
+                credentialStore = configManager,
+                browser = BrowserLauncher { error("Browser should not be opened") },
+            )
 
         val exception =
             assertThrows<DriveApiException> {
-                oauthFlow.authorize(config, configManager, allowInteractive = false)
+                oauthFlow.authorize(config, allowInteractive = false)
             }
         assertTrue(exception.message!!.contains("not authenticated or offline"))
     }
@@ -65,8 +71,8 @@ class OfflineSyncTest {
         val configManager = ConfigManager(configFile.absolutePath)
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "existing-valid-refresh-token",
@@ -82,17 +88,22 @@ class OfflineSyncTest {
                 }
             }
 
-        val oauthFlow = OAuthFlow(mockClient)
+        val oauthFlow =
+            OAuthFlow(
+                mockClient,
+                credentialStore = configManager,
+                browser = BrowserLauncher { error("Browser should not be opened") },
+            )
 
         val exception =
             assertThrows<DriveApiException> {
-                oauthFlow.authorize(config, configManager, allowInteractive = false)
+                oauthFlow.authorize(config, allowInteractive = false)
             }
         assertTrue(exception.message!!.contains("offline"))
 
         // Refresh token should be preserved in config!
         val reloaded = configManager.load()
-        assertEquals("existing-valid-refresh-token", reloaded.googleDrive?.refreshToken)
+        assertEquals("existing-valid-refresh-token", reloaded.cloudCredentials?.refreshToken)
     }
 
     @Test
@@ -120,8 +131,8 @@ class OfflineSyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "valid-refresh-token",

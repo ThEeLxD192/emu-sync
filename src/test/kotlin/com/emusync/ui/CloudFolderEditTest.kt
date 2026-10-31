@@ -1,13 +1,13 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.effectiveCloudFolder
 import com.emusync.drive.MigrationDrive
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -196,7 +196,7 @@ class CloudFolderEditTest {
         entries: List<GameEntry>,
     ): Pair<AppViewModel, ConfigManager> {
         val manager = ConfigManager(File(directory, "config.json"))
-        manager.save(AppConfig(GoogleDriveConfig("client", "secret", "refresh"), entries))
+        manager.save(AppConfig(OAuthCredentials("client", "secret", "refresh"), entries))
         val viewModel = AppViewModel(configManager = manager, httpClient = drive.client)
         viewModel.loadConfig()
         return viewModel to manager

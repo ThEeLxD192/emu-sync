@@ -1,6 +1,7 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.SaveTarget as ConfiguredSaveTarget
 import com.emusync.domain.library.SaveTargetType
@@ -12,7 +13,6 @@ import com.emusync.domain.sync.SaveSynchronizer
 import com.emusync.domain.sync.SyncDecision
 import com.emusync.domain.sync.SyncEvent
 import com.emusync.domain.sync.SyncGame
-import com.emusync.model.AppConfig
 import io.ktor.client.HttpClient
 import java.io.File
 

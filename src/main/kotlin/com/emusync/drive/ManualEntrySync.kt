@@ -1,6 +1,7 @@
 package com.emusync.drive
 
 import com.emusync.domain.library.GameEntry
+import com.emusync.domain.operation.recoverOperationFailure
 import com.emusync.domain.sync.SyncEvent
 
 internal class ManualEntrySync(
@@ -20,9 +21,6 @@ internal class ManualEntrySync(
     private val config
         get() = context.config
 
-    private val configManager
-        get() = context.configManager
-
     private val onStatus
         get() = context.onStatus
 
@@ -31,7 +29,7 @@ internal class ManualEntrySync(
      * game or emulator.
      */
     suspend fun syncEntry(entry: GameEntry): Boolean {
-        return recoverDriveFailure(
+        return recoverOperationFailure(
             action = {
                 val token = connect() ?: return false
 
@@ -48,7 +46,7 @@ internal class ManualEntrySync(
     }
 
     private suspend fun connect(): String? {
-        if (config.googleDrive?.refreshToken.isNullOrBlank()) {
+        if (config.cloudCredentials?.refreshToken.isNullOrBlank()) {
             onStatus(
                 SyncEvent.Error(
                     "Google Drive is not connected. Click 'Connect Drive' in the top bar to sign in."
@@ -57,8 +55,8 @@ internal class ManualEntrySync(
             return null
         }
         onStatus(SyncEvent.Syncing("Connecting to Google Drive..."))
-        return recoverDriveFailure(
-            action = { oauthFlow.authorize(config, configManager, allowInteractive = false) },
+        return recoverOperationFailure(
+            action = { oauthFlow.authorize(config, allowInteractive = false) },
             recover = { failure ->
                 onStatus(
                     SyncEvent.Error(

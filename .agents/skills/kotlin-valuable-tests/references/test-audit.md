@@ -249,3 +249,40 @@ empaquetado y limitaciones completos en [AGENTS.md](../../../../AGENTS.md).
 No hay evidencia nativa Windows ni cuentas reales, y las integraciones visuales no
 son pruebas de renderizado. La composición/adaptadores aún presentes en raíz se
 extraerán en sus hitos; las pruebas de integración seguirán a su propietario.
+
+## H4 — Persistencia local, OAuth y transferencias
+
+Fecha: 2026-10-30–31, Linux; base `0def750`. Se conservan todos los escenarios de
+H1/H3. Las fuentes actuales están enlazadas en el [catálogo](test-audit-cases.md).
+Configuración, tipos de destinos e historial pasan a local; protocolo y transporte
+pasan a Drive. La recuperación local recibe CloudSaveTransfer y expone LocalSaveFiles;
+las integraciones de ambos adaptadores conservan componentes reales en la raíz.
+OperationRecoveryTest pertenece a dominio: conserva la propagación de cancelación.
+
+| Cambio de límite | Contrato y decisión |
+| --- | --- |
+| CredentialStore/BrowserLauncher por constructor | OAuth ya no conoce ConfigManager ni abre AWT directamente. OAuthPersistenceTest y DriveConnectionTest conservan respuestas tardías, revisiones, desconexión, cancelación y edición simultánea con persistencia real. OAuthCredentialStoreTest añade rechazo de una revisión cambiada con valores idénticos, usando almacenamiento neutral dentro del módulo Drive. |
+| DTO de credenciales y nombres neutrales | ConfigFormatCompatibilityTest conserva documento literal completo y esperado independiente. Exige googleDrive/clientId/clientSecret/refreshToken en JSON mientras los consumidores usan cloudCredentials/OAuthCredentials. |
+| Checkpoints de historial neutrales | SyncHistoryCompatibilityTest añade JSON versión uno literal, registros completos y sin campos opcionales. Leer no reescribe; añadir conserva claves, hashes, IDs, versiones y tiempos previos. Las tres pruebas originales de historial pasan a SyncHistoryStoreTest sin perder fallos de reemplazo ni corrupción. |
+| Recuperación/transferencia entre módulos | TrackedFileSyncTest y ConditionalCloudWriteTest de raíz siguen usando DriveTransfer y SyncHistoryStore reales, con SaveMappingDrive. Comprueban snapshots estables, conservación de progreso/copia remota/historial, backups, reintentos, conflictos y cancelación. Solo se traducen metadatos y rutas al cruzar el límite neutral. |
+| Condicionales y transporte | Seis escenarios de ConditionalCloudUpdateTest pasan a Drive con el acceso interno normal de su propio módulo. DriveTransferCioTest conserva siete escenarios de sockets reales, y dos escritores CIO aún exigen un único ganador con el mismo ETag. |
+| Fixtures y recursos | MigrationDrive/MigrationNode/MigrationMove viven en testFixtures de Drive y los usan DriveSearchTest y las integraciones de migración/UI de raíz. El esquema ConditionalFileResponse de raíz y sus fingerprints son independientes de DTO/helpers privados de producción. MemoryCredentialStore representa revisiones neutrales. Los clientes propiedad de suites trasladadas se cierran en AfterEach; los de transporte/fixtures conservan use/finally. |
+
+Se añaden solo dos casos: **430 métodos, 431 casos JUnit, 65 suites y ocho archivos
+fixture**, en 73 archivos Kotlin. Sin retiradas, supresiones nuevas ni accesos especiales
+del compilador para cruzar módulos.
+
+La ejecución final combinó check, grafos runtime de local/Drive y packageReleaseAppImage:
+correcta en 1 min 4 s, 109 tareas (23 ejecutadas y 86 UP-TO-DATE). Raíz: 310 casos,
+308 aprobados y dos omitidos por PowerShell, 13,210 s JUnit. Drive: 40 aprobados,
+4,167 s. Local (31, 0,509 s) y dominio (50, 0,289 s) UP-TO-DATE de ejecuciones
+afectadas anteriores; total vigente 429 aprobados y dos omitidos, sin fallos/errores.
+La comprobación afectada posterior de calidad Drive y paquete pasó en 16 s,
+tras retirar únicamente un cuerpo vacío al separar el enum de progreso. Se ejecutó
+Detekt main de Drive; los otros análisis y el paquete estaban UP-TO-DATE. El ajuste
+no cambió bytecode ni se repitieron suites. Nueve reportes Detekt limpios, incluido
+testFixtures, y sin avisos de errores de resolución de tipos. Hooks: nueve PASS; convenciones: cuatro PASS.
+
+Los comandos y límites completos están en [AGENTS.md](../../../../AGENTS.md). El staging
+Linux no equivale a un AppImage independiente ni a Windows nativo; no hay cuentas reales
+ni CI remoto. Los resultados de H1–H3 anteriores siguen siendo evidencia histórica.

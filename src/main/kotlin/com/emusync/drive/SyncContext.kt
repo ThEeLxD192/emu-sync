@@ -1,14 +1,19 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.execution.BrowserLauncher
 import com.emusync.domain.execution.GameLauncher
 import com.emusync.domain.sync.CloudFolderStore
+import com.emusync.domain.sync.LocalSaveFiles
 import com.emusync.domain.sync.PostSyncFailure
 import com.emusync.domain.sync.SaveConflict
 import com.emusync.domain.sync.SyncDecision
 import com.emusync.domain.sync.SyncEvent
-import com.emusync.model.AppConfig
+import com.emusync.local.saves.SyncHistoryStore
+import com.emusync.local.saves.TrackedFileSync
 import com.emusync.runner.GameRunner
+import com.emusync.runner.openOAuthBrowser
 import io.ktor.client.HttpClient
 import java.util.logging.Logger
 import kotlinx.coroutines.CompletableDeferred
@@ -19,7 +24,7 @@ import kotlinx.coroutines.CompletableDeferred
 internal class SyncContext(
     client: HttpClient,
     val config: AppConfig,
-    val configManager: ConfigManager,
+    configManager: ConfigManager,
     val onStatus: (SyncEvent) -> Unit,
 ) {
     val logger: java.util.logging.Logger = Logger.getLogger(SyncOrchestrator::class.java.name)
@@ -27,8 +32,7 @@ internal class SyncContext(
     val transfer =
         DriveTransfer(client) { progress ->
             val verb =
-                if (progress.direction == TransferProgress.Direction.DOWNLOAD) "Downloading"
-                else "Uploading"
+                if (progress.direction == TransferDirection.DOWNLOAD) "Downloading" else "Uploading"
             val percent =
                 progress.totalBytes
                     ?.takeIf { it > 0L }
@@ -37,9 +41,15 @@ internal class SyncContext(
             onStatus(SyncEvent.Syncing("$verb ${progress.fileName}$suffix"))
         }
     val folders: CloudFolderStore = DriveFolders(client)
-    val trackedSync = TrackedFileSync(transfer, SyncHistoryStore(configManager.configFile))
+    val trackedSync: LocalSaveFiles =
+        TrackedFileSync(transfer, SyncHistoryStore(configManager.configFile))
     val folderMigrator = CloudFolderMigrator(folders, search)
-    val oauthFlow = OAuthFlow(client)
+    val oauthFlow =
+        OAuthFlow(
+            client,
+            credentialStore = configManager,
+            browser = BrowserLauncher(::openOAuthBrowser),
+        )
     val runner: GameLauncher = GameRunner()
     private var pendingConflict: Pair<SaveConflict, CompletableDeferred<SyncDecision>>? = null
     private var pendingRetry: Pair<PostSyncFailure, suspend () -> Unit>? = null

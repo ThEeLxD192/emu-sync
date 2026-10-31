@@ -1,9 +1,9 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
-import com.emusync.model.AppConfig
 import com.emusync.steam.SteamShortcutManager
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -136,7 +136,7 @@ internal class EntryEditor(
         oldEntry: GameEntry,
         edited: GameEntry,
     ): Boolean =
-        if (config.googleDrive == null) true
+        if (config.cloudCredentials == null) true
         else
             createSaveSynchronizer(client, config, configManager, callbacks.publishStatus)
                 .renameEntryCloudData(oldEntry, edited)
@@ -174,7 +174,9 @@ internal class EntryEditor(
         val oldTitle = current.effectiveTitle
         val newTitle = current.copy(entry = edited).effectiveTitle
         val config = state.value.config
-        return if (newTitle == oldTitle || edited !is EmulatorSystem || config?.googleDrive == null)
+        return if (
+            newTitle == oldTitle || edited !is EmulatorSystem || config?.cloudCredentials == null
+        )
             true
         else
             createSaveSynchronizer(client, config, configManager, callbacks.publishStatus)

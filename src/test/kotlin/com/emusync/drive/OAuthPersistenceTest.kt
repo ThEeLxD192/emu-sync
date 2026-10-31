@@ -1,9 +1,11 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
+import com.emusync.domain.execution.BrowserLauncher
 import com.emusync.domain.library.NativePCGame
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
+import com.emusync.domain.operation.recoverOperationFailure
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
@@ -32,7 +34,7 @@ class OAuthPersistenceTest {
     private val headers = headersOf(HttpHeaders.ContentType, "application/json")
     private val original =
         AppConfig(
-            GoogleDriveConfig("client", "secret"),
+            OAuthCredentials("client", "secret"),
             listOf(NativePCGame("Original", "echo")),
         )
 
@@ -41,7 +43,9 @@ class OAuthPersistenceTest {
         @TempDir directory: File
     ) = runTest {
         val config =
-            original.copy(googleDrive = original.googleDrive!!.copy(refreshToken = "expired"))
+            original.copy(
+                cloudCredentials = original.cloudCredentials!!.copy(refreshToken = "expired")
+            )
         val manager = manager(directory, config)
         var requests = 0
         val client = client {
@@ -52,8 +56,12 @@ class OAuthPersistenceTest {
         }
         try {
             val flow =
-                OAuthFlow(client) {
-                    assertNull(manager.load().googleDrive?.refreshToken)
+                OAuthFlow(
+                    client,
+                    credentialStore = manager,
+                    browser = BrowserLauncher { error("Browser should not be opened") },
+                ) {
+                    assertNull(manager.load().cloudCredentials?.refreshToken)
                     manager.update { current ->
                         current.copy(
                             entries =
@@ -64,9 +72,9 @@ class OAuthPersistenceTest {
                     "new-code"
                 }
 
-            assertEquals("access", flow.authorize(config, manager, allowInteractive = true))
+            assertEquals("access", flow.authorize(config, allowInteractive = true))
             assertEquals(2, requests)
-            assertEquals("new-refresh", manager.load().googleDrive?.refreshToken)
+            assertEquals("new-refresh", manager.load().cloudCredentials?.refreshToken)
             assertEquals(2, manager.load().entries.size)
         } finally {
             client.close()
@@ -83,11 +91,15 @@ class OAuthPersistenceTest {
         val client = client { respond(tokenResponse, headers = headers) }
         try {
             val flow =
-                OAuthFlow(client) {
+                OAuthFlow(
+                    client,
+                    credentialStore = manager,
+                    browser = BrowserLauncher { error("Browser should not be opened") },
+                ) {
                     waiting.complete(Unit)
                     code.await()
                 }
-            val authorization = async { flow.authorize(original, manager, allowInteractive = true) }
+            val authorization = async { flow.authorize(original, allowInteractive = true) }
             waiting.await()
             val added = NativePCGame("Added while waiting", "echo")
             manager.update { it.copy(entries = it.entries + added) }
@@ -95,7 +107,7 @@ class OAuthPersistenceTest {
 
             assertEquals("access", authorization.await())
             assertEquals(listOf("Original", added.name), manager.load().entries.map { it.name })
-            assertEquals("new-refresh", manager.load().googleDrive?.refreshToken)
+            assertEquals("new-refresh", manager.load().cloudCredentials?.refreshToken)
         } finally {
             client.close()
         }
@@ -106,7 +118,9 @@ class OAuthPersistenceTest {
         @TempDir directory: File
     ) = runTest {
         val config =
-            original.copy(googleDrive = original.googleDrive!!.copy(refreshToken = "expired"))
+            original.copy(
+                cloudCredentials = original.cloudCredentials!!.copy(refreshToken = "expired")
+            )
         val manager = manager(directory, config)
         val client = client {
             manager.update { current ->
@@ -115,9 +129,16 @@ class OAuthPersistenceTest {
             respond("""{"error":"invalid_grant"}""", HttpStatusCode.BadRequest, headers)
         }
         try {
-            assertFailsWith<DriveApiException> { OAuthFlow(client).authorize(config, manager) }
+            assertFailsWith<DriveApiException> {
+                OAuthFlow(
+                        client,
+                        credentialStore = manager,
+                        browser = BrowserLauncher { error("Browser should not be opened") },
+                    )
+                    .authorize(config)
+            }
 
-            assertNull(manager.load().googleDrive?.refreshToken)
+            assertNull(manager.load().cloudCredentials?.refreshToken)
             assertEquals(listOf("Original", "New entry"), manager.load().entries.map { it.name })
         } finally {
             client.close()
@@ -128,18 +149,27 @@ class OAuthPersistenceTest {
     fun `late invalid grant cannot clear a replacement refresh token`(@TempDir directory: File) =
         runTest {
             val config =
-                original.copy(googleDrive = original.googleDrive!!.copy(refreshToken = "expired"))
+                original.copy(
+                    cloudCredentials = original.cloudCredentials!!.copy(refreshToken = "expired")
+                )
             val manager = manager(directory, config)
             val client = client {
-                manager.updateGoogleDrive { credentials ->
+                manager.updateCredentials { credentials ->
                     checkNotNull(credentials).copy(refreshToken = "replacement")
                 }
                 respond("""{"error":"invalid_grant"}""", HttpStatusCode.BadRequest, headers)
             }
             try {
-                assertFailsWith<DriveApiException> { OAuthFlow(client).authorize(config, manager) }
+                assertFailsWith<DriveApiException> {
+                    OAuthFlow(
+                            client,
+                            credentialStore = manager,
+                            browser = BrowserLauncher { error("Browser should not be opened") },
+                        )
+                        .authorize(config)
+                }
 
-                assertEquals("replacement", manager.load().googleDrive?.refreshToken)
+                assertEquals("replacement", manager.load().cloudCredentials?.refreshToken)
             } finally {
                 client.close()
             }
@@ -155,26 +185,30 @@ class OAuthPersistenceTest {
         val client = client { error("A cancelled connection must not exchange its code") }
         try {
             val flow =
-                OAuthFlow(client) {
+                OAuthFlow(
+                    client,
+                    credentialStore = manager,
+                    browser = BrowserLauncher { error("Browser should not be opened") },
+                ) {
                     waiting.complete(Unit)
                     code.await()
                 }
             val authorization = async {
-                recoverDriveFailure(
+                recoverOperationFailure(
                     action = {
-                        Result.success(flow.authorize(original, manager, allowInteractive = true))
+                        Result.success(flow.authorize(original, allowInteractive = true))
                     },
                     recover = { Result.failure(it) },
                 )
             }
             waiting.await()
-            manager.updateGoogleDrive { credentials ->
+            manager.updateCredentials { credentials ->
                 checkNotNull(credentials).copy(refreshToken = null)
             }
             code.complete("late-code")
 
             assertTrue(authorization.await().exceptionOrNull() is DriveApiException)
-            assertNull(manager.load().googleDrive?.refreshToken)
+            assertNull(manager.load().cloudCredentials?.refreshToken)
         } finally {
             client.close()
         }
@@ -185,17 +219,23 @@ class OAuthPersistenceTest {
         runTest {
             val manager = manager(directory)
             val client = client {
-                manager.updateGoogleDrive { credentials ->
+                manager.updateCredentials { credentials ->
                     checkNotNull(credentials).copy(refreshToken = null)
                 }
                 respond(tokenResponse, headers = headers)
             }
             try {
                 assertFailsWith<DriveApiException> {
-                    OAuthFlow(client) { "code" }
-                        .authorize(original, manager, allowInteractive = true)
+                    OAuthFlow(
+                            client,
+                            credentialStore = manager,
+                            browser = BrowserLauncher { error("Browser should not be opened") },
+                        ) {
+                            "code"
+                        }
+                        .authorize(original, allowInteractive = true)
                 }
-                assertNull(manager.load().googleDrive?.refreshToken)
+                assertNull(manager.load().cloudCredentials?.refreshToken)
             } finally {
                 client.close()
             }
@@ -207,12 +247,13 @@ class OAuthPersistenceTest {
     ) = runTest {
         val config =
             original.copy(
-                googleDrive = original.googleDrive!!.copy(refreshToken = "original-refresh")
+                cloudCredentials =
+                    original.cloudCredentials!!.copy(refreshToken = "original-refresh")
             )
         val manager = manager(directory, config)
         val client = client {
-            manager.updateGoogleDrive {
-                GoogleDriveConfig("new-client", "new-secret", "new-refresh")
+            manager.updateCredentials {
+                OAuthCredentials("new-client", "new-secret", "new-refresh")
             }
             respond(
                 """{"access_token":"old-access","expires_in":3600,"token_type":"Bearer"}""",
@@ -220,9 +261,16 @@ class OAuthPersistenceTest {
             )
         }
         try {
-            assertFailsWith<DriveApiException> { OAuthFlow(client).authorize(config, manager) }
-            assertEquals("new-client", manager.load().googleDrive?.clientId)
-            assertEquals("new-refresh", manager.load().googleDrive?.refreshToken)
+            assertFailsWith<DriveApiException> {
+                OAuthFlow(
+                        client,
+                        credentialStore = manager,
+                        browser = BrowserLauncher { error("Browser should not be opened") },
+                    )
+                    .authorize(config)
+            }
+            assertEquals("new-client", manager.load().cloudCredentials?.clientId)
+            assertEquals("new-refresh", manager.load().cloudCredentials?.refreshToken)
         } finally {
             client.close()
         }
@@ -232,11 +280,16 @@ class OAuthPersistenceTest {
     fun `authorization with stale credentials makes no token request`(@TempDir directory: File) =
         runTest {
             val manager = manager(directory)
-            manager.updateGoogleDrive { GoogleDriveConfig("new-client", "new-secret") }
+            manager.updateCredentials { OAuthCredentials("new-client", "new-secret") }
             val client = client { error("Stale credentials must not be sent") }
             try {
                 assertFailsWith<DriveApiException> {
-                    OAuthFlow(client).authorize(original, manager, allowInteractive = true)
+                    OAuthFlow(
+                            client,
+                            credentialStore = manager,
+                            browser = BrowserLauncher { error("Browser should not be opened") },
+                        )
+                        .authorize(original, allowInteractive = true)
                 }
             } finally {
                 client.close()
@@ -248,7 +301,8 @@ class OAuthPersistenceTest {
         runTest {
             val config =
                 original.copy(
-                    googleDrive = original.googleDrive!!.copy(refreshToken = "valid-refresh")
+                    cloudCredentials =
+                        original.cloudCredentials!!.copy(refreshToken = "valid-refresh")
                 )
             val manager = manager(directory, config)
             val client = client {
@@ -259,8 +313,15 @@ class OAuthPersistenceTest {
                 )
             }
             try {
-                assertFailsWith<DriveApiException> { OAuthFlow(client).authorize(config, manager) }
-                assertEquals("valid-refresh", manager.load().googleDrive?.refreshToken)
+                assertFailsWith<DriveApiException> {
+                    OAuthFlow(
+                            client,
+                            credentialStore = manager,
+                            browser = BrowserLauncher { error("Browser should not be opened") },
+                        )
+                        .authorize(config)
+                }
+                assertEquals("valid-refresh", manager.load().cloudCredentials?.refreshToken)
             } finally {
                 client.close()
             }
@@ -271,11 +332,20 @@ class OAuthPersistenceTest {
         @TempDir directory: File
     ) = runTest {
         val config =
-            original.copy(googleDrive = original.googleDrive!!.copy(refreshToken = "valid-refresh"))
+            original.copy(
+                cloudCredentials = original.cloudCredentials!!.copy(refreshToken = "valid-refresh")
+            )
         val manager = manager(directory, config)
         val client = client { throw CancellationException("Cancelled token request") }
         try {
-            assertFailsWith<CancellationException> { OAuthFlow(client).authorize(config, manager) }
+            assertFailsWith<CancellationException> {
+                OAuthFlow(
+                        client,
+                        credentialStore = manager,
+                        browser = BrowserLauncher { error("Browser should not be opened") },
+                    )
+                    .authorize(config)
+            }
             assertEquals(config, manager.load())
         } finally {
             client.close()

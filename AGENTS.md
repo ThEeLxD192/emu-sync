@@ -4,9 +4,9 @@
 
 EmuSync es una aplicación Kotlin/Compose Desktop para Linux y Windows. La migración
 acordada usa módulos Gradle JVM y conserva el comportamiento y los formatos actuales.
-La primera entrega fue esta guía y la skill local de pruebas. H0–H2 están
-completados. H3 está verificado técnicamente y espera confirmación de commit;
-H4–H8 siguen pendientes. Documentar un hito no significa ejecutarlo.
+La primera entrega fue esta guía y la skill local de pruebas. H0–H3 están
+completados. H4 está verificado técnicamente y espera confirmación de commit; H5–H8 siguen
+pendientes. Documentar un hito no significa ejecutarlo.
 
 Línea base inspeccionada el 2026-10-30, sobre `484012f`:
 
@@ -29,10 +29,8 @@ src/main/kotlin/
   Main.kt                    # Arranque y composición de la aplicación
   com/emusync/
     AppInfo.kt               # Información y versión de la aplicación
-    config/                  # Persistencia y DTO JSON, con conversiones explícitas
-    model/                   # Configuración agregada y resolución local de destinos legacy
-    drive/                   # OAuth, Drive, reglas y flujos de sincronización
-    runner/                  # Lanzamiento y seguimiento de procesos
+    drive/                   # Coordinación de sync y migraciones; extracción H5 pendiente
+    runner/                  # Procesos y navegador; extracción H6 pendiente
     scanner/                 # Descubrimiento de ROMs
     steam/                   # VDF, accesos directos y lanzadores
     update/                  # Consulta, descarga e instalación de actualizaciones
@@ -50,9 +48,14 @@ gradle/
 build-logic/                 # Convenciones JVM/calidad; build incluido
   src/main/kotlin/           # Plugins precompilados .gradle.kts
 domain/                      # Biblioteca, reglas de sync y contratos neutrales (H3)
-  src/{main,test}/kotlin/     # com/emusync/domain/{library,sync,execution}
+  src/{main,test}/kotlin/     # com/emusync/domain/{config,library,sync,operation,execution}
 application/                 # Módulo vacío preparado para H5
-data/{local,drive,updates}/  # Módulos vacíos preparados para H4/H6
+data/local/                  # Configuración/DTO y saves: historial, snapshots, backups y rutas
+  src/{main,test}/kotlin/     # com/emusync/config y com/emusync/local/saves
+data/drive/                  # OAuth, búsquedas, carpetas y transferencias de Google Drive
+  src/{main,test}/kotlin/     # com/emusync/drive
+  src/testFixtures/kotlin/    # Árbol Drive compartido por pruebas de protocolo/integración
+data/updates/                # Módulo vacío preparado para H6
 platform/desktop/            # Módulo vacío preparado para H6
 presentation/, desktopApp/   # Módulos vacíos preparados para H7
 scripts/                     # Distribución, versión, hooks y sus pruebas
@@ -413,22 +416,97 @@ Evidencia (2026-10-30, Linux; base H2 `5e3d6f7`):
   cuentas cloud reales, UI gráfica, CI remoto ni Windows nativo. No se movieron
   recursos/versiones ni se publicaron paquetes; H4–H8 siguen pendientes.
 
-**H3 completado técnicamente. Commit H3: pendiente de confirmación explícita.**
+**H3 completado. Commit H3: `0def750` (`refactor: extract domain models and neutral sync contracts`).**
 
 ### H4 — Persistencia local y Google Drive
 
-- [ ] Extraer configuración, historial y recuperación a `data:local`.
-- [ ] Extraer OAuth, protocolo y transferencias a `data:drive`.
-- [ ] Inyectar contratos de credenciales y colaboradores, separando DTO de dominio.
-- [ ] Verificar JSON, revisiones, escrituras atómicas y condicionales, cancelación,
+- [x] Extraer configuración, historial y recuperación a `data:local`.
+- [x] Extraer OAuth, protocolo y transferencias a `data:drive`.
+- [x] Inyectar contratos de credenciales y colaboradores, separando DTO de dominio.
+- [x] Verificar JSON, revisiones, escrituras atómicas y condicionales, cancelación,
   conflictos, rutas seguras y recuperación ante fallos.
-- [ ] **H4 completado.**
+- [x] **H4 completado.**
 
 Aceptación: adaptadores utilizables sin presentación y datos existentes compatibles.
 Los tests de protocolo usan límites controlados y los de transporte conservan su
 comprobación real cuando sea necesaria.
 
-Evidencia: pendiente. Commit: pendiente.
+Evidencia (2026-10-30–31, Linux; base H3 `0def750`):
+
+- `data:local` contiene ConfigManager/DTO, resolución de destinos legacy y rutas de
+  restauración, historial, snapshots y copias de recuperación. `data:drive` contiene
+  OAuth, búsquedas/carpetas y transferencias normales, reanudables y condicionales.
+  Ambos módulos solo dependen de `domain` y de sus bibliotecas; no dependen entre sí,
+  de la raíz, de Compose ni de presentación. Local no incorpora Ktor. La raíz agrega
+  los módulos y conserva los coordinadores de H5 y la composición pendiente de H7.
+- `AppConfig` y `OAuthCredentials` son modelos neutrales de dominio. La propiedad
+  neutral `cloudCredentials` se convierte explícitamente a la clave JSON `googleDrive`
+  mediante un DTO interno. El historial mantiene su DTO, versión, claves y valores;
+  `get` devuelve `SyncCheckpoint`. Se conservan rutas remotas, nombres de backups,
+  permisos, reemplazos atómicos y migraciones, sin cambiar versiones ni formatos.
+- OAuth recibe `CredentialStore` y `BrowserLauncher` por constructor. Las revisiones
+  y el compare-and-set permanecen en el almacén local; Drive no importa ConfigManager.
+  El navegador queda en la raíz para H6, inyectado desde la composición actual.
+  `TrackedFileSync` implementa `LocalSaveFiles` y recibe `CloudSaveTransfer`; su
+  recuperación no conoce HttpClient, DTO Drive ni implementaciones del otro adaptador.
+  Los clientes HTTP siguen siendo prestados y los cierra su propietario actual.
+- Las pruebas de configuración/destinos y las tres de historial viven en local.
+  Las suites de OAuth, carpetas, búsqueda, transferencias y seis escrituras
+  condicionales viven en Drive, conservando CIO real y el servidor de dos escritores.
+  Las integraciones entre adaptadores/UI continúan en la raíz con componentes reales.
+  `MigrationDrive` se comparte mediante testFixtures de Drive con consumidores reales
+  en ambos sitios; no se añaden accesos especiales del compilador ni DTO publicados
+  solo para tests. El fixture condicional de la raíz declara su esquema independiente.
+- Se conserva todo escenario anterior y se añaden solo dos regresiones: historial
+  versión uno literal con checkpoints completos/legacy y rechazo de refresh cuando
+  cambia la revisión del almacén inyectado, incluso con credenciales iguales. La
+  prueba de JSON completa de H3 verifica también el nuevo DTO de credenciales.
+  Resultado vigente: 430 métodos, 431 casos, 65 suites, 73 archivos Kotlin de
+  pruebas/fixtures. [Catálogo actualizado](.agents/skills/kotlin-valuable-tests/references/test-audit-cases.md).
+  Los clientes de las suites de protocolo trasladadas se cierran también si falla
+  una aserción; el fixture compartido conserva su cierre explícito.
+- Ejecución final:
+
+  ```bash
+  ./gradlew spotlessApply check \
+    :data:local:dependencies --configuration runtimeClasspath \
+    :data:drive:dependencies --configuration runtimeClasspath \
+    packageReleaseAppImage --no-daemon
+  ```
+
+  `BUILD SUCCESSFUL` en 1 min 4 s; 109 tareas, 23 ejecutadas y 86 UP-TO-DATE.
+  Se ejecutaron raíz (310 casos, 308 aprobados y dos omitidos por PowerShell;
+  43 XML, 13,210 s JUnit) y Drive (40 aprobados, siete XML, 4,167 s).
+  Dominio (50 aprobados, siete XML, 0,289 s) y local (31 aprobados, ocho XML,
+  0,509 s) reutilizaron resultados correctos de las ejecuciones afectadas anteriores.
+  Evidencia combinada: 429 aprobados, cero fallos/errores y dos omitidos en Linux.
+  No se presenta la reutilización como una ejecución nueva de los 431 casos.
+  Tras separar TransferDirection en su archivo y retirar el cuerpo vacío de la
+  data class de progreso, `./gradlew :data:drive:spotlessApply
+  :data:drive:qualityCheck packageReleaseAppImage --no-daemon` pasó en 16 s;
+  35 tareas, cinco ejecutadas y 30 UP-TO-DATE. Se verificó main Drive; los otros
+  análisis y el paquete estaban UP-TO-DATE. Ese ajuste declarativo no cambió el
+  bytecode ni requirió volver a ejecutar las suites.
+- Detekt: nueve SARIF con cero hallazgos y sin avisos de errores del compilador
+  durante el análisis. Las comprobaciones de cierre ejecutaron main/test de raíz
+  y Drive, además de testFixtures; dominio y local reutilizaron resultados correctos. Al independizar el fixture de
+  respuesta se usó serialización reificada para que el análisis no dependiera de
+  miembros serializer generados en las fuentes de test. Se corrigió el guard del
+  fixture compartido, sin relajar reglas ni añadir supresiones. El comando ejecutó
+  nueve grupos PASS de hooks y cuatro de convenciones, incluidos bloqueos deliberados,
+  análisis de fixtures y reutilización de caché en la copia desechable.
+- Los grafos runtime confirman las dependencias unidireccionales anteriores. El mismo
+  comando preparó la distribución Linux en `build/compose/binaries/main-release/app`;
+  se verificó la presencia de clases y classpath de dominio/local/Drive, excluyendo
+  fixtures del runtime. Docker y CI ya incluyen esos directorios y reportes desde H2;
+  no se cambiaron rutas de recursos, metadatos, staging ni scripts de distribución.
+- Catálogo contrastado con las fuentes, enlaces añadidos/movidos, visibilidad de tipos,
+  límites de módulos y `git diff --check`: revisados. No se repite la suite después
+  de editar únicamente seguimiento. No se ejecutaron Docker, cuentas cloud, UI gráfica,
+  CI remoto, AppImage independiente con appimagetool ni MSI/EXE o Windows nativo.
+  La limitación de Detekt/Gradle registrada en H2 sigue vigente. H5–H8 no se ejecutaron.
+
+**H4 completado técnicamente. Commit H4: pendiente de confirmación explícita.**
 
 ### H5 — Casos de uso
 

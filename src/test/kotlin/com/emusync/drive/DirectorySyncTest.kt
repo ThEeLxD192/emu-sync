@@ -1,14 +1,14 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.domain.sync.EntrySyncStatus
 import com.emusync.domain.sync.SyncDecision
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
 import com.emusync.ui.createSaveSynchronizer
@@ -28,6 +28,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -73,8 +74,8 @@ class DirectorySyncTest {
 
     private fun driveConfig() =
         AppConfig(
-            googleDrive =
-                GoogleDriveConfig(
+            cloudCredentials =
+                OAuthCredentials(
                     clientId = "test-client",
                     clientSecret = "test-secret",
                     refreshToken = "test-refresh-token",
@@ -208,14 +209,13 @@ class DirectorySyncTest {
                                 val (name, date) = cloudFiles.first { it.first == id }.second
                                 respond(
                                     Json.encodeToString(
-                                        ConditionalDriveFile.serializer(),
-                                        ConditionalDriveFile(
+                                        ConditionalFileResponse(
                                             id,
                                             name,
                                             date,
                                             "\"old\"",
                                             "1",
-                                        ),
+                                        )
                                     ),
                                     headers = jsonHeaders,
                                 )
@@ -226,14 +226,13 @@ class DirectorySyncTest {
                                 uploadRequests += "PUT:$id"
                                 respond(
                                     Json.encodeToString(
-                                        ConditionalDriveFile.serializer(),
-                                        ConditionalDriveFile(
+                                        ConditionalFileResponse(
                                             id,
                                             name,
                                             "2026-10-09T15:00:00.000Z",
                                             "\"new\"",
                                             "2",
-                                        ),
+                                        )
                                     ),
                                     headers = jsonHeaders,
                                 )
@@ -492,14 +491,13 @@ class DirectorySyncTest {
                             request.url.encodedPath.startsWith("/drive/v2/files/") ->
                                 respond(
                                     Json.encodeToString(
-                                        ConditionalDriveFile.serializer(),
-                                        ConditionalDriveFile(
+                                        ConditionalFileResponse(
                                             "legacy-save-id",
                                             "SAVE_SLOT",
                                             cloudModifiedTime,
                                             "\"old\"",
                                             "1",
-                                        ),
+                                        )
                                     ),
                                     headers = jsonHeaders,
                                 )
@@ -507,14 +505,13 @@ class DirectorySyncTest {
                                 uploadRequests += "PUT:legacy-save-id"
                                 respond(
                                     Json.encodeToString(
-                                        ConditionalDriveFile.serializer(),
-                                        ConditionalDriveFile(
+                                        ConditionalFileResponse(
                                             "legacy-save-id",
                                             "SAVE_SLOT",
                                             "2026-10-09T15:00:00.000Z",
                                             "\"new\"",
                                             "2",
-                                        ),
+                                        )
                                     ),
                                     headers = jsonHeaders,
                                 )
@@ -647,15 +644,14 @@ class DirectorySyncTest {
                             val (name, date) = cloudFiles[index]
                             respond(
                                 Json.encodeToString(
-                                    ConditionalDriveFile.serializer(),
-                                    ConditionalDriveFile(
+                                    ConditionalFileResponse(
                                         id,
                                         name,
                                         date,
                                         "\"observed\"",
                                         sha256Checksum =
                                             sha256(fileContents[id] ?: "DUMMY".toByteArray()),
-                                    ),
+                                    )
                                 ),
                                 headers = jsonHeaders,
                             )
@@ -667,12 +663,11 @@ class DirectorySyncTest {
                             onWrite()
                             respond(
                                 Json.encodeToString(
-                                    ConditionalDriveFile.serializer(),
-                                    ConditionalDriveFile(
+                                    ConditionalFileResponse(
                                         id,
                                         name,
                                         uploadResponseModTime,
-                                    ),
+                                    )
                                 ),
                                 headers = jsonHeaders,
                             )
@@ -784,8 +779,8 @@ class DirectorySyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -837,8 +832,8 @@ class DirectorySyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -880,7 +875,7 @@ class DirectorySyncTest {
                 extensions = listOf("sfb"),
                 savePaths = listOf("/some/path"),
             )
-        val config = AppConfig(googleDrive = null, entries = listOf(entry))
+        val config = AppConfig(cloudCredentials = null, entries = listOf(entry))
         configManager.save(config)
 
         val orchestrator =
@@ -915,8 +910,8 @@ class DirectorySyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -987,8 +982,8 @@ class DirectorySyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -1053,8 +1048,8 @@ class DirectorySyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -1113,8 +1108,8 @@ class DirectorySyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -1227,8 +1222,8 @@ class DirectorySyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",

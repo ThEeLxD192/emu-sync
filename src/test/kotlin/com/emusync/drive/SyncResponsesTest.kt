@@ -1,6 +1,8 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.SaveTargetType
@@ -8,8 +10,6 @@ import com.emusync.domain.sync.SaveConflict
 import com.emusync.domain.sync.SaveSynchronizer
 import com.emusync.domain.sync.SyncDecision
 import com.emusync.domain.sync.SyncEvent
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
 import java.io.File
 import java.time.Instant
 import kotlin.test.assertEquals
@@ -47,7 +47,7 @@ class SyncResponsesTest {
             val sync: SaveSynchronizer =
                 SyncOrchestrator(
                     drive.client,
-                    AppConfig(GoogleDriveConfig("client", "secret", "refresh"), listOf(entry)),
+                    AppConfig(OAuthCredentials("client", "secret", "refresh"), listOf(entry)),
                     ConfigManager(File(directory, "config.json")),
                 ) {
                     if (it is SyncEvent.Conflict) check(conflicts.trySend(it.request).isSuccess)

@@ -1,6 +1,8 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
@@ -9,8 +11,7 @@ import com.emusync.domain.library.scopeNewSaveTargets
 import com.emusync.domain.sync.EntrySyncStatus
 import com.emusync.domain.sync.SaveSynchronizer
 import com.emusync.domain.sync.SyncDecision
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
+import com.emusync.local.saves.resolveCloudRestoreTargets
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
 import com.emusync.ui.createSaveSynchronizer
@@ -562,7 +563,7 @@ class SaveTargetMappingTest {
         )
 
     private fun configuration(entry: NativePCGame) =
-        AppConfig(GoogleDriveConfig("client", "secret", "refresh"), listOf(entry))
+        AppConfig(OAuthCredentials("client", "secret", "refresh"), listOf(entry))
 
     private fun orchestrator(
         drive: SaveMappingDrive,

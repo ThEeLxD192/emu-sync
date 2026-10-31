@@ -11,6 +11,7 @@ import io.ktor.http.content.OutgoingContent
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import java.time.Instant
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -186,15 +187,14 @@ internal class SaveMappingDrive : AutoCloseable {
     ) =
         respond(
             Json.encodeToString(
-                ConditionalDriveFile.serializer(),
-                ConditionalDriveFile(
+                ConditionalFileResponse(
                     file.id,
                     file.name,
                     file.modifiedTime,
                     etag(file),
                     file.version,
                     file.sha256Checksum,
-                ),
+                )
             ),
             headers = headersOf(HttpHeaders.ContentType, "application/json"),
         )

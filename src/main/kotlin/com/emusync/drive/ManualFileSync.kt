@@ -3,6 +3,7 @@ package com.emusync.drive
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.sync.SaveConflict
 import com.emusync.domain.sync.SyncDecision
+import com.emusync.local.saves.resolveRemoteFile
 import java.io.File
 import java.time.Instant
 
@@ -61,7 +62,7 @@ internal class ManualFileSync(private val context: SyncContext) {
             val driveName = directoryCloudName(prefix, name)
             DirectoryAction(
                 PlannedSave(local, remote, folderId, driveName),
-                trackedSync.plan(local, remote, folderId, driveName),
+                trackedSync.plan((local).path, (remote)?.toSyncState(), folderId, driveName),
             )
         }
     }
@@ -115,7 +116,8 @@ internal class ManualFileSync(private val context: SyncContext) {
         beforePlay: Boolean = false,
     ) {
         val remote = canonicalCloudFiles(cloudFiles).find { it.name == driveName }
-        val decision = trackedSync.plan(localSavePath, remote, folderId, driveName)
+        val decision =
+            trackedSync.plan((localSavePath).path, (remote)?.toSyncState(), folderId, driveName)
         val choice =
             if (decision == SyncDecision.CONFLICT && remote != null) {
                 requestFileConflict(localSavePath, remote, displayName)
@@ -150,12 +152,27 @@ internal class ManualFileSync(private val context: SyncContext) {
 
         when (decision) {
             SyncDecision.DOWNLOAD_CLOUD ->
-                remote?.let { trackedSync.download(token, it, local, folderId, driveName) }
+                remote?.let {
+                    trackedSync.download(
+                        token,
+                        (it).toSyncState(),
+                        (local).path,
+                        folderId,
+                        driveName,
+                    )
+                }
             SyncDecision.UPLOAD_LOCAL ->
-                if (local.isFile) trackedSync.upload(token, local, remote, folderId, driveName)
+                if (local.isFile)
+                    trackedSync.upload(
+                        token,
+                        (local).path,
+                        (remote)?.toSyncState(),
+                        folderId,
+                        driveName,
+                    )
             SyncDecision.IN_SYNC ->
                 if (local.isFile && remote != null)
-                    trackedSync.remember(local, remote, folderId, driveName)
+                    trackedSync.remember((local).path, (remote).toSyncState(), folderId, driveName)
             null -> Unit
             SyncDecision.CONFLICT -> error("A conflict must be resolved before applying a save")
         }

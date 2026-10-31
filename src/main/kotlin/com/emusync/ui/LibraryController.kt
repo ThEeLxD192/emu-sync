@@ -1,11 +1,11 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
-import com.emusync.model.AppConfig
 import com.emusync.scanner.scanRoms
 import io.ktor.client.HttpClient
 import java.util.concurrent.ConcurrentHashMap
@@ -57,7 +57,7 @@ internal class LibraryController(
 
     suspend fun selectEntry(entry: GameEntry) {
         val request = selectionGeneration.incrementAndGet()
-        val linked = state.value.config?.googleDrive?.refreshToken?.isNotBlank() == true
+        val linked = state.value.config?.cloudCredentials?.refreshToken?.isNotBlank() == true
         state.update {
             it.copy(
                 isLoading = true,
@@ -135,7 +135,7 @@ internal class LibraryController(
         val request = checkGeneration.incrementAndGet()
         checks[entry.name] = request
         val revision = operations.revision
-        if (cfg.googleDrive?.refreshToken.isNullOrBlank()) {
+        if (cfg.cloudCredentials?.refreshToken.isNullOrBlank()) {
             state.update {
                 it.copy(
                     entrySyncStatus =
@@ -148,8 +148,8 @@ internal class LibraryController(
             checks[entry.name] == request &&
                 operations.revision == revision &&
                 !operations.isBusy &&
-                current.config?.googleDrive == cfg.googleDrive &&
-                current.config.entries.any { it == entry }
+                current.config?.cloudCredentials == cfg.cloudCredentials &&
+                current.config?.entries?.any { it == entry } == true
         state.update {
             if (isCurrent(it))
                 it.copy(
@@ -195,7 +195,7 @@ internal class LibraryController(
             val success =
                 createSaveSynchronizer(client, cfg, configManager, ::publishStatus).syncEntry(entry)
             refreshConnection()
-            if (state.value.config?.googleDrive == cfg.googleDrive) {
+            if (state.value.config?.cloudCredentials == cfg.cloudCredentials) {
                 state.update {
                     it.copy(
                         entrySyncStatus =

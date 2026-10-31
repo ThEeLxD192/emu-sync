@@ -1,7 +1,7 @@
 package com.emusync.ui
 
+import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.GameEntry
-import com.emusync.model.AppConfig
 
 /** Immutable Single Source of Truth for the entire application UI state. */
 data class AppUiState(

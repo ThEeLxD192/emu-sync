@@ -1,10 +1,10 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
 import com.emusync.domain.library.GameEntry
 import com.emusync.drive.OAuthFlow
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 
@@ -22,8 +22,8 @@ internal class DriveConnectionController(
         return if (trimmedId.isBlank() || trimmedSecret.isBlank()) {
             "Client ID and Client Secret cannot be blank."
         } else {
-            val updated = configManager.updateGoogleDrive { current ->
-                GoogleDriveConfig(
+            val updated = configManager.updateCredentials { current ->
+                OAuthCredentials(
                     trimmedId,
                     trimmedSecret,
                     current?.refreshToken?.takeIf {
@@ -38,9 +38,9 @@ internal class DriveConnectionController(
 
     fun unlink(): String {
         val config = state.value.config ?: return "No config loaded"
-        return if (config.googleDrive == null) "Google Drive is not configured."
+        return if (config.cloudCredentials == null) "Google Drive is not configured."
         else {
-            val updated = configManager.updateGoogleDrive { it?.copy(refreshToken = null) }
+            val updated = configManager.updateCredentials { it?.copy(refreshToken = null) }
             publishConnection(updated)
             "Google Drive disconnected."
         }
@@ -48,11 +48,12 @@ internal class DriveConnectionController(
 
     suspend fun login(): String {
         val config = state.value.config ?: return "No config loaded"
-        return if (config.googleDrive == null) "Missing googleDrive configuration in config.json"
+        return if (config.cloudCredentials == null)
+            "Missing googleDrive configuration in config.json"
         else
             recoverUiFailure(
                 action = {
-                    oauthFlow.authorize(config, configManager, allowInteractive = true)
+                    oauthFlow.authorize(config, allowInteractive = true)
                     publishConnection(configManager.load())
                     state.value.selectedEntry?.let { checkSync(it) }
                     "Google Drive successfully connected!"
@@ -66,12 +67,14 @@ internal class DriveConnectionController(
 
     fun refreshStoredConnection() {
         val current = configManager.load()
-        if (current.googleDrive != state.value.config?.googleDrive) publishConnection(current)
+        if (current.cloudCredentials != state.value.config?.cloudCredentials)
+            publishConnection(current)
     }
 
     private fun publishConnection(config: AppConfig) {
         val status =
-            if (config.googleDrive?.refreshToken.isNullOrBlank()) CloudSyncStatus.NOT_CONFIGURED
+            if (config.cloudCredentials?.refreshToken.isNullOrBlank())
+                CloudSyncStatus.NOT_CONFIGURED
             else CloudSyncStatus.IDLE
         state.update {
             it.copy(

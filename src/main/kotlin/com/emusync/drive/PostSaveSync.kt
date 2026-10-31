@@ -3,6 +3,7 @@ package com.emusync.drive
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.domain.library.effectiveCloudFolder
+import com.emusync.domain.operation.recoverOperationFailure
 import com.emusync.domain.sync.SyncDecision
 import java.io.File
 
@@ -138,7 +139,7 @@ internal class PostSaveSync(private val context: SyncContext, private val manual
         displayName: String,
         reserved: Set<String>,
     ): PostSyncResult =
-        recoverDriveFailure(
+        recoverOperationFailure(
             action = {
                 syncSingleFilePost(token, file, displayName)
                 PostSyncResult(1, emptyList())
@@ -160,7 +161,13 @@ internal class PostSaveSync(private val context: SyncContext, private val manual
         )
 
     private suspend fun syncSingleFilePost(token: String, file: PlannedSave, displayName: String) {
-        val decision = trackedSync.plan(file.local, file.remote, file.folderId, file.driveName)
+        val decision =
+            trackedSync.plan(
+                (file.local).path,
+                (file.remote)?.toSyncState(),
+                file.folderId,
+                file.driveName,
+            )
         val choice =
             if (decision == SyncDecision.CONFLICT && file.remote != null) {
                 manual.requestFileConflict(file.local, file.remote, displayName)

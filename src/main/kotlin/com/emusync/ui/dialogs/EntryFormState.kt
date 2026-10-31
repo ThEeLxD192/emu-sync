@@ -9,7 +9,7 @@ import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.scopeNewSaveTargets
 import com.emusync.domain.sync.remotePathSegments
-import com.emusync.model.effectiveSaveTargets
+import com.emusync.local.saves.effectiveSaveTargets
 import com.emusync.util.ArgumentsCodec
 
 internal enum class EntryType(val label: String) {

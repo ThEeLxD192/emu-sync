@@ -1,12 +1,13 @@
 package com.emusync.ui
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
+import com.emusync.domain.execution.BrowserLauncher
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.drive.OAuthFlow
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -41,7 +42,14 @@ class DriveConnectionTest {
         val original = manager.load()
         val client = client()
         try {
-            val flow = OAuthFlow(client) { awaitCancellation() }
+            val flow =
+                OAuthFlow(
+                    client,
+                    credentialStore = manager,
+                    browser = BrowserLauncher { error("Browser should not be opened") },
+                ) {
+                    awaitCancellation()
+                }
             val viewModel = AppViewModel(manager, httpClient = client, oauthFlow = flow)
             viewModel.loadConfig()
 
@@ -49,7 +57,7 @@ class DriveConnectionTest {
 
             assertTrue(result.contains("timed out"))
             assertEquals(original, manager.load())
-            assertNull(viewModel.uiState.value.config?.googleDrive?.refreshToken)
+            assertNull(viewModel.uiState.value.config?.cloudCredentials?.refreshToken)
         } finally {
             client.close()
         }
@@ -65,7 +73,11 @@ class DriveConnectionTest {
         val code = CompletableDeferred<String>()
         try {
             val flow =
-                OAuthFlow(client) {
+                OAuthFlow(
+                    client,
+                    credentialStore = manager,
+                    browser = BrowserLauncher { error("Browser should not be opened") },
+                ) {
                     waiting.complete(Unit)
                     code.await()
                 }
@@ -79,7 +91,7 @@ class DriveConnectionTest {
 
             assertEquals("Google Drive successfully connected!", login.await())
             assertEquals(listOf(game.name, added.name), manager.load().entries.map { it.name })
-            assertEquals("new-refresh", manager.load().googleDrive?.refreshToken)
+            assertEquals("new-refresh", manager.load().cloudCredentials?.refreshToken)
             assertEquals(manager.load(), viewModel.uiState.value.config)
             assertEquals(CloudSyncStatus.IDLE, viewModel.uiState.value.entrySyncStatus[added.name])
         } finally {
@@ -96,12 +108,15 @@ class DriveConnectionTest {
         try {
             val viewModel = AppViewModel(manager, httpClient = client)
             viewModel.loadConfig()
-            manager.updateGoogleDrive { it!!.copy(refreshToken = "new-refresh") }
+            manager.updateCredentials { it!!.copy(refreshToken = "new-refresh") }
 
             viewModel.addEntry(NativePCGame("Added", "echo"))
 
-            assertEquals("new-refresh", manager.load().googleDrive?.refreshToken)
-            assertEquals("new-refresh", viewModel.uiState.value.config?.googleDrive?.refreshToken)
+            assertEquals("new-refresh", manager.load().cloudCredentials?.refreshToken)
+            assertEquals(
+                "new-refresh",
+                viewModel.uiState.value.config?.cloudCredentials?.refreshToken,
+            )
             assertEquals(2, manager.load().entries.size)
         } finally {
             client.close()
@@ -120,8 +135,8 @@ class DriveConnectionTest {
 
             viewModel.setupGoogleDrive("new-client", "new-secret", connectNow = false)
 
-            assertEquals("new-client", manager.load().googleDrive?.clientId)
-            assertNull(manager.load().googleDrive?.refreshToken)
+            assertEquals("new-client", manager.load().cloudCredentials?.clientId)
+            assertNull(manager.load().cloudCredentials?.refreshToken)
             assertEquals(
                 CloudSyncStatus.NOT_CONFIGURED,
                 viewModel.uiState.value.entrySyncStatus[game.name],
@@ -144,7 +159,7 @@ class DriveConnectionTest {
 
             viewModel.setupGoogleDrive(" client ", " secret ", connectNow = false)
 
-            assertEquals("existing-refresh", manager.load().googleDrive?.refreshToken)
+            assertEquals("existing-refresh", manager.load().cloudCredentials?.refreshToken)
         } finally {
             client.close()
         }
@@ -161,7 +176,7 @@ class DriveConnectionTest {
 
             viewModel.unlinkGoogleDrive()
 
-            assertNull(viewModel.uiState.value.config?.googleDrive?.refreshToken)
+            assertNull(viewModel.uiState.value.config?.cloudCredentials?.refreshToken)
             assertEquals(
                 CloudSyncStatus.NOT_CONFIGURED,
                 viewModel.uiState.value.entrySyncStatus[game.name],
@@ -179,7 +194,11 @@ class DriveConnectionTest {
         val code = CompletableDeferred<String>()
         try {
             val flow =
-                OAuthFlow(client) {
+                OAuthFlow(
+                    client,
+                    credentialStore = manager,
+                    browser = BrowserLauncher { error("Browser should not be opened") },
+                ) {
                     waiting.complete(Unit)
                     code.await()
                 }
@@ -192,7 +211,7 @@ class DriveConnectionTest {
             code.complete("late-code")
 
             assertTrue(login.await().startsWith("Google Drive login failed:"))
-            assertNull(manager.load().googleDrive?.refreshToken)
+            assertNull(manager.load().cloudCredentials?.refreshToken)
             assertEquals(manager.load(), viewModel.uiState.value.config)
             assertEquals(
                 CloudSyncStatus.NOT_CONFIGURED,
@@ -236,8 +255,8 @@ class DriveConnectionTest {
 
                 viewModel.loadConfig()
 
-                assertNull(manager.load().googleDrive?.refreshToken)
-                assertNull(viewModel.uiState.value.config?.googleDrive?.refreshToken)
+                assertNull(manager.load().cloudCredentials?.refreshToken)
+                assertNull(viewModel.uiState.value.config?.cloudCredentials?.refreshToken)
                 assertEquals(
                     CloudSyncStatus.NOT_CONFIGURED,
                     viewModel.uiState.value.entrySyncStatus[game.name],
@@ -252,12 +271,19 @@ class DriveConnectionTest {
         val manager = manager(directory)
         val client = client()
         try {
-            val flow = OAuthFlow(client) { throw CancellationException("Cancelled browser flow") }
+            val flow =
+                OAuthFlow(
+                    client,
+                    credentialStore = manager,
+                    browser = BrowserLauncher { error("Browser should not be opened") },
+                ) {
+                    throw CancellationException("Cancelled browser flow")
+                }
             val viewModel = AppViewModel(manager, httpClient = client, oauthFlow = flow)
             viewModel.loadConfig()
 
             assertFailsWith<CancellationException> { viewModel.loginGoogleDrive() }
-            assertNull(manager.load().googleDrive?.refreshToken)
+            assertNull(manager.load().cloudCredentials?.refreshToken)
         } finally {
             client.close()
         }
@@ -265,7 +291,7 @@ class DriveConnectionTest {
 
     private fun manager(directory: File, token: String? = null) =
         ConfigManager(File(directory, "config.json")).also {
-            it.save(AppConfig(GoogleDriveConfig("client", "secret", token), listOf(game)))
+            it.save(AppConfig(OAuthCredentials("client", "secret", token), listOf(game)))
         }
 
     private fun client() =

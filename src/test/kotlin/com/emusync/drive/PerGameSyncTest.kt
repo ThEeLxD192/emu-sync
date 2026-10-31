@@ -1,12 +1,13 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.domain.sync.SyncDecision
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
+import com.emusync.local.saves.resolveCloudRestorePaths
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
 import com.emusync.ui.createSaveSynchronizer
@@ -27,6 +28,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -102,8 +104,8 @@ class PerGameSyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -265,8 +267,8 @@ class PerGameSyncTest {
 
             val config =
                 AppConfig(
-                    googleDrive =
-                        GoogleDriveConfig(
+                    cloudCredentials =
+                        OAuthCredentials(
                             clientId = "test-client",
                             clientSecret = "test-secret",
                             refreshToken = "test-refresh-token",
@@ -388,8 +390,8 @@ class PerGameSyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -500,8 +502,8 @@ class PerGameSyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -647,8 +649,8 @@ class PerGameSyncTest {
             )
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -779,8 +781,8 @@ class PerGameSyncTest {
             )
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -802,14 +804,13 @@ class PerGameSyncTest {
                             request.url.encodedPath.startsWith("/drive/v2/files/") ->
                                 respond(
                                     Json.encodeToString(
-                                        ConditionalDriveFile.serializer(),
-                                        ConditionalDriveFile(
+                                        ConditionalFileResponse(
                                             "existing-save-id",
                                             "profiles/slot1/save.dat",
                                             cloudModifiedTime,
                                             "\"old\"",
                                             "1",
-                                        ),
+                                        )
                                     ),
                                     headers = jsonHeaders,
                                 )
@@ -817,14 +818,13 @@ class PerGameSyncTest {
                                 uploadOperations += "PUT:existing-save-id"
                                 respond(
                                     Json.encodeToString(
-                                        ConditionalDriveFile.serializer(),
-                                        ConditionalDriveFile(
+                                        ConditionalFileResponse(
                                             "existing-save-id",
                                             "profiles/slot1/save.dat",
                                             "2026-10-09T15:00:00.000Z",
                                             "\"new\"",
                                             "2",
-                                        ),
+                                        )
                                     ),
                                     headers = jsonHeaders,
                                 )
@@ -961,8 +961,8 @@ class PerGameSyncTest {
             )
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -1083,8 +1083,8 @@ class PerGameSyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -1241,8 +1241,8 @@ class PerGameSyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",
@@ -1344,8 +1344,8 @@ class PerGameSyncTest {
 
         val config =
             AppConfig(
-                googleDrive =
-                    GoogleDriveConfig(
+                cloudCredentials =
+                    OAuthCredentials(
                         clientId = "test-client",
                         clientSecret = "test-secret",
                         refreshToken = "test-refresh-token",

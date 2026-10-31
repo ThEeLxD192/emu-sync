@@ -1,6 +1,7 @@
 package com.emusync.drive
 
 import com.emusync.domain.library.SaveTarget as ConfiguredSaveTarget
+import com.emusync.domain.operation.recoverOperationFailure
 import com.emusync.domain.sync.PostSyncFailure
 import com.emusync.domain.sync.SyncEvent
 import com.emusync.domain.sync.SyncGame
@@ -47,13 +48,12 @@ internal class PostGameSync(
         mappingTargets: List<ConfiguredSaveTarget>,
     ): Boolean {
         context.onStatus(SyncEvent.Syncing("Uploading saves for ${item.effectiveTitle}..."))
-        recoverDriveFailure(
+        recoverOperationFailure(
             action = {
                 // Games can outlive an access token. Authorize again before uploading.
                 val token =
                     context.oauthFlow.authorize(
                         context.config,
-                        context.configManager,
                         allowInteractive = false,
                     )
                 val cloudPath = paths.getCloudPathSegments(item)
@@ -85,7 +85,7 @@ internal class PostGameSync(
         summary: UploadSummary,
     ) {
         for (target in targets.filter { it.file.exists() }) {
-            recoverDriveFailure(
+            recoverOperationFailure(
                 action = {
                     summary.accept(
                         saves.sync(
@@ -119,7 +119,7 @@ internal class PostGameSync(
             if (!local.exists()) continue
             val siblings = fileSiblingCloudNames(target, mappingTargets, session.cloudFiles)
             val reserved = reservedCloudNames(target, mappingTargets, session.cloudFiles)
-            recoverDriveFailure(
+            recoverOperationFailure(
                 action = {
                     summary.accept(
                         saves.sync(

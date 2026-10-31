@@ -43,7 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.emusync.model.GoogleDriveConfig
+import com.emusync.domain.config.OAuthCredentials
 import com.emusync.ui.theme.EmuSyncColors
 import java.awt.Desktop
 import java.io.File
@@ -54,7 +54,7 @@ import java.io.File
  */
 @Composable
 fun DriveSetupDialog(
-    initialConfig: GoogleDriveConfig?,
+    initialConfig: OAuthCredentials?,
     configFile: File,
     onDismiss: () -> Unit,
     onSaveAndConnect: (clientId: String, clientSecret: String) -> Unit,

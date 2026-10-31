@@ -1,12 +1,13 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.domain.sync.SyncDecision
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
+import com.emusync.local.saves.SyncHistoryStore
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
 import com.emusync.ui.createSaveSynchronizer
@@ -26,6 +27,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -55,7 +57,7 @@ class PostSyncFailureTest {
             )
         val config =
             AppConfig(
-                googleDrive = GoogleDriveConfig("client", "secret", "refresh"),
+                cloudCredentials = OAuthCredentials("client", "secret", "refresh"),
                 entries = listOf(entry),
             )
         val configManager = ConfigManager(File(tempDir, "config.json").absolutePath)
@@ -180,7 +182,7 @@ class PostSyncFailureTest {
             )
         val config =
             AppConfig(
-                googleDrive = GoogleDriveConfig("client", "secret", "refresh"),
+                cloudCredentials = OAuthCredentials("client", "secret", "refresh"),
                 entries = listOf(entry),
             )
         val configManager =
@@ -315,7 +317,7 @@ class PostSyncFailureTest {
             )
         val config =
             AppConfig(
-                googleDrive = GoogleDriveConfig("client", "secret", "refresh"),
+                cloudCredentials = OAuthCredentials("client", "secret", "refresh"),
                 entries = listOf(entry),
             )
         val configManager =
@@ -326,7 +328,7 @@ class PostSyncFailureTest {
             history.record(
                 history.key(file, "game", file.name),
                 sha256("ORIGINAL".toByteArray()),
-                DriveFile(id, file.name, "2020-01-01T00:00:00Z"),
+                (DriveFile(id, file.name, "2020-01-01T00:00:00Z")).toSyncState(),
             )
         }
         var firstCloudTime = "2020-01-01T00:00:00Z"
@@ -349,14 +351,13 @@ class PostSyncFailureTest {
                                 val date = if (first) firstCloudTime else secondCloudTime
                                 respond(
                                     Json.encodeToString(
-                                        ConditionalDriveFile.serializer(),
-                                        ConditionalDriveFile(
+                                        ConditionalFileResponse(
                                             id,
                                             if (first) "first.dat" else "second.dat",
                                             date,
                                             "\"$date\"",
                                             date,
-                                        ),
+                                        )
                                     ),
                                     headers = jsonHeaders,
                                 )
@@ -370,14 +371,13 @@ class PostSyncFailureTest {
                                     if (first) firstCloudTime = "2027-01-01T00:00:00Z"
                                     respond(
                                         Json.encodeToString(
-                                            ConditionalDriveFile.serializer(),
-                                            ConditionalDriveFile(
+                                            ConditionalFileResponse(
                                                 if (first) "first-id" else "second-id",
                                                 if (first) "first.dat" else "second.dat",
                                                 "2026-10-09T12:00:00Z",
                                                 "\"new\"",
                                                 "2026-10-09T12:00:00Z",
-                                            ),
+                                            )
                                         ),
                                         headers = jsonHeaders,
                                     )

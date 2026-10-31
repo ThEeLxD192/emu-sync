@@ -1,11 +1,11 @@
 package com.emusync.drive
 
 import com.emusync.config.ConfigManager
+import com.emusync.domain.config.AppConfig
+import com.emusync.domain.config.OAuthCredentials
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.SaveTargetType
-import com.emusync.model.AppConfig
-import com.emusync.model.GoogleDriveConfig
 import com.emusync.ui.AppStatus
 import com.emusync.ui.GameItem
 import com.emusync.ui.createSaveSynchronizer
@@ -60,7 +60,7 @@ class PostPlayAuthorizationTest {
                 listOf("-version"),
                 saveTargets = listOf(SaveTarget(save.path, SaveTargetType.FILE)),
             )
-        val config = AppConfig(GoogleDriveConfig("client", "secret", "refresh"), listOf(entry))
+        val config = AppConfig(OAuthCredentials("client", "secret", "refresh"), listOf(entry))
         val manager = ConfigManager(File(directory, "config.json"))
         manager.save(config)
         var played = false
@@ -131,7 +131,7 @@ class PostPlayAuthorizationTest {
                         played = true
                         save.writeText("AFTER PLAY")
                         if (unlinkDuringPlay)
-                            manager.updateGoogleDrive { it?.copy(refreshToken = null) }
+                            manager.updateCredentials { it?.copy(refreshToken = null) }
                     }
                 }
 

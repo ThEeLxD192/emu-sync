@@ -6,8 +6,8 @@ import androidx.compose.runtime.setValue
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.domain.library.scopeNewSaveTargets
-import com.emusync.drive.resolveCloudRestorePaths
-import com.emusync.drive.resolveCloudRestoreTargets
+import com.emusync.local.saves.resolveCloudRestorePaths
+import com.emusync.local.saves.resolveCloudRestoreTargets
 import com.emusync.ui.GameItem
 
 internal data class GameEditResult(

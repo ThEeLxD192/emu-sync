@@ -5,6 +5,7 @@ import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget as ConfiguredSaveTarget
 import com.emusync.domain.library.effectiveCloudFolder
+import com.emusync.domain.operation.recoverOperationFailure
 import com.emusync.domain.sync.SyncEvent
 import java.io.File
 import java.util.logging.Level
@@ -32,9 +33,6 @@ internal class CloudEntryMigration(
     private val config
         get() = context.config
 
-    private val configManager
-        get() = context.configManager
-
     private val onStatus
         get() = context.onStatus
 
@@ -59,10 +57,10 @@ internal class CloudEntryMigration(
         val oldCloudPath = paths.getCloudPathSegments(entry, romName, oldTitle)
         val newCloudPath = paths.getCloudPathSegments(entry, romName, newTitle)
 
-        if (oldCloudPath == newCloudPath || config.googleDrive?.refreshToken.isNullOrBlank())
+        if (oldCloudPath == newCloudPath || config.cloudCredentials?.refreshToken.isNullOrBlank())
             return true
 
-        return recoverDriveFailure(
+        return recoverOperationFailure(
             action = {
                 onStatus(SyncEvent.Syncing("Checking cloud folder for $newTitle..."))
                 val token = authorizeRename()
@@ -173,8 +171,8 @@ internal class CloudEntryMigration(
     }
 
     private suspend fun authorizeRename(): String? =
-        recoverDriveFailure(
-            action = { oauthFlow.authorize(config, configManager, allowInteractive = false) },
+        recoverOperationFailure(
+            action = { oauthFlow.authorize(config, allowInteractive = false) },
             recover = { failure ->
                 onStatus(SyncEvent.Error("Drive authentication failed: ${failure.message}"))
                 null
@@ -191,7 +189,7 @@ internal class CloudEntryMigration(
         return when {
             oldPath == newPath -> true
             !canMigrateEntry(oldEntry, oldPath) -> false
-            config.googleDrive?.refreshToken.isNullOrBlank() -> true
+            config.cloudCredentials?.refreshToken.isNullOrBlank() -> true
             else -> migrateEntry(newEntry, oldPath, newPath)
         }
     }
@@ -232,10 +230,10 @@ internal class CloudEntryMigration(
         oldPath: List<String>,
         newPath: List<String>,
     ): Boolean {
-        return recoverDriveFailure(
+        return recoverOperationFailure(
             action = {
                 onStatus(SyncEvent.Syncing("Moving cloud saves for ${newEntry.name}..."))
-                val token = oauthFlow.authorize(config, configManager, allowInteractive = false)
+                val token = oauthFlow.authorize(config, allowInteractive = false)
                 folderMigrator.migrate(token, oldPath, newPath)
                 onStatus(SyncEvent.Idle)
                 true
