@@ -90,7 +90,8 @@ Drive protocol/transfers. `application` coordinates workflows through domain con
 and downloads updates, and `platform:desktop` owns desktop integration. `presentation`
 contains Compose and UI controllers; `desktopApp` owns startup, dependency composition,
 resources and packaging. Root commands aggregate or delegate to these modules.
-Native Windows validation remains pending. See
+Final Linux validation passes with 434 test cases (432 passed, two PowerShell cases
+skipped) and zero Detekt findings. Native Windows validation remains pending. See
 [the migration roadmap](AGENTS.md).
 
 ```bash
@@ -291,9 +292,14 @@ Then run the AppImage:
 # Package for Windows (MSI installer & EXE bootstrapper)
 ./gradlew packageReleaseMsi packageReleaseExe
 
-# Package for Linux (AppImage)
+# Prepare the Linux application directory with its bundled runtime
 ./gradlew packageReleaseAppImage
 ```
+
+The Gradle Linux task prepares `desktopApp/build/compose/binaries/main-release/app/`.
+Use the Docker command above to generate the standalone `EmuSync-x86_64.AppImage`.
+Windows packaging requires a native Windows host; its final migration validation
+is still pending.
 
 ---
 
@@ -301,7 +307,7 @@ Then run the AppImage:
 
 EmuSync utilizes GitHub Actions for continuous integration and automated release packaging:
 
-- **CI Validation (`.github/workflows/ci.yml`)**: Runs on every push and pull request to `main`, verifying unit tests (`./gradlew test`) and Compose Desktop packaging across both Linux (AppImage) and Windows (MSI & EXE).
+- **CI Validation (`.github/workflows/ci.yml`)**: Runs on pushes to `main`/`develop` and pull requests, verifying quality and tests (`./gradlew check`), Linux application staging, and native Windows MSI/EXE packaging.
 - **Publish Release (`.github/workflows/release.yml`)**: Interactive manual trigger (`workflow_dispatch`) that:
   1. Prompts for the SemVer release type (`patch`, `minor`, `major`).
   2. Bumps the application version and creates the git tag (`vX.Y.Z`).

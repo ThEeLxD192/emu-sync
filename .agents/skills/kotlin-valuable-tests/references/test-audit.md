@@ -422,3 +422,61 @@ entre ejecuciones y limitaciones completas en [AGENTS.md](../../../../AGENTS.md)
 
 El precommit sobre la exportación final del índice pasó en un minuto: 95 tareas
 ejecutadas, sin modificar el trabajo ni el índice para pasar sus comprobaciones.
+
+## Validación H8 — revisión final de contratos y evidencia
+
+Fecha: 2026-10-31; base H7 `46e1c1b` (commit ya registrado). H8 verifica Linux y
+conserva abiertos H6/H7/H8 por la validación nativa Windows pendiente.
+
+Se contrastaron las 70 fuentes enlazadas y los 433 métodos del catálogo con el
+código y los XML actuales. Las dos elecciones EnumSource del reintento explican
+los 434 casos. Se conservan las garantías de las tablas anteriores: no se añade,
+retira ni reescribe ningún escenario en H8. Los 81 archivos de pruebas incluyen
+11 fixtures; producción tiene 210 archivos Kotlin en los ocho módulos.
+
+`./gradlew check packageReleaseAppImage --rerun-tasks --no-daemon` pasó en 1 min 6 s:
+104 tareas ejecutadas. Son **434 casos ejecutados de nuevo: 432 aprobados, cero fallos/errores y
+dos omitidos PowerShell**, 19,996 s JUnit. Se reutilizó la caché de configuración,
+sin reutilizar las tareas de pruebas/análisis. Se excluyen los reportes históricos
+de la raíz sin fuentes. Los 17 SARIF nuevos, incluido testFixtures Drive, no tienen
+hallazgos. Hooks: nueve grupos PASS; convenciones: cuatro PASS. No se relajan reglas
+ni se añaden supresiones o accesos especiales para las pruebas.
+
+La compatibilidad de JSON/configuración e historial usa documentos literales en
+ConfigFormatCompatibilityTest y SyncHistoryCompatibilityTest; los escenarios de
+persistencia, backups, OAuth, conflictos, cancelación, rutas y escrituras condicionales
+siguen ejecutándose en sus módulos propietarios. Las integraciones CIO reales y las
+pruebas Linux de procesos/instalación conservan su límite de sistema. No se usaron
+datos del usuario ni cuentas reales de Drive/Steam.
+
+Los grafos resueltos de producción y pruebas coinciden con la arquitectura, sin
+ciclos ni dependencias hacia la raíz. Presentation solo incorpora adaptadores y
+fixtures en pruebas y no depende de desktopApp. No quedan dependencias o fachadas
+temporales de la migración que retirar; las APIs estables y compatibilidad legacy
+conservan consumidores reales. No se eliminan regresiones por compartir límites.
+
+Docker generó el AppImage independiente y validó AppStream. Su AppRun extraído abrió
+una ventana EmuSync de 1280×800 bajo Xvfb con el runtime incluido y configuración
+temporal, dentro de un contenedor desechable. Esto comprueba el arranque básico;
+no demuestra interacción manual, montaje FUSE ni funcionamiento en Windows.
+Los dos escenarios PowerShell siguen omitidos en este host Linux sin PowerShell;
+las pruebas Windows controladas no son instalación nativa. MSI/EXE y sus pruebas
+nativas siguen pendientes, sin CI remoto, push ni publicación.
+
+Comandos, tiempos por módulo, grafo, artefacto/SHA-256 y pasos pendientes están en
+[la evidencia de H8](../../../../AGENTS.md#h8--validación-final-y-cierre). No se repite
+la suite por la actualización documental.
+
+El usuario autorizó después una limpieza previa al commit. Se retira únicamente el
+callback legacy de Sidebar por índices y su envoltorio: el único consumidor siempre
+proporciona la lista completa y esa rama tenía prioridad. Se mantienen los escenarios
+de SidebarInteractionStateTest, SidebarTest y LibraryConcurrencyTest, así como las APIs
+de edición todavía probadas. No se añaden ni eliminan escenarios por esta simplificación.
+El cierre posterior `check packageReleaseAppImage --no-daemon` pasó en 49 s: 113 tareas,
+18 ejecutadas y 95 UP-TO-DATE. Ejecutó presentación (194 casos, 4,121 s) y desktopApp
+(uno, 0,411 s), todos aprobados; las otras suites reutilizaron la ejecución completa
+anterior de H8. Detekt de presentación, hooks y convenciones pasaron; los 17 SARIF
+vigentes están limpios. Los reportes históricos se conservan al retirar builds obsoletos.
+El AppImage se regeneró con las fuentes finales y volvió a abrir la ventana bajo Xvfb
+con el runtime incluido y configuración temporal, dentro de un contenedor desechable.
+El commit de validación y limpieza está autorizado; Windows nativo sigue pendiente.

@@ -94,9 +94,6 @@ fun EmuSyncApp(
                             scope.launch { viewModel.selectEntry(entry) }
                         },
                         onAddClicked = { showAddDialog = true },
-                        onReorder = { fromIndex, toIndex ->
-                            scope.launch { viewModel.reorderEntries(fromIndex, toIndex) }
-                        },
                         onReorderEntries = { newEntries ->
                             scope.launch { viewModel.reorderEntriesList(newEntries) }
                         },

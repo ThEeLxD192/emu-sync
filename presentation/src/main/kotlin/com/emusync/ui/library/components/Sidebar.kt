@@ -70,8 +70,7 @@ fun Sidebar(
     selectedEntry: GameEntry?,
     onEntrySelected: (GameEntry) -> Unit,
     onAddClicked: () -> Unit,
-    onReorder: ((fromIndex: Int, toIndex: Int) -> Unit)? = null,
-    onReorderEntries: ((List<GameEntry>) -> Unit)? = null,
+    onReorderEntries: (List<GameEntry>) -> Unit,
     steamAvailable: Boolean = false,
     isSteamRegistered: (GameEntry) -> Boolean = { it.steamAppId != null },
     onSteamToggle: ((GameEntry) -> Unit)? = null,
@@ -85,18 +84,6 @@ fun Sidebar(
         remember(entries, interaction.collapsedGroups, selectedEntry) {
             computeSidebarRows(entries, interaction.collapsedGroups, selectedEntry)
         }
-
-    val applyReorder: (List<GameEntry>) -> Unit = { newEntries ->
-        if (onReorderEntries != null) {
-            onReorderEntries(newEntries)
-        } else if (onReorder != null) {
-            // Find single moved entry if using legacy onReorder
-            val fromIdx = entries.indices.firstOrNull { entries[it] != newEntries[it] } ?: 0
-            val movedEntry = entries[fromIdx]
-            val toIdx = newEntries.indexOf(movedEntry).coerceAtLeast(0)
-            onReorder(fromIdx, toIdx)
-        }
-    }
 
     Column(modifier = modifier.padding(vertical = 4.dp)) {
         Row(
@@ -138,7 +125,7 @@ fun Sidebar(
                             entries,
                             interaction,
                             itemHeightPx,
-                            applyReorder,
+                            onReorderEntries,
                             onEntrySelected,
                         )
                     is SidebarRow.EntryRow ->
@@ -148,7 +135,7 @@ fun Sidebar(
                             selectedEntry,
                             interaction,
                             itemHeightPx,
-                            applyReorder,
+                            onReorderEntries,
                             onEntrySelected,
                             steamAvailable,
                             isSteamRegistered,

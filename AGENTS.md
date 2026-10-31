@@ -5,10 +5,11 @@
 EmuSync es una aplicación Kotlin/Compose Desktop para Linux y Windows. La migración
 acordada usa módulos Gradle JVM y conserva el comportamiento y los formatos actuales.
 La primera entrega fue esta guía y la skill local de pruebas. H0–H5 están
-completados. Las implementaciones de H6 y H7 están verificadas en Linux; queda
-pendiente su validación nativa en Windows. H6 está registrado en `d54561a`; el commit
-de H7 espera confirmación explícita. H8 sigue pendiente. La instrucción del usuario
-autorizó avanzar con H7 conservando el pendiente de Windows de H6.
+completados. Las implementaciones de H6 y H7 y la validación final de H8 están
+verificadas en Linux; queda pendiente su validación nativa en Windows. H6 está
+registrado en `d54561a` y H7 en `46e1c1b`. H8 sigue abierto por Windows. El usuario
+autorizó avanzar con H7 y después con H8 conservando el pendiente de Windows de H6,
+y autorizó el commit de validación con una limpieza previa de restos de la migración.
 Documentar un hito no significa ejecutarlo.
 
 Línea base inspeccionada el 2026-10-30, sobre `484012f`:
@@ -817,17 +818,154 @@ Evidencia (2026-10-31, Linux; base H6 `d54561a`):
   Catálogo, enlaces locales modificados, grafos, staging, sintaxis Bash y diff revisados.
 
 **Implementación H7 verificada en Linux. Validación nativa Windows pendiente.
-Commit H7: pendiente de confirmación (`refactor: extract presentation and desktop application`).**
+Commit H7: `46e1c1b` (`refactor: extract presentation and desktop application`).**
 
 ### H8 — Validación final y cierre
 
-- [ ] Ejecutar `check`, revisar Detekt de todos los módulos y confirmar ausencia de ciclos.
-- [ ] Revisar la matriz de pruebas y retirar fachadas o dependencias temporales.
+- [x] Ejecutar `check`, revisar Detekt de todos los módulos y confirmar ausencia de ciclos.
+- [x] Revisar la matriz de pruebas y retirar fachadas o dependencias temporales.
 - [ ] Verificar AppImage en Linux y MSI/EXE en Windows sin publicar releases.
-- [ ] Confirmar compatibilidad de datos, actualizar estructura real y registrar pendientes.
+  AppImage generado y arranque comprobado en Linux; MSI/EXE nativos pendientes.
+- [x] Confirmar compatibilidad de datos, actualizar estructura real y registrar pendientes.
 - [ ] **H8 completado.**
 
 Aceptación: todos los hitos verificados, formatos compatibles, cero hallazgos Detekt y
 evidencia de distribución por plataforma. Un resultado solo en Linux no cierra Windows.
 
-Evidencia: pendiente. Commit: pendiente.
+Evidencia (2026-10-31, Linux; base H7 `46e1c1b`):
+
+- Cierre con ejecución nueva de compilación, pruebas, formato y análisis:
+
+  ```bash
+  ./gradlew check packageReleaseAppImage --rerun-tasks --no-daemon
+  ```
+
+  `BUILD SUCCESSFUL` en 1 min 6 s; 104 tareas accionables, todas ejecutadas.
+  Se reutilizó la configuración, pero `--rerun-tasks` ejecutó las ocho suites y los
+  17 análisis Detekt. Las tareas raíz de fuentes/pruebas son NO-SOURCE; sus reportes
+  históricos no se cuentan. No se cambiaron fuentes, pruebas, versiones, reglas ni
+  supresiones para obtener este resultado.
+
+  | Módulo | Kotlin producción | Kotlin pruebas/fixtures | Casos | Tiempo JUnit |
+  | --- | ---: | ---: | ---: | ---: |
+  | domain | 61 | 8 | 58 | 0,640 s |
+  | application | 33 | 3 | 2 | 0,343 s |
+  | data:local | 16 | 8 | 31 | 0,850 s |
+  | data:drive | 21 | 12 | 40 | 4,232 s |
+  | data:updates | 6 | 2 | 13 | 1,194 s |
+  | platform:desktop | 24 | 16 | 95 | 9,560 s |
+  | presentation | 43 | 31 | 194 | 2,756 s |
+  | desktopApp | 6 | 1 | 1 | 0,421 s |
+
+  Total: **210 archivos Kotlin de producción, 81 de pruebas/fixtures, 70 suites y
+  434 casos: 432 aprobados, cero fallos/errores y dos omitidos**, 19,996 s JUnit.
+  Las omisiones son los dos escenarios PowerShell de WindowsLauncherTest ya
+  identificados; no hay PowerShell ni host Windows disponible. Los 17 SARIF nuevos,
+  incluido testFixtures de Drive, tienen **cero hallazgos**, sin avisos de errores del
+  compilador en el análisis. Hooks: nueve grupos PASS; convenciones: cuatro PASS,
+  incluidos aislamiento del índice, Java 25, fixtures, reutilización de caché y
+  bloqueos deliberados en copias desechables.
+- Se contrastaron las declaraciones Gradle, imports de producción y los componentes
+  y aristas de `resolutionResult` de runtimeClasspath/testRuntimeClasspath de los
+  ocho módulos y la raíz, mediante un init script temporal de inspección:
+
+  | Consumidor de producción | Dependencias directas de proyecto resueltas |
+  | --- | --- |
+  | domain | Ninguna |
+  | application | domain |
+  | data:local, data:drive, data:updates, platform:desktop | domain |
+  | presentation | application, domain |
+  | desktopApp | presentation, application, domain y los cuatro adaptadores |
+  | Raíz | Ninguna; solo tareas agregadas/delegadas |
+
+  El grafo es acíclico y no hay dependencias de módulos hacia la raíz. Domain y
+  application carecen de Compose, Ktor y serialización en runtime; presentation no
+  incluye Ktor ni adaptadores en producción. Sus integraciones sí reciben adaptadores
+  y fixtures de Drive desde testRuntimeClasspath, sin depender de desktopApp.
+  La composición y propiedad de recursos están en desktopApp. No quedan fachadas de
+  transición ni dependencias temporales de la migración que retirar: AppViewModel y
+  SteamShortcutManager son APIs estables con consumidores y garantías conservadas;
+  los lectores legacy protegen datos existentes y no son scaffolding.
+- [Matriz revisada](.agents/skills/kotlin-valuable-tests/references/test-audit.md) y
+  [catálogo](.agents/skills/kotlin-valuable-tests/references/test-audit-cases.md)
+  contrastados con fuentes y XML: los 433 métodos siguen registrados, incluido el
+  escenario parametrizado con dos elecciones. Sin altas ni retiradas en H8. Se
+  ejecutaron ConfigFormatCompatibilityTest y SyncHistoryCompatibilityTest sobre
+  documentos literales, además de migraciones legacy, revisiones OAuth, persistencia
+  atómica, backups, rutas seguras, conflictos, cancelación y escrituras condicionales.
+  Esta evidencia comprueba los formatos y contratos auditados; no usa datos personales
+  ni una cuenta real de Drive o Steam.
+- Staging Linux con MainKt y los ocho JAR en el classpath, **579 clases EmuSync sin
+  duplicados**, sin fixtures ni UpdateManager. Los tres recursos (PNG, ICO y AppStream)
+  pertenecen exclusivamente al JAR de desktopApp y conservan los bytes de H6.
+  Se mantienen versión 1.1.1, UUID Windows, ID AppStream y nombres de artefactos.
+  La estructura documentada corresponde a las fuentes actuales; README distingue
+  preparación Gradle y generación del AppImage independiente. Los resultados de
+  AUDIT_STATUS son históricos y no se usan como evidencia de este cierre.
+- `docker compose config --quiet` y `docker compose build`: correctos. Empaquetado
+  independiente, sin montar fuentes ni builds del host:
+
+  ```bash
+  mkdir -p /tmp/emusync-h8-appimage
+  docker run --rm \
+    --mount type=bind,src=/tmp/emusync-h8-appimage,dst=/out \
+    --mount type=volume,src=emu-sync_gradle-cache,dst=/root/.gradle \
+    emu-sync-builder:latest
+  ```
+
+  El script build-dist.sh validó AppStream y ejecutó appimagetool. Gradle pasó en 30 s,
+  33 tareas ejecutadas. Artefacto local: `/tmp/emusync-h8-appimage/EmuSync-x86_64.AppImage`,
+  106.592.760 bytes; SHA-256
+  `6a1b3176b533dee4294d5c12db78045b1ef67a1e5535ef150a3e901026335f83`.
+  En otro contenedor desechable se instalaron Xvfb/xauth/x11-utils, se extrajo ese
+  AppImage y se ejecutó su AppRun con el runtime incluido, renderizador software y
+  EMUSYNC_CONFIG temporal. X11 confirmó una ventana EmuSync de 1280×800 y la creación
+  de la configuración. El proceso se terminó y el contenedor se eliminó. El arranque
+  emitió únicamente el aviso SLF4J de proveedor ausente; no hubo error de arranque.
+  No se comprobó montaje FUSE ni interacción manual de la interfaz.
+- **Cierre pendiente en Windows:** ejecutar `./gradlew check --no-daemon` y
+  `./gradlew packageReleaseMsi packageReleaseExe --no-daemon` en Windows nativo,
+  revisar los XML/SARIF y los instaladores de desktopApp, y comprobar instalación,
+  arranque y lanzadores PowerShell. Registrar host, comandos, resultados y artefactos
+  antes de marcar H6, H7 y H8 completos. CI conserva estas tareas y reportes, pero
+  no se ejecutó CI remoto, push ni publicación. Los tests con lanzadores Windows
+  controlados y el dry-run de H7 no sustituyen esa evidencia. Continúa la limitación
+  Detekt/Gradle diagnosticada en H2.
+- Enlaces locales del seguimiento/matriz y `git diff --check` revisados. El enlace
+  README → LICENSE sigue ausente desde antes de H3; no se inventa una licencia en
+  este cierre. No se repite la suite tras editar únicamente documentación.
+- Limpieza previa al commit, autorizada después de la validación anterior:
+  - Eliminados el árbol vacío `src/` de la raíz y el directorio vacío
+    `presentation/src/main/kotlin/com/emusync/ui/dialogs`.
+  - Eliminadas la caché obsoleta de Gradle 8.11.1 y las clases, recursos compilados,
+    librerías, temporales y distribuciones de los dos builds archivados en
+    `.gradle/build-before-*`. Se conservan íntegros sus reports/test-results.
+    Retirados también compose/distributions/generated/kotlin/libs/tmp del build raíz
+    antiguo: el staging actual pertenece a desktopApp. La configuración personal,
+    partidas, historial y backups no forman parte de esta limpieza. Algunos restos
+    generados eran propiedad de root; se eliminaron mediante montajes Docker acotados
+    y se corrigió la propiedad de temporales generados de build-logic inaccesibles.
+  - Retirado el callback legacy por índices de Sidebar y su envoltorio: su único
+    consumidor siempre proporcionaba el callback de lista completa, que tenía
+    prioridad. Se pasa ese callback directamente para arrastre y controles arriba/abajo.
+    No se retiran archivos Kotlin ni pruebas con contratos vigentes; se conservan
+    las regresiones de orden, grupos y edición concurrente.
+  - `./gradlew check packageReleaseAppImage --no-daemon`: correcto en 49 s;
+    113 tareas, 18 ejecutadas y 95 UP-TO-DATE. Se ejecutaron los 194 casos de
+    presentation (4,121 s) y el de desktopApp (0,411 s), todos aprobados; las otras
+    suites reutilizaron la ejecución completa de H8. También se ejecutaron Detekt
+    main/test de presentación, hooks y convenciones. Los 17 SARIF vigentes siguen
+    sin hallazgos. No se añaden pruebas para retirar una rama sin consumidores.
+  - Se reconstruyó la imagen Docker con las fuentes limpias y se repitió build-dist.sh
+    sin montar fuentes/builds del host: Gradle correcto en 31 s, 33 tareas ejecutadas;
+    AppStream y appimagetool correctos. El staging final contiene 578 clases EmuSync
+    sin duplicados. AppImage final:
+    `/tmp/emusync-h8-cleanup-appimage/EmuSync-x86_64.AppImage`, 106.592.760 bytes,
+    SHA-256 `753a23f83128f711a0759e4e5dbcbe063ada0264f421f8d03662d978ba3bc030`.
+    Se repitió el arranque extraído bajo Xvfb en otro contenedor desechable:
+    ventana EmuSync de 1280×800 y configuración temporal creadas, sin errores de
+    arranque y con el mismo aviso SLF4J de proveedor ausente.
+
+**Validación final H8 verificada en Linux. H6, H7 y H8 siguen abiertos por Windows.
+Commit H8 autorizado (`chore: clean migration leftovers and record final validation`);
+su hash se registrará en la próxima actualización del seguimiento.**
