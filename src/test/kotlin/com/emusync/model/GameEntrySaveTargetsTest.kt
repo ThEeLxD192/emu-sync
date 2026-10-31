@@ -70,11 +70,11 @@ class GameEntrySaveTargetsTest {
         assertEquals(listOf(typedStem), withoutExact.effectiveSaveTargetsForRom("Game.sfc"))
         val legacy = emulator.copy(saveTargetsByRom = emptyMap())
         assertEquals(
-            listOf(inferLegacySaveTarget(legacyExact)),
+            listOf(SaveTarget(legacyExact, SaveTargetType.UNKNOWN)),
             legacy.effectiveSaveTargetsForRom("Game.sfc"),
         )
         assertEquals(
-            listOf(inferLegacySaveTarget(legacyStem)),
+            listOf(SaveTarget(legacyStem, SaveTargetType.UNKNOWN)),
             legacy
                 .copy(savePathsByRom = mapOf("Game" to listOf(legacyStem)))
                 .effectiveSaveTargetsForRom("Game.sfc"),

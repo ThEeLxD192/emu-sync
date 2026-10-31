@@ -4,8 +4,9 @@
 
 EmuSync es una aplicación Kotlin/Compose Desktop para Linux y Windows. La migración
 acordada usa módulos Gradle JVM y conserva el comportamiento y los formatos actuales.
-La primera entrega es esta guía y la skill local de pruebas. Los hitos H1–H8 quedan
-pendientes para avanzar de forma incremental; documentarlos no significa ejecutarlos.
+La primera entrega fue esta guía y la skill local de pruebas. H1 está verificado
+técnicamente y espera confirmación de commit; H2–H8 siguen pendientes. Documentar
+un hito no significa ejecutarlo.
 
 Línea base inspeccionada el 2026-10-30, sobre `484012f`:
 
@@ -205,20 +206,44 @@ Evidencia (2026-10-30):
 - No se ejecutó empaquetado ni validación nativa de Windows: no hay cambios de
   aplicación, distribución o configuración que lo requieran en H0.
 
-Commit: aprobado por el usuario; registrar el hash en la siguiente actualización del seguimiento.
+Commit H0: `21e8e56` (`docs: add modular architecture roadmap and Kotlin testing skill`).
 
 ### H1 — Auditoría y consolidación de pruebas
 
-- [ ] Clasificar todas las pruebas/fixtures por contrato, riesgo y nivel en la matriz.
-- [ ] Registrar y aplicar decisiones de conservar, combinar, reescribir o retirar.
-- [ ] Ejecutar suites afectadas y comprobar que cada riesgo crítico sigue protegido.
-- [ ] **H1 completado.**
+- [x] Clasificar todas las pruebas/fixtures por contrato, riesgo y nivel en la matriz.
+- [x] Registrar y aplicar decisiones de conservar, combinar, reescribir o retirar.
+- [x] Ejecutar suites afectadas y comprobar que cada riesgo crítico sigue protegido.
+- [x] **H1 completado.**
 
 Aceptación: decisiones justificadas y trazables, sin una cuota de eliminación ni una
 meta artificial de cobertura. Las regresiones retiradas tienen protección equivalente
 identificable. El número de casos y tiempos se registran como evidencia, no como meta.
 
-Evidencia: pendiente. Commit: pendiente.
+Evidencia (2026-10-30, Linux; base `21e8e56`):
+
+- [Matriz y evidencia detallada](.agents/skills/kotlin-valuable-tests/references/test-audit.md)
+  con [catálogo por escenario](.agents/skills/kotlin-valuable-tests/references/test-audit-cases.md):
+  57 archivos Kotlin, fixtures y los ocho escenarios de hooks clasificados. Sobre
+  430 métodos originales: 421 conservados, cinco reescritos y cuatro retirados con
+  protección equivalente identificada; quedan 426 métodos y 427 casos JUnit.
+- Las reescrituras exigen la ruta Windows completa, esperados legacy independientes,
+  bytes de subida reanudable, orden observable del sidebar y una precondición explícita
+  de escritorio para Steam Game Mode. Sin cambios de producción ni dependencias.
+- `./gradlew spotlessApply test --tests ... --no-daemon` (seis filtros completos en
+  la matriz): `BUILD SUCCESSFUL` en 12 s, 59 casos aprobados, cero omisiones; suma
+  JUnit 1,182 s. Se aplicó formato y se ejecutaron las suites afectadas.
+- `./gradlew check --no-daemon`: `BUILD SUCCESSFUL` en 23 s; 15 tareas accionables,
+  seis ejecutadas y nueve UP-TO-DATE. Suite completa ejecutada: 427 casos, 425 aprobados,
+  cero fallos/errores y dos omisiones de PowerShell en Linux; suma JUnit 11,358 s.
+  Hooks: ocho PASS. Spotless Kotlin y Detekt de pruebas ejecutados; Detekt principal
+  y formato Gradle UP-TO-DATE. Ambos SARIF: cero hallazgos.
+- Catálogo contrastado con fuentes y XML, enlaces relativos y `git diff --check`
+  correctos. No se repitió la suite tras editar únicamente documentación.
+- Se conserva el aviso de deprecaciones para H2. No se ejecutó empaquetado, UI
+  renderizada ni Windows nativo; las simulaciones de plataforma no sustituyen esa
+  validación de H6/H8. La matriz registra además límites ambientales y de recursos.
+
+**H1 completado técnicamente. Commit H1: pendiente de confirmación explícita.**
 
 ### H2 — Base Gradle multimódulo
 

@@ -154,47 +154,6 @@ class ConfigManagerTest {
     }
 
     @Test
-    fun `should resolve explicit custom path over environment or defaults`(@TempDir tempDir: File) {
-        val customFile = File(tempDir, "my_custom_config.json")
-        val resolved =
-            ConfigManager.resolveDefaultConfigFile(
-                customPath = customFile.absolutePath,
-                envProvider = { "some_env_val" },
-                propertyProvider = { "some_prop_val" },
-            )
-        assertEquals(customFile.absolutePath, resolved.absolutePath)
-    }
-
-    @Test
-    fun `should resolve co-located config next to AppImage when it exists`(@TempDir tempDir: File) {
-        val appImageFile = File(tempDir, "EmuSync-x86_64.AppImage").apply { createNewFile() }
-        val coLocatedConfig = File(tempDir, "config.json").apply { writeText("{}") }
-
-        val resolved =
-            ConfigManager.resolveDefaultConfigFile(
-                envProvider = { if (it == "APPIMAGE") appImageFile.absolutePath else null },
-                propertyProvider = { null },
-                workingDir = File("/nonexistent/cwd"),
-            )
-        assertEquals(coLocatedConfig.absolutePath, resolved.absolutePath)
-    }
-
-    @Test
-    fun `should resolve co-located config in working directory when it exists`(
-        @TempDir tempDir: File
-    ) {
-        val cwdConfig = File(tempDir, "config.json").apply { writeText("{}") }
-
-        val resolved =
-            ConfigManager.resolveDefaultConfigFile(
-                envProvider = { null },
-                propertyProvider = { null },
-                workingDir = tempDir,
-            )
-        assertEquals(cwdConfig.absolutePath, resolved.absolutePath)
-    }
-
-    @Test
     fun `should resolve Windows platform default config path`() {
         val resolved =
             ConfigManager.getDefaultPlatformConfigFile(
@@ -203,20 +162,9 @@ class ConfigManagerTest {
                 },
                 propertyProvider = { if (it == "os.name") "Windows 11" else null },
             )
-        assertTrue(resolved.path.contains("AppData") && resolved.path.contains("emusync"))
-        assertTrue(resolved.name == "config.json")
-    }
-
-    @Test
-    fun `should resolve Linux platform default config path`() {
-        val resolved =
-            ConfigManager.getDefaultPlatformConfigFile(
-                envProvider = { if (it == "XDG_CONFIG_HOME") "/home/gamer/.config" else null },
-                propertyProvider = { if (it == "os.name") "Linux" else null },
-            )
         assertEquals(
-            File("/home/gamer/.config/emusync/config.json").absolutePath,
-            resolved.absolutePath,
+            File("C:\\Users\\Gamer\\AppData\\Roaming", "emusync/config.json"),
+            resolved,
         )
     }
 

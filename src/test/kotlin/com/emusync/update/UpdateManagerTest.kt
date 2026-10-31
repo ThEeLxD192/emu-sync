@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
@@ -434,8 +435,12 @@ class UpdateManagerTest {
 
     @Test
     fun `isSteamGameMode returns false by default in non-gaming test environment`() {
-        val manager = UpdateManager()
-        // In the JUnit environment (without SteamGamepadUI or gamescope), it evaluates to false
-        assertFalse(manager.isSteamGameMode())
+        assumeFalse(
+            System.getenv("SteamGamepadUI") == "1" ||
+                System.getenv("XDG_CURRENT_DESKTOP")?.equals("gamescope", ignoreCase = true) ==
+                    true,
+            "The default desktop assertion requires a session outside Steam Game Mode",
+        )
+        UpdateManager().use { manager -> assertFalse(manager.isSteamGameMode()) }
     }
 }

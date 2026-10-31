@@ -3,7 +3,6 @@ package com.emusync.ui.components
 import com.emusync.model.GameEntry
 import com.emusync.model.NativePCGame
 import kotlin.test.assertEquals
-import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -110,11 +109,11 @@ class SidebarInteractionStateTest {
     }
 
     @Test
-    fun `invalid sibling moves keep the original order and list instance`() {
-        assertSame(entries, moveChildEntry(entries, "Missing", 0, 1))
-        assertSame(entries, moveChildEntry(entries, "Group", -1, 1))
-        assertSame(entries, moveChildEntry(entries, "Group", 0, 2))
-        assertSame(entries, moveChildEntry(entries, "Group", 0, 0))
+    fun `invalid sibling moves preserve every entry in its original order`() {
+        assertEquals(listOf(first, second, standalone), moveChildEntry(entries, "Missing", 0, 1))
+        assertEquals(listOf(first, second, standalone), moveChildEntry(entries, "Group", -1, 1))
+        assertEquals(listOf(first, second, standalone), moveChildEntry(entries, "Group", 0, 2))
+        assertEquals(listOf(first, second, standalone), moveChildEntry(entries, "Group", 0, 0))
     }
 
     private fun header(state: SidebarInteractionState, selected: GameEntry? = null) =

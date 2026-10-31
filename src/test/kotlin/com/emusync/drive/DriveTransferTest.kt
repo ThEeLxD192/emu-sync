@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
+import io.ktor.client.engine.mock.toByteArray
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.HttpHeaders
@@ -254,63 +255,70 @@ class DriveTransferTest {
         }
 
     @Test
-    fun `upload creates resumable session and sends file content`() = runTest {
-        val file =
-            File.createTempFile("emusync-upload", ".sav").apply {
-                writeBytes(byteArrayOf(1, 2, 3, 4))
-            }
-        val requests = mutableListOf<io.ktor.client.request.HttpRequestData>()
-        val progress = mutableListOf<TransferProgress>()
-        val sessionUri = "https://uploads.example/session-create"
-        val client =
-            HttpClient(MockEngine) {
-                install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
-                engine {
-                    addHandler { request ->
-                        requests += request
-                        when (request.method.value) {
-                            "POST" ->
-                                respond(
-                                    content = "",
-                                    headers = headersOf(HttpHeaders.Location, sessionUri),
-                                )
-                            "PUT" ->
-                                respond(
-                                    content =
-                                        """{"id":"created-id","name":"slot.sav","modifiedTime":"2026-03-18T12:00:00Z"}""",
-                                    status = HttpStatusCode.Created,
-                                    headers = jsonHeaders,
-                                )
-                            else -> error("Unexpected ${request.method.value} request")
+    fun `upload creates resumable session and sends file content`(@TempDir directory: File) =
+        runTest {
+            val file = File(directory, "slot.sav").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+            val requests = mutableListOf<io.ktor.client.request.HttpRequestData>()
+            val progress = mutableListOf<TransferProgress>()
+            val sessionUri = "https://uploads.example/session-create"
+            val client =
+                HttpClient(MockEngine) {
+                    install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                    engine {
+                        addHandler { request ->
+                            requests += request
+                            when (request.method.value) {
+                                "POST" ->
+                                    respond(
+                                        content = "",
+                                        headers = headersOf(HttpHeaders.Location, sessionUri),
+                                    )
+                                "PUT" -> {
+                                    assertContentEquals(
+                                        byteArrayOf(1, 2, 3, 4),
+                                        request.body.toByteArray(),
+                                    )
+                                    respond(
+                                        content =
+                                            """{"id":"created-id","name":"slot.sav","modifiedTime":"2026-03-18T12:00:00Z"}""",
+                                        status = HttpStatusCode.Created,
+                                        headers = jsonHeaders,
+                                    )
+                                }
+                                else -> error("Unexpected ${request.method.value} request")
+                            }
                         }
                     }
                 }
-            }
 
-        val result =
-            DriveTransfer(client, progress::add).upload("token", file, "slot.sav", "save-folder")
+            client.use {
+                val result =
+                    DriveTransfer(client, progress::add)
+                        .upload("token", file, "slot.sav", "save-folder")
 
-        assertEquals("created-id", result.id)
-        assertEquals("resumable", requests[0].url.parameters["uploadType"])
-        assertEquals("4", requests[0].headers["X-Upload-Content-Length"])
-        val metadata =
-            Json.parseToJsonElement(
-                    (requests[0].body as OutgoingContent.ByteArrayContent).bytes().decodeToString()
+                assertEquals("created-id", result.id)
+                assertEquals("resumable", requests[0].url.parameters["uploadType"])
+                assertEquals("4", requests[0].headers["X-Upload-Content-Length"])
+                val metadata =
+                    Json.parseToJsonElement(
+                            (requests[0].body as OutgoingContent.ByteArrayContent)
+                                .bytes()
+                                .decodeToString()
+                        )
+                        .jsonObject
+                assertEquals("slot.sav", metadata["name"]?.jsonPrimitive?.content)
+                assertEquals(
+                    "save-folder",
+                    metadata["parents"]?.jsonArray?.single()?.jsonPrimitive?.content,
                 )
-                .jsonObject
-        assertEquals("slot.sav", metadata["name"]?.jsonPrimitive?.content)
-        assertEquals(
-            "save-folder",
-            metadata["parents"]?.jsonArray?.single()?.jsonPrimitive?.content,
-        )
-        assertEquals(sessionUri, requests[1].url.toString())
-        assertEquals("bytes 0-3/4", requests[1].headers[HttpHeaders.ContentRange])
-        assertEquals(
-            listOf(TransferProgress(TransferProgress.Direction.UPLOAD, file.name, 4, 4)),
-            progress,
-        )
-        file.delete()
-    }
+                assertEquals(sessionUri, requests[1].url.toString())
+                assertEquals("bytes 0-3/4", requests[1].headers[HttpHeaders.ContentRange])
+                assertEquals(
+                    listOf(TransferProgress(TransferProgress.Direction.UPLOAD, file.name, 4, 4)),
+                    progress,
+                )
+            }
+        }
 
     @Test
     fun `update starts resumable session with PATCH and uploads media`() = runTest {
