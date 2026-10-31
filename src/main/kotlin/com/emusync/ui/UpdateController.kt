@@ -2,40 +2,26 @@ package com.emusync.ui
 
 import com.emusync.application.update.UpdateCoordinator
 import com.emusync.application.update.UpdateState
+import com.emusync.domain.update.UpdateFiles
 import com.emusync.domain.update.UpdateInfo
 import com.emusync.domain.update.UpdateInstaller
 import com.emusync.domain.update.UpdateSource
-import com.emusync.update.UpdateManager
-import com.emusync.update.UpdateStagingFiles
 import java.io.File
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 
 /** Maps the update workflow to presentation state. Resources remain owned by the composition. */
 internal class UpdateController(
     private val state: MutableStateFlow<AppUiState>,
-    manager: UpdateManager,
-    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    source: UpdateSource,
+    files: UpdateFiles,
+    installer: UpdateInstaller,
 ) {
     private val updates =
         UpdateCoordinator(
-            object : UpdateSource {
-                override suspend fun check() = manager.checkForUpdates()
-
-                override suspend fun download(
-                    info: UpdateInfo,
-                    destination: String,
-                    onProgress: (Float) -> Unit,
-                ) = manager.downloadUpdate(info.downloadUrl, File(destination), onProgress)
-            },
-            UpdateStagingFiles(manager, ioDispatcher),
-            object : UpdateInstaller {
-                override fun isSteamGameMode() = manager.isSteamGameMode()
-
-                override fun restart(path: String) = manager.applyUpdateAndRestart(File(path))
-            },
+            source,
+            files,
+            installer,
             initialState = state.value.updateState.toWorkflowState(),
         ) { next ->
             state.update { it.copy(updateState = next.toUiState()) }

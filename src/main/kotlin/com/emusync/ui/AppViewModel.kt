@@ -3,8 +3,10 @@ package com.emusync.ui
 import com.emusync.application.library.GameOverrideChanges
 import com.emusync.application.library.LoadLibrary
 import com.emusync.application.sync.SaveTargetMappingException
+import com.emusync.composition.DesktopUpdates
+import com.emusync.composition.composeDesktopUpdates
+import com.emusync.composition.composeGameRunner
 import com.emusync.config.ConfigManager
-import com.emusync.domain.execution.BrowserLauncher
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
@@ -12,11 +14,10 @@ import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.update.UpdateInfo
 import com.emusync.drive.DriveClientFactory
 import com.emusync.drive.OAuthFlow
+import com.emusync.runner.DesktopBrowserLauncher
 import com.emusync.runner.GameRunner
-import com.emusync.runner.openOAuthBrowser
 import com.emusync.steam.DesktopSteamLibrary
 import com.emusync.steam.SteamShortcutManager
-import com.emusync.update.UpdateManager
 import io.ktor.client.HttpClient
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,13 +37,13 @@ class AppViewModel(
     private val configManager: ConfigManager,
     private val steamManager: SteamShortcutManager = SteamShortcutManager(),
     private val httpClient: HttpClient = DriveClientFactory.create(),
-    private val updateManager: UpdateManager = UpdateManager(),
-    private val gameRunner: GameRunner = GameRunner(),
+    private val updates: DesktopUpdates = composeDesktopUpdates(),
+    private val gameRunner: GameRunner = composeGameRunner(steamManager),
     oauthFlow: OAuthFlow =
         OAuthFlow(
             httpClient,
             credentialStore = configManager,
-            browser = BrowserLauncher(::openOAuthBrowser),
+            browser = DesktopBrowserLauncher(),
         ),
     loadGames: suspend (GameEntry) -> List<GameItem> = ::loadLibraryGames,
 ) : AutoCloseable {
@@ -55,7 +56,8 @@ class AppViewModel(
         val coverPath: String? = null,
     )
 
-    private val updates = UpdateController(_uiState, updateManager)
+    private val updateController =
+        UpdateController(_uiState, updates.source, updates.files, updates.installer)
     private val operations = LibraryOperationCoordinator(_uiState)
     private val connection: DriveConnectionController =
         DriveConnectionController(_uiState, configManager, oauthFlow, ::checkSyncForEntry)
@@ -266,7 +268,7 @@ class AppViewModel(
 
     // ── In-App Updates ───────────────────────────────────────────
 
-    suspend fun checkForUpdates(manual: Boolean = false) = updates.checkForUpdates(manual)
+    suspend fun checkForUpdates(manual: Boolean = false) = updateController.checkForUpdates(manual)
 
     fun dismissUpdateDialog() {
         _uiState.update { it.copy(showUpdateDialog = false) }
@@ -276,9 +278,9 @@ class AppViewModel(
         _uiState.update { it.copy(showUpdateDialog = true) }
     }
 
-    suspend fun downloadAndApplyUpdate(info: UpdateInfo) = updates.download(info)
+    suspend fun downloadAndApplyUpdate(info: UpdateInfo) = updateController.download(info)
 
-    fun restartApp(file: File): Boolean = updates.restart(file)
+    fun restartApp(file: File): Boolean = updateController.restart(file)
 
     fun clearStatus() {
         if (operations.isBusy) return
@@ -287,6 +289,6 @@ class AppViewModel(
 
     override fun close() {
         httpClient.close()
-        updateManager.close()
+        updates.close()
     }
 }

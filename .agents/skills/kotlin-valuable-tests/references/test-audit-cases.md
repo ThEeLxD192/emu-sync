@@ -25,6 +25,9 @@ respuestas a conflictos consume `SaveSynchronizer` y eventos neutrales directame
 Tras H5 se conservan esos 430 métodos y 431 casos en 67 suites y 76 archivos Kotlin
 (nueve fixtures): dos escenarios de reglas pasan a application; las integraciones
 con adaptadores siguen en la raíz hasta desktopApp.
+Tras H6 hay 431 métodos, 432 casos y 68 suites en 77 archivos Kotlin (nueve fixtures).
+Se traslada plataforma con sus pruebas, se divide la suite mixta de actualizaciones
+y se añade únicamente la regresión de preparación Steam inyectada.
 
 ## data/local/config/ConfigLocationTest.kt
 
@@ -437,9 +440,9 @@ Riesgo: media: borrar indicadores de disco o elegir otro título al cambiar de d
 | `title lookup preserves exact then stem then normalized priority and ignores blank values` | conservar: garantía observable específica de este escenario |
 | `normalized title lookup preserves first nonblank matching entry` | conservar: garantía observable específica de este escenario |
 
-## runner/ExternalProcessTrackerTest.kt
+## platform/desktop/runner/ExternalProcessTrackerTest.kt
 
-Fuente: [ExternalProcessTrackerTest.kt](../../../../src/test/kotlin/com/emusync/runner/ExternalProcessTrackerTest.kt). Punto de entrada: `ExternalProcessTracker.waitForProcess`.
+Fuente: [ExternalProcessTrackerTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/runner/ExternalProcessTrackerTest.kt). Punto de entrada: `ExternalProcessTracker.waitForProcess`.
 Nivel: unitaria con tiempo virtual. Dobles/límites: runTest y sondeos/tiempo/procesos falsos.
 Riesgo: alta: esperar un proceso ajeno, terminar antes del juego o ignorar cancelación.
 
@@ -452,14 +455,15 @@ Riesgo: alta: esperar un proceso ajeno, terminar antes del juego o ignorar cance
 | `tracking follows replacement processes and excludes a preexisting decoy` | conservar: garantía observable específica de este escenario |
 | `caller cancellation interrupts waiting for a running game` | conservar: garantía observable específica de este escenario |
 
-## runner/GameRunnerTest.kt
+## platform/desktop/runner/GameRunnerTest.kt
 
-Fuente: [GameRunnerTest.kt](../../../../src/test/kotlin/com/emusync/runner/GameRunnerTest.kt). Punto de entrada: `GameRunner.launch / openEmulator / isProcessRunning / isSteamShaderCompiling`.
+Fuente: [GameRunnerTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/runner/GameRunnerTest.kt). Punto de entrada: `GameRunner.launch / openEmulator / isProcessRunning / isSteamShaderCompiling`.
 Nivel: integración de procesos. Dobles/límites: procesos reales aislados, scripts y archivos de argumentos.
 Riesgo: crítica: lanzar con argumentos alterados o sincronizar antes de que termine el juego correcto.
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
+| `Steam launch uses the injected preparation and stops on its failure` | añadir en H6: usa GameRunner.launch con preparación inyectada; verifica entrada y ruta exactas, conserva ROM y propaga el fallo antes del handoff a Steam |
 | `openEmulator starts without rom arguments` | conservar: garantía observable específica de este escenario |
 | `should fail when EmulatorSystem is launched without romFile` | conservar: garantía observable específica de este escenario |
 | `should successfully launch and wait for a direct command` | conservar: garantía observable específica de este escenario |
@@ -474,9 +478,9 @@ Riesgo: crítica: lanzar con argumentos alterados o sincronizar antes de que ter
 | `isSteamShaderCompiling should detect fossilize_replay active state` | conservar: garantía observable específica de este escenario |
 | `direct launch preserves quoted fullscreen arguments and expands inline ROM placeholder` | conservar: garantía observable específica de este escenario |
 
-## scanner/RomScannerTest.kt
+## platform/desktop/scanner/RomScannerTest.kt
 
-Fuente: [RomScannerTest.kt](../../../../src/test/kotlin/com/emusync/scanner/RomScannerTest.kt). Punto de entrada: `scanRoms`.
+Fuente: [RomScannerTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/scanner/RomScannerTest.kt). Punto de entrada: `scanRoms`.
 Nivel: integración local. Dobles/límites: árboles de archivos, firmas y symlinks temporales.
 Riesgo: alta: recursión infinita, juegos duplicados u ocultar ROMs por una firma excluida.
 
@@ -492,9 +496,9 @@ Riesgo: alta: recursión infinita, juegos duplicados u ocultar ROMs por una firm
 | `a regular file cannot be scanned as a directory` | conservar: garantía observable específica de este escenario |
 | `extensions that normalize to empty do not match files without an extension` | conservar: garantía observable específica de este escenario |
 
-## steam/BinaryVdfFieldTest.kt
+## platform/desktop/steam/BinaryVdfFieldTest.kt
 
-Fuente: [BinaryVdfFieldTest.kt](../../../../src/test/kotlin/com/emusync/steam/BinaryVdfFieldTest.kt). Punto de entrada: `BinaryVdf.read`.
+Fuente: [BinaryVdfFieldTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/steam/BinaryVdfFieldTest.kt). Punto de entrada: `BinaryVdf.read`.
 Nivel: compatibilidad de formato. Dobles/límites: bytes VDF escritos por fixture independiente del escritor de producción.
 Riesgo: alta: perder aliases legacy o dar prioridad incorrecta a campos canónicos vacíos.
 
@@ -502,9 +506,9 @@ Riesgo: alta: perder aliases legacy o dar prioridad incorrecta a campos canónic
 | --- | --- |
 | `legacy aliases remain fallbacks and empty canonical fields retain precedence` | conservar: garantía observable específica de este escenario |
 
-## steam/BinaryVdfTest.kt
+## platform/desktop/steam/BinaryVdfTest.kt
 
-Fuente: [BinaryVdfTest.kt](../../../../src/test/kotlin/com/emusync/steam/BinaryVdfTest.kt). Punto de entrada: `BinaryVdf.write/read`.
+Fuente: [BinaryVdfTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/steam/BinaryVdfTest.kt). Punto de entrada: `BinaryVdf.write/read`.
 Nivel: integración local de formato. Dobles/límites: shortcuts conocidos y archivos temporales.
 Riesgo: alta: perder campos/entradas al reescribir shortcuts.vdf.
 
@@ -514,9 +518,9 @@ Riesgo: alta: perder campos/entradas al reescribir shortcuts.vdf.
 | `should append new shortcut and preserve existing shortcuts` | conservar: garantía observable específica de este escenario |
 | `should handle empty shortcuts list` | conservar: garantía observable específica de este escenario |
 
-## steam/LauncherIsolationTest.kt
+## platform/desktop/steam/LauncherIsolationTest.kt
 
-Fuente: [LauncherIsolationTest.kt](../../../../src/test/kotlin/com/emusync/steam/LauncherIsolationTest.kt). Punto de entrada: `SteamShortcutManager.launcherKey / migrateLegacyLaunchers / createLinuxWrapperScript`.
+Fuente: [LauncherIsolationTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/steam/LauncherIsolationTest.kt). Punto de entrada: `SteamShortcutManager.launcherKey / migrateLegacyLaunchers / createLinuxWrapperScript`.
 Nivel: integración de lanzadores. Dobles/límites: scripts/procesos reales, VDF y señales en TempDir.
 Riesgo: crítica: colisión de nombres, lanzar otro juego o romper accesos ya cargados por Steam.
 
@@ -527,9 +531,9 @@ Riesgo: crítica: colisión de nombres, lanzar otro juego o romper accesos ya ca
 | `ambiguous old alias refuses to launch but new wrappers keep separate ROM signals` | conservar: garantía observable específica de este escenario |
 | `renaming a hashed launcher keeps the shortcut already loaded by Steam working` | conservar: garantía observable específica de este escenario |
 
-## steam/SteamSaveSafetyTest.kt
+## platform/desktop/steam/SteamSaveSafetyTest.kt
 
-Fuente: [SteamSaveSafetyTest.kt](../../../../src/test/kotlin/com/emusync/steam/SteamSaveSafetyTest.kt). Punto de entrada: `wrapper Linux generado / registerEntry / BinaryVdf.read/write`.
+Fuente: [SteamSaveSafetyTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/steam/SteamSaveSafetyTest.kt). Punto de entrada: `wrapper Linux generado / registerEntry / BinaryVdf.read/write`.
 Nivel: integración de plataforma. Dobles/límites: bash real, argumentos literales, disco y fallo de escritura inyectado.
 Riesgo: crítica: ejecutar metacaracteres o destruir el VDF ante truncado/fallo.
 
@@ -541,9 +545,9 @@ Riesgo: crítica: ejecutar metacaracteres o destruir el VDF ante truncado/fallo.
 | `truncated VDF values are rejected instead of being rewritten as valid entries` | conservar: garantía observable específica de este escenario |
 | `NUL in VDF fields is rejected before touching the original file` | conservar: garantía observable específica de este escenario |
 
-## steam/SteamShortcutManagerTest.kt
+## platform/desktop/steam/SteamShortcutManagerTest.kt
 
-Fuente: [SteamShortcutManagerTest.kt](../../../../src/test/kotlin/com/emusync/steam/SteamShortcutManagerTest.kt). Punto de entrada: `SteamShortcutManager.registerEntry / unregisterEntry / prepareLaunch / búsquedas de Steam`.
+Fuente: [SteamShortcutManagerTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/steam/SteamShortcutManagerTest.kt). Punto de entrada: `SteamShortcutManager.registerEntry / unregisterEntry / prepareLaunch / búsquedas de Steam`.
 Nivel: integración local y reglas. Dobles/límites: VDF/scripts reales, consulta de registro y plataforma controladas.
 Riesgo: alta: duplicar shortcuts, perder appId/opciones, señalizar otra ROM o elegir otra cuenta.
 
@@ -560,9 +564,9 @@ Riesgo: alta: duplicar shortcuts, perder appId/opciones, señalizar otra ROM o e
 | `prepareLaunch writes ROM path to signal file correctly` | conservar: garantía observable específica de este escenario |
 | `findShortcutsFile should pick most recently active user account skipping 0` | conservar: garantía observable específica de este escenario |
 
-## steam/WindowsLauncherTest.kt
+## platform/desktop/steam/WindowsLauncherTest.kt
 
-Fuente: [WindowsLauncherTest.kt](../../../../src/test/kotlin/com/emusync/steam/WindowsLauncherTest.kt). Punto de entrada: `wrapper/configuración generados y lanzador PowerShell`.
+Fuente: [WindowsLauncherTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/steam/WindowsLauncherTest.kt). Punto de entrada: `wrapper/configuración generados y lanzador PowerShell`.
 Nivel: artefacto e integración de proceso. Dobles/límites: JSON/batch reales; PowerShell y grabador de argumentos cuando están disponibles.
 Riesgo: crítica: interpolar metacaracteres, perder argumentos vacíos o alterar el código de salida.
 
@@ -572,9 +576,9 @@ Riesgo: crítica: interpolar metacaracteres, perder argumentos vacíos o alterar
 | `PowerShell launcher preserves empty quotes slashes metacharacters and exit code` | conservar: garantía observable específica de este escenario |
 | `missing ROM and batch emulator fail without launching` | conservar: garantía observable específica de este escenario |
 
-## steam/WindowsSteamPathsTest.kt
+## platform/desktop/steam/WindowsSteamPathsTest.kt
 
-Fuente: [WindowsSteamPathsTest.kt](../../../../src/test/kotlin/com/emusync/steam/WindowsSteamPathsTest.kt). Punto de entrada: `WindowsSteamPaths.find`.
+Fuente: [WindowsSteamPathsTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/steam/WindowsSteamPathsTest.kt). Punto de entrada: `WindowsSteamPaths.find`.
 Nivel: unitaria con filesystem. Dobles/límites: consultas de registro falsas y directorios userdata reales.
 Riesgo: alta: elegir una instalación vacía o ignorar registro nativo tras el redirigido.
 
@@ -587,7 +591,7 @@ Riesgo: alta: elegir una instalación vacía o ignorar registro nativo tras el r
 ## ui/AppViewModelTest.kt
 
 Fuente: [AppViewModelTest.kt](../../../../src/test/kotlin/com/emusync/ui/AppViewModelTest.kt). Punto de entrada: `AppViewModel y uiState`.
-Nivel: integración de presentación. Dobles/límites: configuración/scanner reales; MockEngine y UpdateManager controlado.
+Nivel: integración de presentación. Dobles/límites: configuración/scanner reales; MockEngine y contratos de actualizaciones controlados.
 Riesgo: alta: UI y configuración divergentes, perder overrides o no informar fallo de reinicio.
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
@@ -656,9 +660,9 @@ Riesgo: crítica: reconectar tras unlink, perder entradas o mostrar credenciales
 | `background invalid grant updates the UI connection status` | conservar: garantía observable específica de este escenario |
 | `cancelled login propagates cancellation` | conservar: garantía observable específica de este escenario |
 
-## ui/FilePickerTest.kt
+## platform/desktop/picker/FilePickerTest.kt
 
-Fuente: [FilePickerTest.kt](../../../../src/test/kotlin/com/emusync/ui/FilePickerTest.kt). Punto de entrada: `FilePicker.pickPath / pickFile / pickDirectory`.
+Fuente: [FilePickerTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/desktop/picker/FilePickerTest.kt). Punto de entrada: `FilePicker.pickPath / pickFile / pickDirectory`.
 Nivel: unitaria de frontera. Dobles/límites: proveedores de plataforma y selectores falsos, restaurados en AfterEach.
 Riesgo: media: reabrir otro diálogo tras cancelar o perder directorio/archivo inicial.
 
@@ -738,9 +742,9 @@ Riesgo: crítica: descargar dos veces, aceptar bytes incompletos o reiniciar dur
 | `cancelled update check propagates cancellation and restores its previous state` | conservar: garantía observable específica de este escenario |
 | `restart does not interrupt an active game session` | conservar: garantía observable específica de este escenario |
 
-## ui/components/LinuxFileChooserTest.kt
+## platform/desktop/picker/LinuxFileChooserTest.kt
 
-Fuente: [LinuxFileChooserTest.kt](../../../../src/test/kotlin/com/emusync/ui/components/LinuxFileChooserTest.kt). Punto de entrada: `LinuxFileChooser.pickFile / pickDirectory`.
+Fuente: [LinuxFileChooserTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/desktop/picker/LinuxFileChooserTest.kt). Punto de entrada: `LinuxFileChooser.pickFile / pickDirectory`.
 Nivel: unitaria de protocolo de proceso. Dobles/límites: ejecutor falso que registra argv/resultados, sin abrir diálogos.
 Riesgo: media: dividir rutas con espacios o ignorar cancelación y abrir otro selector.
 
@@ -830,9 +834,9 @@ Riesgo: alta: desacoplar ruta/tipo/prefijo al borrar filas o aceptar traversal.
 | `blank rows are excluded and target values are trimmed` | conservar: garantía observable específica de este escenario |
 | `cloud path validation accepts relative names and rejects traversal or absolute paths` | conservar: garantía observable específica de este escenario |
 
-## update/AppImageInstallerTest.kt
+## platform/desktop/update/AppImageInstallerTest.kt
 
-Fuente: [AppImageInstallerTest.kt](../../../../src/test/kotlin/com/emusync/update/AppImageInstallerTest.kt). Punto de entrada: `AppImageInstaller.replace`.
+Fuente: [AppImageInstallerTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/update/AppImageInstallerTest.kt). Punto de entrada: `AppImageInstaller.replace`.
 Nivel: integración local con fallos. Dobles/límites: archivos reales e inyección de copia/promoción/rollback/lanzamiento.
 Riesgo: crítica: perder el ejecutable anterior o su backup tras fallo/cancelación.
 
@@ -846,9 +850,9 @@ Riesgo: crítica: perder el ejecutable anterior o su backup tras fallo/cancelaci
 | `failed rollback keeps backup available for recovery` | conservar: garantía observable específica de este escenario |
 | `rejects replacing a file with itself` | conservar: garantía observable específica de este escenario |
 
-## update/UpdateDownloadSafetyTest.kt
+## data/updates/UpdateDownloadSafetyTest.kt
 
-Fuente: [UpdateDownloadSafetyTest.kt](../../../../src/test/kotlin/com/emusync/update/UpdateDownloadSafetyTest.kt). Punto de entrada: `UpdateManager.downloadUpdate`.
+Fuente: [UpdateDownloadSafetyTest.kt](../../../../data/updates/src/test/kotlin/com/emusync/update/UpdateDownloadSafetyTest.kt). Punto de entrada: `GitHubUpdateSource.download`.
 Nivel: protocolo con filesystem. Dobles/límites: MockEngine/ByteChannel y archivo previo conocido.
 Riesgo: crítica: reemplazar una descarga válida con bytes truncados o dejar temporales al cancelar.
 
@@ -861,11 +865,11 @@ Riesgo: crítica: reemplazar una descarga válida con bytes truncados o dejar te
 | `empty and rejected downloads never replace a previous file` | conservar: garantía observable específica de este escenario |
 | `cancelled download propagates cancellation and preserves destination` | conservar: garantía observable específica de este escenario |
 
-## update/UpdateManagerTest.kt
+## data/updates/GitHubUpdateSourceTest.kt
 
-Fuente: [UpdateManagerTest.kt](../../../../src/test/kotlin/com/emusync/update/UpdateManagerTest.kt). Punto de entrada: `UpdateManager.isNewerVersion / checkForUpdates / findBestAssetForPlatform / instalación`.
-Nivel: reglas, protocolo e integración local. Dobles/límites: JSON de releases con MockEngine, plataforma/lanzadores controlados y disco real.
-Riesgo: alta: actualizar a una versión/artefacto equivocado o informar éxito de instalación fallida.
+Fuente: [GitHubUpdateSourceTest.kt](../../../../data/updates/src/test/kotlin/com/emusync/update/GitHubUpdateSourceTest.kt). Punto de entrada: `GitHubUpdateSource.check / download / reglas de versiones y artefactos`.
+Nivel: reglas y protocolo con disco. Dobles/límites: JSON literal con MockEngine, plataforma inyectada y archivos temporales.
+Riesgo: alta: seleccionar otra versión/artefacto o alterar la descarga.
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
@@ -875,20 +879,29 @@ Riesgo: alta: actualizar a una versión/artefacto equivocado o informar éxito d
 | `checkForUpdates detects newer release and MSI asset on Windows` | conservar: garantía observable específica de este escenario |
 | `findBestAssetForPlatform prioritizes MSI then EXE then ZIP on Windows` | conservar: garantía observable específica de este escenario |
 | `findBestAssetForPlatform prioritizes AppImage then tar gz then deb on Linux` | conservar: garantía observable específica de este escenario |
+| `downloadUpdate streams bytes and reports progress` | conservar: garantía observable específica de este escenario |
+
+## platform/desktop/update/DesktopUpdateInstallerTest.kt
+
+Fuente: [DesktopUpdateInstallerTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/update/DesktopUpdateInstallerTest.kt). Punto de entrada: `DesktopUpdateInstaller.restart / instalación por plataforma`.
+Nivel: integración local. Dobles/límites: disco real y lanzadores/plataforma controlados.
+Riesgo: crítica: sustituir el ejecutable incorrecto o informar éxito tras una instalación fallida.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
 | `applyWindowsUpdateAndRestart launches msiexec for MSI files` | conservar: garantía observable específica de este escenario |
 | `applyWindowsUpdateAndRestart launches EXE installer directly` | conservar: garantía observable específica de este escenario |
 | `applyWindowsUpdateAndRestart returns false for non-installer files` | conservar: garantía observable específica de este escenario |
-| `downloadUpdate streams bytes and reports progress` | conservar: garantía observable específica de este escenario |
 | `applyLinuxUpdateAndRestart replaces AppImage file and calls launcher` | conservar: garantía observable específica de este escenario |
 | `applyLinuxUpdateAndRestart returns false when APPIMAGE path is missing` | conservar: garantía observable específica de este escenario |
 | `applyLinuxUpdateAndRestart returns false when downloaded file does not exist` | conservar: garantía observable específica de este escenario |
 | `applyUpdateAndRestart delegates to Linux update on Linux platform` | conservar: garantía observable específica de este escenario |
 | `applyLinuxUpdateAndRestart in Steam Game Mode calls launcher with updated path` | conservar: garantía observable específica de este escenario |
-| `isSteamGameMode returns false by default in non-gaming test environment` | reescribir: declarar precondición ambiental con assumeFalse y cerrar el manager; una sesión gamescope real produce omisión, no falso fallo |
+| `isSteamGameMode returns false by default in non-gaming test environment` | reescribir en H1: declarar precondición ambiental con assumeFalse; una sesión gamescope real produce omisión, no falso fallo. En H6 el instalador ya no posee HTTP ni requiere cierre |
 
-## update/UpdateRestartTest.kt
+## platform/desktop/update/UpdateRestartTest.kt
 
-Fuente: [UpdateRestartTest.kt](../../../../src/test/kotlin/com/emusync/update/UpdateRestartTest.kt). Punto de entrada: `UpdateManager.applyUpdateAndRestart`.
+Fuente: [UpdateRestartTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/update/UpdateRestartTest.kt). Punto de entrada: `DesktopUpdateInstaller.restart`.
 Nivel: integración local/de procesos. Dobles/límites: ejecutable Linux real en un caso; lanzadores y salida de aplicación falsos en los demás.
 Riesgo: crítica: salir antes de instalar/lanzar o no restaurar el ejecutable si falla el reinicio.
 
@@ -900,9 +913,9 @@ Riesgo: crítica: salir antes de instalar/lanzar o no restaurar el ejecutable si
 | `failed Windows installer launch keeps application open` | conservar: garantía observable específica de este escenario |
 | `successful Windows installer launch exits afterwards` | conservar: garantía observable específica de este escenario |
 
-## util/AppImageEnvironmentTest.kt
+## platform/desktop/util/AppImageEnvironmentTest.kt
 
-Fuente: [AppImageEnvironmentTest.kt](../../../../src/test/kotlin/com/emusync/util/AppImageEnvironmentTest.kt). Punto de entrada: `AppImageEnvironment.clean`.
+Fuente: [AppImageEnvironmentTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/util/AppImageEnvironmentTest.kt). Punto de entrada: `AppImageEnvironment.clean`.
 Nivel: unitaria. Dobles/límites: mapas de entorno literales.
 Riesgo: alta: heredar bibliotecas del AppImage e impedir el arranque del juego.
 
@@ -911,9 +924,9 @@ Riesgo: alta: heredar bibliotecas del AppImage e impedir el arranque del juego.
 | `removes appimage paths and variables while preserving other library paths` | conservar: garantía observable específica de este escenario |
 | `removes library path when it contains only appimage runtime paths` | conservar: garantía observable específica de este escenario |
 
-## util/ArgumentsCodecTest.kt
+## domain/execution/ArgumentsCodecTest.kt
 
-Fuente: [ArgumentsCodecTest.kt](../../../../src/test/kotlin/com/emusync/util/ArgumentsCodecTest.kt). Punto de entrada: `ArgumentsCodec.parse / format`.
+Fuente: [ArgumentsCodecTest.kt](../../../../domain/src/test/kotlin/com/emusync/domain/execution/ArgumentsCodecTest.kt). Punto de entrada: `ArgumentsCodec.parse / format`.
 Nivel: unitaria. Dobles/límites: argv/textos literales y una propiedad de ida/vuelta complementaria.
 Riesgo: alta: perder argumentos vacíos, separadores Windows, escapes o aceptar comillas incompletas.
 

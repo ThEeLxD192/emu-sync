@@ -33,9 +33,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.emusync.domain.execution.PickerType
 import com.emusync.domain.library.GameEntry
 import com.emusync.steam.SteamShortcutManager
-import com.emusync.ui.components.PickerType
 import com.emusync.ui.theme.EmuSyncColors
 
 /** Dialog to add or edit an emulator system or native game entry. */

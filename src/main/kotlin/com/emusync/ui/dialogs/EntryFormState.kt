@@ -3,6 +3,7 @@ package com.emusync.ui.dialogs
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.emusync.domain.execution.ArgumentsCodec
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
@@ -10,7 +11,6 @@ import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.scopeNewSaveTargets
 import com.emusync.domain.sync.remotePathSegments
 import com.emusync.local.saves.effectiveSaveTargets
-import com.emusync.util.ArgumentsCodec
 
 internal enum class EntryType(val label: String) {
     EMULATOR("Emulator"),

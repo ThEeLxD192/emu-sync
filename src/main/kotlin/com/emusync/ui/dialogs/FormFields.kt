@@ -18,8 +18,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.emusync.domain.execution.PickerType
 import com.emusync.domain.library.SaveTargetType
-import com.emusync.ui.components.PickerType
 import com.emusync.ui.theme.EmuSyncColors
 import kotlinx.coroutines.launch
 

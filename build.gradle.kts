@@ -52,6 +52,8 @@ dependencies {
     implementation(project(":application"))
     implementation(project(":data:local"))
     implementation(project(":data:drive"))
+    implementation(project(":data:updates"))
+    implementation(project(":platform:desktop"))
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)

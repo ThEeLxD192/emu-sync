@@ -117,7 +117,7 @@ porque detectan fallos distintos.
 | Migración recuperable y merge bloqueado | CloudFolderMigrationTest: `failed move restores previous moves and reports failure`, `failed rollback retains files on both sides and identifies recovery location`, `cancellation restores acknowledged moves and propagates`; CloudFolderEditTest: `blocked entry merge keeps old configuration and both remote copies`. |
 | Exclusión, edición segura, respuestas obsoletas y reintentos | LibraryConcurrencyTest: `latest selection wins when scans complete in reverse order`, `duplicate launches edits and syncs cannot replace a pending save setup`, `cancelled setup releases the operation and old dialog cannot complete a new one`, `old status check cannot overwrite a newer status response`; PostSyncFailureTest: `partial post game upload reports successes and retries only failed saves` y reintento parametrizado con ambas copias. |
 | Argumentos, procesos, Steam y VDF | GameRunnerTest: `existing process with the same name does not delay newly launched game`; ExternalProcessTrackerTest: `caller cancellation interrupts waiting for a running game`; SteamSaveSafetyTest: `Linux wrapper preserves literal arguments quoted flags and embedded ROM paths`, `interrupted VDF replacement leaves the complete previous file`; LauncherIsolationTest: `ambiguous old alias refuses to launch but new wrappers keep separate ROM signals`; WindowsLauncherTest: escenarios PowerShell conservados, omitidos en Linux. |
-| Actualizaciones, temporales y orden de salida | UpdateDownloadSafetyTest: `truncated update retains an existing download and removes staging files`; AppImageInstallerTest: `failed rollback keeps backup available for recovery`; UpdateRestartTest: `launch failure restores current AppImage and keeps application open`, `successful Windows installer launch exits afterwards`; UpdateConcurrencyTest: `late update check cannot replace a completed download`, `duplicate download is ignored and a cancelled download can be retried`. |
+| Actualizaciones, temporales y orden de salida | UpdateDownloadSafetyTest (data:updates): `truncated update retains an existing download and removes staging files`; AppImageInstallerTest (platform:desktop): `failed rollback keeps backup available for recovery`; UpdateRestartTest: `launch failure restores current AppImage and keeps application open`, `successful Windows installer launch exits afterwards`; UpdateConcurrencyTest: `late update check cannot replace a completed download`, `duplicate download is ignored and a cancelled download can be retried`. |
 | Formularios y reglas comunes | SaveTargetFormStateTest: `removing a row keeps the remaining path type and cloud name together`, `cloud path validation accepts relative names and rejects traversal or absolute paths`; EntryFormStateTest: `editing an emulator preserves launch identifiers and per ROM overrides`, `unsafe cloud mappings are rejected before required field validation`; GameEditFormStateTest: `game drafts do not import emulator wide fallback saves`, `unsafe restore names cannot enable saving outside the destination`. |
 | Índice aislado y limpieza | Los ocho escenarios de hooks de la tabla anterior; no usan stash/reset ni alteran el índice del usuario. |
 
@@ -329,3 +329,51 @@ classpath, sin fixtures ni clases de sync duplicadas en raíz.
 Comandos, propietarios y limitaciones completos en [AGENTS.md](../../../../AGENTS.md).
 No se ejecutaron Windows nativo, UI gráfica, cuentas reales, Docker o CI remoto,
 ni se generó AppImage independiente. H6–H8 siguen pendientes.
+
+
+## Extracción H6 — plataforma y origen de actualizaciones
+
+Fecha: 2026-10-31; base H5 `7f5c549`. Implementación verificada en Linux; H6 sigue
+abierto por falta de validación nativa Windows. Commit autorizado; su hash se
+registrará en la próxima actualización del seguimiento.
+
+Se conservan los 431 casos anteriores: procesos, Steam/VDF/lanzadores, scanner,
+selectores e instalación pasan a platform:desktop; protocolo/descarga a data:updates;
+el codec de argumentos puro a domain. La suite mixta UpdateManagerTest se divide
+según esos propietarios. Las integraciones de presentación permanecen en la raíz
+y consumen los contratos con adaptadores HTTP/disco reales. Cada enlace del catálogo
+identifica su fuente actual, sin perder el escenario parametrizado de reintento.
+
+Se añade solo `GameRunnerTest::Steam launch uses the injected preparation and stops
+on its failure`. Contrato: usar la preparación Steam inyectada y detenerse ante fallo
+antes del handoff; riesgo alto de preparar otras señales o lanzar sin preparación.
+Entra por GameRunner.launch, con un colaborador que registra entrada/ruta y falla,
+y una ROM real aislada que debe conservarse. Comprueba valores del fallo propagado;
+la reconstrucción de trazas de corrutinas puede crear otra instancia de excepción.
+
+Balance H6: **431 métodos, 432 casos, 68 suites y nueve fixtures en 77 archivos Kotlin**.
+No se retiran escenarios. GitHubUpdateSource recibe un cliente prestado; las pruebas
+que lo crean lo cierran también ante aserciones fallidas. Los helpers siguen internos,
+sin publicar DTO ni añadir accesos especiales para pruebas.
+
+La comprobación focalizada final de plataforma pasó en 18 s, 95 casos: 93 aprobados
+y dos omitidos PowerShell. El cierre con spotlessApply/check/dependencias/paquete
+pasó en 1 min (124 tareas: 26 ejecutadas y 98 UP-TO-DATE). Ejecutó raíz (193,
+2,272 s), plataforma (95, 8,434 s) y updates (13, 0,397 s). Dominio (58, 0,221 s),
+application (dos, 0,076 s), local (31, 0,310 s) y Drive (40, 2,599 s) reutilizaron
+resultados correctos de esta integración. Evidencia combinada: **430 aprobados,
+cero fallos/errores y dos omitidos**; no son 432 ejecuciones nuevas en el cierre.
+
+Quince SARIF limpios. El cierre ejecutó main/test de raíz y plataforma y test de
+updates; el resto reutilizó análisis limpios. Hooks: nueve PASS; convenciones:
+cuatro PASS, incluidos fixtures, caché y bloqueos deliberados. Sin nuevas supresiones
+ni reglas relajadas. Los grafos de los nuevos adaptadores solo dependen de domain
+y bibliotecas; plataforma no incorpora Ktor ni Compose y updates no conoce UI,
+Steam o instalación. Staging con ambos JAR y classpath correctos, sin UpdateManager
+ni fixtures. Catálogo, enlaces y escenarios contrastados con fuentes/reportes.
+
+No se ejecutaron Windows nativo, MSI/EXE reales, CI remoto, UI gráfica, Docker,
+cuentas reales ni appimagetool. Se mantienen las dos omisiones por PowerShell.
+Las simulaciones de Windows no cierran su validación ni el hito. Comandos, tiempos
+y límites completos en [AGENTS.md](../../../../AGENTS.md). No se repite la suite
+por estos cambios documentales.

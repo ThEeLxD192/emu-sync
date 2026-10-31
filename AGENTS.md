@@ -4,9 +4,10 @@
 
 EmuSync es una aplicación Kotlin/Compose Desktop para Linux y Windows. La migración
 acordada usa módulos Gradle JVM y conserva el comportamiento y los formatos actuales.
-La primera entrega fue esta guía y la skill local de pruebas. H0–H4 están
-completados. H5 está verificado técnicamente y espera confirmación de commit; H6–H8 siguen
-pendientes. Documentar un hito no significa ejecutarlo.
+La primera entrega fue esta guía y la skill local de pruebas. H0–H5 están
+completados. La implementación de H6 está verificada en Linux; quedan pendientes
+la validación nativa de Windows. El commit de H6 está autorizado; H7–H8 siguen pendientes.
+Documentar un hito no significa ejecutarlo.
 
 Línea base inspeccionada el 2026-10-30, sobre `484012f`:
 
@@ -30,17 +31,12 @@ src/main/kotlin/
   com/emusync/
     AppInfo.kt               # Información y versión de la aplicación
     composition/             # Construcción temporal de servicios; traslado a desktopApp en H7
-    runner/                  # Procesos y navegador; extracción H6 pendiente
-    scanner/                 # Descubrimiento de ROMs
-    steam/                   # VDF, accesos directos y lanzadores
-    update/                  # Consulta, descarga e instalación de actualizaciones
-    util/                    # Argumentos y entorno AppImage
     ui/                      # Estado y controladores
       components/            # Componentes de interfaz
       dialogs/               # Diálogos y estado de formularios
       theme/                 # Colores y tema
 src/main/resources/          # Iconos y metadatos AppStream
-src/test/kotlin/com/emusync/  # Pruebas y fixtures de esas funcionalidades
+src/test/kotlin/com/emusync/  # Presentación e integraciones entre adaptadores
 config/                      # Configuración de Detekt
 gradle/
   wrapper/                   # Gradle Wrapper
@@ -57,8 +53,10 @@ data/local/                  # Configuración/DTO y saves: historial, snapshots,
 data/drive/                  # OAuth, búsquedas, carpetas y transferencias de Google Drive
   src/{main,test}/kotlin/     # com/emusync/drive
   src/testFixtures/kotlin/    # Árbol Drive compartido por pruebas de protocolo/integración
-data/updates/                # Módulo vacío preparado para H6
-platform/desktop/            # Módulo vacío preparado para H6
+data/updates/                # Consulta GitHub y descarga de actualizaciones (H6)
+  src/{main,test}/kotlin/     # com/emusync/update; DTO internos y cliente HTTP prestado
+platform/desktop/            # Adaptadores JVM de escritorio (H6)
+  src/{main,test}/kotlin/     # runner, steam, scanner, update, desktop/picker y entorno
 presentation/, desktopApp/   # Módulos vacíos preparados para H7
 scripts/                     # Distribución, versión, hooks y sus pruebas
 .githooks/                   # Hook de precommit versionado
@@ -598,20 +596,114 @@ Evidencia (2026-10-31, Linux; base H4 `27d8eb1`):
   tipos reutilizables, staging y `git diff --check`: revisados. No se repite la suite
   tras editar únicamente seguimiento.
 
-**H5 completado técnicamente. Commit H5: pendiente de confirmación explícita.**
+**H5 completado. Commit H5: `7f5c549` (`refactor: extract application use cases and workflow coordination`).**
 
 ### H6 — Plataforma y actualizaciones
 
-- [ ] Extraer procesos, Steam, navegador y servicios nativos a `platform:desktop`.
-- [ ] Separar consulta/descarga (`data:updates`) de instalación y reinicio (plataforma).
-- [ ] Conservar pruebas reales de procesos, VDF, argumentos, transporte e instalación.
+- [x] Extraer procesos, Steam, navegador y servicios nativos a `platform:desktop`.
+- [x] Separar consulta/descarga (`data:updates`) de instalación y reinicio (plataforma).
+- [x] Conservar pruebas reales de procesos, VDF, argumentos, transporte e instalación.
 - [ ] Verificar Linux y Windows en sus entornos; registrar omisiones justificadas.
+  Linux verificado; Windows nativo pendiente. Las simulaciones no cierran esta subtarea.
 - [ ] **H6 completado.**
 
 Aceptación: contratos implementados sin dependencia visual, preservando aislamiento
 de lanzadores, integridad de descargas, recuperación y códigos de salida.
 
-Evidencia: pendiente. Commit: pendiente.
+Evidencia (2026-10-31, Linux; base H5 `7f5c549`):
+
+- `platform:desktop` contiene procesos/seguimiento, Steam/VDF/lanzadores Windows y
+  Linux, navegador OAuth, descubrimiento de ROMs, selectores AWT/Swing y kdialog/zenity,
+  entorno AppImage, staging e instalación/reinicio. Solo depende de `domain`, Kotlin,
+  corrutinas y serialización para el JSON de argumentos Windows; no incorpora Compose,
+  Ktor, application ni adaptadores de datos. Se conservan rutas, argumentos, señales,
+  códigos de salida, registros y recuperación. Los helpers de plataforma son internos
+  o privados; los modelos reutilizables de procesos, Steam y configuración Windows
+  tienen archivos propios.
+- `data:updates` implementa `UpdateSource` con `GitHubUpdateSource`: conserva endpoint,
+  cabeceras, selección de artefactos, comparación de versiones, timeouts, progreso,
+  publicación atómica de descargas completas y cancelación. Los DTO GitHub son internos
+  y están separados. Recibe cliente HTTP, repositorio, versión y plataforma por
+  constructor; no conoce AppInfo, instalación, Steam ni presentación. Su grafo contiene
+  únicamente `domain` y las bibliotecas Kotlin/corrutinas/serialización/Ktor existentes.
+  Ninguno de los dos adaptadores depende del otro.
+- `DesktopUpdateInstaller` implementa `UpdateInstaller`; `UpdateStagingFiles` implementa
+  `UpdateFiles` y recibe proveedores de plataforma/ruta. La composición provisional
+  `DesktopUpdates` conecta estas capacidades y posee el cliente HTTP, que el origen
+  solo toma prestado. AppViewModel cierra ese propietario; UpdateController recibe
+  únicamente contratos de dominio. Se elimina UpdateManager, sin fachada temporal.
+  La composición sigue en la raíz hasta desktopApp en H7.
+- GameRunner recibe `SteamLaunchPreparation`, implementada por DesktopSteamLibrary;
+  deja de construir su propio SteamShortcutManager. La composición proporciona el
+  colaborador. DesktopBrowserLauncher implementa BrowserLauncher. PathPicker/PickerType
+  expresan selección neutral, y el codec puro de argumentos compartido por formularios
+  y lanzadores vive en `domain`, en la funcionalidad execution. No se trasladaron recursos, versión,
+  identificadores ni distribución a desktopApp, ni se adelantó la reorganización de UI.
+- Se trasladan las suites junto a sus propietarios; UpdateManagerTest se divide en
+  GitHubUpdateSourceTest y DesktopUpdateInstallerTest. Las integraciones de UI siguen
+  usando HTTP/disco/adaptadores reales a través de contratos. Se conserva cada escenario
+  anterior y se añade solo `Steam launch uses the injected preparation and stops on its
+  failure`: observa entrada/ruta exactas, fallo propagado y ROM conservada. Resultado:
+  **431 métodos, 432 casos, 68 suites y 77 archivos Kotlin de pruebas/fixtures** (nueve
+  fixtures). [Matriz y catálogo actualizados](.agents/skills/kotlin-valuable-tests/references/test-audit.md).
+  Los clientes de las pruebas GitHub trasladadas se cierran también ante fallos.
+- Comprobación focalizada final: `./gradlew :platform:desktop:spotlessApply
+  :platform:desktop:test :platform:desktop:qualityCheck --no-daemon` pasó en 18 s;
+  23 tareas, seis ejecutadas y 17 UP-TO-DATE. Ejecutó 95 casos de plataforma: 93
+  aprobados, cero fallos/errores y dos omitidos por PowerShell.
+  La integración previa compiló raíz y verificó datos/actualizaciones/calidad; detectó
+  dependencias de serialización/imports tras el traslado y una aserción de identidad
+  de excepción incompatible con la reconstrucción de trazas de corrutinas. Se
+  corrigieron antes del cierre, sin alterar contratos ni relajar reglas/supresiones.
+- Cierre:
+
+  ```bash
+  ./gradlew spotlessApply check :data:updates:dependencies \
+    :platform:desktop:dependencies --configuration runtimeClasspath \
+    packageReleaseAppImage --no-daemon
+  ```
+
+  `BUILD SUCCESSFUL` en 1 min; 124 tareas, 26 ejecutadas y 98 UP-TO-DATE.
+  El reporte de dependencias de updates incluye todas las configuraciones y su
+  runtimeClasspath; el de plataforma está filtrado a runtimeClasspath.
+
+  | Suite | Casos | Resultado | Tiempo JUnit | Ejecución en el cierre |
+  | --- | ---: | --- | ---: | --- |
+  | Raíz | 193 | Todos aprobados | 2,272 s | Ejecutada |
+  | Plataforma | 95 | 93 aprobados, dos omitidos | 8,434 s | Ejecutada |
+  | Updates | 13 | Todos aprobados | 0,397 s | Ejecutada |
+  | Dominio | 58 | Todos aprobados | 0,221 s | UP-TO-DATE de esta integración |
+  | Application | 2 | Todos aprobados | 0,076 s | UP-TO-DATE de esta integración |
+  | Local | 31 | Todos aprobados | 0,310 s | UP-TO-DATE de esta integración |
+  | Drive | 40 | Todos aprobados | 2,599 s | UP-TO-DATE de esta integración |
+
+  Evidencia vigente combinada: **430 aprobados, cero fallos/errores y dos omitidos**;
+  no son 432 ejecuciones nuevas en el cierre. Se conservan las integraciones CIO reales
+  de Drive y sus dos escritores, además de procesos/instalación Linux reales.
+- Quince SARIF con cero hallazgos, incluido testFixtures de Drive. El cierre ejecutó
+  main/test de raíz y plataforma y test de updates; los demás análisis reutilizaron
+  resultados limpios de esta integración. Hooks: nueve grupos PASS; convenciones:
+  cuatro PASS, incluidos aislamiento del índice, fixtures, caché, Java 25 y fallos
+  deliberados en copias desechables. No se añaden accesos especiales del compilador.
+- `packageReleaseAppImage` preparó `build/compose/binaries/main-release/app`. Se
+  comprobaron clases y classpath de desktop/updates/dominio/application/local/Drive,
+  sin fixtures, duplicados de las clases movidas ni UpdateManager. Docker/Compose y CI
+  ya incluyen ambos directorios y reportes recursivos desde H2; no cambian rutas de
+  staging, recursos, metadatos o artefactos. No se generó AppImage independiente con
+  appimagetool ni se ejecutaron interfaz gráfica, Docker o cuentas reales.
+- **Windows nativo pendiente:** este host es Linux y no dispone de PowerShell. Se
+  conservan las dos omisiones explícitas de WindowsLauncherTest y las comprobaciones
+  de argumentos MSI/EXE con lanzadores controlados; estas últimas no son instalación
+  real Windows. CI mantiene Windows y sus tareas check/MSI/EXE, pero no se ejecutó CI
+  remoto, push ni publicación. Esta limitación impide marcar H6 completo; H7–H8 no se
+  ejecutaron. Continúa la limitación Detekt/Gradle diagnosticada en H2.
+- Catálogo contrastado con fuentes y reportes, enlaces locales, visibilidad/imports,
+  grafos, staging y `git diff --check`: revisados. No se repite la suite tras editar
+  únicamente documentación.
+
+**Implementación H6 verificada en Linux. Validación nativa Windows pendiente.
+Commit H6: autorizado (`refactor: extract desktop platform and update adapters`);
+hash pendiente de registrar en la próxima actualización del seguimiento.**
 
 ### H7 — Presentación y composición Desktop
 

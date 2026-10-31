@@ -5,7 +5,6 @@ import com.emusync.application.sync.SyncServices
 import com.emusync.config.ConfigManager
 import com.emusync.domain.config.AppConfig
 import com.emusync.domain.config.CloudAuthorization
-import com.emusync.domain.execution.BrowserLauncher
 import com.emusync.domain.sync.SaveSynchronizer
 import com.emusync.domain.sync.SyncEvent
 import com.emusync.drive.DriveFileListing
@@ -17,8 +16,7 @@ import com.emusync.drive.TransferDirection
 import com.emusync.local.saves.DesktopSaveAccess
 import com.emusync.local.saves.SyncHistoryStore
 import com.emusync.local.saves.TrackedFileSync
-import com.emusync.runner.GameRunner
-import com.emusync.runner.openOAuthBrowser
+import com.emusync.runner.DesktopBrowserLauncher
 import io.ktor.client.HttpClient
 
 internal fun composeSaveSynchronizer(
@@ -38,8 +36,7 @@ internal fun composeSaveSynchronizer(
             val suffix = percent?.let { " ($it%)" }.orEmpty()
             onStatus(SyncEvent.Syncing("$verb ${progress.fileName}$suffix"))
         }
-    val oauth =
-        OAuthFlow(client, credentialStore = store, browser = BrowserLauncher(::openOAuthBrowser))
+    val oauth = OAuthFlow(client, credentialStore = store, browser = DesktopBrowserLauncher())
     return SyncOrchestrator(
         config,
         SyncServices(
@@ -48,7 +45,7 @@ internal fun composeSaveSynchronizer(
             DriveFolders(client),
             TrackedFileSync(transfer, SyncHistoryStore(store.configFile)),
             CloudAuthorization { cfg, interactive -> oauth.authorize(cfg, interactive) },
-            GameRunner(),
+            composeGameRunner(),
         ),
         onStatus,
     )

@@ -1,5 +1,6 @@
 package com.emusync.ui
 
+import com.emusync.composition.DesktopUpdates
 import com.emusync.config.ConfigManager
 import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.EmulatorSystem
@@ -7,6 +8,9 @@ import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.effectiveCloudFolder
 import com.emusync.local.saves.inferLegacySaveTarget
 import com.emusync.steam.SteamShortcutManager
+import com.emusync.update.DesktopUpdateInstaller
+import com.emusync.update.GitHubUpdateSource
+import com.emusync.update.UpdateStagingFiles
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respondOk
@@ -235,13 +239,13 @@ class AppViewModelTest {
     @Test
     fun `restartApp sets UpdateUiState Error when updateManager fails`(@TempDir tempDir: File) {
         val failingManager =
-            object : com.emusync.update.UpdateManager() {
-                override fun applyUpdateAndRestart(downloadedFile: File): Boolean = false
+            object : DesktopUpdateInstaller() {
+                override fun restart(path: String): Boolean = false
             }
         val viewModel =
             AppViewModel(
                 configManager = ConfigManager(File(tempDir, "config.json")),
-                updateManager = failingManager,
+                updates = testUpdates(failingManager),
                 httpClient = createMockHttpClient(),
             )
 
@@ -257,13 +261,13 @@ class AppViewModelTest {
     @Test
     fun `restartApp returns true when updateManager succeeds`(@TempDir tempDir: File) {
         val succeedingManager =
-            object : com.emusync.update.UpdateManager() {
-                override fun applyUpdateAndRestart(downloadedFile: File): Boolean = true
+            object : DesktopUpdateInstaller() {
+                override fun restart(path: String): Boolean = true
             }
         val viewModel =
             AppViewModel(
                 configManager = ConfigManager(File(tempDir, "config.json")),
-                updateManager = succeedingManager,
+                updates = testUpdates(succeedingManager),
                 httpClient = createMockHttpClient(),
             )
 
@@ -501,4 +505,14 @@ class AppViewModelTest {
             assertEquals("UnifiedSwitch", editedEntry?.cloudFolder)
             assertEquals("UnifiedSwitch", editedEntry?.effectiveCloudFolder)
         }
+
+    private fun testUpdates(installer: DesktopUpdateInstaller): DesktopUpdates {
+        val client = createMockHttpClient()
+        return DesktopUpdates(
+            GitHubUpdateSource(client, "owner", "repo", "1.0.0", false),
+            UpdateStagingFiles({ false }, { null }),
+            installer,
+            client::close,
+        )
+    }
 }

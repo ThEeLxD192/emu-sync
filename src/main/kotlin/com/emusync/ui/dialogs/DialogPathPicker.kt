@@ -1,7 +1,7 @@
 package com.emusync.ui.dialogs
 
-import com.emusync.ui.components.FilePicker
-import com.emusync.ui.components.PickerType
+import com.emusync.desktop.picker.FilePicker
+import com.emusync.domain.execution.PickerType
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

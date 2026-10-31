@@ -44,9 +44,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.emusync.domain.execution.PickerType
 import com.emusync.domain.library.SaveTarget
 import com.emusync.ui.GameItem
-import com.emusync.ui.components.PickerType
 import com.emusync.ui.components.loadGameCover
 import com.emusync.ui.theme.EmuSyncColors
 import java.io.File

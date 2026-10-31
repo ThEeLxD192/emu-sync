@@ -1,7 +1,9 @@
 package com.emusync.ui
 
 import com.emusync.domain.update.UpdateInfo
-import com.emusync.update.UpdateManager
+import com.emusync.update.DesktopUpdateInstaller
+import com.emusync.update.GitHubUpdateSource
+import com.emusync.update.UpdateStagingFiles
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -62,7 +64,7 @@ class UpdateConcurrencyTest {
                     install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
                 }
                 .use { client ->
-                    val controller = UpdateController(state, manager(client, directory))
+                    val controller = controller(state, client, directory)
                     val old = async { controller.checkForUpdates(manual = false) }
                     checking.await()
                     controller.download(info)
@@ -93,7 +95,7 @@ class UpdateConcurrencyTest {
                 }
             )
             .use { client ->
-                val controller = UpdateController(state, manager(client, directory))
+                val controller = controller(state, client, directory)
                 val first = async { controller.download(info) }
                 downloading.await()
                 controller.download(info)
@@ -117,7 +119,7 @@ class UpdateConcurrencyTest {
     fun `release size mismatch cannot become a ready update`(@TempDir directory: File) = runTest {
         val state = MutableStateFlow(AppUiState())
         HttpClient(MockEngine { respond("SHORT") }).use { client ->
-            UpdateController(state, manager(client, directory)).download(info)
+            controller(state, client, directory).download(info)
             assertTrue(
                 assertIs<UpdateUiState.Error>(state.value.updateState).message.contains("size")
             )
@@ -139,7 +141,7 @@ class UpdateConcurrencyTest {
                 }
             )
             .use { client ->
-                val controller = UpdateController(state, manager(client, directory))
+                val controller = controller(state, client, directory)
                 val job = async { controller.checkForUpdates(manual = true) }
                 checking.await()
                 job.cancelAndJoin()
@@ -154,22 +156,34 @@ class UpdateConcurrencyTest {
         val state = MutableStateFlow(AppUiState(isOperationInProgress = true))
         var restarts = 0
         val manager =
-            object : UpdateManager() {
-                override fun applyUpdateAndRestart(downloadedFile: File): Boolean {
+            object : DesktopUpdateInstaller() {
+                override fun restart(path: String): Boolean {
                     restarts++
                     return true
                 }
             }
-        assertFalse(UpdateController(state, manager).restart(File(directory, "update.AppImage")))
+        HttpClient(MockEngine { error("No HTTP requests expected") }).use { client ->
+            assertFalse(
+                controller(state, client, directory, manager)
+                    .restart(File(directory, "update.AppImage"))
+            )
+        }
         assertEquals(0, restarts)
     }
 
-    private fun manager(client: HttpClient, directory: File) =
-        object : UpdateManager(client) {
-            override fun isWindows() = false
-
-            override fun getCurrentAppImagePath() = File(directory, "current.AppImage").path
-
-            override fun isSteamGameMode() = false
-        }
+    private fun controller(
+        state: MutableStateFlow<AppUiState>,
+        client: HttpClient,
+        directory: File,
+        installer: DesktopUpdateInstaller =
+            object : DesktopUpdateInstaller() {
+                override fun isSteamGameMode() = false
+            },
+    ) =
+        UpdateController(
+            state,
+            GitHubUpdateSource(client, "owner", "repo", "1.0.0", false),
+            UpdateStagingFiles({ false }, { File(directory, "current.AppImage").path }),
+            installer,
+        )
 }
