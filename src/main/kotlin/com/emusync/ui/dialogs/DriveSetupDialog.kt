@@ -60,8 +60,8 @@ fun DriveSetupDialog(
     onSaveAndConnect: (clientId: String, clientSecret: String) -> Unit,
     onUnlink: () -> Unit,
 ) {
-    var clientId by remember { mutableStateOf(initialConfig?.clientId ?: "") }
-    var clientSecret by remember { mutableStateOf(initialConfig?.clientSecret ?: "") }
+    var clientId by remember { mutableStateOf(initialConfig?.clientId.orEmpty()) }
+    var clientSecret by remember { mutableStateOf(initialConfig?.clientSecret.orEmpty()) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val isLinked = !initialConfig?.refreshToken.isNullOrBlank()
 
@@ -180,7 +180,7 @@ fun DriveSetupDialog(
                 if (errorMessage != null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = errorMessage ?: "",
+                        text = errorMessage.orEmpty(),
                         color = EmuSyncColors.Error,
                         style = MaterialTheme.typography.bodySmall,
                     )
