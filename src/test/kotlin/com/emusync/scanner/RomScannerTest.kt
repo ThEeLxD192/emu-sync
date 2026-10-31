@@ -83,4 +83,64 @@ class RomScannerTest {
         File(directory, "game.GBA").writeText("ROM")
         assertEquals(1, scanRoms(directory.path, listOf(" .gBa ")).size)
     }
+
+    @Test
+    fun `signature files identify complete games and exclude their individual ROMs`(
+        @TempDir directory: File
+    ) = runTest {
+        val gameFolders =
+            listOf("PS3_DISC", "EBOOT", "APP", "MAIN").map { signature ->
+                File(directory, "Game-$signature").apply {
+                    mkdirs()
+                    File(this, "ordinary.bin").writeText("ROM")
+                    File(this, "nested").mkdirs()
+                    File(this, "nested/hidden.bin").writeText("ROM")
+                    File(this, "$signature.BIN").writeText("Signature")
+                }
+            }
+        val standalone = File(directory, "Standalone.bin").apply { writeText("ROM") }
+
+        val roms = scanRoms(directory.path, listOf("bin"))
+
+        assertEquals((gameFolders + standalone).toSet(), roms.map { it.file }.toSet())
+        assertEquals(5, roms.size)
+        assertTrue(roms.all { it.extension == "bin" })
+        assertEquals(
+            (gameFolders.map { it.name } + "Standalone").sortedBy { it.lowercase() },
+            roms.map { it.name },
+        )
+    }
+
+    @Test
+    fun `signature with an excluded extension does not hide matching ROMs or subfolders`(
+        @TempDir directory: File
+    ) = runTest {
+        File(directory, "eboot.txt").writeText("Not an allowed ROM")
+        val ordinary = File(directory, "ordinary.gba").apply { writeText("ROM") }
+        val nested =
+            File(directory, "nested/game.gba").apply {
+                parentFile.mkdirs()
+                writeText("ROM")
+            }
+
+        val roms = scanRoms(directory.path, listOf("gba"))
+
+        assertEquals(setOf(ordinary, nested), roms.map { it.file }.toSet())
+    }
+
+    @Test
+    fun `a regular file cannot be scanned as a directory`(@TempDir directory: File) = runTest {
+        val file = File(directory, "game.gba").apply { writeText("ROM") }
+
+        assertTrue(scanRoms(file.path, listOf("gba")).isEmpty())
+    }
+
+    @Test
+    fun `extensions that normalize to empty do not match files without an extension`(
+        @TempDir directory: File
+    ) = runTest {
+        File(directory, "game").writeText("ROM")
+
+        assertTrue(scanRoms(directory.path, listOf("", " ", " . ")).isEmpty())
+    }
 }

@@ -3,39 +3,32 @@ package com.emusync.scanner
 import java.io.File
 import java.io.IOException
 import java.nio.file.Path
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
-/**
- * Data class representing a discovered ROM file.
- *
- * @property file The ROM [File] on disk.
- * @property name Display-friendly name (filename without extension).
- * @property extension The file extension (lowercase, without dot).
- */
-data class RomFile(
-    val file: File,
-    val name: String,
-    val extension: String,
-)
+private val GAME_SIGNATURES = setOf("ps3_disc", "eboot", "app", "main")
 
 /**
  * Scans a directory for ROM files matching the given extensions.
  *
- * This is a `suspend` function that offloads the I/O-heavy directory listing to [Dispatchers.IO],
- * preventing UI freezes on large ROM collections.
+ * Directory listing runs on [ioDispatcher], which defaults to [Dispatchers.IO], to prevent UI
+ * freezes on large ROM collections.
  *
  * @param directory Absolute path to the directory to scan.
  * @param extensions List of allowed file extensions (case-insensitive, without dots). Example:
  *   `listOf("gba", "gbc", "zip")`
+ * @param ioDispatcher Dispatcher used for filesystem operations.
  * @return Sorted list of [RomFile] objects found. Empty list if directory doesn't exist.
  */
 suspend fun scanRoms(
     directory: String,
     extensions: List<String>,
+    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ): List<RomFile> =
-    withContext(Dispatchers.IO) {
+    withContext(ioDispatcher) {
         val dir = File(directory)
 
         if (!dir.exists() || !dir.isDirectory) {
@@ -50,78 +43,64 @@ suspend fun scanRoms(
                 .toSet()
         if (allowedExtensions.isEmpty()) return@withContext emptyList()
 
-        // Signature files that indicate the current directory is a self-contained game
-        val signatureFiles = setOf("ps3_disc", "eboot", "app", "main")
-
-        val result = mutableListOf<RomFile>()
-        val visited = mutableSetOf<Path>()
-
-        // Use ArrayDeque as a queue for breadth-first search
-        val directoriesToScan = ArrayDeque<File>()
-        directoriesToScan.add(dir)
-
-        while (directoriesToScan.isNotEmpty()) {
-            ensureActive()
-
-            val currentDir = directoriesToScan.removeFirst()
-            // Resolve aliases before descending so symlinks cannot create cycles or duplicate
-            // games.
-            val realPath =
-                try {
-                    currentDir.toPath().toRealPath()
-                } catch (_: IOException) {
-                    continue
-                }
-            if (!visited.add(realPath)) continue
-            val children = currentDir.listFiles() ?: continue
-
-            var isGameFolder = false
-            val singleRomsInThisDir = mutableListOf<RomFile>()
-            val subdirectories = mutableListOf<File>()
-
-            for (file in children) {
-                if (file.isDirectory) {
-                    subdirectories.add(file)
-                } else if (file.isFile) {
-                    val ext = file.extension.lowercase()
-
-                    if (ext in allowedExtensions) {
-                        val nameWithoutExt = file.nameWithoutExtension.lowercase()
-
-                        if (nameWithoutExt in signatureFiles) {
-                            result.add(
-                                RomFile(
-                                    file = currentDir,
-                                    name = currentDir.name,
-                                    extension = ext,
-                                )
-                            )
-                            isGameFolder = true
-                            break // Stop checking further files in this folder
-                        } else {
-                            // Classic single-file ROM
-                            singleRomsInThisDir.add(
-                                RomFile(
-                                    file = file,
-                                    name = file.nameWithoutExtension,
-                                    extension = ext,
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            // If the folder was not a self-contained game (e.g., did not contain eboot.bin),
-            // add its individual ROMs and continue exploring subfolders.
-            if (!isGameFolder) {
-                result.addAll(singleRomsInThisDir)
-                directoriesToScan.addAll(subdirectories)
-            }
-        }
-
-        // Return distinct list sorted alphabetically
-        return@withContext result
+        scanDirectories(dir, allowedExtensions)
             .distinctBy { it.file.absolutePath }
             .sortedBy { it.name.lowercase() }
     }
+
+private suspend fun scanDirectories(root: File, allowedExtensions: Set<String>): List<RomFile> {
+    val result = mutableListOf<RomFile>()
+    val visited = mutableSetOf<Path>()
+    val pending = ArrayDeque<File>()
+    pending.add(root)
+
+    while (pending.isNotEmpty()) {
+        currentCoroutineContext().ensureActive()
+        val directory = pending.removeFirst()
+        val children = unvisitedChildren(directory, visited) ?: continue
+        val scanned = scanDirectory(directory, children, allowedExtensions)
+        result.addAll(scanned.roms)
+        pending.addAll(scanned.subdirectories)
+    }
+    return result
+}
+
+/** Resolves aliases before descending so symlinks cannot create cycles or duplicate games. */
+private fun unvisitedChildren(directory: File, visited: MutableSet<Path>): Array<File>? {
+    val realPath =
+        try {
+            directory.toPath().toRealPath()
+        } catch (_: IOException) {
+            return null
+        }
+    return if (visited.add(realPath)) directory.listFiles() else null
+}
+
+private data class DirectoryScan(val roms: List<RomFile>, val subdirectories: List<File>)
+
+private fun scanDirectory(
+    directory: File,
+    children: Array<File>,
+    allowedExtensions: Set<String>,
+): DirectoryScan {
+    val roms = mutableListOf<RomFile>()
+    val subdirectories = mutableListOf<File>()
+    for (file in children) {
+        if (file.isDirectory) {
+            subdirectories.add(file)
+        } else if (file.isFile) {
+            val extension = file.extension.lowercase()
+            if (extension in allowedExtensions) {
+                if (file.nameWithoutExtension.lowercase() in GAME_SIGNATURES) {
+                    // A game folder owns its contents: discard individual ROMs and stop descent.
+                    return DirectoryScan(
+                        listOf(RomFile(directory, directory.name, extension)),
+                        emptyList(),
+                    )
+                }
+                roms.add(RomFile(file, file.nameWithoutExtension, extension))
+            }
+        }
+    }
+    return DirectoryScan(roms, subdirectories)
+}
