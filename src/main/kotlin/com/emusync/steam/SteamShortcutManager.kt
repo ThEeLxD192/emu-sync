@@ -35,6 +35,9 @@ import kotlin.random.Random
  * // Then launch via steam://rungameid/<appId>
  * ```
  */
+// This stable facade is called by the UI and launcher integration, including overridable
+// platform hooks. Keep its public API together; path lookup and script encoding are delegated.
+@Suppress("TooManyFunctions")
 open class SteamShortcutManager(
     private val customSteamUserdataDir: File? = null,
     private val customLauncherDir: File? = null,
@@ -42,6 +45,8 @@ open class SteamShortcutManager(
 ) {
 
     companion object {
+        private const val MAX_SHORTCUT_APP_ID_EXCLUSIVE = -1000
+
         /**
          * Maps executable name patterns to the flags that force the emulator into its
          * fullscreen/Big Picture UI (bypassing the Qt windowed GUI).
@@ -71,7 +76,8 @@ open class SteamShortcutManager(
             val exeName = File(executablePath).nameWithoutExtension.lowercase()
             return FULLSCREEN_FLAGS.entries
                 .firstOrNull { (pattern, _) -> exeName.contains(pattern) }
-                ?.value ?: ""
+                ?.value
+                .orEmpty()
         }
 
         /**
@@ -141,55 +147,13 @@ open class SteamShortcutManager(
     }
 
     /** Locates the Steam `userdata` directory on Windows. */
-    open fun findWindowsSteamUserdataDir(): File? {
-        // 1. Check registry: HKCU\Software\Valve\Steam -> SteamPath
-        val hkcuPath = registryQuery("HKCU\\Software\\Valve\\Steam", "SteamPath")
-        if (!hkcuPath.isNullOrBlank()) {
-            val dir = File(hkcuPath.replace('/', File.separatorChar), "userdata")
-            if (dir.exists() && dir.isDirectory) return dir
-        }
-
-        // 2. Check registry: HKLM\SOFTWARE\WOW6432Node\Valve\Steam -> InstallPath
-        val hklmPath =
-            registryQuery("HKLM\\SOFTWARE\\WOW6432Node\\Valve\\Steam", "InstallPath")
-                ?: registryQuery("HKLM\\SOFTWARE\\Valve\\Steam", "InstallPath")
-        if (!hklmPath.isNullOrBlank()) {
-            val dir = File(hklmPath.replace('/', File.separatorChar), "userdata")
-            if (dir.exists() && dir.isDirectory) return dir
-        }
-
-        // 3. Fallback common paths on Windows
-        val candidates =
-            listOfNotNull(
-                System.getenv("ProgramFiles(x86)")?.let { File(it, "Steam/userdata") },
-                System.getenv("ProgramFiles")?.let { File(it, "Steam/userdata") },
-                File("C:\\Program Files (x86)\\Steam\\userdata"),
-                File("C:\\Program Files\\Steam\\userdata"),
-                File("C:\\Steam\\userdata"),
-                File("D:\\Steam\\userdata"),
-            )
-        val existingCandidate = candidates.firstOrNull { it.exists() && it.isDirectory }
-        if (existingCandidate != null) return existingCandidate
-
-        // If userdata folder does not exist yet but Steam root exists, return userdata path inside
-        // it
-        if (!hkcuPath.isNullOrBlank()) {
-            val root = File(hkcuPath.replace('/', File.separatorChar))
-            if (root.exists()) return File(root, "userdata")
-        }
-        if (!hklmPath.isNullOrBlank()) {
-            val root = File(hklmPath.replace('/', File.separatorChar))
-            if (root.exists()) return File(root, "userdata")
-        }
-
-        return candidates.firstOrNull()
-    }
+    open fun findWindowsSteamUserdataDir(): File? = WindowsSteamPaths(registryQuery).find()
 
     /** Locates the Steam `userdata` directory on Linux (standard or Flatpak). */
     open fun findLinuxSteamUserdataDir(): File? {
         val userHome = System.getProperty("user.home", "")
         val candidates =
-            listOfNotNull(
+            listOf(
                 File(userHome, ".local/share/Steam/userdata"),
                 File(userHome, ".steam/steam/userdata"),
                 File(userHome, ".steam/root/userdata"),
@@ -229,16 +193,13 @@ open class SteamShortcutManager(
      * @return The shortcuts.vdf [File], or null if Steam is not installed.
      */
     open fun findShortcutsFile(): File? {
-        val base = getSteamUserdataDir() ?: return null
-        if (!base.exists() || !base.isDirectory) return null
-
+        val base = getSteamUserdataDir()?.takeIf { it.exists() && it.isDirectory } ?: return null
         val accounts =
             base
                 .listFiles()
                 ?.filter { it.isDirectory && it.name != "0" }
-                ?.sortedByDescending { it.lastModified() } // most recently used account first
-            ?: return null
-
+                ?.sortedByDescending { it.lastModified() }
+                .orEmpty()
         return accounts
             .map { File(it, "config/shortcuts.vdf") }
             .firstOrNull { it.exists() || it.parentFile?.exists() == true }
@@ -298,11 +259,7 @@ open class SteamShortcutManager(
             it.appName == appName || (entry.steamAppId != null && it.appId == entry.steamAppId)
         }
         if (duplicate != null) {
-            val regenerated =
-                when (entry) {
-                    is EmulatorSystem -> buildEmulatorShortcut(entry, appName)
-                    is NativePCGame -> buildNativeShortcut(entry, appName)
-                }
+            val regenerated = buildShortcut(entry, appName)
             val updated =
                 duplicate.copy(
                     appName = regenerated.appName,
@@ -319,11 +276,7 @@ open class SteamShortcutManager(
             return updated
         }
 
-        val newShortcut =
-            when (entry) {
-                is EmulatorSystem -> buildEmulatorShortcut(entry, appName)
-                is NativePCGame -> buildNativeShortcut(entry, appName)
-            }
+        val newShortcut = buildShortcut(entry, appName)
 
         BinaryVdf.write(vdfFile, existing + newShortcut)
         if (entry is EmulatorSystem) installLegacyBridge(entry, existing + newShortcut)
@@ -455,7 +408,7 @@ open class SteamShortcutManager(
         val digest =
             MessageDigest.getInstance("SHA-256")
                 .digest(name.toByteArray(Charsets.UTF_8))
-                .joinToString("") { "%02x".format(it) }
+                .joinToString("") { "%02x".format(Locale.ROOT, it) }
         return "$readable-$digest"
     }
 
@@ -577,11 +530,22 @@ open class SteamShortcutManager(
     fun resolveStartDir(executablePath: String): String {
         val normalized = executablePath.replace('\\', '/')
         val lastSlash = normalized.lastIndexOf('/')
-        if (lastSlash < 0) return "."
-        val parent = normalized.substring(0, lastSlash)
-        if (parent.isEmpty()) return "/"
-        return if (isWindows()) parent.replace('/', '\\') else parent
+        return if (lastSlash < 0) "."
+        else {
+            val parent = normalized.substring(0, lastSlash)
+            when {
+                parent.isEmpty() -> "/"
+                isWindows() -> parent.replace('/', '\\')
+                else -> parent
+            }
+        }
     }
+
+    private fun buildShortcut(entry: GameEntry, appName: String): SteamShortcut =
+        when (entry) {
+            is EmulatorSystem -> buildEmulatorShortcut(entry, appName)
+            is NativePCGame -> buildNativeShortcut(entry, appName)
+        }
 
     /**
      * Creates a wrapper script for an emulator and returns the shortcut.
@@ -644,6 +608,6 @@ open class SteamShortcutManager(
     private fun generateAppId(): Int {
         // Generate a random ID in a high range (negative in signed int = high unsigned)
         // This matches how Steam assigns IDs to non-Steam games.
-        return Random.nextInt(Int.MIN_VALUE, -1000)
+        return Random.nextInt(Int.MIN_VALUE, MAX_SHORTCUT_APP_ID_EXCLUSIVE)
     }
 }

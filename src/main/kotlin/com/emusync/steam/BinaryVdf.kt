@@ -92,6 +92,9 @@ object BinaryVdf {
             "tags",
         )
 
+    private const val HEX_RADIX = 16
+    private const val MAX_OBJECT_DEPTH = 64
+
     private const val TYPE_OBJECT: Int = 0x00
     private const val TYPE_STRING: Int = 0x01
     private const val TYPE_INT32: Int = 0x02
@@ -105,9 +108,7 @@ object BinaryVdf {
      * @throws IllegalArgumentException if the file format is invalid.
      */
     fun read(file: File): List<SteamShortcut> {
-        if (!file.exists()) return emptyList()
-
-        val bytes = file.readBytes()
+        val bytes = if (file.exists()) file.readBytes() else byteArrayOf()
         if (bytes.isEmpty()) return emptyList()
 
         val stream = ByteArrayInputStream(bytes)
@@ -115,7 +116,7 @@ object BinaryVdf {
         // Read root object marker and name ("shortcuts")
         val rootType = stream.read()
         require(rootType == TYPE_OBJECT) {
-            "Expected object marker (0x00) at start, got 0x${rootType.toString(16)}"
+            "Expected object marker (0x00) at start, got 0x${rootType.toString(HEX_RADIX)}"
         }
         val rootName = readNullTermString(stream)
         require(rootName == "shortcuts") { "Expected 'shortcuts' root object, got '$rootName'" }
@@ -128,7 +129,7 @@ object BinaryVdf {
             require(type != -1) { "Truncated VDF root object" }
             if (type == TYPE_END) break
             require(type == TYPE_OBJECT) {
-                "Expected object (0x00) or end (0x08), got 0x${type.toString(16)}"
+                "Expected object (0x00) or end (0x08), got 0x${type.toString(HEX_RADIX)}"
             }
 
             // Index name ("0", "1", ...) — we don't use it, just consume
@@ -198,7 +199,7 @@ object BinaryVdf {
      */
     @Suppress("UNCHECKED_CAST")
     private fun readObjectFields(stream: ByteArrayInputStream, depth: Int = 0): Map<String, Any> {
-        require(depth <= 64) { "VDF objects are nested too deeply" }
+        require(depth <= MAX_OBJECT_DEPTH) { "VDF objects are nested too deeply" }
         val fields = mutableMapOf<String, Any>()
 
         while (true) {
@@ -221,28 +222,9 @@ object BinaryVdf {
                     val subFields = readObjectFields(stream, depth + 1)
                     fields[key] = subFields
                 }
-                else -> error("Unknown VDF type marker: 0x${type.toString(16)}")
+                else -> error("Unknown VDF type marker: 0x${type.toString(HEX_RADIX)}")
             }
         }
-    }
-
-    /** Reads a null-terminated string from the stream. */
-    private fun readNullTermString(stream: ByteArrayInputStream): String {
-        val buffer = ByteArrayOutputStream()
-        while (true) {
-            val b = stream.read()
-            require(b != -1) { "Truncated VDF string" }
-            if (b == 0x00) break
-            buffer.write(b)
-        }
-        return buffer.toString(Charsets.UTF_8.name())
-    }
-
-    /** Reads a 4-byte little-endian Int32. */
-    private fun readInt32LE(stream: ByteArrayInputStream): Int {
-        val bytes = stream.readNBytes(4)
-        require(bytes.size == 4) { "Truncated VDF integer" }
-        return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).int
     }
 
     // ── Writing helpers ──────────────────────────────────────────────
@@ -309,38 +291,63 @@ object BinaryVdf {
         output.write(bytes)
     }
 
-    /** Writes a null-terminated UTF-8 string. */
-    private fun writeNullTermString(output: ByteArrayOutputStream, value: String) {
-        require('\u0000' !in value) { "VDF strings cannot contain NUL" }
-        output.write(value.toByteArray(Charsets.UTF_8))
-        output.write(0x00)
-    }
-
     // ── Shortcut construction ────────────────────────────────────────
 
     /** Builds a [SteamShortcut] from a raw field map parsed from the binary. */
     @Suppress("UNCHECKED_CAST")
     private fun buildShortcut(fields: Map<String, Any>): SteamShortcut {
         return SteamShortcut(
-            appId = (fields["appid"] as? Int) ?: 0,
-            appName = (fields["AppName"] as? String) ?: (fields["appname"] as? String) ?: "",
-            exe = (fields["Exe"] as? String) ?: (fields["exe"] as? String) ?: "",
-            startDir = (fields["StartDir"] as? String) ?: (fields["startdir"] as? String) ?: "",
-            icon = (fields["icon"] as? String) ?: "",
-            shortcutPath = (fields["ShortcutPath"] as? String) ?: "",
-            launchOptions = (fields["LaunchOptions"] as? String) ?: "",
-            isHidden = ((fields["IsHidden"] as? Int) ?: 0) != 0,
-            allowDesktopConfig = ((fields["AllowDesktopConfig"] as? Int) ?: 1) != 0,
-            allowOverlay = ((fields["AllowOverlay"] as? Int) ?: 1) != 0,
-            openVR = ((fields["OpenVR"] as? Int) ?: 0) != 0,
-            devkit = ((fields["Devkit"] as? Int) ?: 0) != 0,
-            devkitGameID = (fields["DevkitGameID"] as? String) ?: "",
-            devkitOverrideAppID = (fields["DevkitOverrideAppID"] as? Int) ?: 0,
-            lastPlayTime = (fields["LastPlayTime"] as? Int) ?: 0,
-            flatpakAppID = (fields["FlatpakAppID"] as? String) ?: "",
-            sortAs = (fields["sortas"] as? String) ?: "",
-            tags = (fields["tags"] as? Map<String, String>) ?: emptyMap(),
+            appId = fields.intField("appid"),
+            appName = fields.stringField("AppName", "appname"),
+            exe = fields.stringField("Exe", "exe"),
+            startDir = fields.stringField("StartDir", "startdir"),
+            icon = fields.stringField("icon"),
+            shortcutPath = fields.stringField("ShortcutPath"),
+            launchOptions = fields.stringField("LaunchOptions"),
+            isHidden = fields.intField("IsHidden", 0) != 0,
+            allowDesktopConfig = fields.intField("AllowDesktopConfig", 1) != 0,
+            allowOverlay = fields.intField("AllowOverlay", 1) != 0,
+            openVR = fields.intField("OpenVR", 0) != 0,
+            devkit = fields.intField("Devkit", 0) != 0,
+            devkitGameID = fields.stringField("DevkitGameID"),
+            devkitOverrideAppID = fields.intField("DevkitOverrideAppID"),
+            lastPlayTime = fields.intField("LastPlayTime"),
+            flatpakAppID = fields.stringField("FlatpakAppID"),
+            sortAs = fields.stringField("sortas"),
+            tags = (fields["tags"] as? Map<String, String>).orEmpty(),
             extraFields = fields.filterKeys { it !in KNOWN_FIELDS },
         )
     }
 }
+
+/** Reads a null-terminated UTF-8 string, rejecting truncated input. */
+private fun readNullTermString(stream: ByteArrayInputStream): String {
+    val buffer = ByteArrayOutputStream()
+    while (true) {
+        val b = stream.read()
+        require(b != -1) { "Truncated VDF string" }
+        if (b == 0x00) break
+        buffer.write(b)
+    }
+    return buffer.toString(Charsets.UTF_8.name())
+}
+
+/** Reads a complete little-endian Int32. */
+private fun readInt32LE(stream: ByteArrayInputStream): Int {
+    val bytes = stream.readNBytes(Int.SIZE_BYTES)
+    require(bytes.size == Int.SIZE_BYTES) { "Truncated VDF integer" }
+    return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).int
+}
+
+/** Writes a null-terminated UTF-8 string, rejecting embedded terminators. */
+private fun writeNullTermString(output: ByteArrayOutputStream, value: String) {
+    require('\u0000' !in value) { "VDF strings cannot contain NUL" }
+    output.write(value.toByteArray(Charsets.UTF_8))
+    output.write(0x00)
+}
+
+private fun Map<String, Any>.stringField(name: String, alias: String? = null): String =
+    ((this[name] as? String) ?: alias?.let { this[it] as? String }).orEmpty()
+
+private fun Map<String, Any>.intField(name: String, default: Int = 0): Int =
+    (this[name] as? Int) ?: default

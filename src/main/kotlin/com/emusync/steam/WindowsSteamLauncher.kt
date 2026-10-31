@@ -8,6 +8,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.Base64
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 @Serializable
@@ -37,12 +38,11 @@ internal class WindowsSteamLauncher(private val directory: File) {
         writeLauncherFile(
             File(directory, "launch_$key.json"),
             Json.encodeToString(
-                WindowsLaunchConfiguration.serializer(),
                 WindowsLaunchConfiguration(
                     entry.executablePath,
                     signal.absolutePath,
                     fullscreen + entry.arguments,
-                ),
+                )
             ),
         )
         return File(directory, "launch_$key.bat").also {
