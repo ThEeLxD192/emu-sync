@@ -7,11 +7,32 @@ import java.nio.file.StandardCopyOption
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CancellationException
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
 class AppImageInstallerTest {
+    @Test
+    fun `cancelled installation restores the original before rethrowing cancellation`(
+        @TempDir directory: File
+    ) {
+        val target = File(directory, "EmuSync.AppImage").apply { writeText("ORIGINAL") }
+        val source = File(directory, "download.AppImage").apply { writeText("UPDATE") }
+        val cancellation = CancellationException("Installation cancelled")
+
+        val thrown =
+            assertFailsWith<CancellationException> {
+                AppImageInstaller().replace(source, target) { throw cancellation }
+            }
+
+        assertSame(cancellation, thrown)
+        assertEquals("ORIGINAL", target.readText())
+        assertEquals("UPDATE", source.readText())
+        assertEquals(setOf(target.name, source.name), directory.list()?.toSet())
+    }
+
     @Test
     fun `keeps original and download until launch succeeds`(@TempDir directory: File) {
         val target = File(directory, "EmuSync.AppImage").apply { writeText("ORIGINAL") }

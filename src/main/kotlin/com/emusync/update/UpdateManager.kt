@@ -7,28 +7,19 @@ import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.plugins.timeout
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
-import io.ktor.http.contentLength
 import io.ktor.serialization.kotlinx.json.json
-import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.readAvailable
 import java.io.File
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import java.util.logging.Level
 import java.util.logging.Logger
 import kotlin.system.exitProcess
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -61,27 +52,14 @@ data class UpdateInfo(
 )
 
 open class UpdateManager(
-    private val client: HttpClient =
-        HttpClient(CIO) {
-            install(ContentNegotiation) {
-                json(
-                    Json {
-                        ignoreUnknownKeys = true
-                        isLenient = true
-                    }
-                )
-            }
-            install(HttpTimeout) {
-                connectTimeoutMillis = 15_000
-                socketTimeoutMillis = 60_000
-                requestTimeoutMillis = null
-            }
-        },
+    private val client: HttpClient = createUpdateClient(),
     private val exitApplication: (Int) -> Unit = ::exitProcess,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : AutoCloseable {
     override fun close() = client.close()
 
     private val appImageInstaller = AppImageInstaller()
+    private val downloader = UpdateDownloader(client, ioDispatcher)
     private val logger = Logger.getLogger(UpdateManager::class.java.name)
 
     /**
@@ -102,7 +80,7 @@ open class UpdateManager(
         repo: String = AppInfo.GITHUB_REPO,
         currentVersion: String = AppInfo.VERSION,
     ): UpdateInfo? =
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             try {
                 val response: HttpResponse =
                     client.get("https://api.github.com/repos/$owner/$repo/releases/latest") {
@@ -145,79 +123,7 @@ open class UpdateManager(
         downloadUrl: String,
         destinationFile: File,
         onProgress: (Float) -> Unit,
-    ): Result<Unit> =
-        withContext(Dispatchers.IO) {
-            var staged: Path? = null
-            var channel: ByteReadChannel? = null
-            try {
-                val parent = destinationFile.absoluteFile.parentFile
-                Files.createDirectories(parent.toPath())
-                staged = Files.createTempFile(parent.toPath(), ".${destinationFile.name}.", ".part")
-                val response: HttpResponse =
-                    client.get(downloadUrl) {
-                        header(HttpHeaders.UserAgent, "EmuSync-Desktop-App")
-                        timeout {
-                            requestTimeoutMillis = null
-                            socketTimeoutMillis = 60_000
-                        }
-                    }
-                if (response.status != HttpStatusCode.OK) {
-                    return@withContext Result.failure(
-                        IllegalStateException(
-                            "HTTP ${response.status.value} ${response.status.description}"
-                        )
-                    )
-                }
-                val totalBytes = response.contentLength()
-                val body: ByteReadChannel = response.body()
-                channel = body
-                var bytesRead = 0L
-                Files.newOutputStream(staged).use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    while (!body.isClosedForRead) {
-                        currentCoroutineContext().ensureActive()
-                        val read = body.readAvailable(buffer, 0, buffer.size)
-                        if (read < 0) break
-                        if (read == 0) continue
-                        output.write(buffer, 0, read)
-                        bytesRead += read
-                        if (totalBytes != null && totalBytes > 0) {
-                            onProgress((bytesRead.toFloat() / totalBytes).coerceIn(0f, 1f))
-                        }
-                    }
-                }
-                check(bytesRead > 0) { "The downloaded update is empty" }
-                check(totalBytes == null || bytesRead == totalBytes) {
-                    "The downloaded update is incomplete: expected $totalBytes bytes, received $bytesRead"
-                }
-                currentCoroutineContext().ensureActive()
-                staged.toFile().setExecutable(true, false)
-                try {
-                    Files.move(
-                        staged,
-                        destinationFile.toPath(),
-                        StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING,
-                    )
-                } catch (_: AtomicMoveNotSupportedException) {
-                    Files.move(
-                        staged,
-                        destinationFile.toPath(),
-                        StandardCopyOption.REPLACE_EXISTING,
-                    )
-                }
-                staged = null
-                onProgress(1f)
-                Result.success(Unit)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                Result.failure(failure)
-            } finally {
-                channel?.cancel(CancellationException("Update response is no longer needed"))
-                staged?.let { Files.deleteIfExists(it) }
-            }
-        }
+    ): Result<Unit> = downloader.download(downloadUrl, destinationFile, onProgress)
 
     /**
      * Applies the downloaded update and restarts the application. On Windows, launches the
@@ -278,14 +184,6 @@ open class UpdateManager(
             System.getenv("XDG_CURRENT_DESKTOP")?.lowercase() == "gamescope"
 
     /**
-     * Replaces the running [target] AppImage with [source]. Stages the download on the destination
-     * filesystem before replacing the active binary.
-     */
-    internal fun replaceAppImageFile(source: File, target: File) {
-        appImageInstaller.replace(source, target)
-    }
-
-    /**
      * Starts the updated AppImage with independent standard streams. In Steam Deck Game Mode, Steam
      * manages the process tree; exiting cleanly lets the user relaunch the updated app from Steam
      * without leaving ghost processes. Application exit is handled after installation by
@@ -304,27 +202,29 @@ open class UpdateManager(
     }
 
     /** Replaces the currently running AppImage on Linux and restarts the application. */
+    // This UI boundary reports any filesystem or launcher exception after installer rollback.
+    @Suppress("TooGenericExceptionCaught")
     open fun applyLinuxUpdateAndRestart(
         downloadedFile: File,
         launcher: (String) -> Unit = ::defaultLinuxLauncher,
     ): Boolean {
         val currentAppImagePath = getCurrentAppImagePath() ?: return false
         val currentAppImage = File(currentAppImagePath)
-        if (!currentAppImage.exists() || !downloadedFile.exists()) return false
-
-        return try {
-            appImageInstaller.replace(downloadedFile, currentAppImage) {
-                launcher(currentAppImage.absolutePath)
+        return if (!currentAppImage.exists() || !downloadedFile.exists()) false
+        else
+            try {
+                appImageInstaller.replace(downloadedFile, currentAppImage) {
+                    launcher(currentAppImage.absolutePath)
+                }
+                true
+            } catch (failure: Exception) {
+                logger.log(
+                    Level.WARNING,
+                    "Could not install or launch the updated AppImage at $currentAppImagePath",
+                    failure,
+                )
+                false
             }
-            true
-        } catch (failure: Exception) {
-            logger.log(
-                Level.WARNING,
-                "Could not install or launch the updated AppImage at $currentAppImagePath",
-                failure,
-            )
-            false
-        }
     }
 
     companion object {
@@ -353,10 +253,29 @@ open class UpdateManager(
             for (i in 0 until maxLen) {
                 val c = currParts.getOrElse(i) { 0 }
                 val r = remoteParts.getOrElse(i) { 0 }
-                if (r > c) return true
-                if (r < c) return false
+                val comparison = r.compareTo(c)
+                if (comparison != 0) return comparison > 0
             }
             return false
         }
     }
 }
+
+private const val UPDATE_CONNECT_TIMEOUT_MS = 15_000L
+
+private fun createUpdateClient(): HttpClient =
+    HttpClient(CIO) {
+        install(ContentNegotiation) {
+            json(
+                Json {
+                    ignoreUnknownKeys = true
+                    isLenient = true
+                }
+            )
+        }
+        install(HttpTimeout) {
+            connectTimeoutMillis = UPDATE_CONNECT_TIMEOUT_MS
+            socketTimeoutMillis = UPDATE_SOCKET_TIMEOUT_MS
+            requestTimeoutMillis = null
+        }
+    }

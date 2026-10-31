@@ -16,6 +16,9 @@ internal class AppImageInstaller(
     },
     private val moveFile: (Path, Path) -> Unit = ::moveReplacing,
 ) {
+    // Filesystem operations and the supplied launcher can fail with different exception types.
+    // Always attempt rollback, retain a failed recovery backup, and rethrow the original failure.
+    @Suppress("TooGenericExceptionCaught")
     fun replace(source: File, target: File, onInstalled: () -> Unit = {}) {
         val sourcePath = source.toPath().toAbsolutePath().normalize()
         val targetPath = target.toPath().toAbsolutePath().normalize()
@@ -71,7 +74,7 @@ internal class AppImageInstaller(
     }
 }
 
-private fun moveReplacing(source: Path, target: Path) {
+internal fun moveReplacing(source: Path, target: Path) {
     try {
         Files.move(
             source,

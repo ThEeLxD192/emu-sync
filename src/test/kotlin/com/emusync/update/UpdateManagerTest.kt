@@ -35,6 +35,14 @@ class UpdateManagerTest {
     }
 
     @Test
+    fun `missing trailing version components are equivalent to zero`() {
+        assertFalse(UpdateManager.isNewerVersion("1.2", "1.2.0"))
+        assertFalse(UpdateManager.isNewerVersion("1.2.0", "1.2"))
+        assertTrue(UpdateManager.isNewerVersion("1.2", "1.2.0.1"))
+        assertFalse(UpdateManager.isNewerVersion("1.2.0.1", "1.2"))
+    }
+
+    @Test
     fun `checkForUpdates detects newer release and AppImage asset on Linux`() = runTest {
         val mockEngine = MockEngine { _ ->
             val jsonResponse =
@@ -372,24 +380,10 @@ class UpdateManagerTest {
     }
 
     @Test
-    fun `replaceAppImageFile safely replaces active file`(@TempDir tempDir: File) {
-        val target = File(tempDir, "Target.AppImage").apply { writeText("INITIAL") }
-        val source = File(tempDir, "Source.AppImage").apply { writeText("UPDATED") }
-
-        val manager = UpdateManager()
-        manager.replaceAppImageFile(source, target)
-
-        assertTrue(target.exists())
-        assertEquals("UPDATED", target.readText())
-        assertFalse(source.exists())
-        assertTrue(target.canExecute())
-    }
-
-    @Test
     fun `applyUpdateAndRestart delegates to Linux update on Linux platform`(
         @TempDir tempDir: File
     ) {
-        val currentAppImage = File(tempDir, "EmuSync.AppImage").apply { writeText("V1") }
+        File(tempDir, "EmuSync.AppImage").writeText("V1")
         val downloadedUpdate = File(tempDir, "update.AppImage").apply { writeText("V2") }
 
         var linuxUpdateCalled = false
