@@ -27,7 +27,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +38,7 @@ import androidx.compose.ui.window.Dialog
 import com.emusync.domain.execution.PickerType
 import com.emusync.domain.library.GameEntry
 import com.emusync.ui.theme.EmuSyncColors
+import kotlinx.coroutines.launch
 
 /** Dialog to add or edit an emulator system or native game entry. */
 @Composable
@@ -46,7 +49,11 @@ fun AddEntryDialog(
     onDismiss: () -> Unit,
     onSave: (GameEntry) -> Unit,
 ) {
-    val form = remember { EntryFormState(initialEntry, actions.saveTargets) }
+    val loadedForm by
+        produceState<EntryFormState?>(null, initialEntry, actions.saveTargets) {
+            value = readFormDraft { EntryFormState(initialEntry, actions.saveTargets) }
+        }
+    val form = loadedForm ?: return
     LaunchedEffect(form.entryType) { form.applyTypeDefaults() }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -317,6 +324,7 @@ private fun EntryFormState.EntryActions(
     onDismiss: () -> Unit,
     onSave: (GameEntry) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     // ── Buttons ─────────────────────────────────────────
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -326,7 +334,11 @@ private fun EntryFormState.EntryActions(
             Text("Cancel")
         }
         Button(
-            onClick = { buildEntry(initialEntry)?.let(onSave) },
+            onClick = {
+                scope.launch {
+                    readFormDraft { buildEntry(initialEntry) }?.let(onSave)
+                }
+            },
             colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
         ) {
             Text(if (initialEntry == null) "Add" else "Save")

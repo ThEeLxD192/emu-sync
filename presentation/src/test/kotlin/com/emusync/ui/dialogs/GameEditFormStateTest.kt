@@ -23,7 +23,7 @@ class GameEditFormStateTest {
                         listOf(SaveTarget(File(directory, "global.dat").path, SaveTargetType.FILE))
                 )
         val game = testGameItem("Game", entry, File(directory, "game.rom"))
-        val form = GameEditFormState(game)
+        val form = GameEditFormState(game, com.emusync.local.saves.LocalSaveTargets())
 
         assertEquals(listOf(""), form.saves.savePaths)
         assertTrue(form.result(game, emptyList()).targets.isEmpty())
@@ -42,7 +42,7 @@ class GameEditFormStateTest {
                 File(directory, "game.rom"),
             )
         val form =
-            GameEditFormState(game).apply {
+            GameEditFormState(game, com.emusync.local.saves.LocalSaveTargets()).apply {
                 customTitle = " "
                 coverPath = " "
             }
@@ -59,7 +59,7 @@ class GameEditFormStateTest {
         @TempDir directory: File
     ) {
         val game = testGameItem("Game", emulator(), File(directory, "game.rom"))
-        val form = GameEditFormState(game)
+        val form = GameEditFormState(game, com.emusync.local.saves.LocalSaveTargets())
         val names = listOf("save.dat", "slot/options.ini")
         assertFalse(form.canSave(names, form.restorePaths(names)))
         val destination = File(directory, "restores")
@@ -78,7 +78,7 @@ class GameEditFormStateTest {
     fun `whole folder restore produces one directory target`(@TempDir directory: File) {
         val game = testGameItem("Game", emulator())
         val form =
-            GameEditFormState(game).apply {
+            GameEditFormState(game, com.emusync.local.saves.LocalSaveTargets()).apply {
                 restoreDestinationFolder = directory.path
                 restoreWholeFolder = true
             }
@@ -96,7 +96,10 @@ class GameEditFormStateTest {
         @TempDir directory: File
     ) {
         val game = testGameItem("Game", emulator())
-        val form = GameEditFormState(game).apply { restoreDestinationFolder = directory.path }
+        val form =
+            GameEditFormState(game, com.emusync.local.saves.LocalSaveTargets()).apply {
+                restoreDestinationFolder = directory.path
+            }
         val names = listOf("../escape.dat", "/absolute.dat")
 
         assertTrue(form.restorePaths(names).isEmpty())
@@ -107,7 +110,7 @@ class GameEditFormStateTest {
     @Test
     fun `invalid edited cloud names disable saving even without cloud restore`() {
         val game = testGameItem("Game", emulator())
-        val form = GameEditFormState(game)
+        val form = GameEditFormState(game, com.emusync.local.saves.LocalSaveTargets())
         form.saves.updateCloudPath(0, "../escape.dat")
 
         assertFalse(form.canSave(emptyList(), emptyList()))

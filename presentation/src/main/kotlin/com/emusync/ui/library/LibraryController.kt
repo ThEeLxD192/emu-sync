@@ -5,6 +5,7 @@ import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetAccess
 import com.emusync.domain.sync.SaveSynchronizerFactory
 import com.emusync.ui.AppStatus
 import com.emusync.ui.AppUiState
@@ -18,8 +19,10 @@ import com.emusync.ui.recoverUiFailure
 import com.emusync.ui.restoreUiOnCancellation
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 
 /**
  * Coordinates library loading, save synchronization and game sessions independently of
@@ -30,6 +33,8 @@ internal class LibraryController(
     private val synchronizers: SaveSynchronizerFactory,
     private val operations: LibraryOperationCoordinator,
     private val callbacks: LibraryCallbacks,
+    private val saveTargets: SaveTargetAccess,
+    private val ioDispatcher: CoroutineDispatcher,
 ) {
     private val loadGames
         get() = callbacks.loadGames
@@ -197,6 +202,7 @@ internal class LibraryController(
             var configuredItem = item
             createSaveSynchronizer(synchronizers, cfg, ::publishStatus).playWithSync(
                 item,
+                saveTargets,
                 resolveConfiguredItem = { configuredItem },
             ) { requested, notice, names ->
                 val result = requestSaveSetup(requested, notice, names)
@@ -235,11 +241,14 @@ internal class LibraryController(
         displayed =
             status.copy(
                 onRetry = {
-                    operations.runIfIdle {
-                        // A callback retained by an old dialog cannot replay a completed upload.
-                        if (state.value.status === displayed) {
-                            status.onRetry()
-                            refreshConnection()
+                    withContext(ioDispatcher) {
+                        operations.runIfIdle {
+                            // A callback retained by an old dialog cannot replay a completed
+                            // upload.
+                            if (state.value.status === displayed) {
+                                status.onRetry()
+                                refreshConnection()
+                            }
                         }
                     }
                 }

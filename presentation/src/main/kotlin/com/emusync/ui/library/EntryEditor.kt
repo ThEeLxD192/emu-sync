@@ -5,6 +5,7 @@ import com.emusync.application.library.EntryEditResult
 import com.emusync.application.library.GameOverrideChanges
 import com.emusync.domain.config.ConfigurationStore
 import com.emusync.domain.library.GameEntry
+import com.emusync.domain.library.SaveTargetAccess
 import com.emusync.domain.library.SteamLibrary
 import com.emusync.domain.sync.SaveSynchronizer
 import com.emusync.domain.sync.SaveSynchronizerFactory
@@ -23,6 +24,7 @@ internal class EntryEditor(
     synchronizers: SaveSynchronizerFactory,
     steam: SteamLibrary,
     private val callbacks: EntryEditCallbacks,
+    private val saveTargets: SaveTargetAccess,
 ) {
     private val edits =
         EditLibrary(
@@ -80,11 +82,15 @@ internal class EntryEditor(
         else
             publish(
                 latest,
-                edits.editGameOverride(config, game.copy(entry = latest).toSyncGame(), changes),
+                edits.editGameOverride(
+                    config,
+                    game.copy(entry = latest).toSyncGame(saveTargets),
+                    changes,
+                ),
             )
     }
 
-    private suspend fun publish(oldEntry: GameEntry, result: EntryEditResult?): Boolean {
+    suspend fun publish(oldEntry: GameEntry, result: EntryEditResult?): Boolean {
         if (result == null) return false
         state.update { it.copy(config = result.config) }
         if (state.value.selectedEntry?.name == oldEntry.name) callbacks.selectEntry(result.entry)

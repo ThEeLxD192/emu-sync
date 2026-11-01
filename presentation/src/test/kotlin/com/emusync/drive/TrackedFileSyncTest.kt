@@ -14,7 +14,7 @@ import com.emusync.local.saves.TrackedFileSync
 import com.emusync.ui.AppStatus
 import com.emusync.ui.createSaveSynchronizer
 import com.emusync.ui.library.components.key
-import com.emusync.ui.library.sync.playWithSync
+import com.emusync.ui.playWithSync
 import com.emusync.ui.testGameItem
 import java.io.File
 import java.time.Instant

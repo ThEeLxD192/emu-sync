@@ -473,7 +473,7 @@ class LibraryConcurrencyTest {
             }
         )
 
-    private fun controller(
+    private suspend fun controller(
         directory: File,
         state: MutableStateFlow<AppUiState>,
         client: HttpClient,
@@ -491,5 +491,11 @@ class LibraryConcurrencyTest {
             },
             operations,
             LibraryCallbacks(::loadTestLibraryGames, {}, { _, _ -> }),
+            com.emusync.local.saves.LocalSaveTargets(),
+            checkNotNull(
+                kotlinx.coroutines
+                    .currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor]
+                    as? kotlinx.coroutines.CoroutineDispatcher
+            ),
         )
 }

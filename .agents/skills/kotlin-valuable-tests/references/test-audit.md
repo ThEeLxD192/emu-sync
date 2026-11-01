@@ -480,3 +480,54 @@ vigentes están limpios. Los reportes históricos se conservan al retirar builds
 El AppImage se regeneró con las fuentes finales y volvió a abrir la ventana bajo Xvfb
 con el runtime incluido y configuración temporal, dentro de un contenedor desechable.
 El commit de validación y limpieza está autorizado; Windows nativo sigue pendiente.
+
+
+## Revisión posterior a H8 — efectos visuales y dependencias verificadas
+
+Fecha: 2026-10-31; base `f7c7248`, commit previo de H8 ya registrado. Windows nativo
+continúa pendiente. Se conservan los 434 casos por escenario anteriores y se
+registran siete regresiones nuevas, sin retiradas: **440 métodos, 441 casos, 72 suites
+y 83 archivos Kotlin de pruebas/fixtures (11 fixtures)**.
+
+| Garantía | Evidencia que observa el fallo |
+| --- | --- |
+| Buscar y decodificar portadas fuera de Compose | GameCoverLoaderTest envía el descriptor al localizador en un worker real distinto del llamador, decodifica un PNG y comprueba caché/override. Los siete escenarios de CoverLookupTest pasan a plataforma con los mismos esperados independientes. |
+| Persistencia/Steam fuera del hilo visual y lecturas sin I/O | LibraryThreadingTest exige el worker en los contratos de almacén/Steam, prueba carga, reordenación, alta, renombrado, baja y desconexión; las lecturas repetidas de los indicadores no llaman adaptadores. |
+| Registro neutral con configuración vigente | SteamRegistrationTest conserva edición y credenciales que cambian durante el registro; la baja afecta solo al ID solicitado y los fallos/entradas ausentes no escriben configuración. |
+| Tipos tardíos y borrador coherente | SaveTargetFormStateTest cambia la ruta antes de completar la observación y mantiene el tipo nuevo; readFormDraft retiene ruta/título del instante de guardar y aplica el error de validación sin sobrescribir campos editados después. |
+| Dependencias de producción permitidas | La regresión Gradle desechable admite una dependencia de prueba; rechaza domain → application, Ktor en domain y fuentes raíz. También demuestra reutilización de caché. No cuenta como prueba JUnit de negocio. |
+
+GameItem ya no contiene capacidades ni búsqueda de archivos. Su regresión de identidad
+se adapta a descriptores/copias y resolución mediante el contrato explícito, sin perder
+la distinción por entrada/ROM ni mantener destinos antiguos. Los formularios usan ese
+contrato en sus límites de I/O. Las integraciones conservan disco/HTTP/procesos reales.
+
+Las pruebas de coordinación reciben el dispatcher de la corrutina llamadora: el intento
+inicial con Unconfined perdió el scheduler virtual del timeout OAuth y falló. Se corrigió
+la inyección, manteniendo el timeout y la regresión. Las pruebas nuevas de aislamiento
+usan workers reales que se cierran explícitamente; el resto conserva su scheduler.
+
+El cierre `spotlessApply check packageReleaseAppImage --no-daemon` pasó en 1 min 29 s,
+132 tareas (41 ejecutadas, 91 UP-TO-DATE). Ejecutó presentación (191 casos), plataforma
+(102) y desktopApp (uno); reutilizó dominio (58), application (cinco), local (31), Drive
+(40) y updates (13), correctos de esta integración. **439 aprobados, cero fallos/errores
+y dos omitidos PowerShell**. Los 17 SARIF están limpios, sin nuevas supresiones ni reglas
+relajadas. Hooks: nueve grupos PASS; convenciones: cinco grupos PASS, incluido el guard
+arquitectónico. Tiempos por módulo, comandos y límites en [AGENTS.md](../../../../AGENTS.md).
+
+El smoke visual encontró una ruta vacía clasificada como directorio por este JDK.
+Se amplió el escenario físico existente: falló con FILE esperado y DIRECTORY recibido;
+LocalSaveTargets.typeOf ahora devuelve null para rutas vacías/blancas. El cierre
+posterior con el mismo comando pasó en 1 min 15 s (132 tareas: 24 ejecutadas y 108
+UP-TO-DATE). Ejecutó local (31 casos), presentación (191) y desktopApp (uno); el resto
+reutilizó resultados correctos. Continúan **439 aprobados, dos omitidos PowerShell y
+cero fallos/errores**, con los 17 SARIF limpios. No se duplican escenarios para contar
+este límite adicional. El AppImage también mostró la portada y abrió ambos formularios;
+la validación vacía y el guardado de título conservaron la partida y la portada temporales.
+
+El artefacto regenerado tras corregir la ruta vacía se probó de nuevo bajo Xvfb:
+FILE inicial conservado, validación visible, preview y cuadrícula con la portada,
+guardado de título con partida/destinos intactos y cierre Safe Close con código cero.
+El builder y el runtime de prueba usaron red host porque bridge/veth no está disponible
+en este entorno. Artefacto/SHA-256 y comandos en AGENTS.md; no hubo cuentas reales,
+publicación ni validación nativa de Windows. El commit de la corrección está autorizado.

@@ -1,6 +1,7 @@
-package com.emusync.ui
+package com.emusync.desktop
 
 import com.emusync.domain.library.EmulatorSystem
+import com.emusync.domain.library.GameEntry
 import com.emusync.domain.library.NativePCGame
 import java.io.File
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -22,9 +23,9 @@ class CoverLookupTest {
                 romsDirectory = romDir.absolutePath,
                 extensions = listOf("iso"),
             )
-        val item = testGameItem(name = "Crash Bandicoot", entry = system, romFile = romFile)
+        val item = cover(name = "Crash Bandicoot", entry = system, romFile = romFile)
 
-        assertEquals(coverFile.absolutePath, item.coverFile?.absolutePath)
+        assertEquals(coverFile.absolutePath, item?.absolutePath)
     }
 
     @Test
@@ -42,9 +43,9 @@ class CoverLookupTest {
                 coversDirectory = coversDir.absolutePath,
                 extensions = listOf("iso"),
             )
-        val item = testGameItem(name = "God of War", entry = system, romFile = romFile)
+        val item = cover(name = "God of War", entry = system, romFile = romFile)
 
-        assertEquals(coverFile.absolutePath, item.coverFile?.absolutePath)
+        assertEquals(coverFile.absolutePath, item?.absolutePath)
     }
 
     @Test
@@ -68,13 +69,13 @@ class CoverLookupTest {
                 extensions = listOf("iso"),
             )
         val item =
-            testGameItem(
+            cover(
                 name = "Midnight Club 3 - DUB Edition Remix (USA)",
                 entry = system,
                 romFile = romFile,
             )
 
-        assertEquals(coverFile.absolutePath, item.coverFile?.absolutePath)
+        assertEquals(coverFile.absolutePath, item?.absolutePath)
     }
 
     @Test
@@ -89,9 +90,9 @@ class CoverLookupTest {
                 executablePath = execFile.absolutePath,
                 coverPath = coverFile.absolutePath,
             )
-        val item = testGameItem(name = "Spelunky", entry = nativeGame)
+        val item = cover(name = "Spelunky", entry = nativeGame)
 
-        assertEquals(coverFile.absolutePath, item.coverFile?.absolutePath)
+        assertEquals(coverFile.absolutePath, item?.absolutePath)
     }
 
     @Test
@@ -116,10 +117,10 @@ class CoverLookupTest {
                 extensions = listOf("gba"),
                 coverPathByRom = mapOf("Pokemon Emerald.gba" to individualCustomCover.absolutePath),
             )
-        val item = testGameItem(name = "Pokemon Emerald", entry = system, romFile = romFile)
+        val item = cover(name = "Pokemon Emerald", entry = system, romFile = romFile)
 
         // Priority 1 wins: individual custom cover!
-        assertEquals(individualCustomCover.absolutePath, item.coverFile?.absolutePath)
+        assertEquals(individualCustomCover.absolutePath, item?.absolutePath)
     }
 
     @Test
@@ -141,10 +142,10 @@ class CoverLookupTest {
                 extensions = listOf("gba"),
                 coverPathByRom = emptyMap(), // No individual cover set
             )
-        val item = testGameItem(name = "Metroid Fusion", entry = system, romFile = romFile)
+        val item = cover(name = "Metroid Fusion", entry = system, romFile = romFile)
 
         // Priority 2 wins: same folder as ROM!
-        assertEquals(sameFolderCover.absolutePath, item.coverFile?.absolutePath)
+        assertEquals(sameFolderCover.absolutePath, item?.absolutePath)
     }
 
     @Test
@@ -167,13 +168,16 @@ class CoverLookupTest {
                 extensions = listOf("gba"),
             )
         val item =
-            testGameItem(
+            cover(
                 name = "Castlevania - Aria of Sorrow (USA)",
                 entry = system,
                 romFile = romFile,
             )
 
         // Priority 3 wins: fallback in covers/ with region stripped!
-        assertEquals(fallbackCover.absolutePath, item.coverFile?.absolutePath)
+        assertEquals(fallbackCover.absolutePath, item?.absolutePath)
     }
+
+    private fun cover(name: String, entry: GameEntry, romFile: File? = null): File? =
+        DesktopCoverFiles().find(name, entry, romFile?.path)?.let(::File)
 }

@@ -11,7 +11,7 @@ import com.emusync.local.saves.resolveCloudRestorePaths
 import com.emusync.ui.AppStatus
 import com.emusync.ui.createSaveSynchronizer
 import com.emusync.ui.library.sync.formatSyncTimestamp
-import com.emusync.ui.library.sync.playWithSync
+import com.emusync.ui.playWithSync
 import com.emusync.ui.testGameItem
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine

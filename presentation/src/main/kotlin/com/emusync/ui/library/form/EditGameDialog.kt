@@ -35,8 +35,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,7 +52,8 @@ import androidx.compose.ui.window.Dialog
 import com.emusync.domain.execution.PickerType
 import com.emusync.domain.library.SaveTarget
 import com.emusync.ui.library.GameItem
-import com.emusync.ui.library.components.loadGameCover
+import com.emusync.ui.library.components.CoverPreview
+import com.emusync.ui.library.components.loadGameCoverAsync
 import com.emusync.ui.theme.EmuSyncColors
 import java.io.File
 import kotlinx.coroutines.launch
@@ -62,11 +68,18 @@ fun EditGameDialog(
     onDismiss: () -> Unit,
     onSave: (title: String?, saveTargets: List<SaveTarget>, coverPath: String?) -> Unit,
 ) {
-    val form = remember { GameEditFormState(game) }
-    val selectedRestorePaths =
-        remember(form.restoreDestinationFolder, form.restoreWholeFolder, cloudRestoreFileNames) {
-            form.restorePaths(cloudRestoreFileNames)
+    val loadedForm by
+        produceState<GameEditFormState?>(null, game, actions.saveTargets) {
+            value = readFormDraft { GameEditFormState(game, actions.saveTargets) }
         }
+    val form = loadedForm ?: return
+    var selectedRestorePaths by
+        remember(form.restoreDestinationFolder, form.restoreWholeFolder, cloudRestoreFileNames) {
+            mutableStateOf(emptyList<String>())
+        }
+    LaunchedEffect(form.restoreDestinationFolder, form.restoreWholeFolder, cloudRestoreFileNames) {
+        selectedRestorePaths = readFormDraft { form.restorePaths(cloudRestoreFileNames) }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -233,23 +246,13 @@ private fun GameEditFormState.GameTitleFields(game: GameItem) {
 @Composable
 private fun GameEditFormState.GameCoverArt(game: GameItem, actions: LibraryFormActions) {
     val form = this
-    val previewFile =
-        remember(coverPath) {
-            val trimmed = coverPath.trim()
-            if (trimmed.isNotBlank()) {
-                File(trimmed).takeIf { it.exists() && it.isFile }
-            } else {
-                game.coverFile
-            }
+    val preview by
+        produceState(CoverPreview(), game, coverPath, actions.covers) {
+            value = loadGameCoverAsync(game, actions.covers, coverPath)
         }
-
-    val previewBitmap =
-        remember(previewFile?.absolutePath) {
-            loadGameCover(previewFile)
-        }
-
+    val previewBitmap = preview.bitmap
     val isCustomCover = coverPath.isNotBlank()
-    val isAutoDetected = !isCustomCover && previewFile != null
+    val isAutoDetected = !isCustomCover && preview.path != null
 
     // ── Cover Art Section ─────────────────────────────
     Row(
@@ -281,7 +284,7 @@ private fun GameEditFormState.GameCoverArt(game: GameItem, actions: LibraryFormA
 
         Spacer(Modifier.width(16.dp))
 
-        CoverDetails(actions, form, game, isCustomCover, isAutoDetected)
+        CoverDetails(actions, form, game, preview.path, isCustomCover, isAutoDetected)
     }
 
     Spacer(Modifier.height(22.dp))
@@ -366,6 +369,7 @@ private fun RowScope.CoverDetails(
     actions: LibraryFormActions,
     form: GameEditFormState,
     game: GameItem,
+    detectedPath: String?,
     isCustomCover: Boolean,
     isAutoDetected: Boolean,
 ) {
@@ -389,7 +393,7 @@ private fun RowScope.CoverDetails(
                 placeholder = {
                     Text(
                         text =
-                            if (game.coverFile != null) game.coverFile?.name.orEmpty()
+                            if (detectedPath != null) File(detectedPath).name
                             else "Auto-detecting...",
                         color = EmuSyncColors.OnSurfaceDim.copy(alpha = 0.5f),
                         maxLines = 1,
@@ -463,6 +467,7 @@ private fun GameEditFormState.GameActions(
     onDismiss: () -> Unit,
     onSave: (String?, List<SaveTarget>, String?) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     // ── Action Buttons ────────────────────────────────
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -474,8 +479,10 @@ private fun GameEditFormState.GameActions(
         Button(
             enabled = canSave(cloudRestoreFileNames, selectedRestorePaths),
             onClick = {
-                val edit = result(game, cloudRestoreFileNames)
-                onSave(edit.title, edit.targets, edit.coverPath)
+                scope.launch {
+                    val edit = readFormDraft { result(game, cloudRestoreFileNames) }
+                    onSave(edit.title, edit.targets, edit.coverPath)
+                }
             },
             colors = ButtonDefaults.buttonColors(containerColor = EmuSyncColors.Primary),
         ) {

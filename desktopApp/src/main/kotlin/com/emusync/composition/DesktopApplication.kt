@@ -2,6 +2,7 @@ package com.emusync.composition
 
 import com.emusync.application.connection.CloudConnection
 import com.emusync.config.ConfigManager
+import com.emusync.desktop.DesktopCoverFiles
 import com.emusync.desktop.openConfigDirectory
 import com.emusync.desktop.picker.FilePicker
 import com.emusync.domain.config.CloudAuthorization
@@ -43,6 +44,7 @@ internal class DesktopApplication(
                 withContext(ioDispatcher) { FilePicker.pickPath(label, initial, type) }
             },
             SteamShortcutManager::detectFullscreenArgs,
+            DesktopCoverFiles(),
         )
 
     fun openConfigDirectory() = openConfigDirectory(store.configFile)
@@ -75,6 +77,7 @@ internal fun composeAppViewModel(
             },
             { gameRunner.openEmulator(it) },
             loadGames,
+            LocalSaveTargets(),
         ),
         CloudConnection(
             configManager,
@@ -87,7 +90,7 @@ internal suspend fun loadLibraryGames(entry: GameEntry): List<GameItem> =
     when (entry) {
         is EmulatorSystem ->
             scanRoms(entry.romsDirectory, entry.extensions).map {
-                GameItem(it.name, entry, it.file, LocalSaveTargets())
+                GameItem(it.name, entry, it.file)
             }
-        is NativePCGame -> listOf(GameItem(entry.name, entry, saveTargets = LocalSaveTargets()))
+        is NativePCGame -> listOf(GameItem(entry.name, entry))
     }

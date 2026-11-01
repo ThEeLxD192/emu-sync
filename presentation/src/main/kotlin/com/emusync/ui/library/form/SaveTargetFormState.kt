@@ -4,12 +4,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetAccess
 import com.emusync.domain.library.SaveTargetType
 import com.emusync.domain.sync.remotePathSegments
-import java.io.File
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Keeps each save path, its chosen type and its cloud name aligned as rows are edited. */
-internal class SaveTargetFormState(initialTargets: List<SaveTarget>) {
+internal class SaveTargetFormState(
+    initialTargets: List<SaveTarget>,
+    private val access: SaveTargetAccess,
+) {
     var savePaths by mutableStateOf(initialTargets.map { it.path }.ifEmpty { listOf("") })
         private set
 
@@ -26,7 +32,15 @@ internal class SaveTargetFormState(initialTargets: List<SaveTarget>) {
 
     fun updatePath(index: Int, value: String) {
         savePaths = savePaths.updated(index, value)
-        saveTypes = saveTypes.updated(index, formTargetType(value.trim(), saveTypes[index]))
+    }
+
+    suspend fun refreshType(
+        index: Int,
+        expectedPath: String,
+        ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ) {
+        val type = withContext(ioDispatcher) { access.typeOf(expectedPath.trim()) } ?: return
+        if (savePaths.getOrNull(index) == expectedPath) updateType(index, type)
     }
 
     fun updateType(index: Int, type: SaveTargetType) {
@@ -64,18 +78,11 @@ internal class SaveTargetFormState(initialTargets: List<SaveTarget>) {
             ?.let { trimmed ->
                 SaveTarget(
                     trimmed,
-                    formTargetType(trimmed, saveTypes.getOrElse(index) { SaveTargetType.FILE }),
+                    access.typeOf(trimmed) ?: saveTypes.getOrElse(index) { SaveTargetType.FILE },
                     saveCloudPaths.getOrElse(index) { "" }.trim().ifBlank { null },
                 )
             }
     }
-}
-
-private fun formTargetType(path: String, fallback: SaveTargetType): SaveTargetType {
-    val file = File(path)
-    return if (file.exists()) {
-        if (file.isDirectory) SaveTargetType.DIRECTORY else SaveTargetType.FILE
-    } else fallback
 }
 
 private fun <T> List<T>.updated(index: Int, value: T): List<T> =

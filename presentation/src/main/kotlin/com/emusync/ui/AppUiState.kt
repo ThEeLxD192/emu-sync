@@ -11,6 +11,8 @@ import com.emusync.ui.updates.UpdateUiState
 data class AppUiState(
     val config: AppConfig? = null,
     val selectedEntry: GameEntry? = null,
+    val steamAvailable: Boolean = false,
+    val steamRegisteredEntries: Set<String> = emptySet(),
     val gameItems: List<GameItem> = emptyList(),
     val status: AppStatus = AppStatus.Idle,
     val isLoading: Boolean = false,

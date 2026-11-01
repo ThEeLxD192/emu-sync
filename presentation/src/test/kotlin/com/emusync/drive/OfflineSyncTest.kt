@@ -7,7 +7,7 @@ import com.emusync.domain.execution.BrowserLauncher
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.ui.AppStatus
 import com.emusync.ui.createSaveSynchronizer
-import com.emusync.ui.library.sync.playWithSync
+import com.emusync.ui.playWithSync
 import com.emusync.ui.testGameItem
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine

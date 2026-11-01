@@ -13,6 +13,7 @@ val ktfmtVersion = catalog.findVersion("ktfmt").get().requiredVersion
 spotless {
     kotlin {
         target("src/**/*.kt")
+        if (project == rootProject) target("src/**/*.kt", "build-logic/src/**/*.kt")
         ktfmt(ktfmtVersion).kotlinlangStyle()
     }
     kotlinGradle {

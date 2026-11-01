@@ -7,7 +7,8 @@ acordada usa módulos Gradle JVM y conserva el comportamiento y los formatos act
 La primera entrega fue esta guía y la skill local de pruebas. H0–H5 están
 completados. Las implementaciones de H6 y H7 y la validación final de H8 están
 verificadas en Linux; queda pendiente su validación nativa en Windows. H6 está
-registrado en `d54561a` y H7 en `46e1c1b`. H8 sigue abierto por Windows. El usuario
+registrado en `d54561a`, H7 en `46e1c1b` y la validación/limpieza Linux de H8 en
+`f7c7248`. H8 sigue abierto por Windows. El usuario
 autorizó avanzar con H7 y después con H8 conservando el pendiente de Windows de H6,
 y autorizó el commit de validación con una limpieza previa de restos de la migración.
 Documentar un hito no significa ejecutarlo.
@@ -30,7 +31,7 @@ o que obliguen a eliminar pruebas para reducir su número.
 
 ```text
 build-logic/                 # Convenciones JVM/calidad; build incluido
-  src/main/kotlin/           # Plugins precompilados .gradle.kts
+  src/main/kotlin/           # Convenciones precompiladas y verificador de arquitectura
 gradle/                     # Wrapper y catálogo con las versiones acordadas
 config/                     # Configuración de Detekt
 domain/                     # Modelos, reglas neutrales y contratos
@@ -967,5 +968,100 @@ Evidencia (2026-10-31, Linux; base H7 `46e1c1b`):
     arranque y con el mismo aviso SLF4J de proveedor ausente.
 
 **Validación final H8 verificada en Linux. H6, H7 y H8 siguen abiertos por Windows.
-Commit H8 autorizado (`chore: clean migration leftovers and record final validation`);
-su hash se registrará en la próxima actualización del seguimiento.**
+Commit H8: `f7c7248` (`chore: clean migration leftovers and record final validation`).**
+
+
+### Revisión posterior a H8 — I/O visual y protección de arquitectura
+
+Evidencia (2026-10-31, Linux; base `f7c7248`). El usuario autorizó corregir los
+hallazgos de la revisión y hacer un commit. Esta revisión no cierra Windows.
+
+- `GameItem` contiene solo datos y transformaciones visuales puras. La búsqueda de
+  portadas implementa el contrato neutral CoverFiles en plataforma; conserva overrides,
+  prioridad de carpetas, nombres normalizados y variantes de extensión. La cuadrícula
+  y el diálogo comparten una carga que resuelve la ruta, consulta metadatos y decodifica
+  dentro del dispatcher de I/O. Los resultados obsoletos se cancelan desde Compose.
+- La resolución de destinos se solicita explícitamente mediante SaveTargetAccess en
+  el límite de sincronización/formulario, sin guardar capacidades en el descriptor.
+  Se mantienen inferencia legacy, comprobación física y defensa de rutas restauradas.
+  Los formularios crean y resuelven borradores fuera del hilo visual con snapshots
+  coherentes; una detección de tipo pendiente no altera una ruta editada después.
+  Las elecciones de restauración se invalidan al cambiar el destino.
+- AppViewModel ofrece operaciones suspendidas sobre un dispatcher inyectable, con
+  I/O serializado por defecto y cancelación estructurada. Carga, escrituras, OAuth,
+  instalación y reintentos dejan de ejecutar efectos bloqueantes en Compose. Las
+  consultas visuales de Steam leen un snapshot de AppUiState, actualizado al cargar
+  y al editar/registrar/desregistrar, sin releer VDF durante la composición.
+- SteamRegistration en application coordina alta/baja e ID persistido a través de
+  contratos. Usa la entrada vigente y modifica solo su ID sobre la configuración más
+  reciente, conservando ediciones y credenciales concurrentes. Un fallo de Steam no
+  escribe un ID; una entrada eliminada no se recrea. La UI traduce el resultado y los
+  errores a su estado. No se introduce transacción distribuida ni se altera el formato.
+- `verifyModuleArchitecture` forma parte de qualityCheck/check y del precommit.
+  Verifica las aristas de proyecto de producción declaradas e heredadas en las
+  configuraciones main, familias de bibliotecas incompatibles con cada capa y ausencia
+  de fuentes raíz. Los tests pueden conectar adaptadores sin romper el grafo productivo.
+  La regresión desechable demuestra rechazo de domain → application, Ktor en domain
+  y fuentes raíz, aceptación de una dependencia de prueba y reutilización de caché.
+  Spotless raíz incluye también las clases Kotlin de build-logic. Sin nuevas versiones,
+  reglas relajadas, supresiones ni accesos especiales del compilador.
+- Se conservan los 434 casos anteriores. Las siete comprobaciones de búsqueda de
+  portadas pasan de presentación a plataforma; se añaden siete regresiones: tres de
+  registro Steam, una del worker de biblioteca y caché visual, una de búsqueda/preview
+  de portadas en el worker y dos de borradores/tipos tardíos. Resultado:
+  **216 archivos Kotlin de producción, 83 de pruebas/fixtures (11 fixtures),
+  440 métodos y 441 casos en 72 suites**. El verificador Gradle es una clase adicional
+  del build incluido, ajena a esas cifras. [Matriz](.agents/skills/kotlin-valuable-tests/references/test-audit.md)
+  y [catálogo](.agents/skills/kotlin-valuable-tests/references/test-audit-cases.md) actualizados.
+- Comprobación focalizada de registro, portadas, worker y formularios correcta; tras
+  detectar que el fixture Unconfined convertía el timeout OAuth virtual en real,
+  la composición de prueba toma el dispatcher de su corrutina llamadora. La regresión
+  de timeout vuelve a pasar con su scheduler, sin aumentar tiempos ni omitirla.
+  El análisis del nuevo localizador señaló la complejidad del antiguo getter; se
+  dividió en helpers de prioridad con sus regresiones originales. Sin supresiones.
+- Cierre:
+
+  ```bash
+  ./gradlew spotlessApply check packageReleaseAppImage --no-daemon
+  ```
+
+  `BUILD SUCCESSFUL` en 1 min 29 s; 132 tareas, 41 ejecutadas y 91 UP-TO-DATE.
+  **441 casos vigentes: 439 aprobados, cero fallos/errores y dos omitidos PowerShell**.
+  En el cierre se ejecutaron plataforma (102 casos, 9,804 s JUnit), presentación
+  (191, 6,782 s) y desktopApp (uno, 0,716 s). Dominio (58, 0,685 s), application
+  (cinco, 0,392 s), local (31, 0,882 s), Drive (40, 4,909 s) y updates (13, 1,717 s)
+  reutilizaron resultados correctos de esta integración; no son 441 ejecuciones nuevas.
+  Los **17 SARIF vigentes están limpios**: main/test de presentación y plataforma
+  reutilizaron la comprobación afectada limpia; los otros trece análisis se ejecutaron.
+  Hooks: nueve grupos PASS; convenciones: los cuatro grupos anteriores y el nuevo
+  grupo de arquitectura, todos PASS. Se preparó el staging Linux de desktopApp.
+- El smoke visual del AppImage detectó que este JDK interpreta File("") como el
+  directorio actual: una observación asíncrona cambiaba el tipo inicial de la fila
+  vacía a DIRECTORY. Se amplió la regresión física existente y falló antes de corregir
+  LocalSaveTargets.typeOf para devolver null en rutas vacías/blancas. Cierre posterior
+  con el mismo comando: correcto en **1 min 15 s**, 132 tareas (24 ejecutadas y 108
+  UP-TO-DATE). Ejecutó local (31 casos, 0,450 s), presentación (191, 5,649 s) y desktopApp
+  (uno, 0,498 s); las otras suites reutilizaron sus resultados correctos anteriores.
+  Se mantienen 439 aprobados y dos omitidos, sin fallos/errores y con 17 SARIF limpios.
+  No se añade un caso JUnit por duplicado ni se cambia la regla de tipos físicos.
+- Distribución final: la red bridge de Docker falló por falta de soporte veth en
+  este host; `docker build --network=host -t emu-sync-builder:latest .` y la ejecución
+  del builder con `--network=host` pasaron sin montar fuentes ni builds del host.
+  El Gradle del contenedor pasó en 33 s (33 tareas ejecutadas); AppStream y appimagetool
+  correctos. AppImage independiente de 106.662.392 bytes en
+  `/tmp/emusync-architecture-appimage/EmuSync-x86_64.AppImage`, SHA-256
+  `ddd335190dcb81f83dfa90974a085b8ae8dbe14cd1a17ec7c3cbb73857012644`.
+  Se extrajo y arrancó con el runtime incluido bajo Xvfb, en un contenedor desechable
+  con configuración, portada PNG y partida de prueba. Se comprobó la portada en la
+  cuadrícula y en Edit Game, la apertura de Add New Entry, su tipo inicial FILE y la
+  validación de campos vacíos. Guardar Smoke Edited conservó el contenido SAVE, el
+  destino y la portada; Safe Close terminó el contenedor con código cero. Sin errores
+  de arranque/operación; solo el aviso SLF4J de proveedor ausente. Se eliminó el contenedor.
+  No se comprobó montaje FUSE ni instalación Windows.
+- Se mantiene el pendiente de MSI/EXE, instalación y ejecución Windows nativos, sin
+  publicación, push ni cuentas reales de Drive/Steam. Sigue la limitación del plugin
+  Detekt diagnosticada en H2. Las revisiones de fuentes, catálogo y enlaces locales
+  no requieren repetir las suites por cambios únicamente documentales.
+
+Commit de esta revisión autorizado (`refactor: isolate presentation IO and enforce module boundaries`);
+su hash se registrará en la próxima actualización del seguimiento.

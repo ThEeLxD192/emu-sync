@@ -3,7 +3,7 @@ package com.emusync.ui.library
 import com.emusync.domain.library.NativePCGame
 import com.emusync.domain.library.SaveTarget
 import com.emusync.domain.library.SaveTargetType
-import com.emusync.local.saves.LocalSaveTargets
+import com.emusync.ui.effectiveSaveTargets
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -13,12 +13,10 @@ import org.junit.jupiter.api.io.TempDir
 
 class GameItemTest {
     @Test
-    fun `equivalent displayed games retain their identity across resolver instances and copies`(
-        @TempDir directory: File
-    ) {
+    fun `equivalent displayed games retain their identity across copies`(@TempDir directory: File) {
         val entry = NativePCGame("Game", "game.exe")
-        val item = GameItem("Game", entry, saveTargets = LocalSaveTargets())
-        val sameGame = GameItem("Game", entry, saveTargets = LocalSaveTargets())
+        val item = GameItem("Game", entry)
+        val sameGame = GameItem("Game", entry)
         val selection = setOf(item)
         assertTrue(sameGame in selection)
         assertFalse(item.copy(romFile = File(directory, "another.rom")) in selection)

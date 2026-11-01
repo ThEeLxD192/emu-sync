@@ -11,7 +11,7 @@ import com.emusync.domain.sync.EntrySyncStatus
 import com.emusync.domain.sync.SyncDecision
 import com.emusync.ui.AppStatus
 import com.emusync.ui.createSaveSynchronizer
-import com.emusync.ui.library.sync.playWithSync
+import com.emusync.ui.playWithSync
 import com.emusync.ui.testGameItem
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine

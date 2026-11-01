@@ -90,8 +90,7 @@ Drive protocol/transfers. `application` coordinates workflows through domain con
 and downloads updates, and `platform:desktop` owns desktop integration. `presentation`
 contains Compose and UI controllers; `desktopApp` owns startup, dependency composition,
 resources and packaging. Root commands aggregate or delegate to these modules.
-Final Linux validation passes with 434 test cases (432 passed, two PowerShell cases
-skipped) and zero Detekt findings. Native Windows validation remains pending. See
+Final Linux validation and its test/analysis results are recorded in the migration roadmap. Native Windows validation remains pending. See
 [the migration roadmap](AGENTS.md).
 
 ```bash
@@ -106,7 +105,7 @@ skipped) and zero Detekt findings. Native Windows validation remains pending. Se
 ./gradlew :data:drive:test --tests 'com.emusync.drive.DriveTransferTest'
 ./gradlew :data:local:test --tests 'com.emusync.config.ConfigManagerTest'
 
-# Check formatting and static analysis without running tests
+# Check formatting, module boundaries and static analysis without running tests
 ./gradlew qualityCheck
 
 # Run quality checks and the unit tests (also required by CI)

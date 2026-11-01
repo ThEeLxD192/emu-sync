@@ -14,7 +14,7 @@ import com.emusync.domain.sync.SyncDecision
 import com.emusync.local.saves.resolveCloudRestoreTargets
 import com.emusync.ui.AppStatus
 import com.emusync.ui.createSaveSynchronizer
-import com.emusync.ui.library.sync.playWithSync
+import com.emusync.ui.playWithSync
 import com.emusync.ui.testGameItem
 import java.io.File
 import java.time.Instant

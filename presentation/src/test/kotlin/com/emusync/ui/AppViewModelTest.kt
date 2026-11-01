@@ -246,29 +246,30 @@ class AppViewModelTest {
     }
 
     @Test
-    fun `restartApp sets UpdateUiState Error when updateManager fails`(@TempDir tempDir: File) {
-        val failingManager =
-            object : DesktopUpdateInstaller() {
-                override fun restart(path: String): Boolean = false
-            }
-        val viewModel =
-            createTestViewModel(
-                configManager = ConfigManager(File(tempDir, "config.json")),
-                updates = testUpdates(failingManager),
-                httpClient = createMockHttpClient(),
-            )
+    fun `restartApp sets UpdateUiState Error when updateManager fails`(@TempDir tempDir: File) =
+        runTest {
+            val failingManager =
+                object : DesktopUpdateInstaller() {
+                    override fun restart(path: String): Boolean = false
+                }
+            val viewModel =
+                createTestViewModel(
+                    configManager = ConfigManager(File(tempDir, "config.json")),
+                    updates = testUpdates(failingManager),
+                    httpClient = createMockHttpClient(),
+                )
 
-        val testFile = File(tempDir, "update.AppImage").apply { createNewFile() }
-        val success = viewModel.restartApp(testFile)
+            val testFile = File(tempDir, "update.AppImage").apply { createNewFile() }
+            val success = viewModel.restartApp(testFile)
 
-        kotlin.test.assertFalse(success)
-        val state = viewModel.uiState.value.updateState
-        assertTrue(state is UpdateUiState.Error)
-        assertTrue(state.message.contains("Could not restart automatically"))
-    }
+            kotlin.test.assertFalse(success)
+            val state = viewModel.uiState.value.updateState
+            assertTrue(state is UpdateUiState.Error)
+            assertTrue(state.message.contains("Could not restart automatically"))
+        }
 
     @Test
-    fun `restartApp returns true when updateManager succeeds`(@TempDir tempDir: File) {
+    fun `restartApp returns true when updateManager succeeds`(@TempDir tempDir: File) = runTest {
         val succeedingManager =
             object : DesktopUpdateInstaller() {
                 override fun restart(path: String): Boolean = true

@@ -17,6 +17,12 @@ y sus controladores. La raíz no tiene fuentes y mantiene los comandos agregados
 calidad/pruebas y las delegaciones de ejecución/empaquetado a `desktopApp`.
 Los proyectos contenedores `:data` y `:platform` no tienen fuentes ni build propio.
 Los agregados raíz incorporan todos los subproyectos con build propio.
+`verifyModuleArchitecture`, incluido en `qualityCheck` y por tanto en `check` y el
+precommit, verifica las dependencias de producción declaradas e heredadas en
+api/implementation/compileOnly/runtimeOnly y los classpaths de main. Rechaza aristas
+fuera del grafo de AGENTS.md, familias Ktor/Compose/serialización incompatibles con
+cada capa y fuentes en la raíz. Las dependencias de prueba no se someten al grafo
+productivo. La tarea es compatible con la caché de configuración.
 
 ```bash
 ./gradlew :qualityCheck --no-daemon
@@ -32,7 +38,11 @@ con tipos de main/test/fixtures, formato bloqueante, bytecode Java 25 y reutiliz
 de la caché de configuración. Su hallazgo GlobalCoroutineUsage es deliberado, se
 verifica en el SARIF temporal y no se incorpora a la aplicación.
 
-Spotless de la raíz formatea también los scripts de este build. `qualityCheck`
+La suite desechable comprueba también que el verificador acepta dependencias de
+prueba, rechaza domain → application, Ktor en domain y fuentes añadidas a la raíz,
+y reutiliza la caché de configuración.
+
+Spotless de la raíz formatea también los scripts y clases Kotlin de este build. `qualityCheck`
 valida los plugins con `build-logic:check`. Los reportes de la aplicación y los
 módulos quedan en sus respectivos `build/test-results/` y `build/reports/`; CI los
 recoge recursivamente. Los módulos vacíos producen tareas NO-SOURCE, no resultados

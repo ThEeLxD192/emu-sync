@@ -1,7 +1,9 @@
 package com.emusync.ui.library.sync
 
+import com.emusync.application.library.gameTargets
 import com.emusync.domain.config.AppConfig
 import com.emusync.domain.library.SaveTarget
+import com.emusync.domain.library.SaveTargetAccess
 import com.emusync.domain.sync.EntrySyncStatus
 import com.emusync.domain.sync.SaveSetup
 import com.emusync.domain.sync.SaveSetupResult
@@ -21,8 +23,14 @@ private val syncDateFormatter =
 internal fun formatSyncTimestamp(epochMs: Long): String =
     syncDateFormatter.format(Instant.ofEpochMilli(epochMs))
 
-internal fun GameItem.toSyncGame() =
-    SyncGame(name, entry, romFile?.path, effectiveTitle, effectiveSaveTargets)
+internal fun GameItem.toSyncGame(saveTargets: SaveTargetAccess) =
+    SyncGame(
+        name,
+        entry,
+        romFile?.path,
+        effectiveTitle,
+        saveTargets.gameTargets(entry, romFile?.name),
+    )
 
 internal fun EntrySyncStatus.toUiStatus(): CloudSyncStatus =
     when (this) {
@@ -74,6 +82,7 @@ internal fun SyncEvent.toUiStatus(sync: SaveSynchronizer): AppStatus =
 /** Save dialogs may edit title/cover as well; only resolved sync data crosses into the service. */
 internal suspend fun SaveSynchronizer.playWithSync(
     item: GameItem,
+    saveTargets: SaveTargetAccess,
     resolveConfiguredItem: (GameItem) -> GameItem = { it },
     onRequestSaveSetup: suspend (GameItem, String?, List<String>) -> List<SaveTarget> = { _, _, _ ->
         emptyList()
@@ -81,7 +90,7 @@ internal suspend fun SaveSynchronizer.playWithSync(
 ) {
     var current = item
     playWithSync(
-        item.toSyncGame(),
+        item.toSyncGame(saveTargets),
         SaveSetup { request ->
             val notice =
                 if (request.cloudFileNames.isEmpty()) null
@@ -89,7 +98,7 @@ internal suspend fun SaveSynchronizer.playWithSync(
                     "Cloud save data was found for this game. Choose one destination folder; only these listed files will be synchronized for this game."
             val targets = onRequestSaveSetup(current, notice, request.cloudFileNames)
             current = resolveConfiguredItem(current)
-            SaveSetupResult(current.toSyncGame(), targets)
+            SaveSetupResult(current.toSyncGame(saveTargets), targets)
         },
     )
 }

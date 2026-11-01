@@ -44,7 +44,7 @@ internal class EntryFormState(initialEntry: GameEntry?, private val targets: Sav
     val coversDirectory = (initialEntry as? EmulatorSystem)?.coversDirectory.orEmpty()
     var coverPath by mutableStateOf((initialEntry as? NativePCGame)?.coverPath.orEmpty())
     var errorMessage by mutableStateOf<String?>(null)
-    val saves = SaveTargetFormState(initialEntry?.let(targets::forEntry).orEmpty())
+    val saves = SaveTargetFormState(initialEntry?.let(targets::forEntry).orEmpty(), targets)
 
     fun applyTypeDefaults() {
         if (entryType == EntryType.EMULATOR && arguments.isBlank()) arguments = "{ROM}"

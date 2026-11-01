@@ -1,3 +1,6 @@
+import org.gradle.api.artifacts.ExternalModuleDependency
+import org.gradle.api.artifacts.ProjectDependency
+
 plugins {
     id("emusync.kotlin-jvm")
     // Declare shared plugin versions once for the module classpaths.
@@ -9,7 +12,59 @@ plugins {
 // Grouping projects (:data and :platform) have no build file or source sets.
 val modules = subprojects.filter { it.buildFile.isFile }.map { it.path }
 
+val verifyModuleArchitecture =
+    tasks.register<VerifyModuleArchitecture>("verifyModuleArchitecture") {
+        group = "verification"
+        description = "Checks the production module graph and prevents root sources."
+        projectDependencies.convention(emptyMap())
+        libraryDependencies.convention(emptyMap())
+        rootSources.from(fileTree("src"))
+    }
+
+allprojects {
+    if (buildFile.isFile) {
+        val owner = path
+        afterEvaluate {
+            val production = configurations.filter {
+                it.name in
+                    setOf(
+                        "api",
+                        "implementation",
+                        "compileOnly",
+                        "runtimeOnly",
+                        "compileClasspath",
+                        "runtimeClasspath",
+                    )
+            }
+            val edges =
+                production
+                    .flatMap {
+                        it.allDependencies.withType(ProjectDependency::class.java).map { dependency
+                            ->
+                            dependency.path
+                        }
+                    }
+                    .distinct()
+                    .sorted()
+            val libraries =
+                production
+                    .flatMap { configuration ->
+                        configuration.allDependencies
+                            .withType(ExternalModuleDependency::class.java)
+                            .map { "${it.group}:${it.name}" }
+                    }
+                    .distinct()
+                    .sorted()
+            verifyModuleArchitecture.configure {
+                projectDependencies.put(owner, edges)
+                libraryDependencies.put(owner, libraries)
+            }
+        }
+    }
+}
+
 tasks.named("qualityCheck") {
+    dependsOn(verifyModuleArchitecture)
     dependsOn(modules.map { "$it:qualityCheck" })
     dependsOn(gradle.includedBuild("build-logic").task(":check"))
 }

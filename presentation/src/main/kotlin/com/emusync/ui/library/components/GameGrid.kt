@@ -67,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.emusync.domain.library.CoverFiles
 import com.emusync.domain.library.EmulatorSystem
 import com.emusync.domain.library.GameEntry
 import com.emusync.ui.library.GameItem
@@ -82,6 +83,7 @@ private const val EDIT_BUTTON_VISIBILITY_THRESHOLD = 0.01f
 @Composable
 fun GameGrid(
     items: List<GameItem>,
+    covers: CoverFiles,
     selectedEntry: GameEntry?,
     isLoading: Boolean,
     syncStatus: CloudSyncStatus = CloudSyncStatus.IDLE,
@@ -208,6 +210,7 @@ fun GameGrid(
                     },
                 ) { gameItem ->
                     GameCard(
+                        covers = covers,
                         item = gameItem,
                         onClick = { onGameClicked(gameItem) },
                         onEdit = { onEditGame(gameItem) },
@@ -364,6 +367,7 @@ private fun CloudStatusChip(
 @Composable
 private fun GameCard(
     item: GameItem,
+    covers: CoverFiles,
     onClick: () -> Unit,
     onEdit: (() -> Unit)? = null,
 ) {
@@ -372,7 +376,7 @@ private fun GameCard(
 
     val coverBitmap =
         produceState<ImageBitmap?>(initialValue = null, key1 = item) {
-                value = loadGameCoverAsync(item.coverFile)
+                value = loadGameCoverAsync(item, covers).bitmap
             }
             .value
 

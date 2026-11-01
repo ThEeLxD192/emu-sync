@@ -19,6 +19,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +47,7 @@ internal fun ColumnScope.EntrySaveFields(
         Spacer(Modifier.height(4.dp))
 
         savePaths.forEachIndexed { index, path ->
+            LaunchedEffect(path) { refreshType(index, path) }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -219,6 +221,7 @@ private fun GameEditFormState.GameRestoreFields(
 @Composable
 private fun SaveTargetFormState.GameSaveRows(actions: LibraryFormActions) {
     savePaths.forEachIndexed { index, path ->
+        LaunchedEffect(path) { refreshType(index, path) }
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,

@@ -104,3 +104,42 @@ fi
 grep -q ':domain:spotlessKotlinCheck FAILED' failed-format.log ||
     fail 'fixture formatting did not block root qualityCheck'
 echo 'PASS: an unformatted test fixture blocks exact root qualityCheck'
+
+# Test dependencies may connect real adapters; production edges must obey the layer graph.
+cat >> domain/build.gradle.kts <<'GRADLE'
+
+dependencies { testImplementation(project(":application")) }
+GRADLE
+if ! bash ./gradlew :verifyModuleArchitecture --configuration-cache --no-daemon > architecture-tests.log 2>&1; then
+    fail 'architecture guard rejected an allowed test dependency'
+fi
+if ! bash ./gradlew :verifyModuleArchitecture --configuration-cache --no-daemon > architecture-cached.log 2>&1; then
+    fail 'cached architecture verification failed'
+fi
+grep -q 'Configuration cache entry reused' architecture-cached.log || fail 'architecture verification did not reuse configuration cache'
+cat >> domain/build.gradle.kts <<'GRADLE'
+
+dependencies { implementation(project(":application")) }
+GRADLE
+if bash ./gradlew :verifyModuleArchitecture --no-daemon > architecture-failed.log 2>&1; then
+    fail 'architecture guard accepted domain -> application in production'
+fi
+grep -q ':domain -> :application' architecture-failed.log || fail 'architecture guard did not identify the forbidden edge'
+# Remove only the forbidden declaration in this disposable fixture.
+sed -i '/dependencies { implementation(project(":application")) }/d' domain/build.gradle.kts
+cat >> domain/build.gradle.kts <<'GRADLE'
+
+dependencies { implementation(libs.ktor.client.core) }
+GRADLE
+if bash ./gradlew :verifyModuleArchitecture --no-daemon > architecture-library-failed.log 2>&1; then
+    fail 'architecture guard accepted Ktor in domain'
+fi
+grep -q ':domain -> io.ktor:ktor-client-core' architecture-library-failed.log || fail 'architecture guard did not identify the forbidden library'
+sed -i '/dependencies { implementation(libs.ktor.client.core) }/d' domain/build.gradle.kts
+mkdir -p src/main/kotlin
+printf 'class StrayRootSource\n' > src/main/kotlin/StrayRootSource.kt
+if bash ./gradlew :verifyModuleArchitecture --no-daemon > root-sources-failed.log 2>&1; then
+    fail 'architecture guard accepted root source files'
+fi
+grep -q 'Root source files are forbidden' root-sources-failed.log || fail 'root source failure did not come from the architecture guard'
+echo 'PASS: architecture permits test dependencies, rejects forbidden production edges, libraries and root sources, and reuses configuration cache'

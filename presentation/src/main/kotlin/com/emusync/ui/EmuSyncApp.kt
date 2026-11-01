@@ -121,6 +121,7 @@ fun EmuSyncApp(
 
                     // Right content area (game grid)
                     GameGrid(
+                        covers = actions.covers,
                         items = uiState.gameItems,
                         selectedEntry = uiState.selectedEntry,
                         isLoading = uiState.isLoading,
@@ -236,7 +237,7 @@ fun EmuSyncApp(
                         scope.launch { viewModel.downloadAndApplyUpdate(info) }
                     },
                     onRestart = { file ->
-                        viewModel.restartApp(file)
+                        scope.launch { viewModel.restartApp(file) }
                     },
                 )
             }

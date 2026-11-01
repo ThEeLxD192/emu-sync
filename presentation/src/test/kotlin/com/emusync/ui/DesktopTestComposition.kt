@@ -1,6 +1,8 @@
 package com.emusync.ui
 
 import com.emusync.application.connection.CloudConnection
+import com.emusync.application.library.gameSpecificTargets
+import com.emusync.application.library.gameTargets
 import com.emusync.config.ConfigManager
 import com.emusync.domain.config.AppConfig
 import com.emusync.domain.config.CloudAuthorization
@@ -18,14 +20,18 @@ import com.emusync.steam.SteamShortcutManager
 import com.emusync.ui.library.GameItem
 import com.emusync.ui.library.LibraryServices
 import com.emusync.ui.library.sync.createSaveSynchronizer as createPresentationSynchronizer
+import com.emusync.ui.library.sync.playWithSync as playPresentationGame
 import com.emusync.ui.updates.UpdateServices
 import com.emusync.update.DesktopUpdateInstaller
 import com.emusync.update.GitHubUpdateSource
 import com.emusync.update.UpdateStagingFiles
 import io.ktor.client.HttpClient
 import java.io.File
+import kotlin.coroutines.ContinuationInterceptor
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
 
-internal fun createTestViewModel(
+internal suspend fun createTestViewModel(
     configManager: ConfigManager,
     httpClient: HttpClient,
     steamManager: SteamShortcutManager = SteamShortcutManager(),
@@ -39,6 +45,7 @@ internal fun createTestViewModel(
     oauthFlow: OAuthFlow =
         OAuthFlow(httpClient, credentialStore = configManager, browser = DesktopBrowserLauncher()),
     loadGames: suspend (GameEntry) -> List<GameItem> = ::loadTestLibraryGames,
+    ioDispatcher: CoroutineDispatcher? = null,
 ) =
     AppViewModel(
         LibraryServices(
@@ -49,16 +56,21 @@ internal fun createTestViewModel(
             },
             { gameRunner.openEmulator(it) },
             loadGames,
+            LocalSaveTargets(),
         ),
         CloudConnection(
             configManager,
             CloudAuthorization { config, interactive -> oauthFlow.authorize(config, interactive) },
         ),
         updates,
+        ioDispatcher
+            ?: checkNotNull(
+                currentCoroutineContext()[ContinuationInterceptor] as? CoroutineDispatcher
+            ),
     )
 
 internal fun testGameItem(name: String, entry: GameEntry, romFile: File? = null) =
-    GameItem(name, entry, romFile, LocalSaveTargets())
+    GameItem(name, entry, romFile)
 
 internal fun createSaveSynchronizer(
     client: HttpClient,
@@ -82,3 +94,22 @@ internal suspend fun loadTestLibraryGames(entry: GameEntry): List<GameItem> =
             }
         is NativePCGame -> listOf(testGameItem(entry.name, entry))
     }
+
+internal val GameItem.effectiveSaveTargets
+    get() = LocalSaveTargets().gameTargets(entry, romFile?.name)
+internal val GameItem.gameSpecificSaveTargets
+    get() = LocalSaveTargets().gameSpecificTargets(entry, romFile?.name)
+internal val GameItem.effectiveSavePaths
+    get() = effectiveSaveTargets.map { it.path }
+internal val GameItem.gameSpecificSavePaths
+    get() = gameSpecificSaveTargets.map { it.path }
+
+internal suspend fun com.emusync.domain.sync.SaveSynchronizer.playWithSync(
+    item: GameItem,
+    resolveConfiguredItem: (GameItem) -> GameItem = { it },
+    onRequestSaveSetup:
+        suspend (GameItem, String?, List<String>) -> List<com.emusync.domain.library.SaveTarget> =
+        { _, _, _ ->
+            emptyList()
+        },
+) = playPresentationGame(item, LocalSaveTargets(), resolveConfiguredItem, onRequestSaveSetup)

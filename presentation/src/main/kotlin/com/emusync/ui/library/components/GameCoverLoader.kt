@@ -2,6 +2,8 @@ package com.emusync.ui.library.components
 
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import com.emusync.domain.library.CoverFiles
+import com.emusync.ui.library.GameItem
 import java.io.File
 import java.util.Collections
 import javax.imageio.ImageIO
@@ -48,3 +50,17 @@ internal suspend fun loadGameCoverAsync(
     file: File?,
     ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ): ImageBitmap? = withContext(ioDispatcher) { loadGameCover(file) }
+
+internal suspend fun loadGameCoverAsync(
+    item: GameItem,
+    covers: CoverFiles,
+    customPath: String? = null,
+    ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+): CoverPreview =
+    withContext(ioDispatcher) {
+        val path =
+            customPath?.trim()?.takeIf { it.isNotBlank() }
+                ?: covers.find(item.name, item.entry, item.romFile?.path)
+        val file = path?.let(::File)?.takeIf { it.isFile }
+        CoverPreview(file?.path, loadGameCover(file))
+    }

@@ -29,6 +29,9 @@ Tras H6 hay 431 métodos, 432 casos y 68 suites en 77 archivos Kotlin (nueve fix
 Se traslada plataforma con sus pruebas, se divide la suite mixta de actualizaciones
 y se añade únicamente la regresión de preparación Steam inyectada.
 Tras H7 hay 433 métodos, 434 casos y 70 suites en 81 archivos Kotlin (11 fixtures).
+Tras la revisión posterior de H8 hay 440 métodos, 441 casos y 72 suites en 83 archivos Kotlin (11 fixtures).
+Se conservan todos los escenarios anteriores y se añaden siete regresiones; las siete de
+búsqueda de portadas pasan a plataforma.
 Las pruebas visuales e integraciones viven en presentation y el ciclo de vida del
 propietario de recursos se comprueba en desktopApp; no se retiran escenarios.
 
@@ -629,9 +632,9 @@ Riesgo: crítica: persistir una edición bloqueada o mover la carpeta compartida
 | `renaming grouped native game updates only its own folder once` | conservar: garantía observable específica de este escenario |
 | `clearing a custom title migrates saves back to the default title` | conservar: garantía observable específica de este escenario |
 
-## ui/CoverLookupTest.kt
+## platform/desktop/CoverLookupTest.kt
 
-Fuente: [CoverLookupTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/CoverLookupTest.kt). Punto de entrada: `GameItem.coverFile`.
+Fuente: [CoverLookupTest.kt](../../../../platform/desktop/src/test/kotlin/com/emusync/desktop/CoverLookupTest.kt). Punto de entrada: `DesktopCoverFiles.find`.
 Nivel: integración local. Dobles/límites: archivos temporales y prioridades de ubicación explícitas.
 Riesgo: media: mostrar portada de otro origen ignorando override o fallback.
 
@@ -690,6 +693,7 @@ Riesgo: media: portada obsoleta tras reemplazo o excepción al abrir imagen corr
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
+| `grid and preview requests resolve and decode covers on the IO dispatcher` | añadir tras H8: el localizador exige un worker distinto del llamador; PNG real, caché compartida y override ausente sin fallback |
 | `async cover loading uses the same cache with an injected dispatcher` | conservar: garantía observable específica de este escenario |
 | `replacing cover content at the same path invalidates the cached bitmap` | conservar: garantía observable específica de este escenario |
 | `missing directory and corrupt covers fall back without crashing` | conservar: garantía observable específica de este escenario |
@@ -832,8 +836,10 @@ Riesgo: alta: desacoplar ruta/tipo/prefijo al borrar filas o aceptar traversal.
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
+| `late type discovery cannot change the type of a newer path` | añadir tras H8: un resultado de tipo pendiente no altera la ruta ni el tipo de la edición posterior |
+| `saving resolves a coherent draft even when fields change during IO dispatch` | añadir tras H8: snapshot coherente de ruta/título y publicación del error de validación conservando los valores nuevos |
 | `removing a row keeps the remaining path type and cloud name together` | conservar: garantía observable específica de este escenario |
-| `physical paths determine their type while missing paths retain the selected type` | conservar: garantía observable específica de este escenario |
+| `physical paths determine their type while missing paths retain the selected type` | conservar y ampliar tras H8: la observación asíncrona respeta rutas ausentes y vacías; archivo/directorio existentes conservan su tipo físico |
 | `blank rows are excluded and target values are trimmed` | conservar: garantía observable específica de este escenario |
 | `cloud path validation accepts relative names and rejects traversal or absolute paths` | conservar: garantía observable específica de este escenario |
 
@@ -1105,11 +1111,35 @@ presentation hacia desktopApp ni accesos especiales del compilador.
 
 Fuente: [GameItemTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/library/GameItemTest.kt).
 Punto de entrada: identidad de GameItem y copy(entry).
-Nivel: unidad con resolución local real en directorio temporal. Riesgo: medio: perder
-identidad visual al construir otro resolver o mantener los destinos antiguos tras editar.
-La prueba falló al introducir el resolver en la data class y pasó tras conservar
-la igualdad/hash originales, excluyendo la capacidad prestada.
+Nivel: unidad del descriptor visual y resolución de destinos mediante el contrato explícito.
+Riesgo: medio: perder identidad visual o mantener destinos antiguos tras copiar una entrada.
+En H7 se excluyó la capacidad de la igualdad; en la corrección posterior de H8 esa capacidad
+se elimina de GameItem y los destinos se consultan en el límite de la operación.
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
-| `equivalent displayed games retain their identity across resolver instances and copies` | añadir H7: pertenencia al conjunto de selección con otro resolver, distinción por ROM/entrada y destinos nuevos al copiar |
+| `equivalent displayed games retain their identity across copies` | conservar y adaptar tras H8: pertenencia al conjunto de selección, distinción por ROM/entrada y destinos nuevos al copiar sin capacidades en el descriptor |
+
+## application/library/SteamRegistrationTest.kt
+
+Fuente: [SteamRegistrationTest.kt](../../../../application/src/test/kotlin/com/emusync/application/library/SteamRegistrationTest.kt).
+Punto de entrada: `SteamRegistration.register / unregister`.
+Nivel: caso de uso con almacén neutral en memoria y Steam controlado.
+Riesgo: alto: sobrescribir ediciones/credenciales recientes al persistir el ID o crear una entrada eliminada.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `registration uses the latest entry and retains edits made during the Steam operation` | añadir tras H8: entrada reciente enviada a Steam; solo se añade el ID sobre los datos y credenciales vigentes |
+| `unregister clears only the requested Steam ID after the shortcut is removed` | añadir tras H8: se conserva el resto de la entrada y de la biblioteca |
+| `failed Steam registration does not persist an ID or recreate a removed entry` | añadir tras H8: fallo sin escritura; entrada ausente rechazada antes de otra llamada Steam |
+
+## presentation/LibraryThreadingTest.kt
+
+Fuente: [LibraryThreadingTest.kt](../../../../presentation/src/test/kotlin/com/emusync/ui/LibraryThreadingTest.kt).
+Punto de entrada: AppViewModel, carga/edición/reordenación/registro/desconexión y lecturas visuales Steam.
+Nivel: coordinación con dispatcher real de un solo hilo, contratos controlados y cliente MockEngine cerrado.
+Riesgo: alto: bloquear el hilo visual o repetir I/O al componer, y conservar indicadores obsoletos tras renombrar.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `library IO runs on its worker while Compose reads cached Steam state` | añadir tras H8: almacén y Steam exigen el worker; las lecturas repetidas de estado no llaman adaptadores; registro, renombrado y baja actualizan el indicador |
