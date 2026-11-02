@@ -546,3 +546,17 @@ caché. Es una integración de scripts/Git/Gradle y no añade casos JUnit de neg
 La evidencia del `check` local y el pendiente de Windows nativo se registran en
 [AGENTS.md](../../../../AGENTS.md). La reproducción controlada en Linux no equivale
 a ejecutar Git Bash en el runner Windows.
+
+## Corrección de formato en la copia de convenciones
+
+Fecha: 2026-11-02; base `207563c`. Se amplía la integración Gradle existente, sin
+añadir ni retirar escenarios Kotlin/JUnit de aplicación.
+
+| Garantía | Evidencia que observa el fallo |
+| --- | --- |
+| La copia desechable conserva las reglas LF del repositorio | El fixture usa Git real con `core.autocrlf=false` y `core.eol=crlf`. `:qualityCheck` debe aceptar las fuentes Kotlin/Gradle LF copiadas y generadas. Al omitir `.gitattributes`, la regresión falla y Spotless exige CRLF, reproduciendo el nuevo fallo Windows. |
+| Los defaults CRLF no permiten un fixture Kotlin CRLF | En la ejecución que ya rechazaba `Unformatted.kt` se añade `CrLfFixture.kt` con sintaxis y espacios válidos y terminación CRLF. El log debe identificar ambos archivos y fallar `:domain:spotlessKotlinCheck`; el fixture de formato incorrecto no puede ocultar la pérdida de la política LF. |
+
+La corrección copia `.gitattributes` y `.editorconfig`, manteniendo las convenciones
+de producción. No aplica formato automáticamente ni omite comprobaciones.
+Resultados y límites de plataforma en [AGENTS.md](../../../../AGENTS.md).

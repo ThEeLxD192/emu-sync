@@ -45,6 +45,11 @@ reutilizan `$BASH` en sus llamadas internas. La suite desechable antepone un
 `bash` que falla al PATH y verifica hooks con el intérprete explícito, también
 al reutilizar la caché de configuración.
 
+La copia conserva `.gitattributes` y `.editorconfig`. Su repositorio temporal usa
+`core.autocrlf=false` y `core.eol=crlf` para comprobar que las reglas LF de Kotlin
+y Gradle prevalecen sobre ese valor por defecto. El formato acepta las fuentes LF
+y rechaza un fixture CRLF, además del fixture con formato Kotlin incorrecto.
+
 La suite desechable comprueba también que el verificador acepta dependencias de
 prueba, rechaza domain → application, Ktor en domain y fuentes añadidas a la raíz,
 y reutiliza la caché de configuración.

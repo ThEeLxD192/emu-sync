@@ -16,6 +16,7 @@ fail() {
 
 cd "$source_root"
 cp gradlew gradlew.bat settings.gradle.kts build.gradle.kts gradle.properties "$fixture_root/"
+cp .gitattributes .editorconfig "$fixture_root/"
 cp -R gradle config "$fixture_root/"
 mkdir -p "$fixture_root/.githooks" "$fixture_root/scripts/tests" "$fixture_root/shadow-bin"
 cp .githooks/pre-commit "$fixture_root/.githooks/"
@@ -41,6 +42,11 @@ for module in domain application data/local data/drive data/updates platform/des
 done
 
 cd "$fixture_root"
+# Exercise LF source policies even when Git's default line endings are Windows-style.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+git init --quiet
+git config --local core.autocrlf false
+git config --local core.eol crlf
 cat > domain/build.gradle.kts <<'GRADLE'
 plugins {
     id("emusync.kotlin-jvm")
@@ -101,6 +107,7 @@ fi
 javap -verbose domain/build/classes/kotlin/testFixtures/FixtureValueKt.class > bytecode.log
 grep -q 'major version: 69' bytecode.log || fail 'test fixtures did not target Java 25'
 echo 'PASS: exact root tasks test modules and analyze main, test and fixtures with Java 25'
+echo 'PASS: LF Kotlin and Gradle sources pass with Git configured for CRLF'
 
 if ! EMUSYNC_BASH="$native_bash" PATH="$fixture_root/shadow-bin:$PATH" \
     "$BASH" ./gradlew :test :qualityCheck :verifyGitHooks --configuration-cache --no-daemon > cached.log 2>&1; then
@@ -118,12 +125,16 @@ grep -q 'failures="1"' domain/build/test-results/test/TEST-ConventionTest.xml ||
 echo 'PASS: a module assertion failure fails the exact root test task'
 
 printf 'fun unformatted( )= "fixture"\n' > domain/src/testFixtures/kotlin/Unformatted.kt
+printf 'fun lineEndingValue() = "fixture"\r\n' > domain/src/testFixtures/kotlin/CrLfFixture.kt
 if "$BASH" ./gradlew :qualityCheck --no-daemon > failed-format.log 2>&1; then
     fail 'root qualityCheck accepted an unformatted fixture'
 fi
 grep -q ':domain:spotlessKotlinCheck FAILED' failed-format.log ||
     fail 'fixture formatting did not block root qualityCheck'
+grep -q 'Unformatted.kt' failed-format.log || fail 'the malformed fixture was not rejected'
+grep -q 'CrLfFixture.kt' failed-format.log || fail 'the CRLF fixture was not rejected'
 echo 'PASS: an unformatted test fixture blocks exact root qualityCheck'
+echo 'PASS: a CRLF Kotlin fixture violates the LF policy despite Git CRLF defaults'
 
 # Test dependencies may connect real adapters; production edges must obey the layer graph.
 cat >> domain/build.gradle.kts <<'GRADLE'

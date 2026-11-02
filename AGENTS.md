@@ -1097,3 +1097,33 @@ Evidencia (2026-11-02, Linux; base `db90baa`):
 - Este host sigue siendo Linux. El log aportado demuestra el fallo Windows previo;
   la corrección requiere confirmación en el próximo CI Windows. No se ejecutaron
   MSI/EXE, instalación ni arranque nativos. H6/H7/H8 conservan su pendiente Windows.
+
+Commit de esta corrección: `207563c`
+(`fix: use explicit Git Bash for Windows CI checks`).
+
+### Corrección posterior — LF en la copia de convenciones
+
+Evidencia (2026-11-02, Linux; base `207563c`):
+
+- El nuevo log Windows aportado confirma ejecución mediante Git Bash y los nueve
+  grupos de hooks aprobados. Se detiene después en `:verifyGradleConventions` por
+  Spotless dentro del proyecto temporal. La copia omitía `.gitattributes` y podía
+  exigir CRLF para fuentes Kotlin/Gradle que el repositorio conserva en LF.
+- Se reprodujo antes de corregirlo: el fixture inicializa un repositorio temporal
+  con `core.autocrlf=false` y `core.eol=crlf`. `:verifyGradleConventions` falló en
+  25 s; el diff Spotless exige cambiar LF por CRLF. Solo se modificó la configuración
+  Git de la copia; no se alteraron el índice ni la configuración del repositorio real.
+- El script copia ahora `.gitattributes` y `.editorconfig`. La misma regresión acepta
+  las fuentes LF y mantiene la reutilización de caché. La comprobación negativa de
+  formato identifica tanto `Unformatted.kt` como el nuevo fixture CRLF de sintaxis
+  válida; no se omiten tareas ni se aplica formato para aceptar la copia.
+  [Matriz actualizada](.agents/skills/kotlin-valuable-tests/references/test-audit.md).
+- `./gradlew check --no-daemon`: `BUILD SUCCESSFUL` en 1 min 16 s; 101 tareas,
+  tres ejecutadas y 98 UP-TO-DATE, con caché de configuración reutilizada. Hooks:
+  nueve grupos PASS; convenciones: ocho grupos PASS, incluidos aceptación LF y
+  rechazo CRLF bajo defaults CRLF. Las suites JUnit y los análisis de los módulos
+  reutilizaron sus resultados anteriores; los 17 SARIF vigentes siguen sin hallazgos.
+  Sintaxis Bash y `git diff --check` correctos. No cambian escenarios de aplicación.
+- La reproducción usa Git/Gradle/Spotless reales en Linux. Sigue pendiente confirmar
+  el nuevo `check` en Windows; no se ejecutaron MSI/EXE ni instalación o arranque
+  Windows. H6/H7/H8 conservan su pendiente nativo.
