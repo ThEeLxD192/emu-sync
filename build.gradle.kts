@@ -1,93 +1,119 @@
-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
-
-val ktorVersion = providers.gradleProperty("ktorVersion").get()
-val serializationVersion = providers.gradleProperty("serializationVersion").get()
-val coroutinesVersion = providers.gradleProperty("coroutinesVersion").get()
+import org.gradle.api.artifacts.ExternalModuleDependency
+import org.gradle.api.artifacts.ProjectDependency
 
 plugins {
-    kotlin("jvm")
-    kotlin("plugin.serialization")
-    id("org.jetbrains.compose")
-    id("org.jetbrains.kotlin.plugin.compose")
+    id("emusync.kotlin-jvm")
+    // Declare shared plugin versions once for the module classpaths.
+    alias(libs.plugins.kotlin.serialization) apply false
+    alias(libs.plugins.compose) apply false
+    alias(libs.plugins.kotlin.compose) apply false
 }
 
-kotlin {
-    jvmToolchain(25)
-}
+// Grouping projects (:data and :platform) have no build file or source sets.
+val modules = subprojects.filter { it.buildFile.isFile }.map { it.path }
 
-dependencies {
-    // Compose Desktop
-    implementation(compose.desktop.currentOs)
-    implementation(compose.material3)
-    implementation(compose.materialIconsExtended)
-
-    // Ktor Client
-    implementation("io.ktor:ktor-client-core:$ktorVersion")
-    implementation("io.ktor:ktor-client-cio:$ktorVersion")
-    implementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
-
-    // Kotlin Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
-
-    // Kotlin Serialization
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:$serializationVersion")
-
-    // Test dependencies
-    testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:$coroutinesVersion")
-    testImplementation("io.ktor:ktor-client-mock:$ktorVersion")
-}
-
-tasks.withType<Test> {
-    useJUnitPlatform()
-    jvmArgs("--enable-native-access=ALL-UNNAMED")
-    testLogging {
-        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+val verifyModuleArchitecture =
+    tasks.register<VerifyModuleArchitecture>("verifyModuleArchitecture") {
+        group = "verification"
+        description = "Checks the production module graph and prevents root sources."
+        projectDependencies.convention(emptyMap())
+        libraryDependencies.convention(emptyMap())
+        rootSources.from(fileTree("src"))
     }
-}
 
-compose.desktop {
-    application {
-        mainClass = "MainKt"
-        jvmArgs += "--enable-native-access=ALL-UNNAMED"
-        javaHome = javaToolchains.launcherFor {
-            languageVersion.set(JavaLanguageVersion.of(25))
-        }.get().metadata.installationPath.asFile.absolutePath
-
-        buildTypes.release.proguard {
-            isEnabled.set(false)
-        }
-
-        nativeDistributions {
-            targetFormats(TargetFormat.AppImage, TargetFormat.Msi, TargetFormat.Exe)
-            packageName = "EmuSync"
-
-            // Include the HTTP server module needed by the OAuth loopback flow
-            modules("jdk.httpserver")
-            packageVersion = "1.1.1"
-            description = "Centralized game launcher and save sync manager"
-            vendor = "EmuSync"
-
-            linux {
-                iconFile.set(project.file("src/main/resources/icon.png"))
-                shortcut = true
-                appRelease = "1"
-                appCategory = "Game"
-                menuGroup = "Game"
+allprojects {
+    if (buildFile.isFile) {
+        val owner = path
+        afterEvaluate {
+            val production = configurations.filter {
+                it.name in
+                    setOf(
+                        "api",
+                        "implementation",
+                        "compileOnly",
+                        "runtimeOnly",
+                        "compileClasspath",
+                        "runtimeClasspath",
+                    )
             }
-            windows {
-                iconFile.set(project.file("src/main/resources/icon.ico"))
-                menu = true
-                shortcut = false
-                dirChooser = true
-                menuGroup = "EmuSync"
-                upgradeUuid = "a7b3c291-5f4e-4b28-98e1-d63f5e824c90"
+            val edges =
+                production
+                    .flatMap {
+                        it.allDependencies.withType(ProjectDependency::class.java).map { dependency
+                            ->
+                            dependency.path
+                        }
+                    }
+                    .distinct()
+                    .sorted()
+            val libraries =
+                production
+                    .flatMap { configuration ->
+                        configuration.allDependencies
+                            .withType(ExternalModuleDependency::class.java)
+                            .map { "${it.group}:${it.name}" }
+                    }
+                    .distinct()
+                    .sorted()
+            verifyModuleArchitecture.configure {
+                projectDependencies.put(owner, edges)
+                libraryDependencies.put(owner, libraries)
             }
         }
     }
 }
 
+tasks.named("qualityCheck") {
+    dependsOn(verifyModuleArchitecture)
+    dependsOn(modules.map { "$it:qualityCheck" })
+    dependsOn(gradle.includedBuild("build-logic").task(":check"))
+}
 
+tasks.named("test") { dependsOn(modules.map { "$it:test" }) }
+
+// CI passes Git Bash's native absolute path so Windows never selects the WSL launcher.
+val bashExecutable = providers.environmentVariable("EMUSYNC_BASH").orElse("bash")
+
+tasks.register<Exec>("installGitHooks") {
+    group = "build setup"
+    description = "Installs the versioned Git hooks for this clone without replacing custom hooks."
+    workingDir(rootDir)
+    commandLine(bashExecutable.get(), "scripts/install-git-hooks.sh")
+}
+
+val verifyGitHooks =
+    tasks.register<Exec>("verifyGitHooks") {
+        group = "verification"
+        description = "Tests Git hook isolation and installation in disposable repositories."
+        workingDir(rootDir)
+        commandLine(bashExecutable.get(), "scripts/tests/git-hooks-test.sh")
+    }
+
+val verifyGradleConventions =
+    tasks.register<Exec>("verifyGradleConventions") {
+        group = "verification"
+        description =
+            "Tests JVM conventions, aggregation and configuration cache in a disposable build."
+        workingDir(rootDir)
+        commandLine(bashExecutable.get(), "scripts/tests/gradle-conventions-test.sh")
+    }
+
+tasks.named("check") {
+    dependsOn(modules.map { "$it:check" })
+    dependsOn(verifyGitHooks)
+    dependsOn(verifyGradleConventions)
+}
+
+// Preserve exact root entry points for scripts, CI and local builds.
+listOf(
+        "run",
+        "runDistributable",
+        "createDistributable",
+        "createReleaseDistributable",
+        "packageReleaseAppImage",
+        "packageReleaseMsi",
+        "packageReleaseExe",
+    )
+    .forEach { name ->
+        tasks.register(name) { dependsOn(":desktopApp:$name") }
+    }

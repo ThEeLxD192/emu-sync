@@ -78,6 +78,69 @@ You can configure Google Drive credentials directly inside the app by clicking *
 
 ---
 
+### Code Quality
+
+Use JDK 25 and Git Bash on Windows. The pinned Spotless/ktfmt formatter applies to
+application code, tests, fixtures and Gradle Kotlin scripts. Detekt analyzes each
+JVM compilation with type resolution, with settings adapted to Compose and tests.
+Versions live in `gradle/libs.versions.toml`; shared configuration lives in
+[`build-logic`](build-logic/README.md). The `domain` module owns neutral models, sync rules and capability contracts.
+`data:local` owns configuration, history and recovery; `data:drive` owns OAuth and
+Drive protocol/transfers. `application` coordinates workflows through domain contracts; `data:updates` queries
+and downloads updates, and `platform:desktop` owns desktop integration. `presentation`
+contains Compose and UI controllers; `desktopApp` owns startup, dependency composition,
+resources and packaging. Root commands aggregate or delegate to these modules.
+Final Linux validation and its test/analysis results are recorded in the migration roadmap. Native Windows validation remains pending. See
+[the migration roadmap](AGENTS.md).
+
+In Git Bash on Windows, run `export EMUSYNC_BASH="$(cygpath -w "$BASH")"`
+before the Gradle commands below. This selects Git Bash for script tasks even when
+Windows resolves `bash.exe` to WSL. CI configures this automatically.
+
+```bash
+# Install the versioned pre-commit hook once per clone
+./gradlew installGitHooks
+
+# Apply formatting explicitly, then stage the formatted changes
+./gradlew spotlessApply
+
+# Run the extracted sync planner tests
+./gradlew :domain:test --tests 'com.emusync.domain.sync.SyncPlannerTest'
+./gradlew :data:drive:test --tests 'com.emusync.drive.DriveTransferTest'
+./gradlew :data:local:test --tests 'com.emusync.config.ConfigManagerTest'
+
+# Check formatting, module boundaries and static analysis without running tests
+./gradlew qualityCheck
+
+# Run quality checks and the unit tests (also required by CI)
+./gradlew check
+```
+
+The hook checks an isolated copy of the staged commit when Kotlin, Gradle or
+quality configuration changes. Unstaged edits remain untouched. Documentation-only
+and image-only commits skip these checks. The hook never formats or stages files
+and does not run tests. Gradle may download dependencies on the first run.
+
+During adoption, Detekt reports existing and new findings without blocking commits
+or CI. Formatting violations still block both. No baseline is generated. To enforce
+Detekt after the cleanup, set `ignoreFailures` to `false` in the Gradle configuration.
+A legitimate exception may use a suppression on the smallest declaration with an
+adjacent comment explaining why that rule does not apply. The target policy for
+production code is to handle nullable values explicitly instead of using `!!`;
+existing violations will be resolved incrementally. Document important contracts
+and design decisions with KDoc.
+Reports are written to each project's `build/reports/detekt/` and uploaded by CI
+even when analysis findings do not fail the build. Root `test`, `qualityCheck` and
+`check` aggregate the modules. `check` also verifies conventions in a disposable
+project, including test fixtures, failure propagation and configuration cache reuse.
+
+Git hooks can be bypassed and must be installed in each clone. Configure GitHub
+branch protection to require the Linux and Windows validation jobs before merging.
+The installer refuses to replace existing custom hook settings or active hooks.
+To uninstall this repository's hook, run `git config --local --unset core.hooksPath`.
+
+---
+
 ### Google Drive OAuth 2.0 Setup
 
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
@@ -232,9 +295,14 @@ Then run the AppImage:
 # Package for Windows (MSI installer & EXE bootstrapper)
 ./gradlew packageReleaseMsi packageReleaseExe
 
-# Package for Linux (AppImage)
+# Prepare the Linux application directory with its bundled runtime
 ./gradlew packageReleaseAppImage
 ```
+
+The Gradle Linux task prepares `desktopApp/build/compose/binaries/main-release/app/`.
+Use the Docker command above to generate the standalone `EmuSync-x86_64.AppImage`.
+Windows packaging requires a native Windows host; its final migration validation
+is still pending.
 
 ---
 
@@ -242,7 +310,7 @@ Then run the AppImage:
 
 EmuSync utilizes GitHub Actions for continuous integration and automated release packaging:
 
-- **CI Validation (`.github/workflows/ci.yml`)**: Runs on every push and pull request to `main`, verifying unit tests (`./gradlew test`) and Compose Desktop packaging across both Linux (AppImage) and Windows (MSI & EXE).
+- **CI Validation (`.github/workflows/ci.yml`)**: Runs on pushes to `main`/`develop` and pull requests, verifying quality and tests (`./gradlew check`), Linux application staging, and native Windows MSI/EXE packaging.
 - **Publish Release (`.github/workflows/release.yml`)**: Interactive manual trigger (`workflow_dispatch`) that:
   1. Prompts for the SemVer release type (`patch`, `minor`, `major`).
   2. Bumps the application version and creates the git tag (`vX.Y.Z`).

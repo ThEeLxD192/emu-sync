@@ -98,11 +98,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          MSI_FILE=$(find build/compose/binaries -type f -name "*.msi" | head -n 1)
-          EXE_FILE=$(find build/compose/binaries -type f -name "*.exe" | head -n 1)
+          MSI_FILE=$(find desktopApp/build/compose/binaries -type f -name "*.msi" | head -n 1)
+          EXE_FILE=$(find desktopApp/build/compose/binaries -type f -name "*.exe" | head -n 1)
           if [ -z "$MSI_FILE" ] || [ -z "$EXE_FILE" ]; then
-            echo "Error: MSI or EXE binary not found under build/compose/binaries"
-            find build/compose/binaries -type f || true
+            echo "Error: MSI or EXE binary not found under desktopApp/build/compose/binaries"
+            find desktopApp/build/compose/binaries -type f || true
             exit 1
           fi
           echo "Found MSI: $MSI_FILE"
@@ -164,7 +164,7 @@ jobs:
             ./scripts/bump-version.sh "${{ github.event.inputs.release_type }}"
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add src/main/kotlin/com/emusync/AppInfo.kt build.gradle.kts
+            git add desktopApp/src/main/kotlin/com/emusync/AppInfo.kt desktopApp/build.gradle.kts
             git commit -m "chore(release): ${RELEASE_TAG}"
             git tag "${RELEASE_TAG}"
             git push --atomic origin HEAD:main "refs/tags/${RELEASE_TAG}"

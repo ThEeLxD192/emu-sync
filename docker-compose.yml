@@ -1,5 +1,5 @@
 services:
-  # Builds and generates the EmuSync-1.0.0-x86_64.AppImage binary directly in the project root
+  # Builds EmuSync-x86_64.AppImage directly in the project root
   build:
     build:
       context: .
@@ -8,8 +8,19 @@ services:
     volumes:
       # Mount root directory to /out to deposit final AppImage executables
       - .:/out
-      - ./src:/app/src
       - ./scripts:/app/scripts
+      - ./build-logic:/app/build-logic
+      - ./gradle:/app/gradle
+      - ./settings.gradle.kts:/app/settings.gradle.kts:ro
+      - ./build.gradle.kts:/app/build.gradle.kts:ro
+      - ./gradle.properties:/app/gradle.properties:ro
+      - ./config:/app/config:ro
+      - ./domain:/app/domain
+      - ./application:/app/application
+      - ./data:/app/data
+      - ./platform:/app/platform
+      - ./presentation:/app/presentation
+      - ./desktopApp:/app/desktopApp
       # Mount ./build to persist build reports and local cache
       - ./build:/app/build
       # Persistent Gradle cache for faster incremental builds

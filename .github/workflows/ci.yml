@@ -31,17 +31,26 @@ jobs:
       - name: Setup Gradle Cache
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Run Unit Tests
-        run: ./gradlew test --no-daemon
+      - name: Check Quality and Run Unit Tests
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            export EMUSYNC_BASH="$(cygpath -w "$BASH")"
+          else
+            export EMUSYNC_BASH="$BASH"
+          fi
+          ./gradlew check --no-daemon
 
-      - name: Upload Test Reports
-        if: failure()
+      - name: Upload Quality and Test Reports
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: test-reports-${{ matrix.platform }}
           path: |
-            build/test-results/test/
-            build/reports/tests/test/
+            **/build/test-results/
+            **/build/reports/tests/
+            **/build/reports/detekt/
+            **/build/reports/plugin-development/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -57,4 +66,4 @@ jobs:
         if: failure() && matrix.platform == 'Windows'
         shell: bash
         run: |
-          find build/compose/logs -type f -exec echo "=== {} ===" \; -exec cat {} \; || true
+          find desktopApp/build/compose/logs -type f -exec echo "=== {} ===" \; -exec cat {} \; || true

@@ -1,18 +1,9 @@
 pluginManagement {
+    includeBuild("build-logic")
     repositories {
         google()
         mavenCentral()
         gradlePluginPortal()
-    }
-
-    val kotlinVersion = extra["kotlinVersion"] as String
-    val composePluginVersion = extra["composePluginVersion"] as String
-
-    plugins {
-        kotlin("jvm") version kotlinVersion
-        kotlin("plugin.serialization") version kotlinVersion
-        id("org.jetbrains.compose") version composePluginVersion
-        id("org.jetbrains.kotlin.plugin.compose") version kotlinVersion
     }
 }
 
@@ -24,3 +15,15 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "emu-sync"
+
+// JVM modules follow the dependency graph documented in AGENTS.md.
+include(
+    ":domain",
+    ":application",
+    ":data:local",
+    ":data:drive",
+    ":data:updates",
+    ":platform:desktop",
+    ":presentation",
+    ":desktopApp",
+)

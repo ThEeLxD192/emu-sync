@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     file \
     wget \
     curl \
+    git \
     appstream \
     gnupg \
     libasound2 \
@@ -34,13 +35,22 @@ WORKDIR /app
 # Copy Gradle configuration first to leverage Docker layer caching
 COPY gradlew gradlew.bat settings.gradle.kts build.gradle.kts gradle.properties ./
 COPY gradle ./gradle
+COPY build-logic ./build-logic
+COPY domain ./domain
+COPY application ./application
+COPY data ./data
+COPY platform ./platform
+COPY presentation ./presentation
+COPY desktopApp ./desktopApp
+COPY config ./config
+COPY .editorconfig .gitattributes ./
 
 # Ensure executable permissions for gradlew
 RUN chmod +x gradlew
 
 # Copy source code, resources, and build scripts
-COPY src ./src
 COPY scripts ./scripts
+COPY .githooks ./.githooks
 COPY config.example.json ./
 
 RUN chmod +x scripts/build-dist.sh
