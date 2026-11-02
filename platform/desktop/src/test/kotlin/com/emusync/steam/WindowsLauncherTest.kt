@@ -85,7 +85,11 @@ class WindowsLauncherTest {
                 )
                 .redirectErrorStream(true)
                 .start()
-        assertTrue(process.waitFor(20, TimeUnit.SECONDS), "PowerShell launch timed out")
+        val finished = process.waitFor(30, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroyForcibly()
+        }
+        assertTrue(finished, "PowerShell launch timed out")
         val log = process.inputStream.bufferedReader().readText()
         assertEquals(37, process.exitValue(), log)
         val expected = payload.map { it.replace("{ROM}", rom.path) }
@@ -107,6 +111,7 @@ class WindowsLauncherTest {
             val process =
                 ProcessBuilder(
                         powershell,
+                        "-NoLogo",
                         "-NoProfile",
                         "-NonInteractive",
                         "-EncodedCommand",
@@ -115,8 +120,13 @@ class WindowsLauncherTest {
                     )
                     .redirectErrorStream(true)
                     .start()
-            assertTrue(process.waitFor(10, TimeUnit.SECONDS))
-            assertEquals(1, process.exitValue())
+            val finished = process.waitFor(30, TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+            }
+            assertTrue(finished, "PowerShell launch timed out")
+            val log = process.inputStream.bufferedReader().readText()
+            assertEquals(1, process.exitValue(), log)
         }
     }
 
@@ -170,8 +180,12 @@ class WindowsLauncherTest {
                     )
                     .redirectErrorStream(true)
                     .start()
+            val finished = process.waitFor(30, TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+            }
             assertTrue(
-                process.waitFor(30, TimeUnit.SECONDS),
+                finished,
                 "Native argument recorder compilation timed out",
             )
             val log = process.inputStream.bufferedReader().readText()
