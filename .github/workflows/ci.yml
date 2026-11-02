@@ -32,7 +32,14 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Check Quality and Run Unit Tests
-        run: ./gradlew check --no-daemon
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            export EMUSYNC_BASH="$(cygpath -w "$BASH")"
+          else
+            export EMUSYNC_BASH="$BASH"
+          fi
+          ./gradlew check --no-daemon
 
       - name: Upload Quality and Test Reports
         if: always()

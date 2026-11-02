@@ -1063,5 +1063,37 @@ hallazgos de la revisión y hacer un commit. Esta revisión no cierra Windows.
   Detekt diagnosticada en H2. Las revisiones de fuentes, catálogo y enlaces locales
   no requieren repetir las suites por cambios únicamente documentales.
 
-Commit de esta revisión autorizado (`refactor: isolate presentation IO and enforce module boundaries`);
-su hash se registrará en la próxima actualización del seguimiento.
+Commit de esta revisión: `db90baa`
+(`refactor: isolate presentation IO and enforce module boundaries`).
+
+### Corrección posterior — Bash de CI Windows
+
+Evidencia (2026-11-02, Linux; base `db90baa`):
+
+- El log Windows aportado termina en `:verifyGitHooks`: Gradle invoca `bash` por
+  nombre y obtiene el lanzador WSL, que falla por no tener distribuciones instaladas.
+  CI selecciona ahora `shell: bash` y exporta su ruta absoluta nativa mediante
+  `EMUSYNC_BASH` (`cygpath -w` en Windows). Las tres tareas Gradle de scripts usan
+  esa variable; los scripts y el precommit reutilizan `$BASH` en llamadas internas.
+  README documenta la configuración local de Git Bash. No se omiten verificaciones.
+- La regresión desechable antepone un `bash` que falla al PATH y exige completar
+  hooks con el intérprete explícito, también al reutilizar la caché. En una copia
+  temporal, restaurar la selección anterior hace fallar `:verifyGitHooks` con 97;
+  con la corrección pasa. La [matriz](.agents/skills/kotlin-valuable-tests/references/test-audit.md)
+  registra esta garantía. No cambian las pruebas Kotlin/JUnit.
+- `./gradlew check --no-daemon`: `BUILD SUCCESSFUL` en 1 min 19 s; 110 tareas,
+  19 ejecutadas y 91 UP-TO-DATE. Se ejecutaron los nueve grupos de hooks y los seis
+  de convenciones, incluido el nuevo escenario de intérprete. Pruebas de aplicación
+  y Detekt reutilizaron resultados anteriores; no son nuevas ejecuciones JUnit.
+  Los 17 SARIF vigentes tienen cero hallazgos. YAML del workflow, sintaxis Bash y
+  `git diff --check` correctos.
+- Dos ejecuciones focalizadas de `:verifyGitHooks --configuration-cache --no-daemon`
+  con `EMUSYNC_BASH` apuntando a una ruta absoluta con espacios pasaron; la segunda
+  reutilizó la caché. Comprueban también las comillas de las llamadas internas.
+- El primer intento `spotlessApply check` pasó hooks/convenciones y se detuvo al
+  limpiar salidas de dominio propiedad de root. Se reparó únicamente la propiedad
+  de los directorios generados `build/` de raíz, build-logic y los ocho módulos,
+  mediante montajes Docker acotados; después pasó el comando de cierre anterior.
+- Este host sigue siendo Linux. El log aportado demuestra el fallo Windows previo;
+  la corrección requiere confirmación en el próximo CI Windows. No se ejecutaron
+  MSI/EXE, instalación ni arranque nativos. H6/H7/H8 conservan su pendiente Windows.

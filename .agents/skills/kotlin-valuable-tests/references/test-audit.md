@@ -531,3 +531,18 @@ guardado de título con partida/destinos intactos y cierre Safe Close con códig
 El builder y el runtime de prueba usaron red host porque bridge/veth no está disponible
 en este entorno. Artefacto/SHA-256 y comandos en AGENTS.md; no hubo cuentas reales,
 publicación ni validación nativa de Windows. El commit de la corrección está autorizado.
+
+## Corrección de Bash en CI Windows
+
+Fecha: 2026-11-02; base `db90baa`. No cambia ningún escenario Kotlin/JUnit.
+
+| Garantía | Evidencia que observa el fallo |
+| --- | --- |
+| Las tareas de scripts usan el intérprete explícito aunque haya otro `bash` incompatible en PATH | `gradle-conventions-test.sh` antepone un ejecutable que sale con 97 y ejecuta `:verifyGitHooks` mediante `EMUSYNC_BASH`, junto con `:test` y `:qualityCheck`. Exige completar los hooks y reutilizar la caché de configuración en la segunda ejecución. Detecta volver a resolver `bash` por nombre en Gradle o en los scripts internos. |
+
+La regresión falla al restaurar `commandLine("bash", ...)` en una copia temporal:
+`:verifyGitHooks` termina con 97. Con la corrección ejecuta los hooks y reutiliza la
+caché. Es una integración de scripts/Git/Gradle y no añade casos JUnit de negocio.
+La evidencia del `check` local y el pendiente de Windows nativo se registran en
+[AGENTS.md](../../../../AGENTS.md). La reproducción controlada en Linux no equivale
+a ejecutar Git Bash en el runner Windows.

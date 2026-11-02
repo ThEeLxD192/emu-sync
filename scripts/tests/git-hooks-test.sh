@@ -56,7 +56,7 @@ git add 'src/Example with spaces.kt'
 printf 'BAD\n' > 'src/Example with spaces.kt'
 index_before=$(git write-tree)
 work_before=$(git hash-object 'src/Example with spaces.kt')
-bash .githooks/pre-commit
+"$BASH" .githooks/pre-commit
 [[ $(git write-tree) == "$index_before" ]] || fail 'index changed'
 [[ $(git hash-object 'src/Example with spaces.kt') == "$work_before" ]] || fail 'working copy changed'
 assert_cleaned
@@ -66,7 +66,7 @@ printf 'BAD\n' > 'src/Example with spaces.kt'
 git add 'src/Example with spaces.kt'
 printf 'GOOD\n' > 'src/Example with spaces.kt'
 index_before=$(git write-tree)
-if bash .githooks/pre-commit; then fail 'bad staged content was accepted'; fi
+if "$BASH" .githooks/pre-commit; then fail 'bad staged content was accepted'; fi
 [[ $(git write-tree) == "$index_before" ]] || fail 'failed hook changed the index'
 [[ $(cat 'src/Example with spaces.kt') == GOOD ]] || fail 'failed hook changed working content'
 assert_cleaned
@@ -75,14 +75,14 @@ echo 'PASS: staged bad content blocks despite unstaged good content; failure cle
 prepare
 printf 'Documentation\n' > README.md
 git add README.md
-bash .githooks/pre-commit
+"$BASH" .githooks/pre-commit
 [[ ! -e "$EMUSYNC_HOOK_TEST_LOG" ]] || fail 'documentation ran Gradle'
 echo 'PASS: documentation-only changes skip Gradle'
 
 prepare
 printf 'config: {}\n' > config/detekt.yml
 git add config/detekt.yml
-bash .githooks/pre-commit
+"$BASH" .githooks/pre-commit
 [[ -s "$EMUSYNC_HOOK_TEST_LOG" ]] || fail 'quality configuration did not run Gradle'
 assert_cleaned
 echo 'PASS: configuration changes trigger quality checks'
@@ -102,7 +102,7 @@ for config_path in \
     printf 'BAD\n' > "$config_path"
     index_before=$(git write-tree)
     work_before=$(git hash-object "$config_path")
-    EMUSYNC_HOOK_TEST_EXPECTED_PATH="$config_path" bash .githooks/pre-commit
+    EMUSYNC_HOOK_TEST_EXPECTED_PATH="$config_path" "$BASH" .githooks/pre-commit
     [[ -s "$EMUSYNC_HOOK_TEST_LOG" ]] || fail "$config_path did not run Gradle"
     [[ $(git write-tree) == "$index_before" ]] || fail "$config_path changed the index"
     [[ $(git hash-object "$config_path") == "$work_before" ]] || fail "$config_path changed working content"
@@ -112,14 +112,14 @@ echo 'PASS: catalogs, build conventions and module scripts validate only staged 
 
 prepare
 git add config/detekt.yml
-if EMUSYNC_HOOK_TEST_INTERRUPT=1 bash .githooks/pre-commit; then fail 'interruption was accepted'; fi
+if EMUSYNC_HOOK_TEST_INTERRUPT=1 "$BASH" .githooks/pre-commit; then fail 'interruption was accepted'; fi
 assert_cleaned
 echo 'PASS: interruption cleans the snapshot'
 
 prepare
 git add 'src/Example with spaces.kt'
 git mv 'src/Example with spaces.kt' 'src/Renamed file.kt'
-bash .githooks/pre-commit
+"$BASH" .githooks/pre-commit
 assert_cleaned
 [[ -f 'src/Renamed file.kt' ]] || fail 'rename was lost'
 echo 'PASS: renamed files work'
@@ -131,19 +131,19 @@ git -c user.name=HookTest -c user.email=hook-test@example.invalid \
 git update-ref HEAD "$(cat "$test_root/fixture-commit")"
 git rm --quiet 'src/Renamed file.kt'
 rm -f "$EMUSYNC_HOOK_TEST_LOG"
-bash .githooks/pre-commit
+"$BASH" .githooks/pre-commit
 [[ -s "$EMUSYNC_HOOK_TEST_LOG" ]] || fail 'Kotlin deletion did not trigger the hook'
 assert_cleaned
 echo 'PASS: deleted Kotlin files trigger checks'
 
-bash scripts/install-git-hooks.sh
+"$BASH" scripts/install-git-hooks.sh
 [[ $(git config --local --get core.hooksPath) == .githooks ]] || fail 'hook not activated'
-bash scripts/install-git-hooks.sh
+"$BASH" scripts/install-git-hooks.sh
 git config --local core.hooksPath custom-hooks
-if bash scripts/install-git-hooks.sh; then fail 'custom hooksPath was replaced'; fi
+if "$BASH" scripts/install-git-hooks.sh; then fail 'custom hooksPath was replaced'; fi
 [[ $(git config --local --get core.hooksPath) == custom-hooks ]] || fail 'custom hooksPath changed'
 git config --local --unset core.hooksPath
 printf '#!/bin/sh\nexit 0\n' > .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
-if bash scripts/install-git-hooks.sh; then fail 'existing active hook was bypassed'; fi
+if "$BASH" scripts/install-git-hooks.sh; then fail 'existing active hook was bypassed'; fi
 echo 'PASS: installation is idempotent and preserves existing hooks'

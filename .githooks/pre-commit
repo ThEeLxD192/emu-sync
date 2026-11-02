@@ -31,7 +31,7 @@ if [[ ! -f "$snapshot/gradlew" ]]; then
 fi
 
 echo "Checking formatting and Detekt against the staged commit..."
-if ! (cd "$snapshot" && bash ./gradlew qualityCheck --console=plain --no-daemon); then
+if ! (cd "$snapshot" && "$BASH" ./gradlew qualityCheck --console=plain --no-daemon); then
     echo "Commit blocked. Review the error above, run ./gradlew spotlessApply if needed, and stage the corrected files." >&2
     exit 1
 fi

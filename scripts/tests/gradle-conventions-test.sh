@@ -17,6 +17,21 @@ fail() {
 cd "$source_root"
 cp gradlew gradlew.bat settings.gradle.kts build.gradle.kts gradle.properties "$fixture_root/"
 cp -R gradle config "$fixture_root/"
+mkdir -p "$fixture_root/.githooks" "$fixture_root/scripts/tests" "$fixture_root/shadow-bin"
+cp .githooks/pre-commit "$fixture_root/.githooks/"
+cp scripts/install-git-hooks.sh "$fixture_root/scripts/"
+cp scripts/tests/git-hooks-test.sh "$fixture_root/scripts/tests/"
+# Reproduce a PATH-selected Bash that cannot run scripts (such as the WSL launcher).
+cat > "$fixture_root/shadow-bin/bash" <<'SHELL'
+#!/bin/sh
+echo 'Unexpected PATH-selected bash' >&2
+exit 97
+SHELL
+chmod +x "$fixture_root/shadow-bin/bash"
+native_bash=$BASH
+if command -v cygpath >/dev/null 2>&1; then
+    native_bash=$(cygpath -w "$BASH")
+fi
 mkdir -p "$fixture_root/build-logic"
 cp build-logic/settings.gradle.kts build-logic/build.gradle.kts "$fixture_root/build-logic/"
 cp -R build-logic/src "$fixture_root/build-logic/"
@@ -63,9 +78,13 @@ class ConventionTest {
 KOTLIN
 
 # Use exact root paths to prove explicit aggregation, rather than Gradle's task selector.
-if ! bash ./gradlew :test :qualityCheck --configuration-cache --no-daemon > first.log 2>&1; then
+if ! EMUSYNC_BASH="$native_bash" PATH="$fixture_root/shadow-bin:$PATH" \
+    "$BASH" ./gradlew :test :qualityCheck :verifyGitHooks --configuration-cache --no-daemon > first.log 2>&1; then
     fail 'root test and qualityCheck did not execute successfully'
 fi
+grep -q 'PASS: installation is idempotent and preserves existing hooks' first.log ||
+    fail 'explicit Bash did not complete hook verification'
+echo 'PASS: explicit Bash executes hook verification despite a broken bash on PATH'
 report=domain/build/test-results/test/TEST-ConventionTest.xml
 [[ -f "$report" ]] || fail 'root test did not produce the module JUnit report'
 grep -q 'tests="1"' "$report" || fail 'module test was not discovered'
@@ -83,14 +102,15 @@ javap -verbose domain/build/classes/kotlin/testFixtures/FixtureValueKt.class > b
 grep -q 'major version: 69' bytecode.log || fail 'test fixtures did not target Java 25'
 echo 'PASS: exact root tasks test modules and analyze main, test and fixtures with Java 25'
 
-if ! bash ./gradlew :test :qualityCheck --configuration-cache --no-daemon > cached.log 2>&1; then
+if ! EMUSYNC_BASH="$native_bash" PATH="$fixture_root/shadow-bin:$PATH" \
+    "$BASH" ./gradlew :test :qualityCheck :verifyGitHooks --configuration-cache --no-daemon > cached.log 2>&1; then
     fail 'cached root tasks failed'
 fi
 grep -q 'Configuration cache entry reused' cached.log || fail 'configuration cache was not reused'
 echo 'PASS: module and fixture verification reuses the configuration cache'
 
 sed -i 's/assertEquals("FIXTURE"/assertEquals("wrong"/' domain/src/test/kotlin/ConventionTest.kt
-if bash ./gradlew :test --no-daemon > failed-test.log 2>&1; then
+if "$BASH" ./gradlew :test --no-daemon > failed-test.log 2>&1; then
     fail 'root test accepted a failing module test'
 fi
 grep -q 'failures="1"' domain/build/test-results/test/TEST-ConventionTest.xml ||
@@ -98,7 +118,7 @@ grep -q 'failures="1"' domain/build/test-results/test/TEST-ConventionTest.xml ||
 echo 'PASS: a module assertion failure fails the exact root test task'
 
 printf 'fun unformatted( )= "fixture"\n' > domain/src/testFixtures/kotlin/Unformatted.kt
-if bash ./gradlew :qualityCheck --no-daemon > failed-format.log 2>&1; then
+if "$BASH" ./gradlew :qualityCheck --no-daemon > failed-format.log 2>&1; then
     fail 'root qualityCheck accepted an unformatted fixture'
 fi
 grep -q ':domain:spotlessKotlinCheck FAILED' failed-format.log ||
@@ -110,10 +130,10 @@ cat >> domain/build.gradle.kts <<'GRADLE'
 
 dependencies { testImplementation(project(":application")) }
 GRADLE
-if ! bash ./gradlew :verifyModuleArchitecture --configuration-cache --no-daemon > architecture-tests.log 2>&1; then
+if ! "$BASH" ./gradlew :verifyModuleArchitecture --configuration-cache --no-daemon > architecture-tests.log 2>&1; then
     fail 'architecture guard rejected an allowed test dependency'
 fi
-if ! bash ./gradlew :verifyModuleArchitecture --configuration-cache --no-daemon > architecture-cached.log 2>&1; then
+if ! "$BASH" ./gradlew :verifyModuleArchitecture --configuration-cache --no-daemon > architecture-cached.log 2>&1; then
     fail 'cached architecture verification failed'
 fi
 grep -q 'Configuration cache entry reused' architecture-cached.log || fail 'architecture verification did not reuse configuration cache'
@@ -121,7 +141,7 @@ cat >> domain/build.gradle.kts <<'GRADLE'
 
 dependencies { implementation(project(":application")) }
 GRADLE
-if bash ./gradlew :verifyModuleArchitecture --no-daemon > architecture-failed.log 2>&1; then
+if "$BASH" ./gradlew :verifyModuleArchitecture --no-daemon > architecture-failed.log 2>&1; then
     fail 'architecture guard accepted domain -> application in production'
 fi
 grep -q ':domain -> :application' architecture-failed.log || fail 'architecture guard did not identify the forbidden edge'
@@ -131,14 +151,14 @@ cat >> domain/build.gradle.kts <<'GRADLE'
 
 dependencies { implementation(libs.ktor.client.core) }
 GRADLE
-if bash ./gradlew :verifyModuleArchitecture --no-daemon > architecture-library-failed.log 2>&1; then
+if "$BASH" ./gradlew :verifyModuleArchitecture --no-daemon > architecture-library-failed.log 2>&1; then
     fail 'architecture guard accepted Ktor in domain'
 fi
 grep -q ':domain -> io.ktor:ktor-client-core' architecture-library-failed.log || fail 'architecture guard did not identify the forbidden library'
 sed -i '/dependencies { implementation(libs.ktor.client.core) }/d' domain/build.gradle.kts
 mkdir -p src/main/kotlin
 printf 'class StrayRootSource\n' > src/main/kotlin/StrayRootSource.kt
-if bash ./gradlew :verifyModuleArchitecture --no-daemon > root-sources-failed.log 2>&1; then
+if "$BASH" ./gradlew :verifyModuleArchitecture --no-daemon > root-sources-failed.log 2>&1; then
     fail 'architecture guard accepted root source files'
 fi
 grep -q 'Root source files are forbidden' root-sources-failed.log || fail 'root source failure did not come from the architecture guard'

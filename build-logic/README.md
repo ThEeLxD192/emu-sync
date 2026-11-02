@@ -38,6 +38,13 @@ con tipos de main/test/fixtures, formato bloqueante, bytecode Java 25 y reutiliz
 de la caché de configuración. Su hallazgo GlobalCoroutineUsage es deliberado, se
 verifica en el SARIF temporal y no se incorpora a la aplicación.
 
+Las tareas de scripts aceptan `EMUSYNC_BASH` con la ruta nativa absoluta del
+intérprete. CI selecciona Git Bash en Windows para evitar el lanzador de WSL;
+la configuración local está en [README](../README.md#code-quality). Los scripts
+reutilizan `$BASH` en sus llamadas internas. La suite desechable antepone un
+`bash` que falla al PATH y verifica hooks con el intérprete explícito, también
+al reutilizar la caché de configuración.
+
 La suite desechable comprueba también que el verificador acepta dependencias de
 prueba, rechaza domain → application, Ktor en domain y fuentes añadidas a la raíz,
 y reutiliza la caché de configuración.

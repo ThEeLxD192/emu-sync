@@ -93,6 +93,10 @@ resources and packaging. Root commands aggregate or delegate to these modules.
 Final Linux validation and its test/analysis results are recorded in the migration roadmap. Native Windows validation remains pending. See
 [the migration roadmap](AGENTS.md).
 
+In Git Bash on Windows, run `export EMUSYNC_BASH="$(cygpath -w "$BASH")"`
+before the Gradle commands below. This selects Git Bash for script tasks even when
+Windows resolves `bash.exe` to WSL. CI configures this automatically.
+
 ```bash
 # Install the versioned pre-commit hook once per clone
 ./gradlew installGitHooks

@@ -71,11 +71,14 @@ tasks.named("qualityCheck") {
 
 tasks.named("test") { dependsOn(modules.map { "$it:test" }) }
 
+// CI passes Git Bash's native absolute path so Windows never selects the WSL launcher.
+val bashExecutable = providers.environmentVariable("EMUSYNC_BASH").orElse("bash")
+
 tasks.register<Exec>("installGitHooks") {
     group = "build setup"
     description = "Installs the versioned Git hooks for this clone without replacing custom hooks."
     workingDir(rootDir)
-    commandLine("bash", "scripts/install-git-hooks.sh")
+    commandLine(bashExecutable.get(), "scripts/install-git-hooks.sh")
 }
 
 val verifyGitHooks =
@@ -83,7 +86,7 @@ val verifyGitHooks =
         group = "verification"
         description = "Tests Git hook isolation and installation in disposable repositories."
         workingDir(rootDir)
-        commandLine("bash", "scripts/tests/git-hooks-test.sh")
+        commandLine(bashExecutable.get(), "scripts/tests/git-hooks-test.sh")
     }
 
 val verifyGradleConventions =
@@ -92,7 +95,7 @@ val verifyGradleConventions =
         description =
             "Tests JVM conventions, aggregation and configuration cache in a disposable build."
         workingDir(rootDir)
-        commandLine("bash", "scripts/tests/gradle-conventions-test.sh")
+        commandLine(bashExecutable.get(), "scripts/tests/gradle-conventions-test.sh")
     }
 
 tasks.named("check") {
