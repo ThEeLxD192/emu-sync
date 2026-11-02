@@ -290,33 +290,59 @@ internal class SaveTargetMapping(private val files: LocalSaveAccess) {
             val legacyFiles = cloudFiles.filterNot { file ->
                 file.name in fileNames || scoped.any { file.name.startsWith("${it.cloudPath}/") }
             }
-            val missingRoot = legacy.any { !files.path(it.path).isDirectory }
-            val ambiguousLocal =
-                legacy
-                    .flatMap { target ->
-                        val root = files.path(target.path)
-                        if (!root.isDirectory) emptyList()
-                        else
-                            root
-                                .walkTopDown()
-                                .filter { it.isFile }
-                                .map { it.toRelativeString(root) }
-                                .toList()
-                    }
+            val unavailableRoots =
+                legacy.filterNot { files.path(it.path).isDirectory }.map { it.path }
+            val collidingNames =
+                legacyLocalFileNames(legacy)
                     .groupingBy { it }
                     .eachCount()
-                    .any { it.value > 1 }
-            val unassignedRemote = legacyFiles.any { remote ->
-                legacy.none { files.path(it.path).resolveRemote(remote.name)?.isFile == true }
+                    .filterValues { it > 1 }
+                    .keys
+                    .toList()
+            val unassignedNames =
+                legacyFiles
+                    .filter { remote ->
+                        legacy.none {
+                            files.path(it.path).resolveRemote(remote.name)?.isFile == true
+                        }
+                    }
+                    .map { it.name }
+            val problems = buildList {
+                if (unavailableRoots.isNotEmpty() && legacyFiles.isNotEmpty())
+                    add(mappingDetails("Folders unavailable on this device", unavailableRoots))
+                if (collidingNames.isNotEmpty())
+                    add(mappingDetails("Names found in multiple save folders", collidingNames))
+                if (unassignedNames.isNotEmpty())
+                    add(mappingDetails("Cloud files with no matching local save", unassignedNames))
             }
-            val missingRemoteFiles = missingRoot && legacyFiles.isNotEmpty()
-            if (missingRemoteFiles || ambiguousLocal || unassignedRemote) {
+            if (problems.isNotEmpty()) {
+                val configured = mappingDetails("Configured save folders", legacy.map { it.path })
                 throw SaveTargetMappingException(
-                    "These legacy save directories share a cloud location, so their files cannot be assigned safely. " +
-                        "Restore the cloud files individually, or reconnect the original local directories before assigning separate cloud paths. " +
-                        "These directories were not synchronized."
+                    "Cannot safely match cloud saves to these older save folders.\n\n" +
+                        "$configured\n\n${problems.joinToString("\n\n")}\n\n" +
+                        "Check the save paths and folder contents in Edit Game on this device. " +
+                        "If restoring to empty folders, restore the cloud files individually to their correct destinations. " +
+                        "These folders were not synchronized."
                 )
             }
+        }
+
+        private fun legacyLocalFileNames(legacy: List<SaveTarget>): List<String> =
+            legacy.flatMap { target ->
+                val root = files.path(target.path)
+                if (!root.isDirectory) emptyList()
+                else
+                    root
+                        .walkTopDown()
+                        .filter { it.isFile }
+                        .map { it.toRelativeString(root) }
+                        .toList()
+            }
+
+        private fun mappingDetails(label: String, paths: List<String>): String {
+            val shown = paths.take(5).joinToString("\n") { "• $it" }
+            val remaining = if (paths.size > 5) "\n… (${paths.size - 5} more)" else ""
+            return "$label:\n$shown$remaining"
         }
     }
 }

@@ -18,6 +18,7 @@ import com.emusync.ui.playWithSync
 import com.emusync.ui.testGameItem
 import java.io.File
 import java.time.Instant
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -130,18 +131,33 @@ class SaveTargetMappingTest {
     @Test
     fun `loading legacy directories keeps their original flat cloud layout`(
         @TempDir directory: File
-    ) {
-        val first = File(directory, "first").apply { mkdirs() }
-        val second = File(directory, "second").apply { mkdirs() }
-        val manager = ConfigManager(File(directory, "config.json"))
-        manager.save(
-            AppConfig(entries = listOf(entry().copy(savePaths = listOf(first.path, second.path))))
-        )
+    ) = runTest {
+        SaveMappingDrive().use { drive ->
+            val first = File(directory, "first").apply { mkdirs() }
+            val second = File(directory, "second").apply { mkdirs() }
+            seed(File(first, "profile/save.dat"), "SAVE")
+            seed(File(second, "unlocked.txt"), "TROPHIES")
+            drive.add("save", "profile/save.dat", "SAVE")
+            drive.add("trophies", "unlocked.txt", "TROPHIES")
+            val manager = ConfigManager(File(directory, "config.json"))
+            manager.save(configuration(entry().copy(savePaths = listOf(first.path, second.path))))
 
-        val loaded = manager.load().entries.single()
+            val loaded = manager.load().entries.single() as NativePCGame
 
-        assertEquals(listOf(first.path, second.path), loaded.saveTargets.map { it.path })
-        assertTrue(loaded.saveTargets.all { it.cloudPath == null })
+            assertEquals(listOf(first.path, second.path), loaded.saveTargets.map { it.path })
+            assertTrue(loaded.saveTargets.all { it.cloudPath == null })
+            val sync = orchestrator(drive, directory, loaded)
+            assertTrue(sync.syncEntry(loaded))
+            assertEquals(EntrySyncStatus.IN_SYNC, sync.checkEntrySyncStatus(loaded))
+            assertFalse(File(first, "unlocked.txt").exists())
+            assertFalse(File(second, "profile").exists())
+
+            change(File(first, "profile/save.dat"), "UPDATED SAVE")
+            assertTrue(sync.syncEntry(loaded))
+            assertEquals(listOf("profile/save.dat"), drive.uploadedNames)
+            assertEquals("TROPHIES", drive.contents.getValue("trophies"))
+            assertEquals(2, drive.files.size)
+        }
     }
 
     @Test
@@ -370,8 +386,41 @@ class SaveTargetMappingTest {
             orchestrator.playWithSync(testGameItem("Game", entry))
 
             assertTrue(statuses.last() is AppStatus.Error)
+            val message = (statuses.last() as AppStatus.Error).message
+            targets.forEach { assertContains(message, it.path) }
             assertFalse(AppStatus.Playing in statuses)
             assertTrue(targets.none { File(it.path).exists() })
+            assertTrue(drive.downloads.isEmpty())
+            assertTrue(drive.startedNames.isEmpty())
+        }
+    }
+
+    @Test
+    fun `existing empty legacy directories report unmatched cloud files without restoring them`(
+        @TempDir directory: File
+    ) = runTest {
+        SaveMappingDrive().use { drive ->
+            val first = File(directory, "saves").apply { mkdirs() }
+            val second = File(directory, "trophies").apply { mkdirs() }
+            drive.add("save", "profile/save.dat", "SAVE")
+            drive.add("trophies", "unlocked.txt", "TROPHIES")
+            val entry =
+                entry(
+                    listOf(
+                        SaveTarget(first.path, SaveTargetType.DIRECTORY),
+                        SaveTarget(second.path, SaveTargetType.DIRECTORY),
+                    )
+                )
+            val statuses = mutableListOf<AppStatus>()
+
+            assertFalse(orchestrator(drive, directory, entry) { statuses += it }.syncEntry(entry))
+
+            val message = (statuses.last() as AppStatus.Error).message
+            listOf(first.path, second.path, "profile/save.dat", "unlocked.txt").forEach {
+                assertContains(message, it)
+            }
+            assertTrue(first.listFiles().orEmpty().isEmpty())
+            assertTrue(second.listFiles().orEmpty().isEmpty())
             assertTrue(drive.downloads.isEmpty())
             assertTrue(drive.startedNames.isEmpty())
         }
@@ -394,7 +443,11 @@ class SaveTargetMappingTest {
                     )
                 )
 
-            assertFalse(orchestrator(drive, directory, entry).syncEntry(entry))
+            val statuses = mutableListOf<AppStatus>()
+            assertFalse(orchestrator(drive, directory, entry) { statuses += it }.syncEntry(entry))
+
+            val message = (statuses.last() as AppStatus.Error).message
+            assertContains(message, "save.dat")
 
             assertEquals("FIRST", File(first, "save.dat").readText())
             assertEquals("SECOND", File(second, "save.dat").readText())

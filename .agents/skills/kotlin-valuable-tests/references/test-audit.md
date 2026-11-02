@@ -560,3 +560,35 @@ añadir ni retirar escenarios Kotlin/JUnit de aplicación.
 La corrección copia `.gitattributes` y `.editorconfig`, manteniendo las convenciones
 de producción. No aplica formato automáticamente ni omite comprobaciones.
 Resultados y límites de plataforma en [AGENTS.md](../../../../AGENTS.md).
+
+## Estabilización de timeouts y cancelación CIO
+
+Fecha: 2026-11-02; base `6a0e547`. Se conservan los siete escenarios de
+DriveTransferCioTest y los recuentos de aplicación; no se omiten casos ni se añade
+reintento automático de pruebas.
+
+| Garantía | Decisión y evidencia |
+| --- | --- |
+| La preparación no compite con el deadline corto de datos | El cliente de prueba reserva 10 s para crear sesiones y consultar estado; mantiene defaults de petición/socket de 150 ms para los datos. Un POST retrasado 300 ms reproduce antes el timeout de CI y después permite llegar al PUT que se quiere cancelar. No cambia el cliente de producción. |
+| Una transferencia lenta conserva los bytes y completa pese a esos defaults | Los escenarios CIO de descarga y subida mantienen respuestas retrasadas 300 ms. Se comprueba en una copia aislada que restaurar timeouts de transferencia de 150 ms vuelve a hacerlos fallar; la configuración de control no puede ocultar esa regresión. |
+| Cancela el llamador mientras la respuesta sigue retenida | Las señales del servidor confirman la fase; el latch se libera en finally, sin cierre automático a los tres segundos. runBlocking hace reales los dos segundos de cancelAndJoin; JUnit acota cada caso a 30 s. Se conservan la partida y las aserciones de limpieza/cancelación. |
+
+Se amplían únicamente los márgenes de conexión, preparación y espera del servidor;
+las esperas intencionadas de transporte siguen usando tiempo real. La reproducción
+controlada y el cierre Linux no sustituyen el próximo resultado Windows. Comandos,
+resultados y limitaciones en [AGENTS.md](../../../../AGENTS.md).
+
+## Diagnóstico de carpetas legacy entre dispositivos
+
+Fecha: 2026-11-02; base `489c8d5`, con la estabilización CIO local anterior conservada.
+
+| Garantía | Decisión y evidencia |
+| --- | --- |
+| Una configuración antigua válida sigue sincronizando carpetas sin prefijos nuevos | Se amplía el caso de carga legacy: dos carpetas con archivos distintos sincronizan sin restaurar el archivo de la otra; una edición conserva su nombre remoto y deja intacta la otra carpeta. ConfigManager, disco y adaptadores reales con Drive controlado. |
+| El aviso permite identificar el motivo en el dispositivo afectado | Los casos de rutas ausentes y colisiones exigen la ruta o el nombre implicado. El nuevo caso de carpetas existentes pero vacías exige los nombres remotos sin correspondencia y los destinos revisados. Fallaban por la ausencia de datos útiles en el mensaje, antes de corregirlo. |
+| La mejora de diagnóstico no permite una restauración ambigua | Se conservan las aserciones de ningún lanzamiento, descarga o subida y los contenidos locales intactos. No se altera la condición de rechazo; los detalles se limitan a cinco ejemplos por grupo. |
+
+La suite de integración pasa de 17 a 18 escenarios; el catálogo registra la única
+alta y las ampliaciones, sin bajas. El diálogo permite desplazar mensajes largos.
+Se verifican compilación y análisis; la comprobación visual en Steam Deck queda
+pendiente. Resultados y alcance del diagnóstico en [AGENTS.md](../../../../AGENTS.md).

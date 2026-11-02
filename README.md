@@ -248,6 +248,9 @@ automatically; the saved prefixes remain stable when local paths are changed.
 
 Existing configurations keep their previous cloud layout. If files from several legacy
 directories cannot be assigned safely, synchronization stops before restoring them.
+The notice identifies the configured paths, unavailable folders, duplicate relative
+names, and cloud files without a local match. A folder can exist but still lack the
+files needed to identify its old cloud saves; check its contents on the affected device.
 Restore the cloud files individually, or reconnect the original local directories before
 assigning separate cloud paths. Assigning a new prefix does not relocate existing remote
 files. Individual restores retain the exact remote names and synchronize only the listed

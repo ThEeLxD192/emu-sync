@@ -184,10 +184,10 @@ Riesgo: crítica: cortar transferencias lentas, bloquear cancelación o corrompe
 
 | Escenario / contrato observable (método exacto) | Decisión y motivo |
 | --- | --- |
-| `CIO download completes when response streams slowly beyond configured request timeout` | conservar: garantía observable específica de este escenario |
-| `CIO stalled download remains cancellable and cleans temporary file` | conservar: garantía observable específica de este escenario |
-| `CIO resumable upload completes when response is slow beyond configured request timeout` | conservar: garantía observable específica de este escenario |
-| `CIO caller cancellation interrupts stalled resumable upload` | conservar: garantía observable específica de este escenario |
+| `CIO download completes when response streams slowly beyond configured request timeout` | conservar: bytes completos tras 300 ms frente a defaults de 150 ms, con reloj real |
+| `CIO stalled download remains cancellable and cleans temporary file` | conservar: respuesta retenida hasta el cierre de la prueba, cancelación acotada con reloj real, partida intacta y limpieza de temporales |
+| `CIO resumable upload completes when response is slow beyond configured request timeout` | conservar: transferencia lenta con CIO real; las peticiones de control tienen margen independiente de los defaults de datos |
+| `CIO caller cancellation interrupts stalled resumable upload` | conservar: creación de sesión retrasada 300 ms, confirmación del PUT retenido y cancelación acotada con reloj real, sin modificar la partida |
 | `CIO resumable upload recovers when server accepts a chunk but drops its response` | conservar: garantía observable específica de este escenario |
 | `CIO resumable upload sends multiple chunks and follows range acknowledgements` | conservar: garantía observable específica de este escenario |
 | `CIO resumable upload restarts once after session expiry` | conservar: garantía observable específica de este escenario |
@@ -331,15 +331,16 @@ Riesgo: crítica: confundir prefijos portables, reclamar archivos no asignados o
 | `new directory scopes upload and restore without depending on local folder names` | conservar: garantía observable específica de este escenario |
 | `directory restore rejects a remote file that is also a parent path` | conservar: garantía observable específica de este escenario |
 | `legacy target migration preserves cloud paths globally and per ROM` | conservar: garantía observable específica de este escenario |
-| `loading legacy directories keeps their original flat cloud layout` | conservar: garantía observable específica de este escenario |
+| `loading legacy directories keeps their original flat cloud layout` | ampliar: carga rutas legacy y sincroniza carpetas con archivos distintos sin mezclar destinos ni cambiar nombres remotos; una actualización modifica solo su archivo |
 | `individual nested restore keeps exact keys before play and when uploading` | conservar: garantía observable específica de este escenario |
 | `two missing directory roots restore identical relative names to their own destinations` | conservar: garantía observable específica de este escenario |
 | `saved mapping survives changing local paths and reversing directory order` | conservar: garantía observable específica de este escenario |
 | `manual upload updates only the mapped directory even when relative names match` | conservar: garantía observable específica de este escenario |
 | `pre-play and post-play use the same directory mappings` | conservar: garantía observable específica de este escenario |
 | `partial upload retry retains the full remote path and does not repeat completed saves` | conservar: garantía observable específica de este escenario |
-| `ambiguous legacy restore fails before writing files or launching` | conservar: garantía observable específica de este escenario |
-| `legacy roots with colliding local names are not selected by timestamps` | conservar: garantía observable específica de este escenario |
+| `ambiguous legacy restore fails before writing files or launching` | ampliar: conserva bloqueo previo a efectos e identifica las rutas configuradas para diagnosticar el dispositivo afectado |
+| `existing empty legacy directories report unmatched cloud files without restoring them` | añadir: aunque existan las carpetas, el aviso identifica destinos y archivos remotos sin correspondencia, manteniéndolos intactos |
+| `legacy roots with colliding local names are not selected by timestamps` | ampliar: conserva ambas partidas e identifica el nombre relativo que colisiona |
 | `legacy roots do not claim newly discovered unassigned remote files` | conservar: garantía observable específica de este escenario |
 | `file mapping survives a different local filename` | conservar: garantía observable específica de este escenario |
 | `overlapping directory mappings fail before any transfer` | conservar: garantía observable específica de este escenario |

@@ -3,7 +3,11 @@ package com.emusync.drive
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.api.createClientPlugin
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.timeout
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.serialization.kotlinx.json.json
 import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
@@ -22,22 +26,24 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.io.TempDir
 
 // These socket integration tests deliberately use real IO threads and wall-clock waits.
 // Virtual time would skip the delays that exercise CIO timeout and cancellation behavior.
 @Suppress("InjectDispatcher", "SleepInsteadOfDelay")
+@Timeout(value = 30, unit = TimeUnit.SECONDS)
 class DriveTransferCioTest {
 
     @Test
     fun `CIO download completes when response streams slowly beyond configured request timeout`(
         @TempDir tempDir: File
-    ) = runTest {
+    ) = runBlocking {
         val expected = byteArrayOf(1, 2, 3, 4)
         val server = LocalHttpServer { socket ->
             socket.readRequestHeaders()
@@ -48,7 +54,7 @@ class DriveTransferCioTest {
                 )
                 write(expected, 0, 1)
                 flush()
-                Thread.sleep(150)
+                Thread.sleep(300)
                 write(expected, 1, 3)
                 flush()
             }
@@ -71,7 +77,7 @@ class DriveTransferCioTest {
     @Test
     fun `CIO stalled download remains cancellable and cleans temporary file`(
         @TempDir tempDir: File
-    ) = runTest {
+    ) = runBlocking {
         val responseStarted = CountDownLatch(1)
         val releaseServer = CountDownLatch(1)
         val server = LocalHttpServer { socket ->
@@ -85,7 +91,7 @@ class DriveTransferCioTest {
                 flush()
             }
             responseStarted.countDown()
-            releaseServer.await(3, TimeUnit.SECONDS)
+            releaseServer.await()
         }
         val client = cioClientWithShortTimeouts()
         val destination = File(tempDir, "existing-save.bin").apply { writeText("keep me") }
@@ -96,10 +102,10 @@ class DriveTransferCioTest {
 
         try {
             assertTrue(
-                withContext(Dispatchers.IO) { responseStarted.await(3, TimeUnit.SECONDS) },
+                withContext(Dispatchers.IO) { responseStarted.await(10, TimeUnit.SECONDS) },
                 "The local server should begin the response",
             )
-            withContext(Dispatchers.IO) { Thread.sleep(150) }
+            withContext(Dispatchers.IO) { Thread.sleep(300) }
             assertFalse(
                 download.isCompleted,
                 "The per-transfer timeout should allow a stalled response to be cancelled by its caller",
@@ -119,7 +125,7 @@ class DriveTransferCioTest {
     @Test
     fun `CIO resumable upload completes when response is slow beyond configured request timeout`(
         @TempDir tempDir: File
-    ) = runTest {
+    ) = runBlocking {
         val server =
             LocalHttpServer(connectionCount = 2) { socket ->
                 val request = socket.readRequest()
@@ -161,20 +167,22 @@ class DriveTransferCioTest {
 
     @Test
     fun `CIO caller cancellation interrupts stalled resumable upload`(@TempDir tempDir: File) =
-        runTest {
+        runBlocking {
             val uploadReceived = CountDownLatch(1)
             val releaseServer = CountDownLatch(1)
             val server =
                 LocalHttpServer(connectionCount = 2) { socket ->
                     val request = socket.readRequest()
                     if (request.line.startsWith("POST ")) {
+                        // Session setup is not the stalled transfer whose timeout is under test.
+                        Thread.sleep(300)
                         socket.respond(
                             "HTTP/1.1 200 OK\r\nLocation: http://127.0.0.1:${socket.localPort}/session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                         )
                     } else {
                         assertTrue(request.line.startsWith("PUT /session "))
                         uploadReceived.countDown()
-                        releaseServer.await(3, TimeUnit.SECONDS)
+                        releaseServer.await()
                     }
                 }
             val client = cioClientWithShortTimeouts()
@@ -185,7 +193,7 @@ class DriveTransferCioTest {
 
             try {
                 assertTrue(
-                    withContext(Dispatchers.IO) { uploadReceived.await(3, TimeUnit.SECONDS) },
+                    withContext(Dispatchers.IO) { uploadReceived.await(10, TimeUnit.SECONDS) },
                     "The local server should receive the resumable upload",
                 )
                 withContext(Dispatchers.IO) { Thread.sleep(300) }
@@ -194,9 +202,7 @@ class DriveTransferCioTest {
                     "The stalled upload should remain active until its caller cancels it",
                 )
 
-                withContext(Dispatchers.IO) {
-                    withTimeout(2_000) { upload.cancelAndJoin() }
-                }
+                withTimeout(2_000) { upload.cancelAndJoin() }
                 assertTrue(upload.isCancelled)
                 assertEquals("upload contents", file.readText())
             } finally {
@@ -209,7 +215,7 @@ class DriveTransferCioTest {
     @Test
     fun `CIO resumable upload recovers when server accepts a chunk but drops its response`(
         @TempDir tempDir: File
-    ) = runTest {
+    ) = runBlocking {
         val contentRanges = mutableListOf<String?>()
         val server =
             LocalHttpServer(connectionCount = 4) { socket ->
@@ -257,7 +263,7 @@ class DriveTransferCioTest {
     @Test
     fun `CIO resumable upload sends multiple chunks and follows range acknowledgements`(
         @TempDir tempDir: File
-    ) = runTest {
+    ) = runBlocking {
         val chunkSize = 8 * 1024 * 1024
         val totalSize = chunkSize + 17
         val contentRanges = mutableListOf<String?>()
@@ -314,7 +320,7 @@ class DriveTransferCioTest {
 
     @Test
     fun `CIO resumable upload restarts once after session expiry`(@TempDir tempDir: File) =
-        runTest {
+        runBlocking {
             var sessionCount = 0
             val uploadPaths = mutableListOf<String>()
             val server =
@@ -366,10 +372,28 @@ class DriveTransferCioTest {
         HttpClient(CIO) {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
             install(HttpTimeout) {
-                connectTimeoutMillis = 2_000
+                connectTimeoutMillis = 10_000
                 requestTimeoutMillis = 150
                 socketTimeoutMillis = 150
             }
+            // Session creation and status probes must not race the short transfer defaults.
+            install(
+                createClientPlugin("ControlRequestTimeout") {
+                    onRequest { request, _ ->
+                        if (
+                            request.method == HttpMethod.Post ||
+                                request.method == HttpMethod.Patch ||
+                                request.headers[HttpHeaders.ContentRange]?.startsWith("bytes */") ==
+                                    true
+                        ) {
+                            request.timeout {
+                                requestTimeoutMillis = 10_000
+                                socketTimeoutMillis = 10_000
+                            }
+                        }
+                    }
+                }
+            )
         }
 
     private class LocalHttpServer(
@@ -396,7 +420,7 @@ class DriveTransferCioTest {
         val uploadFilesUrl: String = "http://127.0.0.1:${socket.localPort}/upload/drive/v3/files"
 
         fun awaitCompletion() {
-            thread.join(3_000)
+            thread.join(10_000)
             assertFalse(thread.isAlive, "The local HTTP response should finish")
             failure.get()?.let { throw AssertionError("Local HTTP server failed", it) }
         }

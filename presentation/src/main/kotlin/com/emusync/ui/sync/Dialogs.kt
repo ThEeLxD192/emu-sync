@@ -15,11 +15,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudSync
@@ -282,9 +285,11 @@ private fun ErrorDialog(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = message,
+                    modifier =
+                        Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
                     style = MaterialTheme.typography.bodyMedium,
                     color = EmuSyncColors.OnSurface,
-                    textAlign = TextAlign.Center,
+                    textAlign = TextAlign.Start,
                 )
                 Spacer(Modifier.height(20.dp))
                 Button(

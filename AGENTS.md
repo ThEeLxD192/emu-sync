@@ -1127,3 +1127,92 @@ Evidencia (2026-11-02, Linux; base `207563c`):
 - La reproducción usa Git/Gradle/Spotless reales en Linux. Sigue pendiente confirmar
   el nuevo `check` en Windows; no se ejecutaron MSI/EXE ni instalación o arranque
   Windows. H6/H7/H8 conservan su pendiente nativo.
+
+Commit de esta corrección: `6a0e547`
+(`fix: preserve formatting policy in Gradle test fixture`).
+
+### Estabilización posterior — preparación y cancelación CIO
+
+Evidencia (2026-11-02, Linux; base `6a0e547`):
+
+- El nuevo log Windows llega a los ocho PASS de convenciones, pero falla uno de
+  los 40 casos Drive: `CIO caller cancellation interrupts stalled resumable upload`.
+  El timeout de 150 ms corresponde al POST de creación de sesión, anterior al PUT
+  retenido que la prueba debe cancelar. El cliente de pruebas aplicaba ese límite
+  también a preparación; el cliente productivo conserva 15 s para metadatos.
+- Se reprodujo el mismo fallo antes de corregirlo, retrasando 300 ms ese POST del
+  servidor loopback: la ejecución focalizada falló con HttpRequestTimeoutException
+  y request_timeout=150 ms. El cliente de pruebas reserva ahora 10 s para sesiones
+  y consultas de estado, manteniendo defaults de petición/socket de 150 ms para
+  los datos. La demora deliberada permanece como regresión.
+- Los siete casos CIO usan runBlocking y un límite JUnit de 30 s por caso. Los
+  dos segundos de cancelAndJoin son tiempo real. Las señales confirman la fase
+  antes de cancelar y las respuestas retenidas se liberan en finally, sin cierre
+  automático a los tres segundos. Las demoras de datos son 300 ms, inequívocamente
+  mayores que sus defaults de 150 ms. Se conservan CIO, sockets reales, bytes,
+  recuperación y limpieza; no se cambian fuentes productivas ni se omiten casos.
+- `./gradlew :data:drive:spotlessApply :data:drive:test --tests
+  'com.emusync.drive.DriveTransferCioTest' :data:drive:qualityCheck --no-daemon`:
+  correcto en 17 s, siete casos aprobados; 26 tareas, seis ejecutadas y 20
+  UP-TO-DATE. Detekt de pruebas ejecutado, sin hallazgos ni supresiones nuevas.
+- `./gradlew check --no-daemon`: `BUILD SUCCESSFUL` en 1 min 14 s; 110 tareas,
+  cuatro ejecutadas y 106 UP-TO-DATE. Drive ejecutó los 40 casos, todos aprobados;
+  las demás suites y los análisis reutilizaron resultados correctos anteriores.
+  Los 17 SARIF vigentes tienen cero hallazgos. Hooks: nueve grupos PASS;
+  convenciones: ocho PASS. No se presentan las suites reutilizadas como nuevas.
+- En una exportación temporal de HEAD con la prueba corregida, restaurar timeouts
+  de transferencia de 150 ms hizo fallar los dos casos CIO de transferencia lenta.
+  Confirma que el margen de las peticiones de control no oculta la regresión que
+  protegen las pruebas. No se aplicó esa mutación al trabajo ni al índice.
+- [Matriz](.agents/skills/kotlin-valuable-tests/references/test-audit.md) y
+  [catálogo](.agents/skills/kotlin-valuable-tests/references/test-audit-cases.md)
+  actualizados, sin altas ni bajas de casos de aplicación. Sigue pendiente el
+  siguiente resultado Windows y la distribución/instalación nativa de H6/H7/H8.
+
+### Diagnóstico posterior — carpetas legacy en Steam Deck
+
+Evidencia (2026-11-02, Linux; base `489c8d5`, conservando la corrección CIO local
+anterior, todavía sin commit):
+
+- El usuario comunica un aviso de asignación ambigua únicamente en Steam Deck,
+  donde recuerda que ambas carpetas existen. En el equipo disponible se contrastan
+  dos carpetas locales con cuatro nombres remotos, todos con correspondencia única.
+  La consulta manual de Drive fue de metadatos; las pruebas usan el fixture
+  controlado. No se añaden credenciales, identificadores ni rutas personales al
+  seguimiento. No se dispone del estado físico de las rutas en la Deck.
+- Se reproduce el aviso con dos carpetas existentes pero vacías: la ausencia de
+  archivos locales también impide recuperar su pertenencia en el formato compartido
+  antiguo. No se ha confirmado un falso positivo en el dispositivo del usuario.
+  El defecto corregido es el diagnóstico genérico, que ocultaba el motivo y los
+  nombres implicados; no se elimina la protección de partidas.
+- El aviso identifica carpetas configuradas, rutas no disponibles, nombres que
+  colisionan y archivos remotos sin correspondencia; muestra hasta cinco ejemplos
+  por grupo. La condición de bloqueo permanece equivalente. El diálogo limita la
+  altura del mensaje y permite desplazarlo para consultar rutas largas.
+- Se amplía el caso de carga legacy para demostrar sincronización de dos carpetas
+  válidas sin mezclar destinos ni cambiar claves remotas. Los casos de rutas ausentes
+  y colisiones exigen los datos útiles del aviso; se añade el caso de carpetas
+  existentes y vacías. Las comprobaciones de diagnóstico fallaron con el mensaje
+  anterior. La preparación del caso ampliado usa credenciales ficticias coherentes
+  entre configuración y almacén. Suite focalizada final: 18 casos aprobados.
+- `./gradlew :presentation:spotlessApply :presentation:test --tests
+  'com.emusync.drive.SaveTargetMappingTest' :presentation:qualityCheck --no-daemon`:
+  `BUILD SUCCESSFUL` en 21 s; 39 tareas, cinco ejecutadas y 34 UP-TO-DATE. Detekt de
+  pruebas ejecutado y sin hallazgos. El agregado de calidad previo analizó también
+  las fuentes modificadas de application y presentation, sin hallazgos.
+- `./gradlew check packageReleaseAppImage --no-daemon`: `BUILD SUCCESSFUL` en
+  1 min 15 s; 114 tareas, 12 ejecutadas y 102 UP-TO-DATE. Se ejecutaron application
+  (cinco casos), presentation (192) y desktopApp (uno); las otras suites y los
+  análisis reutilizaron resultados correctos. Evidencia combinada: 442 casos,
+  440 aprobados y dos omitidos PowerShell, cero fallos/errores; 17 SARIF limpios.
+  Hooks: nueve grupos PASS; convenciones: ocho PASS. Se preparó la distribución
+  Linux de desktopApp; no se generó un AppImage independiente en este cierre.
+- README, [matriz](.agents/skills/kotlin-valuable-tests/references/test-audit.md) y
+  [catálogo](.agents/skills/kotlin-valuable-tests/references/test-audit-cases.md)
+  actualizados; diff revisado. Se añade un único caso, sin bajas ni nuevas
+  supresiones. La validación del diálogo y de las rutas reales en Steam Deck sigue
+  pendiente, igual que el cierre nativo Windows de H6/H7/H8.
+- El usuario identificó posteriormente un archivo `.txt` fuera de su ubicación
+  como causa del aviso en Steam Deck. Se conservan las mejoras de diagnóstico y
+  las pruebas de compatibilidad; no se modifica la regla de asignación ni se
+  presenta este incidente como un fallo de sincronización confirmado.
