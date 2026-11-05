@@ -116,8 +116,14 @@ Windows resolves `bash.exe` to WSL. CI configures this automatically.
 ./gradlew check
 ```
 
-The hook checks an isolated copy of the staged commit when Kotlin, Gradle or
-quality configuration changes. Unstaged edits remain untouched. Documentation-only
+The Rust migration workspace is under `rust/`; its current status and platform
+validation are recorded in [RUST_MIGRATION.md](RUST_MIGRATION.md). With the pinned
+Rust toolchain installed, run `cargo xtask quality` for formatting, Clippy and
+architecture checks, or `cargo xtask check` to include Rust tests. The Rust
+preview does not implement synchronization.
+
+The hook checks an isolated copy of the staged commit when Kotlin, Rust, Gradle or
+quality configuration changes, running the checks relevant to the staged files. Unstaged edits remain untouched. Documentation-only
 and image-only commits skip these checks. The hook never formats or stages files
 and does not run tests. Gradle may download dependencies on the first run.
 

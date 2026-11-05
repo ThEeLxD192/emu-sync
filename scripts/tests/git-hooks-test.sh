@@ -136,6 +136,46 @@ rm -f "$EMUSYNC_HOOK_TEST_LOG"
 assert_cleaned
 echo 'PASS: deleted Kotlin files trigger checks'
 
+# Exercise Rust and mixed triggers using a fake Cargo in a disposable repository.
+mkdir -p "$test_root/bin" rust/domain/src src
+cat > "$test_root/bin/cargo" <<'EOF'
+#!/bin/sh
+set -eu
+[ "$*" = 'xtask quality' ]
+printf 'cargo\n' >> "$EMUSYNC_HOOK_TEST_LOG"
+pwd > "$EMUSYNC_HOOK_TEST_SNAPSHOT"
+[ "$(cat rust/domain/src/lib.rs)" = GOOD ]
+EOF
+chmod +x "$test_root/bin/cargo"
+export PATH="$test_root/bin:$PATH"
+printf 'lock\n' > Cargo.lock
+printf 'GOOD\n' > rust/domain/src/lib.rs
+prepare
+git add Cargo.lock rust/domain/src/lib.rs
+printf 'BAD\n' > rust/domain/src/lib.rs
+index_before=$(git write-tree)
+"$BASH" .githooks/pre-commit
+[[ $(cat "$EMUSYNC_HOOK_TEST_LOG") == cargo ]] || fail 'Rust changes did not run only Cargo'
+[[ $(git write-tree) == "$index_before" ]] || fail 'Rust hook changed the index'
+assert_cleaned
+echo 'PASS: Rust changes validate staged content without Gradle'
+
+prepare
+printf 'BAD\n' > rust/domain/src/lib.rs
+git add Cargo.lock rust/domain/src/lib.rs
+printf 'GOOD\n' > rust/domain/src/lib.rs
+if "$BASH" .githooks/pre-commit; then fail 'bad staged Rust content was accepted'; fi
+assert_cleaned
+echo 'PASS: bad staged Rust content blocks the hook'
+
+prepare
+printf 'GOOD\n' > rust/domain/src/lib.rs
+git add Cargo.lock rust/domain/src/lib.rs 'src/Example with spaces.kt'
+"$BASH" .githooks/pre-commit
+[[ $(wc -l < "$EMUSYNC_HOOK_TEST_LOG") == 2 ]] || fail 'mixed changes did not run both checks'
+assert_cleaned
+echo 'PASS: mixed changes run both quality checks'
+
 "$BASH" scripts/install-git-hooks.sh
 [[ $(git config --local --get core.hooksPath) == .githooks ]] || fail 'hook not activated'
 "$BASH" scripts/install-git-hooks.sh

@@ -2,7 +2,7 @@
 
 ## Estado y alcance
 
-EmuSync es actualmente Kotlin/Compose Desktop para Linux y Windows. La rama `rewrite/rust-native` prepara una migración manual a Rust nativo por hitos; la versión Kotlin sigue operativa y sirve de referencia hasta verificar equivalencia. No hay código Rust ni workspace Cargo todavía. La base y el historial, incluidos los pendientes de validación nativa Windows, están en [RUST_MIGRATION.md](RUST_MIGRATION.md). Documentar un hito no lo ejecuta.
+EmuSync es actualmente Kotlin/Compose Desktop para Linux y Windows. La rama `rewrite/rust-native` prepara una migración manual a Rust nativo por hitos; la versión Kotlin sigue operativa y sirve de referencia hasta verificar equivalencia. R1 introduce el workspace Cargo y una ventana Rust de prueba; consultar el seguimiento para su estado y validaciones pendientes. La base y el historial, incluidos los pendientes de validación nativa Windows, están en [RUST_MIGRATION.md](RUST_MIGRATION.md). Documentar un hito no lo ejecuta.
 
 Mantener los flujos y distribución visual de EmuSync, sin JVM ni WebView en el producto Rust. No cambiar identidad, formatos, rutas, partidas, historial, backups, OAuth, Steam ni semántica de conflictos y cancelación. No introducir un framework de aplicación o DI; usar bibliotecas Rust cuando hagan falta.
 
@@ -27,7 +27,7 @@ Las skills externas proceden de [full-stack-skills/rust-skills](https://github.c
 
 ## Calidad y pruebas
 
-Hasta R1 los comandos reales siguen siendo `./gradlew qualityCheck --no-daemon` y `./gradlew check --no-daemon`. No presentar comandos Cargo como disponibles antes de crear el workspace. Después de R1: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked`, agregados con el verificador de arquitectura mediante `cargo xtask quality` y `cargo xtask check`.
+Durante la coexistencia se conservan `./gradlew qualityCheck --no-daemon` y `./gradlew check --no-daemon`. Para Rust: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked`, agregados con el verificador de arquitectura mediante `cargo xtask quality` y `cargo xtask check`.
 
 Mantener CI y resultados por módulo/plataforma, distinguir ejecución nueva de caché o informes históricos. Ejecutar pruebas y análisis afectados; ejecutar el check completo al cerrar integraciones. No agregar pruebas por movimientos mecánicos o documentación. Las pruebas deben proteger contratos y riesgos, no reflejar implementación ni cumplir cuotas.
 

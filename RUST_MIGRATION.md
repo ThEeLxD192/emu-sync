@@ -4,7 +4,7 @@ Base congelada de referencia: `c9acc16a687b1093007dba4efc12c37237908678`, rama `
 
 ## Seguimiento
 
-Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente; su commit está pendiente de confirmación. R1–R8 no se han iniciado.
+Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente; su commit está pendiente de confirmación. R1 está en curso; R2–R8 no se han iniciado.
 
 ### R0 — Guía, skills y seguimiento
 
@@ -17,11 +17,20 @@ Evidencia (2026-11-05, Linux, base `c9acc16`): rama local creada; cinco skills R
 
 ### R1 — Workspace y calidad
 
-- [ ] Crear workspace Cargo y crates por capacidad; fijar toolchain estable y `Cargo.lock`.
-- [ ] Añadir `cargo xtask quality` y `cargo xtask check`: rustfmt, Clippy bloqueante, pruebas y verificador de arquitectura basado en `cargo metadata`.
+- [x] Crear workspace Cargo y crates por capacidad; fijar toolchain estable y `Cargo.lock`.
+- [x] Añadir `cargo xtask quality` y `cargo xtask check`: rustfmt, Clippy bloqueante, pruebas y verificador de arquitectura basado en `cargo metadata`.
 - [ ] Mantener Gradle y agregar a CI Linux/Windows y rama Rust, informes actuales y hook sobre exportación del índice con disparadores de ambos lenguajes.
 - [ ] Ventana egui/winit/wgpu mínima: texto, portapapeles, DPI y cierre en Windows, X11 y Wayland.
 - [ ] **R1 completado**, con resultados por plataforma y excepciones visibles.
+
+Evidencia parcial (2026-11-05, Linux, base `99a34c1`; sin commit):
+
+- Workspace de ocho capacidades y `xtask`, toolchain 1.99.1 y lockfile; Kotlin y sus módulos siguen presentes. Las capacidades Rust están vacías salvo la ventana de prueba y no implementan sincronización. El verificador inspecciona dependencias normales declaradas mediante `cargo metadata --no-deps --locked`. Una copia temporal con la arista prohibida presentation → data-local fue rechazada; Cargo rechazó previamente domain → application por ciclo antes de alcanzar el verificador.
+- `cargo xtask check`: correcto en Linux con rustc/cargo 1.99.1 del sistema; formato, Clippy bloqueante, arquitectura y pruebas pasaron. Una prueba de reglas arquitectónicas; los demás crates aún no contienen pruebas de producto. La primera compilación gráfica detectó una API cambiada de egui, corregida antes del resultado final.
+- `cargo build --locked -p emusync-desktop-app`: correcto. Con `WINIT_UNIX_BACKEND=wayland timeout 5s target/debug/emusync-desktop-app` y la variante `x11`, ambos procesos permanecieron activos hasta el timeout (124), sin diagnóstico. **No** verifica renderizado, texto, portapapeles, DPI ni cierre normal; X11 aquí es Xwayland, no una sesión X11 nativa. Falta la comprobación interactiva completa en ambos entornos.
+- El hook selecciona Gradle y Cargo por cambios preparados, sobre una exportación aislada. `bash scripts/tests/git-hooks-test.sh` pasó los escenarios de aislamiento existentes y los nuevos de Rust, fallo y cambios mixtos. CI incluye la rama Rust, ambos sistemas y un log Rust por plataforma; CI remoto aún no ejecutado.
+- La primera ejecución `./gradlew check --no-daemon` pasó (110 tareas, cuatro ejecutadas y 106 UP-TO-DATE), pero precedió la última ampliación del fixture de hooks. La siguiente detectó que el Cargo simulado dependía del Bash seleccionado por PATH; se corrigió el fixture. La ejecución final de `./gradlew check --no-daemon` pasó en 1 min 10 s: 101 tareas, tres ejecutadas y 98 UP-TO-DATE, con caché de configuración reutilizada; hooks y convenciones ejecutados. Los resultados Kotlin reutilizados no son ejecuciones nuevas.
+- Windows: sin compilación, pruebas ni ventana nativas en este entorno; portapapeles, DPI y cierre siguen pendientes. Falta confirmar CI Windows y Linux remoto. R1 permanece abierto; sin commit ni push.
 
 ### R2 — Dominio
 

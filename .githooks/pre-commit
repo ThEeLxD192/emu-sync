@@ -4,17 +4,22 @@ set -euo pipefail
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-relevant=false
+kotlin=false
+rust=false
 while IFS= read -r -d '' path; do
     case "$path" in
         *.kt|*.kts|gradle.properties|*/gradle.properties|build-logic/*|gradlew|gradlew.bat|gradle/*|config/detekt*.yml|.editorconfig|.gitattributes|.githooks/*|scripts/*quality*|scripts/install-git-hooks.sh|scripts/tests/*|.github/workflows/ci.yml)
-            relevant=true
-            break
+            kotlin=true
+            ;;
+    esac
+    case "$path" in
+        .gitattributes|.githooks/*|.github/workflows/ci.yml|*.rs|Cargo.toml|Cargo.lock|*/Cargo.toml|rust-toolchain.toml|.cargo/*|rust/*|xtask/*)
+            rust=true
             ;;
     esac
 done < <(git diff --cached --name-only --diff-filter=ACDMRT -z)
 
-if [[ "$relevant" != true ]]; then
+if [[ "$kotlin" != true && "$rust" != true ]]; then
     exit 0
 fi
 
@@ -25,13 +30,20 @@ trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 git checkout-index --all --prefix="$snapshot/"
 
-if [[ ! -f "$snapshot/gradlew" ]]; then
-    echo "Quality check failed: the staged commit must include the Gradle wrapper." >&2
-    exit 1
+if [[ "$kotlin" == true ]]; then
+    if [[ ! -f "$snapshot/gradlew" ]]; then
+        echo "Quality check failed: the staged commit must include the Gradle wrapper." >&2
+        exit 1
+    fi
+    echo "Checking Kotlin quality against the staged commit..."
+    (cd "$snapshot" && "$BASH" ./gradlew qualityCheck --console=plain --no-daemon)
 fi
 
-echo "Checking formatting and Detekt against the staged commit..."
-if ! (cd "$snapshot" && "$BASH" ./gradlew qualityCheck --console=plain --no-daemon); then
-    echo "Commit blocked. Review the error above, run ./gradlew spotlessApply if needed, and stage the corrected files." >&2
-    exit 1
+if [[ "$rust" == true ]]; then
+    if [[ ! -f "$snapshot/Cargo.lock" ]]; then
+        echo "Quality check failed: the staged commit must include Cargo.lock." >&2
+        exit 1
+    fi
+    echo "Checking Rust quality against the staged commit..."
+    (cd "$snapshot" && cargo xtask quality)
 fi

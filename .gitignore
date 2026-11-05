@@ -38,3 +38,6 @@ replay_pid*
 
 # Local audit notes
 /AUDIT_STATUS.md
+
+# Rust build outputs
+/target/

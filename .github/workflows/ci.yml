@@ -2,7 +2,7 @@ name: CI Validation
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, rewrite/rust-native ]
   pull_request:
 
 jobs:
@@ -31,6 +31,18 @@ jobs:
       - name: Setup Gradle Cache
         uses: gradle/actions/setup-gradle@v6
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+          components: rustfmt, clippy
+
+      - name: Check Rust architecture, quality and tests
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo xtask check 2>&1 | tee rust-check.log
+
       - name: Check Quality and Run Unit Tests
         shell: bash
         run: |
@@ -47,6 +59,7 @@ jobs:
         with:
           name: test-reports-${{ matrix.platform }}
           path: |
+            rust-check.log
             **/build/test-results/
             **/build/reports/tests/
             **/build/reports/detekt/

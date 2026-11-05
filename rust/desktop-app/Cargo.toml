@@ -1,0 +1,20 @@
+[package]
+name = "emusync-desktop-app"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+emusync-domain = { path = "../domain" }
+emusync-application = { path = "../application" }
+emusync-data-local = { path = "../data-local" }
+emusync-data-drive = { path = "../data-drive" }
+emusync-data-updates = { path = "../data-updates" }
+emusync-platform-desktop = { path = "../platform-desktop" }
+emusync-presentation = { path = "../presentation" }
+egui = "0.37.0"
+egui-winit = "0.37.0"
+egui-wgpu = { version = "0.37.0", features = ["winit", "wayland", "x11"] }
+winit = "0.30.13"
+pollster = "0.4"

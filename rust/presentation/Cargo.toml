@@ -1,0 +1,10 @@
+[package]
+name = "emusync-presentation"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+emusync-domain = { path = "../domain" }
+emusync-application = { path = "../application" }
