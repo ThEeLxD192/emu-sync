@@ -4,7 +4,7 @@ Base congelada de referencia: `c9acc16a687b1093007dba4efc12c37237908678`, rama `
 
 ## Seguimiento
 
-Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente y registrado en `99a34c1`. R1 está implementado y validado parcialmente en Linux; R2–R8 no se han iniciado. Por decisión del usuario del 2026-11-05, la validación nativa Windows se difiere y no bloquea el trabajo posterior, pero sigue pendiente de aceptación.
+Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente y registrado en `99a34c1`. R1 está implementado y validado parcialmente en Linux; R2 está implementado y validado en Linux; R3–R8 no se han iniciado. La validación nativa Windows de R2 y el CI remoto siguen pendientes. Por decisión del usuario del 2026-11-05, la validación nativa Windows se difiere y no bloquea el trabajo posterior, pero sigue pendiente de aceptación.
 
 ### R0 — Guía, skills y seguimiento
 
@@ -46,9 +46,29 @@ Cuando haya acceso a Windows, completar la aceptación diferida con `cargo xtask
 
 ### R2 — Dominio
 
-- [ ] Migrar modelos, reglas y contratos por capacidad sin copiar mecánicamente clases Kotlin. Mantener dominio libre de UI, HTTP e I/O concreto.
-- [ ] Comparar escenarios de planificación, conflictos, rutas y argumentos con fixtures y esperados independientes.
-- [ ] **R2 completado.**
+- [x] Migrar modelos, reglas y contratos por capacidad sin copiar mecánicamente clases Kotlin. Mantener dominio libre de UI, HTTP e I/O concreto.
+- [x] Comparar escenarios de planificación, conflictos, rutas y argumentos con fixtures y esperados independientes.
+- [x] **R2 completado técnicamente en Linux**; validación Windows nativa y CI remoto pendientes.
+
+Evidencia (2026-11-05, Linux, base `d8532a1`; sin commit):
+
+- `emusync-domain` contiene modelos y contratos de configuración/credenciales, biblioteca y destinos, ejecución, sincronización, recuperación y actualización. No depende de crates de UI, HTTP ni I/O concreto. Los tiempos se expresan como nanosegundos de epoch; la lectura de fechas ISO y formatos persistidos corresponde a adaptadores posteriores. Los mapas de títulos conservan orden de inserción y la ordenación de nombres reproduce UTF-16 Kotlin.
+- Planificación temporal y por checkpoint, selección de duplicados, rutas cloud/remotas, scoping, títulos y argumentos tienen pruebas puras. Duplicados remotos con hash ausente o distinto se rechazan; se introducen identificadores de solicitud para distinguir respuestas tardías con datos iguales. Los contratos documentan actualización atómica, escritura condicional y limpieza cooperativa: su implementación y pruebas de I/O, cancelación y rollback corresponden a R3–R6, no se consideran validadas por declarar interfaces.
+- `domain/src/test/resources/r2/comparison.tsv` contiene entradas y esperados literales independientes usados por `R2FixtureTest` Kotlin y `shared_reference_examples_match_independent_expected_values` Rust: ausencia de copias, límites temporales y post-juego, hashes/versiones, planificación y duplicados, rutas, argumentos y títulos. Las otras pruebas Rust amplían casos de la referencia. La primera ejecución del fixture detectó una barra invertida duplicada en el propio fixture; se corrigió antes de las ejecuciones finales.
+- `./gradlew :domain:spotlessApply :domain:qualityCheck :domain:test --no-daemon`: correcto en Linux, 22 tareas (cinco ejecutadas, 17 UP-TO-DATE); 59 pruebas de dominio ejecutadas, sin fallos ni omisiones; Detekt de pruebas ejecutado sin hallazgos tras extraer funciones del fixture. `cargo xtask check`: correcto en Linux, arquitectura, formato, Clippy y pruebas del workspace; 14 pruebas de dominio Rust, además de las dos pruebas existentes del workspace.
+- `./gradlew check --no-daemon`: correcto en Linux, 111 tareas (seis ejecutadas y 105 UP-TO-DATE); las suites Kotlin reutilizaron los resultados de la ejecución focalizada o resultados previos, y las verificaciones de hooks y convenciones se ejecutaron.
+- Windows nativo no se ejecutó: ni estos fixtures ni el pendiente R1 se presentan como validación Windows. CI remoto Linux/Windows sigue sin ejecución y requiere push autorizado. No se realizó push; el commit espera aprobación separada.
+
+#### Trazabilidad de dominio R2
+
+| Garantía de referencia Kotlin | Prueba Rust y justificación | Linux | Windows |
+| --- | --- | --- | --- |
+| `SyncConflictTest`, `SyncPlannerTest`: copias ausentes, umbral, fracciones, post-juego, orden y duplicados | `initial_decisions_preserve_tolerance_and_post_play_rule`, `directory_plan_sorts_and_retains_older_duplicates`, fixtures compartidos; agrupan por decisión observable. | Pasó | Pendiente |
+| `TrackedSyncPlannerTest`: bootstrap, hashes, cambios simultáneos, versión, fecha legacy, ID y ausencia | `tracked_decisions_use_content_and_remote_identity` y fixtures compartidos; conservan decisiones sin depender del reloj. | Pasó | Pendiente |
+| `CloudPathsTest`, `GameEntryGroupTest`, `GameTitleUtilsTest`, scoping de `SaveTargetMappingTest` | `cloud_folder_and_rom_routing_match_reference_examples`, `titles_follow_kotlin_fixtures_and_priority`, `scoping_directories_avoids_existing_prefixes_and_is_stable`; combinan escenarios por regla. | Pasó | Pendiente |
+| `ArgumentsCodecTest` y rutas remotas de `SaveRestorePathsTest` | `arguments_match_literal_examples`, `arguments_preserve_non_special_escapes_and_format_literals`, `paths_reject_absolute_and_traversal_names`, fixtures compartidos. La resolución física y symlinks quedan en R3. | Pasó | Pendiente |
+| `ConditionalCloudWriteTest`: duplicados idénticos, divergentes o sin verificar | `duplicate_remote_files_require_verified_equal_content` comprueba solo selección pura; dos escritores y transferencia reales quedan en R4. | Pasó | Pendiente |
+| `OperationRecoveryTest`, identidad de `SyncResponsesTest` | `cancellation_is_not_recovered_as_a_normal_failure` y `equal_looking_conflict_requests_keep_distinct_identity`; no sustituyen las pruebas de corrutina, solicitudes tardías o rollback de R5. | Pasó | Pendiente |
 
 ### R3 — Persistencia local
 
