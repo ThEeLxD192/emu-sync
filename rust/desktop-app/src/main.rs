@@ -112,3 +112,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn default_fonts_render_the_preview_text() {
+        let context = egui::Context::default();
+        let output = context.run_ui(egui::RawInput::default(), |ui| {
+            let font = egui::FontId::proportional(16.0);
+            ui.fonts_mut(|fonts| {
+                assert!(fonts.has_glyphs(&font, "EmuSync Rust desktop preview"));
+            });
+        });
+        output.drop_without_applying_deltas();
+    }
+}

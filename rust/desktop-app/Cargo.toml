@@ -13,7 +13,7 @@ emusync-data-drive = { path = "../data-drive" }
 emusync-data-updates = { path = "../data-updates" }
 emusync-platform-desktop = { path = "../platform-desktop" }
 emusync-presentation = { path = "../presentation" }
-egui = "0.37.0"
+egui = { version = "0.37.0", features = ["default_fonts"] }
 egui-winit = "0.37.0"
 egui-wgpu = { version = "0.37.0", features = ["winit", "wayland", "x11"] }
 winit = "0.30.13"
