@@ -1,4 +1,5 @@
-use std::{num::NonZeroU32, sync::Arc};
+use emusync_domain::config::ConfigurationStore;
+use std::{ffi::OsString, num::NonZeroU32, sync::Arc};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -103,7 +104,33 @@ impl ApplicationHandler for App {
     }
 }
 
+fn config_argument(
+    args: impl IntoIterator<Item = OsString>,
+) -> Result<Option<OsString>, &'static str> {
+    let mut args = args.into_iter();
+    let mut config = None;
+    while let Some(arg) = args.next() {
+        if arg == "--config" {
+            if config.is_some() {
+                return Err("--config may only be specified once");
+            }
+            let value = args.next().ok_or("--config requires a path")?;
+            if value.is_empty() || value.to_string_lossy().trim().is_empty() {
+                return Err("--config requires a path");
+            }
+            config = Some(value);
+        } else {
+            return Err("unknown command-line argument");
+        }
+    }
+    Ok(config)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let explicit = config_argument(std::env::args_os().skip(1))?;
+    let path = emusync_data_local::resolve_config_location(explicit.as_deref())?;
+    let configuration = emusync_data_local::ConfigManager::new(&path)?;
+    configuration.load()?;
     let event_loop = EventLoop::new()?;
     let mut app = App::default();
     event_loop.run_app(&mut app)?;
@@ -115,6 +142,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn config_argument_requires_one_path() {
+        use super::config_argument;
+        use std::ffi::OsString;
+        assert_eq!(
+            config_argument([OsString::from("--config"), OsString::from("my config.json")])
+                .unwrap(),
+            Some(OsString::from("my config.json"))
+        );
+        assert!(config_argument([OsString::from("--config")]).is_err());
+        assert!(config_argument([OsString::from("--other")]).is_err());
+    }
     #[test]
     fn default_fonts_render_the_preview_text() {
         let context = egui::Context::default();

@@ -1,1 +1,21 @@
-//! Capacity reserved for the Rust migration.
+//! Local persistence and filesystem adapters.
+
+mod config;
+mod config_dto;
+mod history;
+mod location;
+mod restore_paths;
+mod save_access;
+mod staging;
+mod storage;
+mod targets;
+mod tracked;
+
+pub use config::ConfigManager;
+pub use history::{HistoryCheckpoint, SyncHistoryStore, file_sha256};
+pub use location::resolve_config_location;
+pub use restore_paths::resolve_remote_file;
+pub use save_access::{DesktopSaveAccess, DesktopSavePath};
+pub use staging::{StagedRestore, UploadSnapshot};
+pub use targets::LocalSaveTargets;
+pub use tracked::{TrackedError, TrackedFileSync};

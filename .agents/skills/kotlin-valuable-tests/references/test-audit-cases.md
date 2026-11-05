@@ -1008,6 +1008,16 @@ Riesgo: crítica: perder campos o cambiar claves, discriminadores y enums al sep
 | --- | --- |
 | `legacy document preserves every entry field and serialized save type across domain conversion` | añadir en H3: compara ambos modelos completos y el JSON escrito contra el documento literal, incluidos overrides, identificadores y file/directory/unknown |
 
+## data/local/config/RustPersistenceCompatibilityTest.kt
+
+Fuente: [RustPersistenceCompatibilityTest.kt](../../../../data/local/src/test/kotlin/com/emusync/config/RustPersistenceCompatibilityTest.kt). Puntos de entrada: `ConfigManager.load/save`, `SyncHistoryStore.get/record`.
+Nivel: integración local; con `EMUSYNC_R3_EXCHANGE` intercambia archivos sintéticos producidos por el ejemplo Rust, y sin esa variable usa un fixture literal aislado.
+Riesgo: crítica: formatos incompatibles que pierden configuraciones o checkpoints durante la migración.
+
+| Escenario / contrato observable (método exacto) | Decisión y motivo |
+| --- | --- |
+| `Kotlin reads and writes Rust persistence when exchange directory is supplied` | añadir en R3: Kotlin lee una configuración e historial Rust, conserva argumentos vacíos y registra cambios que después lee Rust. |
+
 ## drive/SyncResponsesTest.kt
 
 Fuente: [SyncResponsesTest.kt](../../../../presentation/src/test/kotlin/com/emusync/drive/SyncResponsesTest.kt). Punto de entrada: `SaveSynchronizer.syncEntry / resolveConflict`.

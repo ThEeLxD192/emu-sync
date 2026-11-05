@@ -1,0 +1,91 @@
+use crate::{
+    config::{infer, resolve},
+    resolve_remote_file,
+};
+use emusync_domain::library::{Emulator, GameEntry, SaveTarget, SaveTargetAccess, SaveTargetType};
+use std::{fs, io, path::Path};
+
+pub struct LocalSaveTargets;
+impl SaveTargetAccess for LocalSaveTargets {
+    type Error = io::Error;
+    fn type_of(&self, path: &str) -> io::Result<Option<SaveTargetType>> {
+        if path.trim().is_empty() {
+            return Ok(None);
+        }
+        match fs::metadata(path) {
+            Ok(m) => Ok(Some(if m.is_dir() {
+                SaveTargetType::Directory
+            } else {
+                SaveTargetType::File
+            })),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+    fn for_entry(&self, entry: &GameEntry) -> io::Result<Vec<SaveTarget>> {
+        let c = entry.common();
+        let mut targets = if c.save_targets.is_empty() {
+            c.save_paths
+                .iter()
+                .filter(|p| !p.trim().is_empty())
+                .map(|p| infer(p))
+                .collect()
+        } else {
+            c.save_targets.clone()
+        };
+        for target in &mut targets {
+            resolve(target);
+        }
+        Ok(targets)
+    }
+    fn for_rom(&self, e: &Emulator, rom: &str) -> io::Result<Vec<SaveTarget>> {
+        let stem = rom.rsplit_once('.').map_or(rom, |(stem, _)| stem);
+        if let Some((_, targets)) = e
+            .save_targets_by_rom
+            .iter()
+            .find(|(k, _)| k == rom)
+            .or_else(|| e.save_targets_by_rom.iter().find(|(k, _)| k == stem))
+        {
+            let mut targets = targets.clone();
+            targets.iter_mut().for_each(resolve);
+            return Ok(targets);
+        }
+        Ok(e.save_paths_by_rom
+            .iter()
+            .find(|(k, _)| k == rom)
+            .or_else(|| e.save_paths_by_rom.iter().find(|(k, _)| k == stem))
+            .map(|(_, paths)| {
+                paths
+                    .iter()
+                    .filter(|p| !p.trim().is_empty())
+                    .map(|p| infer(p))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+    fn for_restore(&self, destination: &str, names: &[String]) -> io::Result<Vec<SaveTarget>> {
+        if destination.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut targets = Vec::new();
+        for name in names {
+            if let Some(path) = resolve_remote_file(Path::new(destination), name)? {
+                let path = path
+                    .to_str()
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "path is not UTF-8")
+                    })?
+                    .to_owned();
+                let target = SaveTarget {
+                    path,
+                    kind: SaveTargetType::File,
+                    cloud_path: Some(name.clone()),
+                };
+                if !targets.contains(&target) {
+                    targets.push(target);
+                }
+            }
+        }
+        Ok(targets)
+    }
+}

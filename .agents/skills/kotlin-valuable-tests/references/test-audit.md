@@ -592,3 +592,8 @@ La suite de integración pasa de 17 a 18 escenarios; el catálogo registra la ú
 alta y las ampliaciones, sin bajas. El diálogo permite desplazar mensajes largos.
 Se verifican compilación y análisis; la comprobación visual en Steam Deck queda
 pendiente. Resultados y alcance del diagnóstico en [AGENTS.md](../../../../AGENTS.md).
+
+
+## R3 — Intercambio de persistencia Kotlin/Rust
+
+`RustPersistenceCompatibilityTest` añade un escenario de integración de configuración e historial. Por defecto usa datos literales en `TempDir`; con `EMUSYNC_R3_EXCHANGE` consume datos sintéticos escritos por Rust y deja modificaciones para lectura posterior desde Rust. Los escenarios históricos se conservan. La ejecución cruzada y sus limitaciones se registran en [RUST_MIGRATION.md](../../../../RUST_MIGRATION.md).

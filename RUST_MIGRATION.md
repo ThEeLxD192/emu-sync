@@ -4,7 +4,7 @@ Base congelada de referencia: `c9acc16a687b1093007dba4efc12c37237908678`, rama `
 
 ## Seguimiento
 
-Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente y registrado en `99a34c1`. R1 está implementado y validado parcialmente en Linux; R2 está implementado y validado en Linux; R3–R8 no se han iniciado. La validación nativa Windows de R2 y el CI remoto siguen pendientes. Por decisión del usuario del 2026-11-05, la validación nativa Windows se difiere y no bloquea el trabajo posterior, pero sigue pendiente de aceptación.
+Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente y registrado en `99a34c1`. R1 está implementado y validado parcialmente en Linux; R2 está implementado y validado en Linux; R3 está iniciado y R4–R8 no se han iniciado. La validación nativa Windows de R2 y el CI remoto siguen pendientes. Por decisión del usuario del 2026-11-05, la validación nativa Windows se difiere y no bloquea el trabajo posterior, pero sigue pendiente de aceptación.
 
 ### R0 — Guía, skills y seguimiento
 
@@ -72,11 +72,27 @@ Evidencia (2026-11-05, Linux, base `d8532a1`; sin commit):
 
 ### R3 — Persistencia local
 
-- [ ] Implementar configuración y DTO, historial, snapshots, backups y rutas seguras; introducir `--config <ruta>` para sustituir el override JVM.
+- [x] Implementar configuración y DTO, historial, snapshots, backups y resolución de rutas; introducir `--config <ruta>` para sustituir el override JVM.
 - [ ] Verificar JSON literal y legacy, precedencia de ubicación, concurrencia, escritura atómica, permisos y lectura/escritura cruzadas Kotlin/Rust.
-- [ ] Conservar historial v1 y la clave SHA-256 de ruta absoluta normalizada léxicamente, NUL, folderId, NUL y remoteName. No sustituir normalización léxica por canonicalización.
+- [x] Conservar historial v1 y la clave SHA-256 de ruta absoluta normalizada léxicamente, NUL, folderId, NUL y remoteName. No sustituir normalización léxica por canonicalización.
 - [ ] Verificar staging, backups, symlinks, traversal, Windows 8.3 y fallos de recuperación.
 - [ ] **R3 completado.**
+
+Evidencia parcial (2026-11-05, Linux, base `50ace7c`; sin commit):
+
+- Se implementaron DTO de configuración, migración de targets legacy, ubicación portable y plataforma, `--config`, almacenamiento atómico privado, actualizaciones serializadas en el proceso y CAS de credenciales. El historial v1 conserva registros legacy, clave SHA-256 de ruta absoluta normalizada léxicamente, NUL, folderId, NUL y nombre remoto, y errores ante corrupción o versión desconocida. Las copias usan hashes verificados; staging y snapshots conservan la partida ante fallo de verificación o backup. El adaptador de transferencias usa el contrato neutral y realiza I/O local en workers bloqueantes.
+- `cargo test --locked -p emusync-data-local`: pasó en Linux con dos pruebas unitarias y catorce de integración; `cargo xtask check` pasó arquitectura, formato, Clippy y todas las pruebas Rust del workspace. `./gradlew check --no-daemon`: correcto en 1 min 15 s, 111 tareas, cuatro ejecutadas y 107 UP-TO-DATE; las suites reutilizadas no son ejecuciones nuevas. La prueba focalizada Kotlin y su análisis se ejecutaron antes con `EMUSYNC_R3_EXCHANGE=/tmp/emusync-r3-cross-1000 ./gradlew :data:local:spotlessApply :data:local:test --tests 'com.emusync.config.RustPersistenceCompatibilityTest' :data:local:qualityCheck --no-daemon --rerun-tasks`: 23 tareas ejecutadas.
+- Intercambio sintético real: `cargo run --locked -p emusync-data-local --example cross_persistence -- write /tmp/emusync-r3-cross-1000`, la prueba Kotlin focalizada anterior y `cargo run --locked -p emusync-data-local --example cross_persistence -- read /tmp/emusync-r3-cross-1000` pasaron, en ese orden. Kotlin leyó y modificó configuración e historial producidos por Rust y Rust leyó los cambios de Kotlin. La comprobación literal completa y el intercambio son complementarios, no demuestran todos los escenarios de ambas plataformas.
+- La resolución remota rechaza traversal y symlinks y conserva la ruta léxica seleccionada; la validación es una observación y no impide por sí sola cambios concurrentes del sistema de archivos antes de una escritura. La integración posterior debe mantener la exclusión y asumir esta limitación. La cancelación de transferencias, el cierre supervisado de workers y la limpieza asíncrona siguen sujetos a integración y pruebas de R4/R5; no se considera que abortar un futuro realice rollback.
+- Windows nativo, 8.3 y CI remoto siguen sin ejecutar. La decisión de diferir Windows permite continuar, pero no constituye su aceptación. Sin push ni commit.
+
+| Garantía Kotlin | Evidencia Rust y alcance | Linux | Windows |
+| --- | --- | --- | --- |
+| ConfigFormatCompatibilityTest, ConfigGroupsTest, ConfigManagerTest: JSON, tipos y legacy | `literal_config_preserves_all_nondefault_fields_and_ordered_titles`, `explicit_empty_emulator_arguments_survive_writes`, `concurrent_config_updates_merge_and_legacy_targets_keep_paths`, intercambio Kotlin/Rust; casos agrupados por formato observable. | Pasó | Pendiente |
+| ConfigUpdatesTest y ConfigLocationTest | `config_loads_legacy_defaults_round_trips_and_preserves_concurrent_updates`, `concurrent_config_updates_merge_and_legacy_targets_keep_paths`, `explicit_and_portable_locations_precede_platform`; CAS, precedencia y actualizaciones en proceso. | Pasó | Pendiente |
+| SyncHistoryStoreTest y SyncHistoryCompatibilityTest | `history_keeps_legacy_data_and_concurrent_records_and_refuses_corruption`, `failed_replacement_retains_old_bytes_and_removes_temporary_file`, intercambio Kotlin/Rust; escritura común y registros v1. | Pasó | Pendiente |
+| TrackedFileSyncTest: snapshot, preservación y recuperación | `snapshots_and_restores_preserve_saves_on_verification_failures`, `backup_failure_prevents_replacement_and_cleans_staging`, `backup_verifies_source_and_existing_recovery_copy`, `tracked_transfers_verify_content_record_history_and_keep_local_changes`; no sustituyen la cancelación ni integración de R5. | Pasó | Pendiente |
+| SaveRestorePathsTest y GameEntrySaveTargetsTest | `resolves_nested_names_and_rejects_untrusted_paths`, `rejects_intermediate_and_final_symlinks_without_touching_saves`, `target_resolution_preserves_remote_names_and_skips_invalid_entries`, `rom_targets_prefer_exact_then_stem_then_legacy_and_resolve_types`; 8.3 y colisiones de restauración coordinada permanecen pendientes de plataforma e integración. | Pasó parcialmente | Pendiente |
 
 ### R4 — OAuth y Google Drive
 
