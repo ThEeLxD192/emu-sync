@@ -4,7 +4,23 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Evidence referring to a retained upload snapshot. The snapshot owner must outlive its use.
+#[derive(Clone, Debug)]
+pub struct UploadEvidence {
+    pub(crate) path: PathBuf,
+    pub(crate) digest: String,
+}
+
+impl UploadEvidence {
+    /// Evidence for a snapshot retained by a persistent recovery entry. The caller
+    /// passes only a path and digest verified by `RecoveryStore::list`.
+    pub fn recovered(path: PathBuf, digest: String) -> Self {
+        Self { path, digest }
+    }
+}
+
 /// Stable upload copy; the temporary directory removes itself when it is dropped.
+#[derive(Debug)]
 pub struct UploadSnapshot {
     directory: tempfile::TempDir,
     path: PathBuf,
@@ -34,6 +50,12 @@ impl UploadSnapshot {
     pub fn path(&self) -> &Path {
         &self.path
     }
+    pub fn evidence(&self) -> UploadEvidence {
+        UploadEvidence {
+            path: self.path.clone(),
+            digest: self.digest.clone(),
+        }
+    }
     pub fn digest(&self) -> &str {
         &self.digest
     }
@@ -55,7 +77,10 @@ impl UploadSnapshot {
 pub struct StagedRestore {
     temp: tempfile::NamedTempFile,
     destination: PathBuf,
+    logical_destination: PathBuf,
     original_digest: Option<String>,
+    #[cfg(target_os = "linux")]
+    pinned: Option<crate::PinnedRemoteDestination>,
 }
 impl StagedRestore {
     pub fn prepare(destination: &Path) -> io::Result<Self> {
@@ -71,12 +96,43 @@ impl StagedRestore {
             .tempfile_in(parent)?;
         Ok(Self {
             temp,
+            logical_destination: destination.clone(),
             destination,
             original_digest,
+            #[cfg(target_os = "linux")]
+            pinned: None,
         })
+    }
+    /// Prepare under a pinned root, creating missing descendant directories without following links.
+    #[cfg(target_os = "linux")]
+    pub fn prepare_pinned(root: &Path, remote_name: &str) -> io::Result<Option<Self>> {
+        let Some(pinned) = crate::PinnedRemoteDestination::open_or_create(root, remote_name)?
+        else {
+            return Ok(None);
+        };
+        let destination = pinned.destination_path();
+        let original_digest = pinned
+            .open_existing()?
+            .map(|file| digest_open_file(&file))
+            .transpose()?;
+        let temp = tempfile::Builder::new()
+            .prefix(".emusync.")
+            .suffix(".restore")
+            .tempfile_in(pinned.parent_path())?;
+        let logical_destination = absolute(pinned.logical_path())?;
+        Ok(Some(Self {
+            temp,
+            destination,
+            logical_destination,
+            original_digest,
+            pinned: Some(pinned),
+        }))
     }
     pub fn path(&self) -> &Path {
         self.temp.path()
+    }
+    pub fn logical_destination(&self) -> &Path {
+        &self.logical_destination
     }
     pub fn commit(
         self,
@@ -87,6 +143,31 @@ impl StagedRestore {
         let digest = file_sha256(self.temp.path())?;
         if expected_remote_hash.is_some_and(|expected| !expected.eq_ignore_ascii_case(&digest)) {
             return Err(io::Error::other("downloaded content could not be verified"));
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(pinned) = &self.pinned {
+            use std::os::fd::AsRawFd;
+            pinned.ensure_current()?;
+            let current = pinned.open_existing()?;
+            let current_digest = current.as_ref().map(digest_open_file).transpose()?;
+            if current_digest != self.original_digest {
+                return Err(io::Error::other("save changed during download"));
+            }
+            if let (Some(old), Some(file)) = (&self.original_digest, current.as_ref())
+                && old != &digest
+            {
+                let source = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+                history.backup_from(key, &source, pinned.logical_path(), old)?;
+            }
+            if self.original_digest.is_none() {
+                self.temp
+                    .persist_noclobber(&self.destination)
+                    .map_err(|e| e.error)?;
+            } else {
+                self.temp.persist(&self.destination).map_err(|e| e.error)?;
+            }
+            pinned.ensure_current()?;
+            return Ok(digest);
         }
         if digest_if_file(&self.destination)? != self.original_digest {
             return Err(io::Error::other("save changed during download"));
@@ -107,4 +188,10 @@ fn digest_if_file(path: &Path) -> io::Result<Option<String>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn digest_open_file(file: &fs::File) -> io::Result<String> {
+    use std::os::fd::AsRawFd;
+    file_sha256(Path::new(&format!("/proc/self/fd/{}", file.as_raw_fd())))
 }

@@ -35,12 +35,24 @@ pub trait CredentialStore {
     type Error;
     fn snapshot(&self, fallback: &AppConfig) -> Result<CredentialSnapshot, Self::Error>;
     /// Both the credential value and connection revision must still match.
+    /// A successful change advances the revision by one with wrapping arithmetic;
+    /// a successful no-op leaves it unchanged.
     fn compare_and_set(
         &self,
         expected: &CredentialSnapshot,
         credentials: Option<Credentials>,
         fallback: &AppConfig,
     ) -> Result<bool, Self::Error>;
+}
+/// Execute a short synchronous action only while the connection revision is current.
+/// Implementations serialize credential changes with the action and must not await inside it.
+pub trait CredentialTransaction: CredentialStore {
+    fn while_current<R>(
+        &self,
+        expected: &CredentialSnapshot,
+        fallback: &AppConfig,
+        action: impl FnOnce() -> R,
+    ) -> Result<Option<R>, Self::Error>;
 }
 pub trait CloudAuthorization {
     type Error;

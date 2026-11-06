@@ -1,19 +1,28 @@
+use emusync_data_local::ConfigManager;
+use emusync_desktop_app::{AuthorizedTransferFailure, CloseState, RuntimeOwner};
 use emusync_domain::config::ConfigurationStore;
-use std::{ffi::OsString, num::NonZeroU32, sync::Arc};
+use std::{
+    ffi::OsString,
+    num::NonZeroU32,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
-    event_loop::{ActiveEventLoop, EventLoop},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
 
-#[derive(Default)]
 struct App {
     window: Option<Arc<Window>>,
     state: Option<egui_winit::State>,
     painter: Option<egui_wgpu::winit::Painter>,
     text: String,
     error: Option<String>,
+    operations: RuntimeOwner<AuthorizedTransferFailure<ConfigManager>>,
+    closing: bool,
+    close_notice: bool,
 }
 
 impl ApplicationHandler for App {
@@ -56,7 +65,27 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.closing {
+            return;
+        }
+        match self.operations.poll_close() {
+            CloseState::Pending => event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(50),
+            )),
+            CloseState::RecoveryRequired => {
+                self.closing = false;
+                self.close_notice = true;
+                event_loop.set_control_flow(ControlFlow::Wait);
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            CloseState::Ready => event_loop.exit(),
+        }
+    }
+
+    fn window_event(&mut self, _event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let (Some(window), Some(state), Some(painter)) =
             (&self.window, &mut self.state, &mut self.painter)
         else {
@@ -70,7 +99,11 @@ impl ApplicationHandler for App {
             window.request_redraw();
         }
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.close_notice = false;
+                self.closing = true;
+                self.operations.begin_close();
+            }
             WindowEvent::Resized(size) => {
                 if let (Some(width), Some(height)) =
                     (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
@@ -86,6 +119,9 @@ impl ApplicationHandler for App {
                     ui.heading("EmuSync");
                     ui.label("Rust desktop preview");
                     ui.text_edit_singleline(&mut self.text);
+                    if self.close_notice {
+                        ui.label("A sync operation needs recovery before closing.");
+                    }
                 });
                 state.handle_platform_output(window, output.platform_output);
                 let primitives = context.tessellate(output.shapes, output.pixels_per_point);
@@ -132,7 +168,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let configuration = emusync_data_local::ConfigManager::new(&path)?;
     configuration.load()?;
     let event_loop = EventLoop::new()?;
-    let mut app = App::default();
+    let mut app = App {
+        window: None,
+        state: None,
+        painter: None,
+        text: String::new(),
+        error: None,
+        operations: RuntimeOwner::new()?,
+        closing: false,
+        close_notice: false,
+    };
     event_loop.run_app(&mut app)?;
     if let Some(error) = app.error {
         return Err(error.into());

@@ -4,7 +4,7 @@ Base congelada de referencia: `c9acc16a687b1093007dba4efc12c37237908678`, rama `
 
 ## Seguimiento
 
-Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente y registrado en `99a34c1`. R1 está implementado y validado parcialmente en Linux; R2 está implementado y validado en Linux; R3 está iniciado y R4–R8 no se han iniciado. La validación nativa Windows de R2 y el CI remoto siguen pendientes. Por decisión del usuario del 2026-11-05, la validación nativa Windows se difiere y no bloquea el trabajo posterior, pero sigue pendiente de aceptación.
+Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente y registrado en `99a34c1`. R1 está implementado y validado parcialmente en Linux; R2 está implementado y validado en Linux; R3 está iniciado y R4 está completado técnicamente en Linux; R5–R8 no se han iniciado. La validación nativa Windows de R2 y R4 y el CI remoto siguen pendientes. Por decisión del usuario del 2026-11-05, la validación nativa Windows se difiere y no bloquea el trabajo posterior, pero sigue pendiente de aceptación.
 
 ### R0 — Guía, skills y seguimiento
 
@@ -96,10 +96,1067 @@ Evidencia parcial (2026-11-05, Linux, base `50ace7c`; sin commit):
 
 ### R4 — OAuth y Google Drive
 
-- [ ] Portar loopback, state, scope `drive.file`, revisión/CAS y refresh; invalidar respuestas obsoletas y preservar cambios concurrentes de biblioteca.
-- [ ] Portar búsqueda, paginación, carpetas, descargas, snapshots y subidas reanudables; probar transporte y cancelación reales controlados.
-- [ ] Mantener actualización condicional con ETag fuerte v2 e `If-Match`, sin fallback incondicional; probar dos escritores y fallos de precondición.
-- [ ] **R4 completado.**
+- [x] Portar loopback, state, scope `drive.file`, revisión/CAS y refresh; invalidar respuestas obsoletas y preservar cambios concurrentes de biblioteca. Validación sintética en Linux; Windows pendiente.
+- [x] Portar búsqueda, paginación, carpetas, descargas, snapshots y subidas reanudables; probar transporte y cancelación reales controlados. Validación sintética en Linux; Windows pendiente.
+- [x] Mantener actualización condicional con ETag fuerte v2 e `If-Match`, sin fallback incondicional; probar dos escritores y fallos de precondición. Validación sintética en Linux; Windows pendiente y limitación de timeout de escritura documentada abajo.
+- [x] **R4 completado técnicamente en Linux**; validación Windows nativa y CI remoto pendientes.
+
+Evidencia parcial (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- Se inició el adaptador de actualización condicional Drive v2: relee metadatos,
+  verifica identidad, versión/hash y ETag fuerte, y envía el snapshot mediante
+  `If-Match`; 404, 409 y 412 no provocan una escritura incondicional. El cliente
+  acepta endpoints inyectados para pruebas aisladas. Aún no está integrado con el
+  contrato de transferencia ni con supervisión de cancelación.
+- `cargo test -p emusync-data-drive --offline`: dos pruebas nuevas aprobadas en
+  Linux, con servidor HTTP loopback y datos sintéticos: dos escritores compiten
+  sobre el mismo ETag y solo uno escribe; un ETag débil rechaza la actualización.
+  La prueba no acredita el servicio real de Google ni el comportamiento de red
+  ante cancelación o respuestas perdidas. `cargo xtask check` pasó arquitectura,
+  formato, Clippy y pruebas del workspace en Linux; reutilizó compilaciones previas.
+- Continuación sobre la misma base: intercambio/refresh OAuth con revisión y CAS
+  del almacén local; loopback con state aleatorio, scope `drive.file`, rechazo de
+  callbacks inválidos y cierre del socket al cancelar; listado paginado v3 con
+  filtrado y fechas precisas; búsqueda/creación de carpetas y traslado. Estas piezas
+  todavía no están compuestas en la aplicación ni constituyen el flujo OAuth completo.
+- `cargo test -p emusync-data-drive --offline`: nueve pruebas aprobadas en Linux
+  con HTTP loopback y archivos sintéticos, incluyendo conservación de biblioteca
+  durante intercambio, respuesta de refresh obsoleta, invalid_grant, state incorrecto,
+  liberación del listener, paginación y creación/movimiento de carpeta. No se utilizó
+  Google Drive ni se probaron credenciales reales. El callback visual Kotlin y la
+  composición con navegador y puerto de producción siguen pendientes.
+- `cargo xtask check`: pasó nuevamente en Linux tras estos cambios; arquitectura,
+  rustfmt, Clippy y pruebas Rust ejecutados. No se ejecutó Gradle en esta continuación.
+
+| Garantía Kotlin | Prueba Rust y justificación | Linux | Windows |
+| --- | --- | --- | --- |
+| OAuthFlowTest: state, scope, cancelación y tokens | `loopback_ignores_wrong_state_and_accepts_matching_code`, `cancellation_releases_listener`, `composed_browser_callback_exchanges_and_persists_tokens`. | Pasó | Pendiente |
+| OAuthCredentialStoreTest: revisión, CAS e invalid_grant | `refresh_response_is_discarded_after_disconnect_and_reconnect`, `exchange_keeps_concurrent_library_edits`, `invalid_grant_clears_only_current_refresh_token`, `refresh_response_is_discarded_after_generic_configuration_aba`. | Pasó | Pendiente |
+| DriveSearchTest: búsqueda exacta y paginación | `listing_follows_pages_and_filters_folders_with_precise_timestamps`, `migration_listing_includes_folders_and_files_across_pages`, `exact_search_escapes_query_and_requests_latest_match`, `oversized_or_stalled_listing_pages_fail_without_partial_results`. | Pasó | Pendiente |
+| DriveFoldersTest: carpetas, movimientos, errores y rechazos | `finds_root_creates_missing_child_and_moves_file`, `folder_lookup_is_scoped_and_missing_child_does_not_create_it`, `blank_folder_id_never_authorizes_further_mutations`, `unusable_folder_search_response_is_a_read_failure_without_creating`, `unusable_folder_create_response_is_unknown_and_never_retried`. | Pasó | Pendiente |
+| ConditionalCloudUpdateTest: dos escritores y precondiciones | `simultaneous_writers_use_if_match_and_only_one_replaces_the_remote`, `missing_weak_wildcard_and_malformed_etags_never_authorize_update`, timeout tras cuerpo y cancelación. | Pasó | Pendiente |
+| ResumableUploadTest: bloques, reanudación, consultas y timeout | 29 pruebas en `resumable.rs`: fragmentos de 8 MiB en rebanadas de 64 KiB, confirmación de bloques 308, respuesta prematura, sesión caducada, control de timeout tras entrega y no reenvío. | Pasó | Pendiente |
+| DriveDownloadTest: streaming, stage y cancelación | `completed_download_replaces_destination`, `truncated_response_preserves_destination_and_cleans_stage`, `cancellation_of_stalled_download_preserves_destination_and_cleans_stage`. | Pasó | Pendiente |
+| TrackedFileSyncTest y Recuperación (memoria y entre procesos) | `supervised_drive.rs` (14 pruebas), `recovery_store.rs` (7 pruebas), `persisted_recovery.rs` (4 pruebas): proceso hijo eliminado entre PUT y respuesta, bloqueo de save no resuelto (`ResourceBusy`), reconciliación por ID o nombre+hash sin repetir PUT. | Pasó | Pendiente |
+
+- En ese punto faltaban búsqueda de archivos, descarga, subida reanudable, rollback,
+  integración y trazabilidad; la continuación figura debajo.
+  La ventana entre validación de rutas locales y escritura de R3 sigue sin resolver;
+  tampoco se ha comprobado Windows nativo, 8.3 ni CI remoto. R4 no está completado.
+
+
+#### Continuación R4 — búsqueda y descarga parcial
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- Se añadió búsqueda v3 exacta por nombre, ordenada por modificación descendente,
+  y consulta por ID. `exact_search_escapes_query_and_requests_latest_match` comprueba
+  los parámetros enviados a un servidor HTTP sintético.
+- `DriveDownload` transmite a un archivo temporal y publica solo al completar. Usa
+  cancelación cooperativa: el propietario debe señalarla y esperar el futuro hasta
+  que cierre el archivo y elimine el temporal. `completed_download_replaces_destination`,
+  `truncated_response_preserves_destination_and_cleans_stage` y
+  `cancellation_of_stalled_download_preserves_destination_and_cleans_stage` pasaron
+  con sockets loopback y directorios temporales. La última espera a observar bytes
+  parciales antes de cancelar. No prueba rollback remoto ni permite abortar el futuro.
+- `cargo test -p emusync-data-drive --test download --locked`: tres pruebas aprobadas.
+  `cargo xtask check`: arquitectura, formato, Clippy y pruebas Rust aprobados en Linux;
+  el primer intento de Clippy detectó dos lecturas de prueba sin comprobar, corregidas
+  antes del resultado final. No se ejecutó Gradle en esta continuación.
+- La descarga aún no implementa el contrato `CloudSaveTransfer`, progreso ni ajuste
+  de fecha; la seguridad frente a cambios del directorio después de validarlo sigue
+  pendiente. También faltan subida reanudable, integración, supervisión de workers,
+  cancelación/rollback de operaciones remotas y cierre de trazabilidad. No se probó
+  Windows nativo, nombres 8.3, Google Drive real ni CI remoto. R4 sigue abierto.
+
+#### Continuación R4 — subida reanudable parcial
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- `ResumableUpload` inicia una sesión de creación v3, envía bloques de hasta 8 MiB,
+  interpreta offsets confirmados, consulta el estado después de perder una respuesta
+  y limita reintentos. Las escrituras sobre archivos existentes siguen reservadas al
+  adaptador condicional. Se rechazan ubicaciones de sesión de otro origen: falta
+  verificar que esta restricción sea compatible con todas las respuestas reales de Google.
+- `cargo test -p emusync-data-drive --test resumable --locked`: tres pruebas aprobadas
+  en Linux con servidor loopback y snapshot sintético: offset parcial, respuesta perdida
+  seguida de consulta de estado, e interrupción de una petición en curso. En este último
+  caso se informa que el resultado remoto es desconocido; no se afirma rollback ni se
+  considera seguro volver a crear el archivo sin reconciliación. El adaptador aún no
+  expone un mecanismo de reconciliación tras ese resultado.
+- `cargo xtask check`: arquitectura, formato, Clippy y pruebas Rust aprobados en Linux;
+  se reutilizaron compilaciones anteriores. No se ejecutó Gradle en esta continuación.
+  Siguen pendientes integración en `CloudSaveTransfer`, progreso, timestamp, cierre
+  supervisado, limpieza/rollback remoto y sus pruebas, junto con la seguridad de rutas
+  de R3. No se comprobó Google real, Windows nativo, 8.3 ni CI remoto; R4 sigue abierto.
+
+#### Continuación R4 — composición OAuth y recuperación de sesión
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- `InteractiveOAuth` conecta `CloudAuthorization`, almacén CAS, receptor loopback y
+  navegador inyectado; conserva puerto y redirect de Kotlin en la configuración de
+  producción y reutiliza sus páginas HTML. `composed_browser_callback_exchanges_and_persists_tokens`
+  aprobó el intercambio completo con navegador simulado, puerto efímero y token HTTP
+  sintético. No se abrió un navegador real ni se probó Google. La composición aún no
+  está conectada a desktop-app y la supervisión del worker del navegador sigue pendiente.
+- Una subida interrumpida devuelve ahora una capacidad opaca de sesión; `reconcile`
+  permite consultar el estado sin exponer la URL en Debug. La prueba de interrupción
+  comprueba también la consulta posterior y una respuesta completada. Un estado parcial
+  es solo una observación: no demuestra que la petición anterior haya terminado y no
+  autoriza por sí solo una nueva creación. La sesión no se persiste entre procesos y
+  sigue faltando integrar reconciliación con el propietario y cierre supervisado.
+- Una respuesta de éxito truncada consulta la sesión antes de devolver resultado;
+  `truncated_success_metadata_is_reconciled_before_returning` lo comprueba con HTTP
+  local. `cargo test -p emusync-data-drive --test resumable --locked`: cuatro pruebas
+  aprobadas; `cargo test -p emusync-data-drive --test oauth --locked`: cuatro aprobadas.
+  `cargo xtask check`: arquitectura, formato, Clippy y pruebas Rust aprobados en Linux;
+  compilaciones reutilizadas. No se ejecutó Gradle ni CI remoto en esta continuación.
+- Siguen pendientes integración de transferencias, semántica de limpieza remota,
+  supervisión de workers locales, seguridad de rutas de R3, trazabilidad completa y
+  validación nativa Windows/8.3. R4 no está completado.
+
+#### Continuación R4 — progreso y fechas de transferencia
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- Descargas informan bytes recibidos, nombre y tamaño cuando está disponible; aplican
+  la fecha remota tras publicar, ignorando fallos de fecha como Kotlin. Subidas
+  reanudables informan offsets confirmados y finalización. `completed_download_replaces_destination`
+  comprueba bytes, progreso y fecha; `resumes_from_acknowledged_offset_and_keeps_exact_bytes`
+  comprueba progreso 3/6 y 6/6 junto con el contenido.
+- `stale_revision_is_rejected_before_opening_snapshot_or_sending_put` confirma que
+  una revisión remota distinta no abre el snapshot ni envía una escritura. Las pruebas
+  usan servidores loopback y archivos sintéticos. `cargo test -p emusync-data-drive
+  --test resumable --locked` y `cargo test -p emusync-data-drive --test conditional
+  --locked` pasaron con cuatro y tres pruebas; `cargo xtask check` pasó arquitectura,
+  formato, Clippy y pruebas Rust en Linux, reutilizando compilaciones previas.
+- La actualización condicional aún no informa progreso. Permanecen pendientes
+  composición de transferencias, dueño y cierre supervisado, resolución segura de
+  resultados remotos inciertos y carrera de rutas de R3. No se ejecutaron Gradle,
+  Google real, Windows nativo/8.3 ni CI remoto en esta continuación; R4 sigue abierto.
+
+#### Continuación R4 — progreso condicional y fallos de sesión
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- La actualización condicional informa los bytes leídos hacia la petición, sin
+  presentarlos como confirmación remota; la prueba de dos escritores comprueba
+  también el evento de progreso. Se conserva `If-Match` y la ausencia de fallback.
+- `expired_session_restarts_once_and_uploads_empty_snapshot` comprueba una sesión
+  404 y un snapshot vacío; `invalid_server_range_is_rejected_without_resending_data`
+  rechaza un offset fuera del archivo sin repetir escritura. Se usaron HTTP loopback
+  y archivos sintéticos, no Google real.
+- `cargo test -p emusync-data-drive --test conditional --offline`: tres pruebas
+  aprobadas; `cargo test -p emusync-data-drive --test resumable --locked`: seis
+  aprobadas. `cargo xtask check`: arquitectura, formato, Clippy y pruebas Rust
+  aprobados en Linux; se reutilizaron compilaciones previas. No se ejecutó Gradle.
+- R4 sigue abierto: faltan la composición de transferencias, supervisión y resolución
+  segura del resultado remoto incierto, y la garantía de rutas de R3. No se validaron
+  Windows nativo, 8.3 ni CI remoto.
+
+#### Continuación R4 — sesión caducada con resultado incierto
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- Cuando se pierde la respuesta de un bloque y la consulta posterior devuelve 404,
+  no se inicia otra sesión: la petición anterior pudo crear ya el archivo. Se conserva
+  la sesión opaca y se devuelve resultado desconocido. Una respuesta 404 directa del
+  bloque mantiene el reinicio único probado anteriormente. Este tratamiento del 404
+  tras un fallo de transporte es más conservador que el reintento Kotlin; aún falta
+  integrar reconciliación y la decisión del propietario para completar la equivalencia.
+- `expired_status_after_lost_response_does_not_create_a_duplicate` comprueba que no
+  se envía una segunda creación; `cargo test -p emusync-data-drive --test resumable
+  --locked` aprobó siete pruebas con HTTP loopback y datos sintéticos. `cargo xtask
+  check` aprobó arquitectura, formato, Clippy y pruebas Rust en Linux, con compilaciones
+  reutilizadas. Gradle, Google real, Windows/8.3 y CI remoto no se ejecutaron.
+- Integración de transferencias, resolución de resultados inciertos, cancelación
+  supervisada y protección de rutas de R3 siguen pendientes. R4 permanece abierto.
+
+#### Continuación R4 — identidad y conservación de sesión
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- La sesión opaca conserva el nombre esperado: una respuesta de subida o consulta
+  con nombre distinto o ID vacío mantiene el resultado incierto y no se acepta como
+  archivo confirmado. Los errores al consultar estado, leer el snapshot tras iniciar
+  sesión o procesar offsets conservan sesión y causa para intentar la reconciliación.
+- `unexpected_upload_identity_retains_session_until_verified` y
+  `status_failure_retains_session_for_later_reconciliation` pasaron con HTTP loopback
+  sintético; `cargo test -p emusync-data-drive --test resumable --locked` pasó nueve
+  casos. `cargo xtask check` aprobó arquitectura, formato, Clippy y pruebas Rust en
+  Linux, con compilaciones reutilizadas. El primer Clippy detectó una variante de
+  error grande; se redujo mediante indirección antes de la ejecución final.
+- Las capacidades de sesión siguen solo en memoria y no resuelven por sí mismas una
+  petición que aún pueda terminar. Faltan el propietario, la integración de transferencias,
+  el cierre supervisado y la protección de rutas de R3. No se ejecutaron Gradle,
+  Google real, Windows/8.3 ni CI remoto. R4 permanece abierto.
+
+#### Continuación R4 — adaptación e integración local parcial
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- `DriveTransfer` conecta descarga, creación reanudable y sustitución condicional
+  al contrato `CloudSaveTransfer`; conserva progreso y convierte timestamps al dominio.
+  Si una respuesta de creación o reemplazo ya exitosa tiene fecha inválida, el error
+  conserva los metadatos remotos para que no se pierda la identidad escrita.
+- `tracked_upload_uses_snapshot_and_records_server_revision` usa `TrackedFileSync`
+  real, archivos temporales y HTTP sintético; comprueba bytes del snapshot, hash y
+  revisión en historial. `cancelled_tracked_download_waits_for_staging_cleanup_and_keeps_save`
+  cancela tras observar datos parciales y comprueba limpieza, partida e historial.
+  `invalid_timestamp_after_success_retains_created_identity` comprueba el ID tras
+  error de fecha. `cargo test -p emusync-data-drive --test tracked_integration --locked`:
+  tres pruebas aprobadas en Linux.
+- `cancellation_during_metadata_read_prevents_conditional_put` y
+  `lost_conditional_write_response_is_an_unknown_outcome` comprueban cancelación antes
+  del PUT y respuesta perdida después del envío. Un PUT iniciado se espera hasta su
+  respuesta; su resultado perdido se informa como incierto. La señal y el inicio del PUT
+  todavía no constituyen una barrera atómica; no se valida una cancelación coincidente.
+  `cargo test -p emusync-data-drive --test conditional --locked`: cinco pruebas aprobadas.
+- `cargo xtask check` pasó arquitectura, formato, Clippy y pruebas Rust en Linux, con
+  compilaciones reutilizadas. No se ejecutó Gradle ni se utilizó Google real.
+- La composición todavía no está conectada a desktop-app. El propietario aún debe
+  conservar exclusión y snapshots ante resultado incierto, supervisar workers y esperar
+  limpieza/rollback antes del cierre; estas pruebas no acreditan esa garantía. Permanece
+  la carrera de rutas de R3; Windows nativo/8.3 y CI remoto no se ejecutaron. R4 sigue abierto.
+
+#### Continuación R4 — propiedad del snapshot en fallos
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- `TrackedFileSync` devuelve el snapshot junto al error de transferencia; cuando la
+  escritura remota ya respondió con éxito y falla verificación o persistencia local,
+  devuelve además el estado remoto. El snapshot vive mientras el error sea conservado;
+  descartarlo todavía elimina el temporal. No hay persistencia de recuperación entre
+  procesos y la caída o aborto del worker no quedan cubiertos por esta propiedad.
+- `interrupted_upload_retains_snapshot_and_session_for_reconciliation` comprueba que
+  una petición cancelada conserva sesión y bytes originales aunque la partida cambie.
+  `local_edit_after_remote_commit_retains_original_snapshot_and_remote_identity`
+  comprueba snapshot, identidad remota, historial y partida editada tras éxito remoto.
+  Ambos usan transporte loopback y archivos sintéticos. `cargo test -p
+  emusync-data-drive --test tracked_integration --locked`: cinco pruebas aprobadas.
+- `cargo xtask check` pasó arquitectura, formato, Clippy y pruebas Rust en Linux con
+  compilaciones reutilizadas; el primer Clippy detectó un error grande en el worker,
+  corregido mediante indirección. Gradle, Google real, Windows/8.3 y CI remoto no se
+  ejecutaron. Faltan el propietario de la exclusión, cierre supervisado, reconciliación
+  completa y seguridad de rutas de R3; R4 sigue abierto.
+
+#### Continuación R4 — supervisión parcial y protección de descargas
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- `local_edit_during_download_is_preserved_and_not_recorded_as_synced` y
+  `wrong_remote_checksum_does_not_replace_save_or_record_history` usan Drive HTTP
+  loopback y persistencia local reales; comprueban partida, historial y temporales.
+  `cargo test -p emusync-data-drive --test tracked_integration --locked` aprobó siete
+  casos en esa ejecución.
+- `OperationSupervisor`, situado en desktop-app por su propiedad de tareas y runtime,
+  mantiene exclusión y error hasta resolución explícita, señala cancelación y espera el
+  worker. Una espera de cierre interrumpida conserva el JoinHandle. Se captura un panic
+  como fallo retenido. El propietario debe conservar el supervisor y completar su cierre;
+  Drop y terminación del runtime no garantizan recuperación.
+- `cargo test -p emusync-desktop-app --tests --locked`: tres pruebas focalizadas del
+  supervisor, una integración con Drive y dos existentes del ejecutable aprobadas.
+  La integración cancela una subida, retiene snapshot y exclusión y consulta una sesión
+  completada antes de liberarlos. No acredita actualización del historial tras reconciliar,
+  persistencia de sesión entre procesos ni rollback remoto. El primer intento de colocar
+  el supervisor en application fue rechazado por el verificador de arquitectura; se movió
+  a desktop-app, sin relajar la regla. `cargo xtask check` pasó arquitectura, formato,
+  Clippy y pruebas Rust en Linux con compilaciones reutilizadas.
+- El supervisor no está conectado al ciclo de vida real de la aplicación. Persisten la
+  carrera de rutas de R3, reconciliación completa y cierre de runtime, pruebas Windows/8.3
+  y CI remoto; Gradle y Google real no se ejecutaron. R4 sigue abierto.
+
+#### Continuación R4 — historial tras reconciliación
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- `record_reconciled_upload` verifica el snapshot retenido y el hash remoto cuando
+  existe antes de registrar la revisión confirmada. Si la partida local cambió, conserva
+  la edición y devuelve error después de registrar qué revisión se subió; el propietario
+  mantiene la exclusión hasta resolverla. La evidencia de snapshot es una referencia al
+  temporal: el propietario debe conservar el error/snapshot durante toda la operación.
+- Se amplió `supervisor_retains_exclusion_and_snapshot_until_remote_reconciliation`:
+  una sesión sintética completada se convierte al estado de dominio; un snapshot alterado
+  rechaza el historial, una edición local se conserva y mantiene la exclusión, y la
+  reconciliación válida registra ID/versión antes de liberar el snapshot. `cargo test
+  -p emusync-desktop-app --test supervised_drive --locked`: una prueba aprobada en Linux.
+- `cargo xtask check` aprobó arquitectura, formato, Clippy y pruebas Rust en Linux, con
+  compilaciones reutilizadas. No se ejecutaron Gradle, Google real, Windows/8.3 ni CI
+  remoto. El supervisor sigue sin conexión al ciclo de vida real; persisten la seguridad
+  de rutas de R3, recuperación entre procesos y cierre supervisado. R4 permanece abierto.
+
+#### Continuación R4 — resultado condicional incierto
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- Un 5xx recibido después del PUT condicional se informa como resultado desconocido,
+  sin repetir la escritura. Una respuesta de éxito con identidad inesperada conserva
+  los metadatos recibidos para recuperación. El 404/409/412 conserva el conflicto y
+  no hay fallback incondicional.
+- `server_error_after_conditional_put_is_not_assumed_to_be_unwritten`,
+  `unexpected_response_retains_reported_identity_for_recovery` y
+  `cancellation_after_put_waits_for_the_remote_response` verifican esos casos con
+  servidor loopback. La última mantiene la respuesta retenida y confirma que el futuro
+  no termina hasta liberarla. `cargo test -p emusync-data-drive --test conditional
+  --locked`: ocho pruebas aprobadas. `cargo xtask check` pasó arquitectura, formato,
+  Clippy y pruebas Rust en Linux; compilaciones reutilizadas.
+- La ventana actual es una vista previa que no inicia operaciones Drive. No se conectó
+  un cierre que descartase resultados pendientes; sigue pendiente integrar supervisor,
+  recuperación e historial en el ciclo de vida real, además de rutas seguras de R3.
+  Gradle, Google real, Windows/8.3 y CI remoto no se ejecutaron; R4 sigue abierto.
+
+#### Continuación R4 — límites HTTP y sesión caducada
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- `DriveHttpPolicy` crea clientes separados: conexión de 3 s, metadatos con límite
+  total de 15 s y lecturas de transferencia con 60 s de inactividad sin límite total. El constructor
+  Google de `DriveTransfer` usa ambos: sesiones/consultas y lectura de metadatos usan
+  el cliente de control; los cuerpos de transferencia usan el otro. Las redirecciones
+  automáticas están desactivadas para no seguir un 308 como redirección de carga;
+  esta política necesita comprobarse con las respuestas reales de Google. El timeout
+  de lectura no cubre escrituras bloqueadas: ese caso sigue pendiente.
+- `cargo test -p emusync-data-drive --test http_policy --locked`: tres pruebas con
+  HTTP loopback e intervalos reducidos verificaron timeout de metadatos, transferencia
+  activa más larga que ese límite y parada por inactividad. `chunk_uses_transfer_timeout_instead_of_short_control_timeout`
+  verifica la selección de cliente en el adaptador reanudable; la suite `resumable`
+  pasó once pruebas. Las demoras de prueba no representan los tiempos de producción.
+- Una sesión caducada durante reconciliación devuelve `ExpiredOutcomeUnknown`, que no
+  afirma ausencia de archivo; `expired_reconciliation_explicitly_preserves_uncertainty`
+  lo comprueba. `cargo xtask check` pasó arquitectura, formato, Clippy y pruebas Rust
+  en Linux con compilaciones reutilizadas. No se ejecutaron Gradle, Google real,
+  Windows/8.3 ni CI remoto. R4 sigue abierto por integración del ciclo de vida,
+  reconciliación entre procesos y seguridad de rutas de R3.
+
+#### Continuación R4/R3 — directorio fijado en Linux
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- Se añadió la pieza Linux `PinnedRemoteDestination`: abre el directorio seleccionado
+  y cada descendiente mediante descriptores, rechaza enlaces en componentes no fiables
+  y permite creación exclusiva sin seguir el destino final ni reemplazar archivos. El
+  directorio raíz seleccionado puede ser un enlace, como en la resolución previa.
+- `parent_swap_to_symlink_does_not_redirect_creation_outside_selected_directory`
+  cambia un directorio intermedio por un enlace tras fijarlo y comprueba que la creación
+  no llegue al directorio externo. `refuses_traversal_existing_files_and_untrusted_symlinks`
+  comprueba traversal, enlaces y conservación de archivos existentes. `cargo test -p
+  emusync-data-local --test pinned_path --offline`: dos pruebas aprobadas en Linux con
+  directorios y bytes sintéticos. `cargo xtask check` pasó arquitectura, formato, Clippy
+  y pruebas Rust en Linux con compilaciones reutilizadas.
+- Esta pieza aún no está integrada con resolución de destinos, staging, backup ni
+  reemplazo atómico; crear un archivo directamente no es una restauración completa y
+  la carrera previa permanece en el flujo actual. No se ejecutaron Windows/8.3, Google
+  real, Gradle ni CI remoto. R4 sigue abierto, igual que la aceptación de rutas de R3.
+
+#### Continuación R4/R3 — staging fijado y descarga trazada Linux
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- `StagedRestore::prepare_pinned` y `TrackedFileSync::download_pinned` conservan el
+  descriptor del directorio durante descarga, verificación, backup y publicación.
+  El backup lee el archivo mediante descriptor abierto sin seguir un enlace final,
+  conserva el nombre y la ruta lógica originales en el formato existente y verifica
+  su hash. Para destino ausente usa publicación sin reemplazo. La ruta fijada requiere
+  directorios intermedios existentes y `/proc/self/fd`; no sustituye todavía al flujo
+  genérico basado en rutas.
+- Se verifica que la ruta del directorio siga apuntando al descriptor antes y después
+  de publicar. Una sustitución detectada devuelve error y evita el checkpoint; el
+  descriptor impide redirigir la escritura a un enlace externo. Las comprobaciones no
+  son una transacción con el historial: permanece una ventana concurrente entre la
+  última comprobación y el registro, y el dueño debe conservar exclusión. Tampoco se
+  acredita atomicidad frente a otro proceso que modifique el archivo final.
+- `cargo test -p emusync-data-local --test pinned_path --locked`: seis pruebas Linux,
+  incluida sustitución de directorio o enlace final, creación concurrente y backup con
+  ruta lógica. `cargo test -p emusync-data-drive --test tracked_integration --locked`:
+  nueve pruebas, incluidas descarga HTTP sintética con backup e historial y rechazo de
+  sustitución durante la transferencia sin tocar el destino externo ni registrar éxito.
+  `cargo xtask check` pasó arquitectura, formato, Clippy y pruebas Rust en Linux con
+  compilaciones reutilizadas. Clippy señaló un getter ambiguo y un error grande en el
+  primer intento; se corrigieron antes del resultado final.
+- Windows nativo/8.3 queda diferido por instrucción del usuario y no bloquea el avance;
+  no se presenta como validado. No se ejecutaron Gradle, Google real ni CI remoto.
+  El ciclo de vida real, integración del flujo genérico con esta capacidad y límites de
+  la garantía concurrente siguen pendientes; R4 permanece abierto.
+
+#### Continuación R4 — cuerpos de petición detenidos
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- Subidas reanudables y condicionales observan el consumo del cuerpo por el cliente HTTP
+  y limitan períodos sin avance mientras quedan bloques por entregar. Un vencimiento
+  devuelve resultado incierto; la reanudable conserva su sesión. Cuando el cuerpo ya fue
+  entregado al cliente, no se impone un límite total de petición; el cliente de producción
+  conserva el límite de inactividad de lectura.
+- Este indicador mide bloques consumidos por reqwest, no bytes escritos realmente por el
+  kernel. Puede no detectar una detención después de que reqwest haya consumido todo el
+  cuerpo y no acredita equivalencia completa con el timeout de socket CIO; ese límite
+  sigue pendiente. No se considera una confirmación remota de los bytes consumidos.
+- `stalled_request_body_times_out_with_recoverable_session` y
+  `stalled_conditional_body_reports_unknown_remote_outcome` usan sockets loopback cuyo
+  servidor deja de leer; las suites focalizadas pasaron doce y nueve pruebas. El caso
+  `chunk_uses_transfer_timeout_instead_of_short_control_timeout` sigue pasando con una
+  respuesta más lenta que el límite de control. `cargo xtask check` pasó arquitectura,
+  formato, Clippy y pruebas Rust en Linux; compilaciones reutilizadas.
+- No se ejecutaron Gradle, Google real ni CI remoto. Windows/8.3 permanece diferido.
+  R4 sigue abierto por la limitación de timeout, el ciclo de vida real y los pendientes
+  de seguridad de rutas y recuperación entre procesos.
+
+#### Continuación R4 — recuperación supervisada con contexto original
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- Los errores de subida retienen ruta local absoluta normalizada, carpeta, nombre remoto
+  y observación previa, además del snapshot y el resultado/error remoto. La recuperación
+  supervisada usa ese contexto para consultar una sesión reanudable o procesar un éxito
+  remoto conocido, verificar el snapshot, registrar historial y solo entonces liberar
+  la exclusión. Fallos, progreso incompleto y sesión caducada conservan la operación.
+- `supervisor_retains_exclusion_and_snapshot_until_remote_reconciliation` usa HTTP
+  loopback y almacenamiento sintético: comprueba respuestas incompleta y caducada,
+  snapshot alterado, edición local y registro válido previo a liberar la exclusión.
+  `cargo test -p emusync-desktop-app --test supervised_drive --locked` pasó; `cargo
+  xtask check` pasó arquitectura, formato, Clippy y pruebas Rust en Linux con compilaciones
+  reutilizadas. El servidor es controlado; sus respuestas no acreditan Google real.
+- La recuperación automática cubre creación reanudable y errores locales posteriores
+  a éxito; no cubre aún resultados inciertos del PUT condicional, vinculación de la
+  recuperación a la revisión OAuth, ni persistencia entre procesos. El ciclo de vida de
+  la aplicación real y la ventana concurrente de rutas de R3 siguen pendientes. No se
+  ejecutaron Gradle, Google real ni CI remoto; Windows/8.3 queda diferido. R4 sigue abierto.
+
+#### Continuación R4 — reconciliación condicional supervisada
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- `reconcile_conditional_upload` consulta metadatos por el ID observado sin reenviar
+  el PUT. Exige ID y nombre coherentes, tipo no carpeta y SHA-256 igual al snapshot
+  retenido antes de registrar historial y liberar exclusión. Hash ausente o distinto
+  mantiene el resultado sin confirmar y conserva snapshot y exclusión.
+- `uncertain_conditional_write_reconciles_only_after_matching_hash` pierde la respuesta
+  del PUT con `If-Match`, consulta un servidor loopback con hash ausente, distinto y
+  finalmente coincidente, y comprueba bloqueo, partida e historial. `cargo test -p
+  emusync-desktop-app --test supervised_drive --locked`: dos pruebas aprobadas.
+  `cargo xtask check` pasó arquitectura, formato, Clippy y pruebas Rust en Linux con
+  compilaciones reutilizadas. No se utilizó Google real ni se ejecutó Gradle o CI remoto.
+- La recuperación aún no está vinculada atómicamente a la revisión OAuth ni conectada
+  al ciclo de vida real. Persisten los límites de escritura de socket, recuperación
+  entre procesos y carrera de rutas de R3. Windows/8.3 sigue diferido; R4 permanece abierto.
+
+#### Continuación R4 — revisión OAuth durante commit y recuperación
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- OAuth puede devolver junto al token la revisión exacta comprobada. La composición
+  supervisada recibe esa revisión antes de iniciar la operación, la conserva en el
+  fallo y vuelve a comprobarla durante recuperación. `CredentialTransaction` serializa
+  los cambios de conexión con la acción síncrona de commit; la espera se realiza en un
+  worker, sin mantener el lock a través de una espera async. El llamador debe construir
+  el guard con la revisión devuelta por OAuth y usar las rutas protegidas; la aplicación
+  de vista previa aún no compone ese flujo.
+- `upload_guarded` impide registrar el historial si la conexión cambió mientras se subía;
+  conserva snapshot y resultado remoto para recuperación. En Linux,
+  `download_pinned_guarded` comprueba la revisión y realiza staging/backup/publicación e
+  historial bajo la misma exclusión de configuración, sin reemplazar la partida si la
+  conexión cambió antes del commit. La garantía es en proceso: Kotlin y Rust no comparten locks.
+- `cargo test -p emusync-data-local --test credential_transaction --locked`: dos
+  pruebas aprobaron exclusión y rechazo de desconexión/reconexión ABA. `cargo test -p
+  emusync-desktop-app --test supervised_drive --locked`: siete pruebas, incluyendo
+  cambio de conexión durante subida exitosa, consulta condicional y descarga fijada;
+  comprobaron partida, historial, snapshot y exclusión con servicios sintéticos.
+  El callback OAuth sintético comprobó la revisión devuelta contra el almacén real.
+- `cargo xtask check` pasó arquitectura, formato, Clippy y pruebas Rust en Linux, con
+  compilaciones reutilizadas. `./gradlew check --no-daemon` pasó en 1 min 18 s: 111
+  tareas, tres ejecutadas y 108 UP-TO-DATE; las suites Kotlin reutilizadas no son nuevas
+  ejecuciones. No se utilizó Google real ni se ejecutó CI remoto; Windows/8.3 se difiere.
+- R4 sigue abierto: falta integrar estas rutas al ciclo de vida real y persistir la
+  recuperación entre procesos; las comprobaciones de rutas y del timeout de escritura
+  conservan las limitaciones anotadas arriba.
+
+#### Continuación R4 — propietario de runtime y cierre de vista previa
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- `RuntimeOwner` posee Tokio y el supervisor; al cerrar rechaza nuevas operaciones,
+  señala cancelación y devuelve estado pendiente hasta que termine el worker. Si hay
+  fallo retenido, mantiene el runtime y devuelve recuperación requerida en vez de
+  descartar el error. La ventana de vista previa consulta esos estados sin bloquear el
+  hilo visual y solo sale al obtener `Ready`.
+- `cargo test -p emusync-desktop-app --test runtime_owner --locked`: dos pruebas
+  aprobaron espera de limpieza, bloqueo de nuevas operaciones, conservación de fallo
+  y cierre tras resolverlo. `cargo xtask check` pasó arquitectura, formato, Clippy y
+  pruebas Rust en Linux con compilaciones reutilizadas.
+- `cargo build --locked -p emusync-desktop-app` pasó. En la sesión Wayland disponible,
+  la vista previa se lanzó con `--config` en un directorio temporal aislado; se identificó
+  su ventana por PID y se solicitó el cierre mediante Hyprland. La solicitud devolvió
+  `ok`, el proceso terminó con código cero y stderr vacío. No había una operación Drive
+  activa en esta prueba gráfica y no se utilizó Google real.
+- La vista previa aún no inicia operaciones Drive ni presenta una acción de recuperación;
+  `RuntimeOwner` todavía no ofrece ejecución asíncrona de recuperación desde el hilo
+  visual. Falta conectar ese flujo y validar su cierre real con operación activa. Siguen
+  pendientes la recuperación entre procesos y las limitaciones documentadas de rutas y
+  timeout; Windows/8.3 permanece diferido. No se ejecutó Gradle ni CI remoto en esta
+  continuación. R4 sigue abierto.
+
+#### Continuación R4 — recuperación asíncrona durante cierre
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- `RuntimeOwner` puede ejecutar la recuperación fuera del hilo visual conservando el
+  supervisor. Si se solicita cerrar mientras se recupera, el cierre espera; si la
+  recuperación hace panic, conserva un estado que impide cerrar hasta reconocimiento
+  explícito. El acceso al supervisor se rechaza mientras se cierra o se recupera.
+- `cargo test -p emusync-desktop-app --test runtime_owner --locked`: cuatro pruebas
+  aprobadas, incluidas recuperación asíncrona y panic. `runtime_close_waits_for_reconciliation_and_history_before_exit`
+  integra Tokio, supervisor, snapshot, Drive HTTP loopback e historial: retiene una
+  respuesta de estado, comprueba que el cierre sigue pendiente, y solo permite salir
+  tras reconciliar y registrar la revisión. `cargo test -p emusync-desktop-app --test
+  supervised_drive --locked`: ocho pruebas aprobadas. La vista previa todavía no expone
+  una acción de producto para iniciar recuperación; la prueba invoca el propietario.
+- `cargo xtask check` pasó arquitectura, formato, Clippy y pruebas Rust en Linux con
+  compilaciones reutilizadas. El primer Clippy pidió simplificar un condicional; se
+  corrigió antes del resultado final. `cargo build --locked -p emusync-desktop-app` y un
+  nuevo cierre Wayland de la vista previa con `--config` temporal pasaron: Hyprland
+  respondió `ok`, proceso cero y stderr vacío. No hubo operación Drive real en la ventana.
+- R4 sigue abierto por el flujo de producto de recuperación, recuperación entre procesos
+  y los límites documentados de rutas y timeout. Windows/8.3 continúa diferido; no se
+  ejecutaron Gradle, Google real ni CI remoto en esta continuación.
+
+#### Continuación R4 — confirmación de bloques y retirada del timeout aproximado
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- Ante un 308 que reconoce todos los bytes, la subida consulta el estado sin reenviar
+  contenido; acepta solo una respuesta final coherente y conserva resultado incierto si
+  todavía no hay confirmación. Dos regresiones loopback cubren ambas respuestas.
+- La primera ejecución de `cargo xtask check` falló en
+  `slow_active_upload_can_exceed_body_inactivity_interval`: el control basado en
+  consumo de reqwest declaró incierta una transferencia que el servidor seguía leyendo.
+  Se retiró ese control de cuerpos condicionales y reanudables para no interrumpir
+  transferencias activas. La prueba lenta se conserva; las pruebas de socket retenido
+  comprueban cancelación cooperativa reanudable y espera del PUT condicional. El timeout
+  real de escritura de socket sigue pendiente; no se presenta como resuelto.
+- `cargo test -p emusync-data-drive --test conditional --test resumable --offline` pasó
+  nueve y quince casos con HTTP y archivos sintéticos. Después, `cargo xtask check`
+  pasó arquitectura, formato, Clippy y pruebas Rust en Linux, con compilaciones
+  reutilizadas. No se ejecutaron Gradle, Google real ni CI remoto en esta continuación.
+- La [guía oficial de subidas Drive](https://developers.google.com/workspace/drive/api/guides/manage-uploads)
+  muestra una URI de sesión en el mismo origen en su ejemplo, pero eso no demuestra que
+  todas las respuestas reales cumplan la restricción del adaptador. Windows/8.3 permanece
+  diferido. R4 sigue abierto por timeout de escritura, recuperación entre procesos,
+  integración de producto y los límites de rutas documentados.
+
+#### Continuación R4/R3 — creación de directorios fijados
+
+Evidencia (2026-11-05, Linux, base `00d51b6`; sin commit):
+
+- La preparación fijada crea la raíz seleccionada si falta y los directorios remotos
+  descendientes mediante `mkdirat`/`openat` relativos al descriptor, reabriendo sin
+  seguir enlaces incluso si otra operación creó el componente primero. La raíz elegida
+  por el usuario puede ser un enlace, como en la referencia. Se valida el nombre
+  remoto completo antes de crear directorios.
+- `cargo test -p emusync-data-local --test pinned_path --locked`: nueve pruebas
+  aprobaron, incluidas rutas anidadas ausentes, creación concurrente, raíz seleccionada
+  mediante enlace y rechazo de traversal/enlaces. `cargo test -p emusync-data-drive
+  --test tracked_integration --locked`: diez pruebas, incluida descarga HTTP sintética
+  a una jerarquía nueva con checkpoint y sin backup innecesario. `cargo xtask check`
+  pasó arquitectura, formato, Clippy y pruebas Rust en Linux; compilaciones reutilizadas.
+- La fijación empieza al abrir la raíz seleccionada: no protege un cambio adversario de
+  esa raíz antes de abrirla. Persisten las ventanas entre comprobación, publicación e
+  historial y la integración al flujo de producto. No se ejecutaron Gradle, Google real
+  ni CI remoto; Windows/8.3 continúa diferido. R4 sigue abierto.
+
+#### Continuación R4 — operaciones de carpetas y resultado incierto
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- La búsqueda de rutas conserva su carácter de solo lectura; el renombrado y borrado
+  explícito envían sus parámetros al endpoint v3. Ninguna búsqueda o migración elimina
+  carpetas automáticamente. Una respuesta perdida o 5xx después de una mutación se
+  informa como resultado incierto y no dispara una repetición automática de creación.
+- `cargo test -p emusync-data-drive --test folders --locked`: cuatro pruebas aprobadas
+  con HTTP loopback y datos sintéticos, incluyendo búsqueda con nombre escapado,
+  carpeta ausente sin creación, rename/delete y respuesta perdida tras crear. Cubren
+  las garantías principales de `DriveFoldersTest`; no comprueban el rollback de una
+  migración de varios archivos, que corresponde al coordinador posterior.
+- `cargo xtask check` pasó arquitectura, formato, Clippy y pruebas Rust en Linux,
+  con compilaciones reutilizadas. No se ejecutaron Gradle, Google real ni CI remoto
+  en esta continuación. Windows/8.3 sigue diferido; R4 permanece abierto por los
+  pendientes de integración, recuperación y rutas documentados.
+
+#### Continuación R4 — bloques grandes y listados de migración
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- La subida reanudable rechaza un rango que reconoce bytes más allá del bloque
+  enviado y conserva la sesión para recuperación; aceptarlo podría omitir bytes
+  del snapshot. Un servidor sintético comprueba ese rechazo y otro comprueba bytes,
+  rangos y progreso de un archivo que supera el bloque de 8 MiB.
+- `cargo test -p emusync-data-drive --test resumable --test listing --locked` pasó
+  17 pruebas de subida y tres de listado. La nueva prueba de listado comprueba que
+  `list_children` incluye tanto carpetas como archivos a través de páginas, mientras
+  la prueba existente verifica que `list_files` excluye carpetas. Datos y servicio
+  HTTP son sintéticos y aislados.
+- `cargo xtask check` pasó en Linux: verificador de arquitectura, rustfmt, Clippy
+  con warnings como errores y pruebas del workspace; se reutilizaron compilaciones.
+- Después de esa comprobación se añadió y ejecutó
+  `cargo test -p emusync-data-drive --test resumable --locked repeated_zero_acknowledgements_stop_with_recoverable_session`:
+  pasó en Linux y verificó el límite de reintentos sin progreso y la sesión retenida.
+- Sigue sin resolverse el timeout real de escritura de socket, por lo que una
+  sustitución condicional atascada puede impedir el cierre cooperativo. La recuperación
+  entre procesos, la integración de producto y las ventanas de rutas antes descritas
+  siguen abiertas. No se comprobó Google real, Windows/8.3 ni CI remoto.
+
+#### Continuación R4 — cancelación y reconciliación de respuestas
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- Un PUT condicional cancelado espera hasta un segundo una respuesta; si sigue
+  pendiente, informa resultado remoto desconocido. El supervisor conserva snapshot y
+  exclusión hasta reconciliar: no se interpreta la cancelación como rollback. Se aplica
+  también a la lectura incompleta de metadatos de éxito. La subida reanudable conserva
+  la sesión si se cancela durante esa lectura.
+- La recuperación por ID admite ahora fechas inválidas tras creación o sustitución:
+  consulta metadatos y verifica identidad, nombre y checksum antes de registrar el
+  historial; no repite la escritura. Las credenciales originales siguen protegiendo el
+  commit del historial.
+- Se separó el cliente de subida: en reqwest 0.12.28 `read_timeout` comienza antes de
+  recibir cabeceras, incluso mientras se envía el cuerpo, y cortaba subidas activas
+  largas. La prueba lenta usa ahora la política construida para producción. El cliente
+  de subida no tiene timeout de inactividad de escritura ni de lectura de respuesta;
+  sin cancelación una conexión detenida puede permanecer pendiente. Esto no constituye
+  equivalencia completa con el timeout de socket Kotlin.
+- `cargo test -p emusync-data-drive --test resumable --test conditional --test http_policy
+  --locked` pasó 19, 11 y tres pruebas, respectivamente; `cargo test -p
+  emusync-desktop-app --test supervised_drive --locked` pasó 11. Usaron archivos y HTTP
+  loopback sintéticos. `cargo xtask check` pasó después en Linux: arquitectura,
+  rustfmt, Clippy y pruebas de todo el workspace, con compilaciones reutilizadas.
+  No se probaron Google real, Windows/8.3 ni CI remoto. La
+  recuperación entre procesos y las limitaciones de rutas antes documentadas persisten.
+
+#### Continuación R4 — lectura de respuestas de subida
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- Tras recibir las cabeceras de una subida, el cuerpo de metadatos usa un límite
+  de inactividad que se reinicia por fragmento. Una respuesta incompleta de una
+  sustitución condicional se conserva como resultado incierto; en una subida
+  reanudable se consulta la sesión, sin reenviar el snapshot automáticamente.
+  Esta comprobación no mide el avance de escritura de socket ni el tiempo hasta
+  recibir las cabeceras: esos límites siguen sin equivalencia con Kotlin.
+- `cargo test -p emusync-data-drive --test resumable --test conditional --test
+  http_policy --locked` pasó 20, 12 y tres pruebas, incluidas respuestas detenidas;
+  `cargo test -p emusync-desktop-app --test supervised_drive --locked` pasó 11.
+  Después `cargo xtask check` pasó en Linux, incluida una prueba adicional en la que
+  metadatos activos superan el intervalo de inactividad. HTTP y archivos fueron
+  sintéticos. No se ejecutaron Google real, Windows/8.3 ni CI remoto.
+
+#### Continuación R4/R3 — revisión de credenciales en escrituras generales
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- `ConfigManager::save` y `update` avanzan la revisión cuando cambian credenciales,
+  además de las acciones explícitas de conexión. Una edición solo de biblioteca no
+  invalida OAuth. Esto cierra un ABA dentro del proceso si las credenciales pasan por
+  la API general y luego vuelven a su valor anterior; los procesos Kotlin y Rust siguen
+  sin compartir locks ni revisión.
+- `cargo test -p emusync-data-local --test credential_transaction --locked` pasó tres
+  pruebas, y `cargo test -p emusync-data-drive --test oauth --locked` pasó cinco,
+  incluida una respuesta de refresh atrasada durante un ABA de configuración general.
+  Ambos utilizaron datos locales y HTTP sintéticos. No se comprobaron Google real,
+  Windows/8.3 ni CI remoto. `cargo xtask check` pasó después en Linux con arquitectura,
+  rustfmt, Clippy y pruebas del workspace; se reutilizaron compilaciones.
+- `./gradlew qualityCheck check --no-daemon` pasó en Linux en 1m 13s: 111 tareas,
+  tres ejecutadas y 108 `UP-TO-DATE`. Las pruebas Kotlin marcadas `UP-TO-DATE` son
+  resultados reutilizados, no ejecuciones nuevas; los verificadores de hooks y
+  convenciones sí se ejecutaron con sus proyectos temporales.
+
+#### Continuación R4 — cancelación de consulta de sesión
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- La cancelación durante la consulta de estado de una subida reanudable conserva
+  la sesión y devuelve resultado desconocido sin esperar todos los timeouts y
+  reintentos de control. El propietario debe seguir reteniendo la exclusión hasta
+  reconciliar; cancelar la consulta no demuestra el resultado de la escritura.
+- `cargo test -p emusync-data-drive --test resumable --locked` pasó 21 pruebas,
+  incluida una consulta detenida de un servidor loopback sintético. Después,
+  `cargo xtask check` pasó en Linux con arquitectura, rustfmt, Clippy y pruebas del
+  workspace, reutilizando compilaciones. No se ejecutaron Google real, Windows/8.3
+  ni CI remoto.
+
+#### Continuación R4 — sesión confirmada y revisión OAuth en recuperación
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- Una sesión reanudable confirmada con fecha ausente o inválida conserva su ID.
+  `reconcile_tracked_upload_with_listing` permite consultar ese ID y exige nombre y
+  checksum del snapshot antes de registrar historial y liberar exclusión. Un checksum
+  distinto mantiene el resultado sin confirmar. No se repite la creación remota.
+- Antes de consultar Drive para reconciliar se verifica la revisión OAuth capturada;
+  el commit de historial la vuelve a verificar para detectar cambios durante la consulta.
+- `cargo test -p emusync-data-drive --test tracked_integration --locked` pasó diez
+  pruebas; `cargo test -p emusync-desktop-app --test supervised_drive --locked` pasó
+  13. Los casos nuevos usan archivos temporales y servidores HTTP loopback sintéticos.
+  `cargo xtask check` pasó después en Linux con arquitectura, rustfmt, Clippy y pruebas
+  del workspace, reutilizando compilaciones.
+  No se comprobó Google real, Windows/8.3 ni CI remoto. Continúa pendiente la
+  equivalencia del timeout de escritura y espera de cabeceras, además de los límites
+  de persistencia entre procesos y rutas documentados en continuaciones anteriores.
+
+#### Continuación R3/R4 — fecha del archivo subido fijada al descriptor
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- En Unix la verificación del hash local y la escritura de su fecha tras subir o
+  reconciliar usan el mismo descriptor abierto. Si la ruta se sustituye después de
+  abrirla, la operación no escribe la fecha en el nuevo destino de esa ruta.
+  La prueba `replacing_path_after_open_does_not_change_other_file_timestamp` cambia
+  la ruta por un enlace y comprueba ambos archivos en Linux.
+- `cargo test -p emusync-data-local --locked` y `cargo test -p emusync-data-drive
+  --test tracked_integration --locked` pasaron. No se ha validado Windows: fuera de
+  Unix se conserva la escritura por ruta anterior. La apertura inicial sigue pudiendo
+  observar una ruta cambiada y esto no cierra las demás ventanas de publicación e
+  historial ya registradas. Google real y CI remoto no se ejecutaron.
+- La descarga establece la fecha sobre su archivo temporal abierto antes de publicarlo;
+  después ya no reabre el destino por nombre para escribirla. `cargo test -p
+  emusync-data-drive --test download --test tracked_integration --locked` pasó tres y
+  diez pruebas con HTTP loopback y archivos temporales en Linux. Las pruebas comprueban
+  fecha, reemplazo, cancelación y fallos; no reproducen una sustitución adversaria de la
+  ruta durante la publicación ni validan Windows. `cargo xtask check` pasó después en
+  Linux con arquitectura, rustfmt, Clippy y pruebas del workspace; compilaciones reutilizadas.
+
+#### Continuación R4 — confirmación prematura y carpeta de recuperación
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- La subida reanudable rechaza una respuesta de finalización recibida antes de enviar
+  el último bloque. Conserva la sesión y el ID comunicado para investigar el resultado,
+  sin volver a crear el archivo. Una recuperación de sesión incierta exige checksum
+  coincidente antes de registrar historial; un checksum ausente permanece sin confirmar.
+- Las recuperaciones que consultan un ID comprueban también su carpeta padre, además
+  de ID, nombre, tipo y checksum. La prueba sintética de extremo a extremo conserva la
+  exclusión ante carpeta incorrecta y checksum incorrecto, y solo registra el historial
+  tras una respuesta coincidente. La consulta de sesión pide también `parents` y, si
+  falta el padre o el checksum, mantiene el resultado sin confirmar o consulta el ID.
+- `cargo test -p emusync-data-drive --test resumable --locked` pasó 22 pruebas;
+  `cargo test -p emusync-desktop-app --test supervised_drive --locked` pasó 14. Se
+  usaron archivos temporales y HTTP loopback. `cargo xtask check` pasó después en
+  Linux con arquitectura, rustfmt, Clippy y pruebas del workspace; se reutilizaron
+  compilaciones. No se comprobaron Google real,
+  Windows/8.3 ni CI remoto. Siguen pendientes los límites de timeout, recuperación
+  entre procesos y rutas ya documentados.
+
+#### Continuación R4 — límites de origen y redirección de sesión
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- Las URL de sesión reanudable se rechazan si cambian de origen o incluyen
+  credenciales incrustadas o fragmento. Las políticas de cliente de producción no
+  siguen redirecciones. Dos listeners loopback verificaron que ni un `Location` de
+  otro origen ni una respuesta 307 a un PUT de sesión contactan al destino alternativo;
+  otra prueba cubrió userinfo y fragmento. La respuesta 307 conserva la sesión para
+  recuperación, sin reenviar automáticamente el snapshot.
+- `cargo test -p emusync-data-drive --test resumable --locked` pasó 25 pruebas en
+  Linux con datos y servicios sintéticos. `cargo xtask check` pasó después en Linux
+  con arquitectura, rustfmt, Clippy y pruebas del workspace; se reutilizaron compilaciones.
+  La compatibilidad de la restricción de origen
+  con todas las respuestas reales de Google sigue sin comprobarse: el ejemplo público
+  citado anteriormente no acredita todos los posibles orígenes. No se ejecutaron
+  Google real, Windows/8.3 ni CI remoto. El timeout de escritura sigue pendiente.
+
+#### Continuación R4 — límite TCP Linux y metadatos acotados
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- El cliente de subida configura `TCP_USER_TIMEOUT` mediante reqwest en Linux. El
+  kernel puede cerrar conexiones con datos sin confirmar o bloqueados por una ventana
+  TCP cero; una escritura condicional devuelve resultado incierto y una subida
+  reanudable consulta su sesión y la conserva si no puede confirmar el resultado.
+  Esto **no equivale** al timeout de socket Kotlin: no limita la espera silenciosa de
+  cabeceras una vez confirmados los datos, ni demuestra el comportamiento al otro lado
+  de un proxy. Windows sigue diferido.
+- El cliente de subida fuerza HTTP/1.1 porque el límite TCP pertenece a la conexión:
+  no debe compartirse entre varios streams HTTP/2. La prueba TLS sintética ofrece
+  ambos protocolos y confirma la negociación HTTP/1.1; no prueba Google real.
+  Tras ese cambio, `cargo xtask check` volvió a pasar en Linux; la prueba TLS, ignorada
+  por defecto, se ejecutó explícitamente como se indica abajo.
+- Pasaron `linux_tcp_timeout_stops_stalled_conditional_body_without_cancellation`,
+  `linux_tcp_timeout_queries_stalled_upload_and_retains_unknown_session` y
+  `slow_active_upload_can_exceed_body_inactivity_interval` con sockets loopback.
+  `cargo test -p emusync-data-drive --test conditional --locked
+  linux_tcp_timeout_distinguishes_stalled_and_active_tls_uploads -- --ignored` pasó
+  explícitamente: genera un certificado temporal con el ejecutable local `openssl`,
+  y comprueba tanto un receptor TLS detenido como una transferencia TLS lenta activa.
+  Esta prueba es ignorada en la suite automática porque requiere ese ejecutable; no se
+  guardó ninguna clave en el repositorio ni se ejecutó Google real o CI remoto.
+- La lectura de metadatos de éxito está acotada a 1 MiB. Una respuesta mayor tras un
+  PUT condicional conserva el resultado incierto; en una sesión reanudable provoca
+  consulta de estado sin reenviar el snapshot. `cargo test -p emusync-data-drive --test
+  conditional --test resumable --locked` pasó 14 y 26 pruebas antes de añadir las dos
+  pruebas TCP específicas anteriores, con archivos y servicios sintéticos.
+- `linux_tcp_timeout_does_not_bound_silent_response_after_body_delivery` reprodujo
+  explícitamente el caso pendiente: tras recibir todos los bytes, un servidor
+  loopback callado mantiene activo el PUT más allá del límite TCP hasta que se
+  solicita cancelación; entonces se conserva el resultado incierto. Pasó ejecutada
+  individualmente en Linux. `cargo xtask check` pasó después con arquitectura,
+  rustfmt, Clippy y pruebas del workspace; compilaciones reutilizadas y la prueba TLS
+  indicada como ignorada en la ejecución automática.
+
+#### Continuación R4 — reintentos implícitos de transporte
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- Los clientes de `DriveHttpPolicy` desactivan explícitamente los reintentos internos
+  de reqwest, además de las redirecciones. Los reintentos y las consultas de sesión
+  quedan bajo control del adaptador; los constructores con clientes inyectados
+  documentan la misma obligación para sus llamadores.
+- `cargo test -p emusync-data-drive --test conditional --test folders --locked` pasó
+  16 y cuatro pruebas en Linux. Las pruebas de respuesta perdida usan ahora los clientes
+  de producción y comprueban que no se envía otra mutación; la prueba TLS opcional fue
+  ignorada en esa ejecución. No se ha reproducido un NACK HTTP/2: la configuración
+  actual de la subida usa HTTP/1.1 y la garantía adicional se basa en la política
+  explícita de reqwest. No se ejecutaron Google real, Windows/8.3 ni CI remoto.
+
+#### Continuación R4 — identidades de carpeta y precondiciones
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- Una carpeta encontrada sin ID utilizable se rechaza antes de realizar mutaciones.
+  Si la creación devuelve éxito sin ID utilizable, se informa resultado incierto y
+  no se crea otra carpeta automáticamente. Una prueba con HTTP loopback comprueba
+  ambos casos y que no hay una petición posterior.
+- Los listados también rechazan IDs vacíos o de solo espacios. En subidas
+  reanudables un ID así mantiene el resultado incierto y la sesión retenida hasta
+  obtener una identidad válida. `cargo test -p emusync-data-drive --test listing
+  --test resumable --locked` pasó cuatro y 27 pruebas, y `cargo test -p
+  emusync-desktop-app --test supervised_drive --locked` pasó 14, en Linux con datos
+  y servidores sintéticos.
+- La regresión de ETag fuerte cubre ahora el campo ausente, vacío, comodín, débil,
+  sin comillas y con retorno de carro, sin abrir el snapshot ni enviar PUT. Esto
+  amplía la trazabilidad de `ConditionalCloudUpdateTest` frente al caso débil previo.
+- `cargo test -p emusync-data-drive --test conditional --test folders --locked` pasó
+  16 y cinco pruebas en Linux; la prueba TLS opcional quedó ignorada en esa ejecución.
+  La comprobación del campo ETag realmente ausente se añadió después de esa ejecución;
+  `cargo xtask check` pasó luego con arquitectura, rustfmt, Clippy y pruebas del
+  workspace, con compilaciones reutilizadas y la prueba TLS ignorada por defecto.
+  Servicios y archivos fueron sintéticos; no se ejecutaron Google real, Windows/8.3
+  ni CI remoto. La espera silenciosa de cabeceras sigue pendiente.
+
+#### Continuación R4 — cancelación antes del PUT condicional
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- El GET de metadatos previo al PUT condicional se puede cancelar mientras espera
+  cabeceras o cuerpo, sin esperar la respuesta del servidor. Esta fase no ha enviado
+  una mutación; las pruebas comprueban que no llega a enviarse el PUT.
+- Los metadatos de ese GET se leen con el mismo límite de tamaño y tiempo entre
+  fragmentos que los metadatos de subida. Una respuesta excesiva produce un error
+  distinguible antes de abrir el snapshot; no se presenta como escritura incierta.
+- `cargo test -p emusync-data-drive --test conditional --locked` pasó 18 pruebas en
+  Linux y dejó una TLS ignorada por defecto. La prueba TLS se ejecutó después
+  explícitamente con `--ignored` y pasó; utilizó un certificado efímero generado con
+  OpenSSL local. `cargo xtask check` pasó después en Linux con arquitectura, rustfmt,
+  Clippy y pruebas del workspace, reutilizando compilaciones; la prueba TLS quedó
+  ignorada en esa ejecución automática. No se comprobaron Google real, Windows/8.3 ni CI remoto. La espera
+  silenciosa de cabeceras después de enviar el PUT sigue pendiente.
+
+#### Continuación R4 — respuesta de subidas vacías
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- La política de producción dispone de un cliente separado para PUT de longitud cero,
+  con límite de espera de cabeceras. No puede cortar un cuerpo activo porque no hay
+  bytes que transmitir. `DriveTransfer::with_clients` y `DriveTransfer::google` lo
+  conectan tanto a creación reanudable como a sustitución condicional. Los
+  constructores que aceptan un único cliente inyectado conservan ese cliente y no
+  implican esta política por sí solos.
+- Con servidor loopback que recibe el PUT vacío y guarda silencio, la sustitución
+  conserva resultado incierto; la creación consulta la sesión y la conserva cuando
+  esta ya no puede confirmarse. La integración con historial retiene el snapshot y
+  no registra una revisión no confirmada. Otra prueba comprueba éxito y reinicio
+  de sesión vacía con clientes de producción.
+- `cargo test -p emusync-data-drive --test conditional --test resumable --test
+  tracked_integration --locked` pasó 19, 28 y 11 pruebas en Linux; la prueba TLS
+  opcional quedó ignorada en esa ejecución. Datos y servicio fueron sintéticos.
+  El caso equivalente para cuerpos no vacíos aún no está resuelto: iniciar un plazo
+  al terminar de leer el snapshot puede cortar una transferencia que sigue activa.
+  No se ejecutaron Google real, Windows/8.3 ni CI remoto.
+
+#### Continuación R4 — respuesta tras el cuerpo de subidas no vacías
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- El cuerpo de subida se envuelve para observar cuándo se entrega el último byte
+  declarado al transporte (hyper deja de consultar el flujo al alcanzar la longitud
+  declarada, por lo que no se usa el fin del flujo). Solo entonces empieza un plazo
+  (`response_inactivity`, 60 s por defecto) para recibir cabeceras; el tiempo de
+  producción o transmisión del cuerpo no tiene límite adicional. Las subidas
+  reanudables entregan cada fragmento en porciones de 64 KiB para que la señal no se
+  adelante mientras un fragmento grande sigue en cola.
+- Sustitución condicional: expirar el plazo devuelve la nueva
+  `ConditionalError::HeadersTimedOut`, tratada como resultado incierto (la recuperación
+  de `drive_recovery` la conserva igual que `OutcomeUnknown`). Subida reanudable: la
+  expiración se trata como respuesta perdida y consulta la sesión, que conserva la sesión
+  si ya no puede confirmarse. Se añade la dependencia directa `bytes`.
+- Limitación: un enlace tan lento que no vacíe el búfer del transporte en el plazo tras
+  entregar el último byte produce un resultado incierto espurio (se conserva el
+  snapshot; no hay pérdida ni escritura repetida). Ajustable con
+  `with_response_inactivity`.
+- `cargo test -p emusync-data-drive --test conditional --test resumable --test
+  tracked_integration --locked` pasó 20, 29 y 11 pruebas en Linux, incluidas dos nuevas
+  con servidor loopback silencioso tras recibir el cuerpo. La prueba TLS ignorada
+  (subida activa lenta frente a estancada) se ejecutó con `--ignored` y pasó. Datos y
+  servicio sintéticos. No se ejecutaron Google real, Windows/8.3 ni CI remoto.
+
+#### Continuación R4 — respuestas acotadas de listados y carpetas
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- Búsqueda, paginación, obtención por ID y búsqueda/creación de carpetas leían el cuerpo
+  con `Response::json()`, sin límite de tamaño ni de silencio entre fragmentos. Ahora
+  usan el mismo lector acotado que las subidas (1 MiB y `response_inactivity`, 60 s por
+  defecto, ajustable con `with_response_inactivity` en `DriveListing` y `DriveFolders`).
+- Lecturas: un cuerpo excesivo, detenido o inválido produce `ListingError::Metadata` o
+  `FolderError::Metadata`; un listado no devuelve resultados parciales. La creación de
+  carpeta, que es una mutación, produce `FolderError::MutationResponseUnknown`
+  (resultado incierto, sin reintento automático ni creación adicional).
+- Pruebas nuevas con servidor loopback sintético: página de listado excesiva y detenida,
+  búsqueda de carpeta excesiva sin crear, y respuesta de creación excesiva y detenida.
+  `cargo test -p emusync-data-drive --test listing --test folders --locked` pasó 5 y 7
+  pruebas. La búsqueda por nombre exacta ya estaba cubierta por
+  `exact_search_escapes_query_and_requests_latest_match`.
+- No se ejecutaron Google real, Windows/8.3 ni CI remoto. R4 sigue abierto por la
+  recuperación entre procesos y el flujo de producto de recuperación.
+
+#### Propuesta R4 — recuperación entre procesos (pendiente de aprobación; sin implementar)
+
+Estado (2026-11-06): propuesta de diseño solicitada por el usuario; ninguna parte está
+implementada ni aceptada. No forma parte de la paridad Kotlin.
+
+Punto de partida verificado:
+
+- Kotlin conserva sesión y resultado incierto solo en memoria (`ResumableDriveUpload.kt`);
+  un reinicio los pierde. Rust replica ese contrato: `OperationSupervisor` retiene el fallo,
+  el `UploadSnapshot` (directorio temporal que se borra al soltarse), `UploadContext` y
+  `UploadSession` hasta reconciliar.
+- La URL de `UploadSession` es una capacidad equivalente a una credencial (su `Debug` ya
+  la oculta). No debe aparecer en registros ni en JSON legible.
+- `data-local` ya dispone de `atomic_write`, `lock_for`, `restrict_file` y
+  `restrict_directory` (usados por historial) y `CredentialSnapshot`/revisión OAuth.
+
+Contenido que habría que conservar tras un reinicio: copia del snapshot, su SHA-256,
+`UploadContext` (ruta local, carpeta, nombre remoto, estado observado), tipo de
+incertidumbre (sesión reanudable, PUT condicional, creación con marca de tiempo inválida o
+`AfterUpload`), identidad de la conexión (revisión OAuth) y, solo para sesiones
+reanudables, la URL de sesión.
+
+Diseño propuesto:
+
+1. **Ubicación y formato:** directorio `recovery/` junto al archivo de configuración, con
+   permisos 0700 y un manifiesto `v1` por operación escrito con `atomic_write` y 0600. La
+   copia del snapshot vive dentro del mismo directorio, no en `/tmp`. Versión de formato
+   explícita; una versión desconocida se conserva intacta y no se interpreta.
+2. **URL de sesión:** no se guarda en claro; se cifra con una clave en el almacén de
+   secretos del sistema si existe. Sin almacén seguro, la URL no se persiste y la
+   recuperación solo puede reconciliar por ID/checksum (PUT condicional, creación
+   registrada) o descartar la sesión como incierta; nunca se reinicia una subida a ciegas.
+3. **Exclusión entre procesos:** bloqueo de archivo exclusivo por directorio de recuperación
+   (el lock en memoria de `lock_for` no cruza procesos). Mientras haya manifiesto sin
+   resolver, la aplicación no inicia nuevas escrituras sobre ese juego y presenta la
+   recuperación. Kotlin y Rust siguen sin ejecutarse sobre los mismos datos a la vez.
+4. **Orden de escritura:** persistir snapshot y manifiesto (fsync) antes de enviar el primer
+   PUT; reemplazar el manifiesto con atomicidad cuando cambie el estado de incertidumbre;
+   borrarlo solo después de registrar el historial reconciliado (`record_reconciled_upload_guarded`).
+   Un manifiesto sin snapshot, un digest que no coincide o una revisión OAuth cambiada se
+   tratan como no verificables y se conservan para inspección, sin borrado automático.
+5. **Reanudación:** al arrancar, cada manifiesto pasa por la misma reconciliación que hoy
+   (`reconcile_*`), sin repetir escrituras. `Incomplete`, `ExpiredOutcomeUnknown` y
+   `RemoteUnconfirmed` mantienen el manifiesto.
+6. **Limpieza:** los manifiestos resueltos se eliminan con el snapshot; los no resueltos no
+   caducan solos. Se ofrece una acción explícita de descarte con confirmación.
+
+Pruebas necesarias (datos y servicios sintéticos): corte entre PUT y respuesta con proceso
+real reiniciado; manifiesto corrupto, versión desconocida y snapshot alterado; dos procesos
+compitiendo por el bloqueo; revisión OAuth cambiada; permisos 0600/0700 en Linux; ausencia
+de la URL de sesión en registros y en disco legible; todas las rutas sin reenvío de PUT.
+Windows requiere su propia validación nativa (ACL, bloqueo y almacén de secretos), diferida.
+
+Decisiones del usuario (2026-11-06):
+
+- Se acepta añadir la función aunque Kotlin no la tenga: añade un directorio y formato
+  nuevos y no modifica los existentes.
+- Almacén de secretos: delegado en el criterio del implementador. Decisión: **no se
+  persiste la URL de sesión** y no se añade almacén de secretos. Motivos: la URL es una
+  capacidad equivalente a una credencial; no hay almacén verificable en todos los entornos
+  (Hyprland/Wayland sin servicio de secretos, Windows sin validación nativa); y evita una
+  dependencia específica de plataforma. Consecuencia: tras un reinicio una sesión
+  reanudable no se consulta ni se continúa; se reconcilia por identidad remota o, si no
+  se conoce, por carpeta, nombre y checksum, y si no se puede confirmar queda sin resolver.
+  El punto 2 del diseño queda sustituido por esta decisión.
+- El descarte manual desde interfaz pertenece a R7. R4 solo ofrece `RecoveryStore::remove`.
+
+#### Continuación R4 — almacén de recuperación persistente (primera parte)
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- `data-local` incorpora `RecoveryStore`, un directorio `<config>.sync-recovery/` (mismo
+  patrón que `.sync-state.json` y `.sync-backups`), 0700, con una subcarpeta `op-*` por
+  operación: `snapshot` (0600, comprobado por SHA-256 tras copiar) y `manifest.json`
+  versión 1 (0600, escritura atómica, máximo 64 KiB). Un bloqueo de archivo exclusivo
+  (`File::lock` de la biblioteca estándar, sin dependencias nuevas) serializa
+  `stage`, `list` y `remove` entre procesos. No se guarda la URL de sesión.
+- `list` informa de entradas no verificables (manifiesto ilegible, versión desconocida,
+  snapshot ausente o con checksum distinto) sin repararlas ni borrarlas. `remove` solo
+  acepta identificadores `op-*` y rechaza separadores y `..`. Un directorio de
+  recuperación que sea un enlace simbólico se rechaza.
+- `cargo test -p emusync-data-local --test recovery_store --locked` pasó 7 pruebas en
+  Linux: persistencia visible desde un nuevo almacén tras soltar el snapshot, permisos
+  0700/0600, entradas manipuladas conservadas byte a byte, identificadores, rechazo de un
+  registro de otro contenido sin dejar residuos, exclusión mientras otro manipulador
+  retiene el bloqueo (otro descriptor sobre el mismo archivo, no otro proceso real) y
+  enlace simbólico.
+#### Continuación R4 — recuperación entre procesos (segunda parte y cierre técnico en Linux)
+
+Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
+
+- `TrackedFileSync` incorpora `upload_guarded_classified`:
+  - Persiste snapshot y manifiesto v1 en `RecoveryStore` antes de enviar el primer PUT
+    (fail-closed: si falla la persistencia, no se emite ninguna petición de escritura).
+  - Bloquea cualquier subida concurrente o posterior sobre el mismo save mientras exista
+    una entrada sin resolver (`has_unresolved` devuelve `io::ErrorKind::ResourceBusy`).
+  - Al completar la subida y asentar el checkpoint en el historial, elimina la entrada
+    persistida (`resolve_recovery`).
+  - Si el fallo es definitivo (`TransferError::leaves_remote_unchanged`: cancelación
+    antes de mutación, precondición fallida, 4xx cliente), descarta la entrada; ante
+    resultado incierto (timeout, error 5xx, caída de red), conserva la entrada para
+    reconciliación.
+- `reconcile_persisted_uploads` reconcilia las operaciones que sobrevivieron al fin del
+  proceso:
+  - Valida la identidad de conexión (`fingerprint` SHA-256 de credenciales); entradas
+    de otra conexión no se tocan ni se eliminan (`ConnectionChanged`).
+  - Reconcilia por ID remoto en la carpeta esperada, o por nombre y checksum SHA-256
+    cuando no hay ID previo (creación).
+  - No reenvía ninguna petición PUT: solo consulta metadatos de confirmación. Al
+    verificar que el hash remoto coincide con el digest del snapshot recuperado, registra
+    el historial con `UploadEvidence::recovered` y borra la entrada del almacén.
+- Pruebas en `rust/desktop-app/tests/persisted_recovery.rs`:
+  - `killed_process_leaves_an_upload_that_a_new_process_reconciles_without_resending`:
+    ejecuta un proceso hijo real que inicia la subida y se congela esperando la
+    respuesta del servidor; el proceso padre mata al hijo con `SIGKILL` (sin destructores
+    ni callbacks de limpieza); un nuevo proceso comprueba que el snapshot y la entrada
+    siguen presentes, que un intento de escritura sobre la misma partida se rechaza con
+    `ResourceBusy` sin emitir peticiones, y reconcilia con éxito verificando el hash y
+    grabando el historial sin reenviar el PUT.
+  - `entry_from_another_connection_is_neither_used_nor_removed`: conexión ajena conservada.
+  - `created_upload_without_identity_reconciles_only_by_name_and_checksum`: discriminación
+    estricta por checksum.
+  - `entries_follow_the_remote_outcome_of_each_upload`: éxito y precondición fallida limpian
+    la entrada; respuesta perdida la conserva.
+- `cargo xtask check` pasó arquitectura, formato, Clippy (`-D warnings`) y la totalidad
+  de las pruebas del workspace en Linux.
+- `./gradlew check --no-daemon` pasó completamente en Linux (111 tareas accionables, 3
+  ejecutadas, 108 up-to-date; hooks y convenciones verificados).
+- **R4 completado técnicamente en Linux.** Validación nativa Windows/8.3 diferida por decisión
+  del usuario (2026-11-05); pruebas con Google Drive real y CI remoto siguen pendientes.
 
 ### R5 — Casos de uso y sincronización
 

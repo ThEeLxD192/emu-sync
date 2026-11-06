@@ -118,6 +118,15 @@ impl SyncHistoryStore {
     }
     /// Preserve a verified copy before replacement. `key` and `digest` must be SHA-256 hex.
     pub fn backup(&self, key: &str, file: &Path, digest: &str) -> io::Result<()> {
+        self.backup_from(key, file, file, digest)
+    }
+    pub(crate) fn backup_from(
+        &self,
+        key: &str,
+        file: &Path,
+        original: &Path,
+        digest: &str,
+    ) -> io::Result<()> {
         if !valid_digest(key) || !valid_digest(digest) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -133,7 +142,8 @@ impl SyncHistoryStore {
         fs::create_dir_all(&version)?;
         restrict_directory(&version)?;
         let destination = version.join(
-            file.file_name()
+            original
+                .file_name()
                 .ok_or_else(|| io::Error::other("save has no filename"))?,
         );
         if destination.exists() {
@@ -153,10 +163,10 @@ impl SyncHistoryStore {
             temp.as_file().sync_all()?;
             temp.persist_noclobber(&destination).map_err(|e| e.error)?;
         }
-        let original = if file.is_absolute() {
-            file.to_owned()
+        let original = if original.is_absolute() {
+            original.to_owned()
         } else {
-            std::env::current_dir()?.join(file)
+            std::env::current_dir()?.join(original)
         };
         let source = serde_json::json!({"originalPath": original.to_string_lossy()});
         atomic_write(
@@ -170,6 +180,9 @@ fn valid_digest(s: &str) -> bool {
 }
 pub fn file_sha256(path: &Path) -> io::Result<String> {
     let mut file = fs::File::open(path)?;
+    reader_sha256(&mut file)
+}
+pub(crate) fn reader_sha256(file: &mut impl Read) -> io::Result<String> {
     let mut hash = Sha256::new();
     let mut buffer = [0u8; 8192];
     loop {

@@ -3,7 +3,10 @@ use crate::{
     storage::{absolute, atomic_write},
 };
 use emusync_domain::{
-    config::{AppConfig, ConfigurationStore, CredentialSnapshot, CredentialStore, Credentials},
+    config::{
+        AppConfig, ConfigurationStore, CredentialSnapshot, CredentialStore, CredentialTransaction,
+        Credentials,
+    },
     library::{Emulator, GameEntry, LibraryStore, SaveTarget, SaveTargetType},
 };
 use std::{
@@ -84,11 +87,20 @@ impl ConfigManager {
         atomic_write(&self.path, &serde_json::to_vec_pretty(&document)?)
     }
     pub fn save(&self, config: &AppConfig) -> io::Result<()> {
-        let _guard = self
+        let mut state = self
             .state
             .lock()
             .map_err(|_| io::Error::other("configuration lock poisoned"))?;
-        self.save_inner(config)
+        let previous = if self.path.exists() {
+            self.load_inner(false).ok().map(|config| config.credentials)
+        } else {
+            Some(None)
+        };
+        self.save_inner(config)?;
+        if previous.as_ref() != Some(&config.credentials) {
+            state.revision = state.revision.wrapping_add(1);
+        }
+        Ok(())
     }
     fn lock(&self) -> io::Result<std::sync::MutexGuard<'_, State>> {
         self.state
@@ -103,11 +115,14 @@ impl ConfigurationStore for ConfigManager {
         self.load_inner(true)
     }
     fn update(&self, transform: impl FnOnce(AppConfig) -> AppConfig) -> io::Result<AppConfig> {
-        let _guard = self.lock()?;
+        let mut state = self.lock()?;
         let current = self.load_inner(true)?;
         let updated = transform(current.clone());
         if updated != current {
             self.save_inner(&updated)?;
+            if updated.credentials != current.credentials {
+                state.revision = state.revision.wrapping_add(1);
+            }
         }
         Ok(updated)
     }
@@ -161,6 +176,25 @@ impl CredentialStore for ConfigManager {
             state.revision = state.revision.wrapping_add(1);
         }
         Ok(true)
+    }
+}
+impl CredentialTransaction for ConfigManager {
+    fn while_current<R>(
+        &self,
+        expected: &CredentialSnapshot,
+        fallback: &AppConfig,
+        action: impl FnOnce() -> R,
+    ) -> io::Result<Option<R>> {
+        let state = self.lock()?;
+        let current = if self.path.exists() {
+            self.load_inner(false)?
+        } else {
+            fallback.clone()
+        };
+        if state.revision != expected.revision || current.credentials != expected.credentials {
+            return Ok(None);
+        }
+        Ok(Some(action()))
     }
 }
 impl LibraryStore for ConfigManager {
