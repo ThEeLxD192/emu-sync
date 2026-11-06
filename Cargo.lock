@@ -674,6 +674,7 @@ name = "emusync-application"
 version = "0.1.0"
 dependencies = [
  "emusync-domain",
+ "tokio",
 ]
 
 [[package]]

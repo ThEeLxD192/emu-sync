@@ -4,7 +4,7 @@ Base congelada de referencia: `c9acc16a687b1093007dba4efc12c37237908678`, rama `
 
 ## Seguimiento
 
-Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente y registrado en `99a34c1`. R1 está implementado y validado parcialmente en Linux; R2 está implementado y validado en Linux; R3 está iniciado y R4 está completado técnicamente en Linux; R5–R8 no se han iniciado. La validación nativa Windows de R2 y R4 y el CI remoto siguen pendientes. Por decisión del usuario del 2026-11-05, la validación nativa Windows se difiere y no bloquea el trabajo posterior, pero sigue pendiente de aceptación.
+Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente y registrado en `99a34c1`. R1 está implementado y validado parcialmente en Linux; R2 está implementado y validado en Linux; R3 está iniciado; R4 y R5 están completados técnicamente en Linux; R6–R8 no se han iniciado. La validación nativa Windows de R2, R4 y R5 y el CI remoto siguen pendientes. Por decisión del usuario del 2026-11-05, la validación nativa Windows se difiere y no bloquea el trabajo posterior, pero sigue pendiente de aceptación.
 
 ### R0 — Guía, skills y seguimiento
 
@@ -1160,10 +1160,47 @@ Evidencia (2026-11-06, Linux, base `00d51b6`; sin commit):
 
 ### R5 — Casos de uso y sincronización
 
-- [ ] Portar biblioteca y ciclo pre-sync → proceso → post-sync, juego offline, conflictos y reintentos identificados por solicitud.
-- [ ] Verificar operaciones exclusivas, invalidación de resultados antiguos y preservación de partidas modificadas durante transferencias.
-- [ ] Cancelación cooperativa: esperar limpieza y rollback remoto asíncrono antes de liberar exclusión o cerrar runtime; `Drop` y abortar futuros no reemplazan ese rollback.
-- [ ] **R5 completado.**
+- [x] Portar biblioteca y ciclo pre-sync → proceso → post-sync, juego offline, conflictos y reintentos identificados por solicitud.
+- [x] Verificar operaciones exclusivas, invalidación de resultados antiguos y preservación de partidas modificadas durante transferencias.
+- [x] Cancelación cooperativa: esperar limpieza y rollback remoto asíncrono antes de liberar exclusión o cerrar runtime; `Drop` y abortar futuros no reemplazan ese rollback.
+- [x] **R5 completado técnicamente en Linux**; validación Windows nativa y CI remoto diferidos.
+
+Evidencia (2026-11-06, Linux, base `9165b4c`; sin commit):
+
+- Se implementó completamente la capa de casos de uso en el crate `emusync-application`, cumpliendo estrictamente con la regla de arquitectura del workspace (dependencia de producción únicamente hacia `emusync-domain = { path = "../domain" }`).
+- Módulos desarrollados y verificados:
+  - `operation`: `OperationCoordinator` con exclusión mutua atómica (`run_if_idle`), control de concurrencia, guard drop-safe para cancelación cooperativa y notificación de eventos (`Started`, `Cancelled`, `Finished`).
+  - `connection`: `CloudConnection` y `ConnectionResult` para sincronización con almacén de configuración y preservación de credenciales.
+  - `update`: `UpdateCoordinator` con máquina de estados (`Idle`, `Checking`, `Available`, `Downloading`, `ReadyToRestart`, `Error`), exclusión de descarga activa, limpieza del archivo de destino ante fallo o cancelación y reinicio bloqueado durante operaciones activas.
+  - `library`:
+    - `entry_sync_checks`: `EntrySyncChecks` y `SyncCheckRequest` con matriz de invalidación de frescura ante cambio de revisión de operaciones, estado ocupado, cambios de credenciales en configuración, eliminación/edición de la entrada o solicitud de chequeo más reciente.
+    - `entry_edits`: `preserve_shared_cloud_root`, `build_game_entry` y `GameOverrideChanges`.
+    - `edit_library`: `EditLibrary` y `EntryEditResult` con reordenación preservando entradas no listadas, altas, bajas, edición con renombrado remoto y preservación de carpetas compartidas.
+    - `load_library`: `LoadLibrary` con migración de accesos directos Steam hacia `steam_app_id`.
+    - `steam_registration`: `SteamRegistration` para registro y desregistro en Steam sincronizado con la configuración.
+  - `sync`:
+    - `channel`: canal oneshot seguro con primitivas de la biblioteca estándar (`std::sync::Mutex`, `std::task::Waker`).
+    - `target_resolver`: `SaveTargetResolver` para resolución de carpetas y segmentos remotos.
+    - `target_mapping`: `SaveTargetMapping` con validación de segmentos de ruta en la nube (rechazo estricto de traversal `..`, `.` y absolutos), detección de colisiones remotas a locales, detección de ancestro/descendiente conflictivo, reserva de nombres de hermanos entre archivos y directorios y detección de duplicados en carpetas legacy.
+    - `migrator`: `CloudFolderMigrator` con detección previa de duplicados en la nube (`DuplicateNames`), fusión de carpetas sin borrar origen si quedan archivos, rollback en orden inverso ante fallo en la transferencia y cancelación cooperativa con rollback inverso.
+    - `context`: `SyncContext` y `SyncServices` con resolución de conflictos y reintentos de post-sincronización identificados por `RequestId`.
+    - `manual`: `ManualFileSync` y `ManualEntrySync` aplicando decisiones de sincronización manual (`DownloadCloud`, `UploadLocal`, `InSync`).
+    - `migration`: `CloudEntryMigration` para traslados y renombrados remotos de categorías y juegos.
+    - `status`: `SyncStatusChecker` para observación sin avanzar historial.
+    - `post_game`: `PostSaveSync` y `PostGameSync` con sincronización por lotes tras jugar, subida de archivos creados o modificados y registro de fallos parciales con `RequestId` único para reintentos dirigidos.
+    - `lifecycle`: `GameSyncLifecycle` con ciclo completo pre-sync → ejecución → post-sync, autorización previa con fallo de transporte tolerado para juego offline, y aborto estricto del inicio ante errores de mapeo/rutas.
+    - `orchestrator`: `SyncOrchestrator` y `SyncOrchestratorFactory` implementando los contratos de dominio `SaveSynchronizer` y `SaveSynchronizerFactory`.
+- Suite de pruebas de `emusync-application` (24 pruebas aprobadas en 7 archivos en `rust/application/tests/`):
+  - `operation_tests.rs`: exclusión mutua de operaciones concurrentes, cancelación con liberación de busy y avance de revisión.
+  - `entry_sync_checks_tests.rs`: matriz completa de invalidación de frescura ante cambio de revisión, estado ocupado, cambio de credenciales, eliminación de juego o nueva comprobación.
+  - `edit_library_tests.rs`: reordenación estable, altas, bajas, renombrado remoto al editar entrada, preservación de raíz compartida en emuladores, aplicación de overrides y registro/desregistro en Steam.
+  - `target_mapping_tests.rs`: rechazo de traversal en rutas nube, colisiones de rutas remotas a locales, reserva de nombres entre archivos y directorios, rechazo de carpetas legacy con nombres idénticos y resolución de segmentos.
+  - `migrator_tests.rs`: detección de duplicados previa a mover, fallo en traslado con rollback en orden inverso y cancelación cooperativa con rollback inverso.
+  - `update_coordinator_tests.rs`: transiciones de estado de comprobación, limpieza de archivo destino ante fallo de descarga y bloqueo de reinicio durante operaciones activas.
+  - `orchestrator_tests.rs`: ciclo completo pre-sync (descarga remota) -> ejecución -> post-sync (subida local), juego offline ante error de transporte en autorización, bloqueo de inicio ante error de mapeo, resolución de conflictos mediante `RequestId` exacto y reporte/reintento de fallo post-sync por `RequestId`.
+- Verificaciones de calidad del workspace completo:
+  - `cargo xtask check`: pasó verificación estricta de dependencias de arquitectura, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` (0 advertencias) y la totalidad de pruebas del workspace (105 pruebas aprobadas, 2 ignoradas documentadas).
+  - `./gradlew check --no-daemon`: `BUILD SUCCESSFUL` en Linux (102 tareas accionables: 3 ejecutadas, 99 up-to-date; hooks de Git y convenciones verificados).
 
 ### R6 — Plataforma y actualizaciones
 

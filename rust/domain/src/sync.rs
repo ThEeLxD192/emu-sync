@@ -520,7 +520,7 @@ pub trait SaveSynchronizer {
     fn play_with_sync(
         &self,
         game: SyncGame,
-        setup: &impl SaveSetup,
+        setup: &(impl SaveSetup + Sync),
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
     /// Only the exact pending request is resolved; completed requests are ignored.
     fn resolve_conflict(&self, request: &SaveConflict, decision: Decision);

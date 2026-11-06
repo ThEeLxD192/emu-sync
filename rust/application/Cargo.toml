@@ -7,3 +7,6 @@ license.workspace = true
 
 [dependencies]
 emusync-domain = { path = "../domain" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
