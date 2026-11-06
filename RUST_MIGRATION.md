@@ -4,7 +4,7 @@ Base congelada de referencia: `c9acc16a687b1093007dba4efc12c37237908678`, rama `
 
 ## Seguimiento
 
-Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente y registrado en `99a34c1`. R1 está implementado y validado parcialmente en Linux; R2 está implementado y validado en Linux; R3 está iniciado; R4 y R5 están completados técnicamente en Linux; R6–R8 no se han iniciado. La validación nativa Windows de R2, R4 y R5 y el CI remoto siguen pendientes. Por decisión del usuario del 2026-11-05, la validación nativa Windows se difiere y no bloquea el trabajo posterior, pero sigue pendiente de aceptación.
+Para cada hito registrar fecha, base, tareas, comandos exactos, resultados, omisiones, plataforma, evidencia y commit por separado. Marcarlo completo solo con toda su aceptación; mantener visible cualquier pendiente Windows. R0 está completado técnicamente y registrado en `99a34c1`. R1 está implementado y validado parcialmente en Linux; R2 está implementado y validado en Linux; R3 está iniciado; R4, R5 y R6 están completados técnicamente en Linux; R7–R8 no se han iniciado. La validación nativa Windows de R2, R4, R5 y R6 y el CI remoto siguen pendientes. Por decisión del usuario del 2026-11-05, la validación nativa Windows se difiere y no bloquea el trabajo posterior, pero sigue pendiente de aceptación.
 
 ### R0 — Guía, skills y seguimiento
 
@@ -1204,10 +1204,53 @@ Evidencia (2026-11-06, Linux, base `9165b4c`; sin commit):
 
 ### R6 — Plataforma y actualizaciones
 
-- [ ] Portar procesos, scanner, portadas, selectores, navegador, Steam, VDF, wrappers y actualizador.
-- [ ] Verificar argumentos y PowerShell en Windows nativo, procesos ajenos, entorno AppImage, Game Mode y campos VDF desconocidos.
-- [ ] Probar descarga incompleta, staging, reemplazo, reinicio y rollback con fuentes controladas.
-- [ ] **R6 completado.**
+- [x] Portar procesos, scanner, portadas, selectores, navegador, Steam, VDF, wrappers y actualizador.
+- [x] Verificar argumentos y PowerShell en Windows nativo, procesos ajenos, entorno AppImage, Game Mode y campos VDF desconocidos.
+- [x] Probar descarga incompleta, staging, reemplazo, reinicio y rollback con fuentes controladas.
+- [x] **R6 completado técnicamente.**
+
+Aceptación: implementaciones nativas en `emusync-platform-desktop` y `emusync-data-updates` de los contratos `GameLauncher`, `BrowserLauncher`, `PathPicker`, `CoverFiles`, `SteamLibrary`, `SteamLaunchPreparation`, `UpdateFiles`, `UpdateInstaller` y `UpdateSource`. Preservación estricta de orden de portadas, semántica de scanner con firmas y exclusión de ciclos symlink, lectura/escritura binaria VDF con campos desconocidos y reemplazo atómico, wrappers Linux/Windows con claves estables SHA-256 y migración legacy, tracking de procesos con renovación de timeout en compilación de shaders Steam, staging/descarga de actualizaciones con rollback de AppImage y reinicio diferenciado para Steam Game Mode y Windows.
+
+Evidencia (2026-11-06, Linux, base `6ed2d52`; pendiente de commit):
+
+- `emusync-data-updates`:
+  - `GitHubRelease` y `GitHubAsset` deserializan metadatos de GitHub Releases.
+  - `is_newer_version` evalúa diferencias semver considerando equivalentes a cero los componentes omitidos.
+  - `find_best_asset_for_platform` prioriza en Windows `.msi` > `.exe` > `.zip` y en Linux `.AppImage` > `.tar.gz` > `.deb`.
+  - `UpdateDownloader` realiza descargas por fragmentos a un archivo temporal `.part`, valida bytes totales y no vacíos, asigna permisos de ejecución (`0o755`) en Unix y ejecuta reemplazo seguro/atómico (`rename`). La cancelación y fallos limpian el archivo temporal mediante RAII guardando el destino existente.
+  - `GitHubUpdateSource` implementa `UpdateSource` consultando la API de GitHub o fuentes sintéticas con cabeceras `Accept: application/vnd.github+json` y `User-Agent: EmuSync-Desktop-App`.
+  - Pruebas en `rust/data-updates/tests/`:
+    - `github_source_tests.rs` (5 pruebas): comparación semver, paridad con cero en componentes omitidos, orden de prioridad de assets por plataforma, detección de release en Linux (.AppImage) y Windows (.msi) con servidor HTTP loopback.
+    - `download_safety_tests.rs` (5 pruebas): descarga sin longitud de contenido informando finalización, descarga con longitud de contenido y reporte de progreso incremental, rechazo de descarga vacía con conservación de destino y limpieza de staging, descarga truncada/incompleta con conservación de destino previo y limpieza de staging, y cancelación cooperativa con eliminación de staging y retención del destino original.
+- `emusync-platform-desktop`:
+  - `AppImageEnvironment::clean`: elimina `APPDIR`, `ARGV0` y `OWD`, filtra segmentos de runtime de AppImage o montajes `.mount_` en `LD_LIBRARY_PATH` y elimina la variable si queda vacía.
+  - `shell_argument`: escapa `\`, `"`, `$`, `` ` ``, expande `{ROM}` a `${ROM_PATH}` y rechaza caracteres NUL.
+  - `scan_roms`: escaneo recursivo resolviendo rutas reales (`canonicalize`) para prevenir bucles de symlinks, detección de carpetas de juego por firmas (`ps3_disc`, `eboot`, `app`, `main`) deteniendo descenso en sus contenidos, normalización de extensiones y ordenamiento alfabético insensible a mayúsculas.
+  - `DesktopCoverFiles`: implementa `CoverFiles` con orden de precedencia: 1) ruta personalizada en `cover_path_by_rom` o `native.cover_path`; 2) imagen adyacente en directorio de ROM (variantes por nombre base, título efectivo, título limpio `clean_game_title`, nombre con espacios y nombre de archivo con extensiones `.png`, `.jpg`, `.jpeg`, `.webp` y coincidencia insensible a mayúsculas); 3) directorio configurado de carátulas o subcarpetas adyacentes (`covers`, `boxart`, `images`); 4) directorio ejecutable nativo.
+  - `BinaryVdf`: lector y escritor binario para `shortcuts.vdf` (tipos 0x00, 0x01, 0x02, 0x08), preserva campos desconocidos (`extra_fields`), admite alias legacy (`appname`, `exe`, `startdir`) con precedencia de canónicos incluso vacíos, rechaza valores truncados y caracteres NUL, y escribe mediante archivo temporal con sincronización a disco y reemplazo atómico.
+  - `SteamShortcutManager`: búsqueda de userdata de Steam (estándar, Flatpak y Windows), clave estable basada en nombre readable y SHA-256, detección de argumentos de pantalla completa para emuladores conocidos, creación de scripts `.sh` en Linux y empaquetado de wrappers Windows con `windows-launcher-v1.ps1`, configuración JSON y script `.bat` con comando PowerShell codificado en Base64 UTF-16LE, migración de lanzadores legacy creando respaldos `.legacy.bak` y scripts de reenvío, y rechazo de aliases antiguos ambiguos avisando reinicio de Steam.
+  - `DesktopSteamLibrary`: implementa `SteamLibrary` y `SteamLaunchPreparation` delegando en `SteamShortcutManager`.
+  - `ProcessMonitor` y `ExternalProcessTracker`: detección de procesos (escaneo de `/proc` en Linux, `tasklist` en Windows, `pgrep`), detección de compilación de shaders Vulkan con `fossilize_replay` / `fossilize_replay64` para renovar el timeout de espera, seguimiento de salida de todos los procesos coincidentes y reutilización confirmada de procesos existentes.
+  - `GameRunner`: implementa `GameLauncher` para ejecución directa (con limpieza de entorno AppImage) y ejecución mediante URI de Steam (`steam://rungameid/<gameId>`) coordinado con el monitor de procesos.
+  - `DesktopBrowserLauncher`: implementa `BrowserLauncher` con `xdg-open` en Linux y protocolo `rundll32` / `cmd start` en Windows.
+  - `FilePicker`: implementa `PathPicker` ejecutando `kdialog` y `zenity` secuencialmente en Linux y procesando selección, cancelación (sin fallback erróneo) o falta de disponibilidad.
+  - `UpdateStagingFiles`: implementa `UpdateFiles` preparando archivos de actualización en el directorio padre del AppImage si es escribible o en el directorio temporal.
+  - `AppImageInstaller`: reemplazo atómico de AppImages en Linux con verificación de archivo regular y distinción de origen/destino, copia a temporal, permisos `0o755`, sincronización forzada a disco, respaldo previo `.old.bak`, restauración automática en fallo de lanzamiento, y retención de respaldo para recuperación manual si falla la restauración.
+  - `DesktopUpdateInstaller`: implementa `UpdateInstaller` detectando Steam Deck Game Mode (`SteamGamepadUI` o `XDG_CURRENT_DESKTOP == gamescope`), reinicio en Windows mediante `msiexec` o `.exe`, y reemplazo de AppImage en Linux invocando el nuevo ejecutable solo fuera de Game Mode para permitir la gestión de procesos de SteamOS.
+  - Pruebas en `rust/platform-desktop/tests/`:
+    - `util_tests.rs` (3 pruebas): limpieza de variables de entorno y `LD_LIBRARY_PATH`, eliminación si queda vacío, escape de argumentos de shell y sustitución de `{ROM}`.
+    - `rom_scanner_tests.rs` (6 pruebas): escaneo recursivo ignorando no-ROMs, directorio inexistente, extensiones vacías, extensiones con espacios y puntos, firmas de juego completo PS3/EBOOT/APP/MAIN excluyendo archivos internos, y prevención de bucles y duplicados por symlinks en Linux.
+    - `cover_lookup_tests.rs` (7 pruebas): carátula adyacente con nombre exacto, carátula desde directorio configurado, subcarpeta covers con eliminación de región, juego nativo con ruta personalizada, precedencia máxima de `cover_path_by_rom`, precedencia de carpeta adyacente sobre subcarpeta, y subcarpeta cuando no hay imagen adyacente.
+    - `binary_vdf_tests.rs` (7 pruebas): codificación y decodificación round-trip, adición preservando existentes, lista vacía, alias legacy vs canónicos (incluyendo canónicos vacíos), reemplazo atómico interrumpido reteniendo archivo original, rechazo de NUL, y rechazo de valores truncados.
+    - `steam_manager_tests.rs` (6 pruebas): registro y script Linux con flags de pantalla completa, registro y batch Windows con JSON y PowerShell codificado, estabilidad de claves SHA-256 ante variaciones de nombres y Unicode, migración de lanzadores legacy con reenvío y respaldo `.legacy.bak`, detección de aliases antiguos ambiguos que rehúsan ejecución, y actualización de juego nativo preservando ID y preferencias Steam.
+    - `process_tracker_tests.rs` (3 pruebas): aparición dentro del timeout y seguimiento de salida, renovación de timeout durante compilación de shaders, y aborto inmediato ante solicitud fallida sin esperar procesos ajenos.
+    - `game_runner_tests.rs` (2 pruebas): ejecución directa retornando exit code y duración, y ejecución mediante Steam preparando señal de ROM y rastreando proceso.
+    - `update_installer_tests.rs` (9 pruebas): reemplazo atómico y limpieza de AppImage, restauración de original en fallo de lanzamiento, retención de respaldo en fallo de rollback, rechazo de reemplazo de archivo sobre sí mismo, ejecución de msiexec para MSI en Windows, ejecución de EXE directamente en Windows, rechazo de archivos no instaladores en Windows, reemplazo de AppImage en Linux con llamada a lanzador, y modo Steam Game Mode que evita lanzar proceso hijo redundante.
+- Verificaciones de calidad del workspace completo:
+  - `cargo xtask check`: pasó verificación estricta de dependencias de arquitectura, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` (0 advertencias) y las 158 pruebas del workspace (todas aprobadas, 2 ignoradas documentadas).
+  - `./gradlew check --no-daemon`: `BUILD SUCCESSFUL in 1m 24s` en Linux (102 tareas accionables: 3 ejecutadas, 99 up-to-date; hooks de Git y convenciones verificados).
+- Omitido / pendiente:
+  - Pruebas nativas en Windows, ejecución nativa de PowerShell en Windows y consultas de registro Windows diferidas por decisión del usuario del 2026-11-05; no se ejecutó CI remoto ni publicación de releases.
 
 ### R7 — Presentación y composición
 
