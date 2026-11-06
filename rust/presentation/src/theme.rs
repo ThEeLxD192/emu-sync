@@ -1,0 +1,59 @@
+//! EmuSync theme and color palette.
+
+use egui::{Color32, CornerRadius, Stroke, Visuals};
+
+pub const BACKGROUND: Color32 = Color32::from_rgb(0x0D, 0x11, 0x17);
+pub const SURFACE: Color32 = Color32::from_rgb(0x16, 0x1B, 0x22);
+pub const SURFACE_VARIANT: Color32 = Color32::from_rgb(0x1C, 0x23, 0x33);
+pub const SURFACE_SELECTED: Color32 = Color32::from_rgb(0x1F, 0x2A, 0x40);
+
+pub const PRIMARY: Color32 = Color32::from_rgb(0x58, 0xA6, 0xFF);
+pub const PRIMARY_CONTAINER: Color32 = Color32::from_rgb(0x1A, 0x3A, 0x5C);
+pub const SECONDARY: Color32 = Color32::from_rgb(0x7C, 0x3A, 0xED);
+pub const SECONDARY_CONTAINER: Color32 = Color32::from_rgb(0x2D, 0x1B, 0x69);
+
+pub const SUCCESS: Color32 = Color32::from_rgb(0x3F, 0xB9, 0x50);
+pub const WARNING: Color32 = Color32::from_rgb(0xF0, 0x88, 0x3E);
+pub const ERROR: Color32 = Color32::from_rgb(0xF8, 0x51, 0x49);
+
+pub const ON_BACKGROUND: Color32 = Color32::from_rgb(0xE6, 0xED, 0xF3);
+pub const ON_SURFACE: Color32 = Color32::from_rgb(0xC9, 0xD1, 0xD9);
+pub const ON_SURFACE_DIM: Color32 = Color32::from_rgb(0x8B, 0x94, 0x9E);
+
+pub const DIVIDER: Color32 = Color32::from_rgb(0x30, 0x36, 0x3D);
+pub const CARD_HOVER: Color32 = Color32::from_rgb(0x22, 0x2D, 0x3D);
+
+/// Configures the egui context with the EmuSync dark palette, roundings, and widget styles.
+pub fn configure_egui_theme(ctx: &egui::Context) {
+    let mut visuals = Visuals::dark();
+
+    visuals.panel_fill = BACKGROUND;
+    visuals.window_fill = SURFACE;
+    visuals.window_stroke = Stroke::new(1.0, DIVIDER);
+    visuals.window_corner_radius = CornerRadius::same(12);
+
+    visuals.widgets.noninteractive.bg_fill = SURFACE;
+    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, ON_SURFACE);
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, DIVIDER);
+    visuals.widgets.noninteractive.corner_radius = CornerRadius::same(6);
+
+    visuals.widgets.inactive.bg_fill = SURFACE_VARIANT;
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, ON_SURFACE);
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, DIVIDER);
+    visuals.widgets.inactive.corner_radius = CornerRadius::same(6);
+
+    visuals.widgets.hovered.bg_fill = CARD_HOVER;
+    visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, ON_BACKGROUND);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, PRIMARY);
+    visuals.widgets.hovered.corner_radius = CornerRadius::same(6);
+
+    visuals.widgets.active.bg_fill = PRIMARY_CONTAINER;
+    visuals.widgets.active.fg_stroke = Stroke::new(1.0, PRIMARY);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0, PRIMARY);
+    visuals.widgets.active.corner_radius = CornerRadius::same(6);
+
+    visuals.selection.bg_fill = PRIMARY_CONTAINER;
+    visuals.selection.stroke = Stroke::new(1.0, PRIMARY);
+
+    ctx.set_visuals(visuals);
+}

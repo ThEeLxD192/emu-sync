@@ -1,10 +1,22 @@
 use emusync_data_local::ConfigManager;
-use emusync_desktop_app::{AuthorizedTransferFailure, CloseState, RuntimeOwner};
+use emusync_desktop_app::{
+    AppEvent, AuthorizedTransferFailure, CloseState, DesktopCoordinator, RuntimeOwner,
+    scan_entry_games,
+};
 use emusync_domain::config::ConfigurationStore;
+use emusync_presentation::{
+    ActiveDialog, EmuSyncApp,
+    actions::UiAction,
+    model::{AppStatus, PathTarget},
+    theme::configure_egui_theme,
+};
 use std::{
     ffi::OsString,
     num::NonZeroU32,
-    sync::Arc,
+    sync::{
+        Arc,
+        mpsc::{Receiver, Sender, channel},
+    },
     time::{Duration, Instant},
 };
 use winit::{
@@ -18,7 +30,11 @@ struct App {
     window: Option<Arc<Window>>,
     state: Option<egui_winit::State>,
     painter: Option<egui_wgpu::winit::Painter>,
-    text: String,
+    emusync_app: EmuSyncApp,
+    configuration: ConfigManager,
+    coordinator: Option<DesktopCoordinator>,
+    event_tx: Sender<AppEvent>,
+    event_rx: Receiver<AppEvent>,
     error: Option<String>,
     operations: RuntimeOwner<AuthorizedTransferFailure<ConfigManager>>,
     closing: bool,
@@ -32,9 +48,15 @@ impl ApplicationHandler for App {
         }
         let result = (|| -> Result<_, Box<dyn std::error::Error>> {
             let window = Arc::new(
-                event_loop.create_window(Window::default_attributes().with_title("EmuSync"))?,
+                event_loop.create_window(
+                    Window::default_attributes()
+                        .with_title("EmuSync")
+                        .with_inner_size(winit::dpi::LogicalSize::new(1080.0, 720.0)),
+                )?,
             );
             let context = egui::Context::default();
+            configure_egui_theme(&context);
+
             let state = egui_winit::State::new(
                 context.clone(),
                 egui::ViewportId::ROOT,
@@ -50,13 +72,28 @@ impl ApplicationHandler for App {
                 Default::default(),
             ));
             pollster::block_on(painter.set_window(egui::ViewportId::ROOT, Some(window.clone())))?;
-            Ok((window, state, painter))
+
+            let w_clone = window.clone();
+            let redraw = Arc::new(move || {
+                w_clone.request_redraw();
+            });
+
+            let coordinator = DesktopCoordinator::new(
+                self.configuration.clone(),
+                self.event_tx.clone(),
+                redraw,
+                self.operations.handle().clone(),
+            );
+            coordinator.initialize();
+
+            Ok((window, state, painter, coordinator))
         })();
         match result {
-            Ok((window, state, painter)) => {
+            Ok((window, state, painter, coordinator)) => {
                 self.window = Some(window);
                 self.state = Some(state);
                 self.painter = Some(painter);
+                self.coordinator = Some(coordinator);
             }
             Err(error) => {
                 self.error = Some(error.to_string());
@@ -76,6 +113,9 @@ impl ApplicationHandler for App {
             CloseState::RecoveryRequired => {
                 self.closing = false;
                 self.close_notice = true;
+                self.emusync_app.state.status = AppStatus::Error {
+                    message: "A sync operation needs recovery before closing.".into(),
+                };
                 event_loop.set_control_flow(ControlFlow::Wait);
                 if let Some(window) = &self.window {
                     window.request_redraw();
@@ -113,22 +153,127 @@ impl ApplicationHandler for App {
                 window.request_redraw();
             }
             WindowEvent::RedrawRequested => {
+                // Ingest background events
+                while let Ok(app_event) = self.event_rx.try_recv() {
+                    match app_event {
+                        AppEvent::ConfigReloaded(cfg) => {
+                            let was_empty = self.emusync_app.state.selected_entry.is_none();
+                            self.emusync_app.state.config = Some(cfg.clone());
+                            if was_empty || self.emusync_app.state.selected_entry.is_none() {
+                                self.emusync_app.state.selected_entry =
+                                    cfg.entries.first().cloned();
+                            } else if let Some(selected) = &self.emusync_app.state.selected_entry {
+                                self.emusync_app.state.selected_entry = cfg
+                                    .entries
+                                    .iter()
+                                    .find(|e| e.common().name == selected.common().name)
+                                    .cloned()
+                                    .or_else(|| cfg.entries.first().cloned());
+                            }
+                            if let Some(selected) = &self.emusync_app.state.selected_entry {
+                                self.emusync_app.state.game_items = scan_entry_games(selected);
+                            }
+                        }
+                        AppEvent::EntryGamesScanned { entry_name, games } => {
+                            if self
+                                .emusync_app
+                                .state
+                                .selected_entry
+                                .as_ref()
+                                .is_some_and(|e| e.common().name == entry_name)
+                            {
+                                self.emusync_app.state.game_items = games;
+                            }
+                        }
+                        AppEvent::SyncStatusUpdated { entry_name, status } => {
+                            self.emusync_app
+                                .state
+                                .entry_sync_status
+                                .insert(entry_name, status);
+                        }
+                        AppEvent::SteamRegistrationUpdated {
+                            entry_name,
+                            registered,
+                        } => {
+                            if registered {
+                                self.emusync_app
+                                    .state
+                                    .steam_registered_entries
+                                    .insert(entry_name);
+                            } else {
+                                self.emusync_app
+                                    .state
+                                    .steam_registered_entries
+                                    .remove(&entry_name);
+                            }
+                        }
+                        AppEvent::StatusChanged(status) => {
+                            self.emusync_app.state.status = status;
+                        }
+                        AppEvent::Toast(message) => {
+                            self.emusync_app.state.toast_message = Some(message);
+                        }
+                        AppEvent::UpdateStateChanged(update_state) => {
+                            self.emusync_app.state.update_state = update_state;
+                        }
+                        AppEvent::PathPicked { target, path } => {
+                            match &mut self.emusync_app.active_dialog {
+                                ActiveDialog::Entry(form) => match target {
+                                    PathTarget::Executable => form.executable_path = path,
+                                    PathTarget::RomsDirectory => form.roms_directory = path,
+                                    PathTarget::SavePath(idx) => {
+                                        if let Some(row) = form.saves.rows.get_mut(idx) {
+                                            row.path = path;
+                                        }
+                                    }
+                                    _ => {}
+                                },
+                                ActiveDialog::GameEdit { form, .. } => match target {
+                                    PathTarget::CoverPath => form.cover_path = path,
+                                    PathTarget::RestoreDestination => {
+                                        form.restore_destination_folder = path
+                                    }
+                                    PathTarget::SavePath(idx) => {
+                                        if let Some(row) = form.saves.rows.get_mut(idx) {
+                                            row.path = path;
+                                        }
+                                    }
+                                    _ => {}
+                                },
+                                _ => {}
+                            }
+                        }
+                        AppEvent::CloseNotice(notice) => {
+                            self.close_notice = true;
+                            self.emusync_app.state.status = AppStatus::Error { message: notice };
+                        }
+                    }
+                }
+
                 let context = state.egui_ctx().clone();
                 let input = state.take_egui_input(window);
                 let mut output = context.run_ui(input, |ui| {
-                    ui.heading("EmuSync");
-                    ui.label("Rust desktop preview");
-                    ui.text_edit_singleline(&mut self.text);
-                    if self.close_notice {
-                        ui.label("A sync operation needs recovery before closing.");
-                    }
+                    self.emusync_app.update(ui);
                 });
+
+                // Drain and dispatch UI actions
+                let actions = self.emusync_app.take_actions();
+                for action in actions {
+                    if matches!(action, UiAction::Exit) {
+                        self.close_notice = false;
+                        self.closing = true;
+                        self.operations.begin_close();
+                    } else if let Some(coordinator) = &self.coordinator {
+                        coordinator.handle_action(action);
+                    }
+                }
+
                 state.handle_platform_output(window, output.platform_output);
                 let primitives = context.tessellate(output.shapes, output.pixels_per_point);
                 painter.paint_and_update_textures(
                     egui::ViewportId::ROOT,
                     output.pixels_per_point,
-                    [0.08, 0.08, 0.08, 1.0],
+                    [0.05, 0.07, 0.09, 1.0],
                     &primitives,
                     &mut output.textures_delta,
                     Vec::new(),
@@ -168,11 +313,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let configuration = emusync_data_local::ConfigManager::new(&path)?;
     configuration.load()?;
     let event_loop = EventLoop::new()?;
+
+    let (event_tx, event_rx) = channel();
+
     let mut app = App {
         window: None,
         state: None,
         painter: None,
-        text: String::new(),
+        emusync_app: EmuSyncApp::new(),
+        configuration,
+        coordinator: None,
+        event_tx,
+        event_rx,
         error: None,
         operations: RuntimeOwner::new()?,
         closing: false,
@@ -205,7 +357,7 @@ mod tests {
         let output = context.run_ui(egui::RawInput::default(), |ui| {
             let font = egui::FontId::proportional(16.0);
             ui.fonts_mut(|fonts| {
-                assert!(fonts.has_glyphs(&font, "EmuSync Rust desktop preview"));
+                assert!(fonts.has_glyphs(&font, "EmuSync"));
             });
         });
         output.drop_without_applying_deltas();

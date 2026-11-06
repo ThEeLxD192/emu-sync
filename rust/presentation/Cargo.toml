@@ -8,3 +8,5 @@ license.workspace = true
 [dependencies]
 emusync-domain = { path = "../domain" }
 emusync-application = { path = "../application" }
+egui = { version = "0.37.0", features = ["default_fonts"] }
+image = { version = "0.25", default-features = false, features = ["png"] }

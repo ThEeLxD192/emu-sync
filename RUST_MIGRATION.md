@@ -1254,10 +1254,35 @@ Evidencia (2026-11-06, Linux, base `6ed2d52`; pendiente de commit):
 
 ### R7 — Presentación y composición
 
-- [ ] Recrear tema oscuro, barra lateral, cuadrícula, formularios, conexión, diálogos y flujos actuales con egui, winit y wgpu, sin JVM ni WebView.
-- [ ] Propietario explícito de clientes, tareas y runtime; comunicar comandos y estados tipados sin bloquear el hilo visual.
-- [ ] Validar edición, orden, conflictos, cancelación, progreso, errores, accesibilidad y cierre en plataformas aplicables.
-- [ ] **R7 completado.**
+- [x] Recrear tema oscuro, barra lateral, cuadrícula, formularios, conexión, diálogos y flujos actuales con egui, winit y wgpu, sin JVM ni WebView.
+- [x] Propietario explícito de clientes, tareas y runtime; comunicar comandos y estados tipados sin bloquear el hilo visual.
+- [x] Validar edición, orden, conflictos, cancelación, progreso, errores, accesibilidad y cierre en plataformas aplicables.
+- [x] **R7 completado técnicamente.**
+
+Evidencia (2026-11-06, Linux, base `ac1995f`; pendiente de commit):
+
+- `emusync-presentation`:
+  - `theme`: paleta oscura idéntica a EmuSync (`#0D1117`, `#161B22`, `#1C2333`, `#58A6FF`, etc.) y configuración de estilos de egui con tipografías y bordes redondeados.
+  - `model`: `CloudSyncStatus` (etiquetas y colores), `AppStatus` (Idle, Syncing, Playing, Error, PostSyncFailed, Conflict), `GameItem` (con resolución de título y cover efectivos), `SaveSetupRequest`, `PathTarget` y `PickMode`.
+  - `actions`: `UiAction` con variantes para selección, lanzamiento, sincronización, edición de biblioteca, Steam, OAuth Drive, actualizador, resolución de conflictos y selección de rutas.
+  - `state`: `AppUiState` con Single Source of Truth inmutable para presentación y consultas derivadas (`is_drive_connected`, `sync_status_for_selected`, etc.).
+  - `forms`: `SaveTargetFormState`, `EntryFormState` (emuladores y nativos con argumentos por defecto y validación estricta de rutas) y `GameEditFormState` (overrides individuales, carpetas de restauración y validación).
+  - `dialogs`: modales completos para configuración de Google Drive (`DriveSetupDialogState`), alta y edición de categorías (`EntryDialog`), edición de overrides y restauración (`GameEditDialog`), actualización y notas de release (`UpdateDialog`), y superposiciones de estado (`StatusOverlay` para conflictos, reintentos post-sync y errores).
+  - `components`: encabezado (`render_header`), barra lateral con accesos Steam y reordenación (`render_sidebar`), cuadrícula de juegos y tarjetas interactivas (`render_game_grid`, `render_game_card`) y notificaciones flotantes (`render_toast`).
+  - `cover_cache`: carga y decodificación de texturas de carátulas PNG/JPEG bajo demanda con `TextureHandle`.
+  - `EmuSyncApp`: fachada central que gestiona diálogos activos, cola de acciones y ciclo `update(ui)`.
+  - Pruebas en `rust/presentation/tests/` (18 pruebas aprobadas): `forms_tests.rs` (7 pruebas), `app_state_tests.rs` (4 pruebas), `ui_view_tests.rs` (7 pruebas con renderizado headless, envío de modales, acciones de Drive/Update y resolución de conflictos).
+- `emusync-desktop-app`:
+  - `DesktopCoordinator`: puente asíncrono entre la interfaz egui y Tokio; orquesta `ConfigManager`, `DesktopSteamLibrary`, `DesktopBrowserLauncher`, `FilePicker`, `DesktopUpdateInstaller`, `GitHubUpdateSource`, `UpdateStagingFiles` y `GameRunner`.
+  - `scanner_helper`: escaneo de ROMs por extensiones y firmas y mapeo unificado a `GameItem`.
+  - `events`: eventos fuertemente tipados (`AppEvent`) enviados al hilo visual mediante canales sin bloquear UI, con callbacks de redibujado (`request_redraw`).
+  - `main.rs`: composición completa de la aplicación nativa en el bucle de eventos de `winit` 0.30 con superficie `wgpu`, despacho de `UiAction`, gestión de ciclo de vida y cierre cooperativo supervisado (`CloseRequested` y `poll_close`).
+  - Pruebas en `rust/desktop-app/tests/desktop_composition_tests.rs` (6 pruebas aprobadas): inicialización y escaneo de biblioteca, altas y bajas de categorías, reordenación estable, guardado de overrides individuales, ciclo de lanzamiento de juego y renderizado headless en bucle egui.
+- Verificaciones de calidad del workspace completo:
+  - `cargo xtask check`: pasó verificación estricta de dependencias de arquitectura, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` (0 advertencias) y las 182 pruebas del workspace (todas aprobadas, 2 ignoradas documentadas).
+  - `./gradlew check --no-daemon`: `BUILD SUCCESSFUL in 1m 25s` en Linux (102 tareas accionables: 3 ejecutadas, 99 up-to-date; hooks de Git y convenciones verificados).
+- Omitido / pendiente:
+  - Validación nativa en Windows diferida por decisión del usuario del 2026-11-05; pruebas con Google Drive real y CI remoto siguen pendientes.
 
 ### R8 — Empaquetado y cierre
 

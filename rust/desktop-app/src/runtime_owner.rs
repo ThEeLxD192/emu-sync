@@ -51,6 +51,9 @@ impl<E: Send + 'static> RuntimeOwner<E> {
             closing: false,
         })
     }
+    pub fn handle(&self) -> &tokio::runtime::Handle {
+        self.runtime.handle()
+    }
     fn reap_recovery(&mut self) {
         if self
             .recovery

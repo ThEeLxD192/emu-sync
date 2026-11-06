@@ -1,4 +1,4 @@
-//! Runtime ownership for the desktop application.
+//! Runtime ownership and desktop application composition.
 mod supervisor;
 pub use supervisor::{OperationFailure, OperationSupervisor, StartError};
 
@@ -11,3 +11,12 @@ pub use drive_recovery::{
 
 mod runtime_owner;
 pub use runtime_owner::{CloseState, Closing, RecoveryPanicked, RecoveryStartError, RuntimeOwner};
+
+pub mod coordinator;
+pub use coordinator::DesktopCoordinator;
+
+pub mod events;
+pub use events::AppEvent;
+
+pub mod scanner_helper;
+pub use scanner_helper::scan_entry_games;

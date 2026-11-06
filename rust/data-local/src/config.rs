@@ -21,6 +21,7 @@ struct State {
     revision: i64,
 }
 /// In-process serialized configuration access. Separate Kotlin and Rust processes must not share it concurrently.
+#[derive(Clone)]
 pub struct ConfigManager {
     path: PathBuf,
     state: Arc<Mutex<State>>,

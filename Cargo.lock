@@ -775,8 +775,10 @@ dependencies = [
 name = "emusync-presentation"
 version = "0.1.0"
 dependencies = [
+ "egui",
  "emusync-application",
  "emusync-domain",
+ "image",
 ]
 
 [[package]]
