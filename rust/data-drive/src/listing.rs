@@ -72,6 +72,14 @@ struct Page {
     files: Vec<File>,
     next_page_token: Option<String>,
 }
+fn escape_query(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.contains('\\') || s.contains('\'') {
+        std::borrow::Cow::Owned(s.replace('\\', "\\\\").replace('\'', "\\'"))
+    } else {
+        std::borrow::Cow::Borrowed(s)
+    }
+}
+
 /// Drive v3 listing, with an injectable files endpoint for isolated testing.
 #[derive(Clone)]
 pub struct DriveListing {
@@ -107,10 +115,9 @@ impl DriveListing {
         name: &str,
         parent: Option<&str>,
     ) -> Result<Option<RemoteFile>, ListingError> {
-        let escape = |value: &str| value.replace('\\', "\\\\").replace('\'', "\\'");
-        let mut query = format!("name = '{}' and trashed = false", escape(name));
+        let mut query = format!("name = '{}' and trashed = false", escape_query(name));
         if let Some(parent) = parent {
-            query.push_str(&format!(" and '{}' in parents", escape(parent)));
+            query.push_str(&format!(" and '{}' in parents", escape_query(parent)));
         }
         let response = self
             .client
@@ -197,10 +204,7 @@ impl DriveListing {
         folder: &str,
         include_folders: bool,
     ) -> Result<Vec<RemoteFile>, ListingError> {
-        let query = format!(
-            "'{}' in parents and trashed = false",
-            folder.replace('\\', "\\\\").replace('\'', "\\'")
-        );
+        let query = format!("'{}' in parents and trashed = false", escape_query(folder));
         let mut next: Option<String> = None;
         let mut seen = HashSet::new();
         let mut files = Vec::new();
@@ -232,13 +236,15 @@ impl DriveListing {
                     files.push(file);
                 }
             }
-            next = page.next_page_token.filter(|s| !s.trim().is_empty());
-            match &next {
+            let next_token = page.next_page_token.filter(|s| !s.trim().is_empty());
+            match next_token {
                 None => return Ok(files),
-                Some(token) if !seen.insert(token.clone()) => {
-                    return Err(ListingError::RepeatedPage);
+                Some(token) => {
+                    if !seen.insert(token.clone()) {
+                        return Err(ListingError::RepeatedPage);
+                    }
+                    next = Some(token);
                 }
-                Some(_) => {}
             }
         }
     }

@@ -59,6 +59,14 @@ struct FolderPage {
     #[serde(default)]
     files: Vec<Folder>,
 }
+fn escape_query(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.contains('\\') || s.contains('\'') {
+        std::borrow::Cow::Owned(s.replace('\\', "\\\\").replace('\'', "\\'"))
+    } else {
+        std::borrow::Cow::Borrowed(s)
+    }
+}
+
 /// Drive v3 folder operations. No cache is shared across OAuth connections.
 #[derive(Clone)]
 pub struct DriveFolders {
@@ -94,13 +102,12 @@ impl DriveFolders {
         name: &str,
         parent: Option<&str>,
     ) -> Result<Option<String>, FolderError> {
-        let quote = |s: &str| s.replace('\\', "\\\\").replace('\'', "\\'");
         let mut query = format!(
             "name = '{}' and mimeType = '{MIME}' and trashed = false",
-            quote(name)
+            escape_query(name)
         );
         if let Some(parent) = parent {
-            query.push_str(&format!(" and '{}' in parents", quote(parent)));
+            query.push_str(&format!(" and '{}' in parents", escape_query(parent)));
         }
         let response = self
             .client
@@ -137,7 +144,10 @@ impl DriveFolders {
         name: &str,
         parent: Option<&str>,
     ) -> Result<String, FolderError> {
-        let parents = parent.map_or_else(Vec::new, |p| vec![p]);
+        let parents = match parent {
+            Some(p) => &[p][..],
+            None => &[][..],
+        };
         let response = self
             .client
             .post(self.files_url.clone())

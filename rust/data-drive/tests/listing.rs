@@ -179,3 +179,73 @@ async fn oversized_or_stalled_listing_pages_fail_without_partial_results() {
         server.join().unwrap();
     }
 }
+
+#[tokio::test]
+async fn get_by_id_retrieves_exact_file() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0; 4096];
+        let n = stream.read(&mut request).unwrap();
+        let req = String::from_utf8_lossy(&request[..n]);
+        assert!(req.starts_with("GET /files/target_file?"));
+        let body = r#"{"id":"target_file","name":"save.dat","modifiedTime":"2026-01-01T00:00:00Z","mimeType":"application/octet-stream","sha256Checksum":"abcdef","version":"5"}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+    });
+    let listing = DriveListing::new(Client::new(), url);
+    let file = listing.get_by_id("synthetic", "target_file").await.unwrap();
+    assert_eq!(file.id, "target_file");
+    assert_eq!(file.name, "save.dat");
+    assert_eq!(file.sha256.as_deref(), Some("abcdef"));
+    assert_eq!(file.version.as_deref(), Some("5"));
+    assert!(!file.is_folder);
+    server.join().unwrap();
+}
+
+#[tokio::test]
+async fn get_by_id_in_parent_verifies_parent_presence() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+    let server = thread::spawn(move || {
+        for i in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            let body = if i == 0 {
+                r#"{"id":"file1","name":"save1.dat","modifiedTime":"2026-01-01T00:00:00Z","parents":["parent_folder"]}"#
+            } else {
+                r#"{"id":"file1","name":"save1.dat","modifiedTime":"2026-01-01T00:00:00Z","parents":["other_folder"]}"#
+            };
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        }
+    });
+    let listing = DriveListing::new(Client::new(), url);
+
+    // 1. Matches expected parent
+    let matched = listing
+        .get_by_id_in_parent("synthetic", "file1", "parent_folder")
+        .await
+        .unwrap();
+    assert!(matched.is_some());
+    assert_eq!(matched.unwrap().id, "file1");
+
+    // 2. Mismatched parent returns None
+    let mismatched = listing
+        .get_by_id_in_parent("synthetic", "file1", "parent_folder")
+        .await
+        .unwrap();
+    assert!(mismatched.is_none());
+
+    server.join().unwrap();
+}

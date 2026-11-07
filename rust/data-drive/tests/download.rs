@@ -144,3 +144,32 @@ async fn truncated_response_preserves_destination_and_cleans_stage() {
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     server.join().unwrap();
 }
+
+#[tokio::test]
+async fn http_error_response_preserves_destination_and_reports_error() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0; 4096];
+        assert!(stream.read(&mut request).unwrap() > 0);
+        write!(
+            stream,
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let destination = dir.path().join("save");
+    std::fs::write(&destination, b"original").unwrap();
+    let result = DriveDownload::new(Client::new(), url)
+        .download("synthetic", "id", &destination, &CancellationToken::new())
+        .await;
+    assert!(matches!(
+        result,
+        Err(DownloadError::Http(reqwest::StatusCode::NOT_FOUND))
+    ));
+    assert_eq!(std::fs::read(&destination).unwrap(), b"original");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    server.join().unwrap();
+}

@@ -27,7 +27,11 @@ pub(crate) async fn read_metadata<T: DeserializeOwned>(
     mut response: reqwest::Response,
     inactivity: Duration,
 ) -> Result<T, ResponseMetadataError> {
-    let mut body = Vec::new();
+    let initial_cap = response
+        .content_length()
+        .map(|cl| (cl as usize).min(MAX_RESPONSE_METADATA_BYTES))
+        .unwrap_or(0);
+    let mut body = Vec::with_capacity(initial_cap);
     loop {
         let chunk = tokio::time::timeout(inactivity, response.chunk())
             .await
@@ -65,7 +69,7 @@ where
     let body = body.map(move |chunk| {
         if let Ok(bytes) = &chunk {
             seen = seen.saturating_add(bytes.len() as u64);
-            if seen >= length {
+            if seen >= length && !*tx.borrow() {
                 tx.send_replace(true);
             }
         }

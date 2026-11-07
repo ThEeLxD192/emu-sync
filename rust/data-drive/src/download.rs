@@ -116,6 +116,7 @@ impl DriveDownload {
         .await
         .map_err(|_| DownloadError::Worker)??;
         let mut file = tokio::fs::File::from_std(file);
+        let progress_name = options.progress_name.to_owned();
         let result = async {
             loop {
                 let chunk = tokio::select! { biased; () = cancel.cancelled() => return Err(DownloadError::Cancelled), result = response.chunk() => result? };
@@ -123,15 +124,22 @@ impl DriveDownload {
                     Some(bytes) => {
                         file.write_all(&bytes).await?;
                         transferred = transferred.saturating_add(bytes.len() as u64);
-                        (options.on_progress)(TransferProgress { name: options.progress_name.to_owned(), transferred, total });
+                        (options.on_progress)(TransferProgress {
+                            name: progress_name.clone(),
+                            transferred,
+                            total,
+                        });
                     }
-                    None => break
+                    None => break,
                 }
             }
             file.flush().await?;
-            if cancel.is_cancelled() { return Err(DownloadError::Cancelled); }
+            if cancel.is_cancelled() {
+                return Err(DownloadError::Cancelled);
+            }
             Ok(())
-        }.await;
+        }
+        .await;
         // Wait for any pending file operation before closing and removing/publishing the stage.
         let flush = file.flush().await;
         let file = file.into_std().await;
