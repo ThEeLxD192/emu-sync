@@ -1,6 +1,5 @@
 use emusync_application::{OperationCoordinator, OperationEvent};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mutual_exclusion_rejects_concurrent_operations() {
@@ -72,7 +71,7 @@ async fn cancelled_task_guard_drop_increments_revision_publishes_cancelled_and_c
         coord_clone
             .run_if_idle(async move {
                 let _ = started_tx.send(());
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                std::future::pending::<()>().await;
             })
             .await
     });

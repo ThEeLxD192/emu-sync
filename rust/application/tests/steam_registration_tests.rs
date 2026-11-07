@@ -232,3 +232,44 @@ fn category_not_found_when_game_does_not_exist_in_store() {
     assert_eq!(steam.registered.lock().unwrap().len(), 0);
     assert_eq!(store.update_calls.load(Ordering::SeqCst), 0);
 }
+
+#[test]
+fn concurrent_deletion_of_category_during_steam_register_returns_category_not_found() {
+    let target_game = sample_native("TargetGame", "/games/target.exe", None);
+    let survivor_game = sample_native("SurvivorGame", "/games/survivor.exe", Some(999));
+
+    let store = MemoryStore {
+        config: Arc::new(Mutex::new(AppConfig {
+            credentials: None,
+            entries: vec![target_game.clone(), survivor_game.clone()],
+        })),
+        update_calls: Arc::new(AtomicUsize::new(0)),
+    };
+
+    let steam = RecordingSteam::default();
+    let store_clone = store.clone();
+
+    // In the on_register callback (simulating race between load() and update()),
+    // remove target_game from the store
+    *steam.on_register.lock().unwrap() = Some(Box::new(move || {
+        store_clone
+            .config
+            .lock()
+            .unwrap()
+            .entries
+            .retain(|e| e.common().name != "TargetGame");
+    }));
+
+    let registration = SteamRegistration::new(store.clone(), steam.clone());
+    let err = registration.register(&target_game).expect_err(
+        "Registration must fail with CategoryNotFound when entry was deleted concurrently",
+    );
+
+    assert_eq!(err, SteamRegistrationError::CategoryNotFound);
+
+    // Verify other entries in store remain uncorrupted
+    let stored = store.config.lock().unwrap().clone();
+    assert_eq!(stored.entries.len(), 1);
+    assert_eq!(stored.entries[0].common().name, "SurvivorGame");
+    assert_eq!(stored.entries[0].common().steam_app_id, Some(999));
+}

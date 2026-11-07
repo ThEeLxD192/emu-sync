@@ -8,7 +8,6 @@ use emusync_domain::sync::{
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 #[derive(Clone, Default)]
 struct DummyPath(String);
@@ -239,12 +238,14 @@ fn monotonic_request_id_generation() {
 
 #[tokio::test]
 async fn request_conflict_resolved_by_matching_id() {
-    let emitted_conflict = Arc::new(Mutex::new(None));
-    let emitted_clone = Arc::clone(&emitted_conflict);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let tx = Arc::new(Mutex::new(Some(tx)));
 
     let ctx = Arc::new(create_context(move |ev| {
-        if let SyncEvent::Conflict(req) = ev {
-            *emitted_clone.lock().unwrap() = Some(req);
+        if let SyncEvent::Conflict(req) = ev
+            && let Some(sender) = tx.lock().unwrap().take()
+        {
+            let _ = sender.send(req);
         }
     }));
 
@@ -255,16 +256,7 @@ async fn request_conflict_resolved_by_matching_id() {
             .await
     });
 
-    // Wait until conflict is emitted
-    let mut conflict_req = None;
-    for _ in 0..50 {
-        tokio::time::sleep(Duration::from_millis(5)).await;
-        if let Some(req) = emitted_conflict.lock().unwrap().clone() {
-            conflict_req = Some(req);
-            break;
-        }
-    }
-    let conflict = conflict_req.expect("conflict should be emitted");
+    let conflict = rx.await.expect("conflict should be emitted");
     assert_eq!(conflict.game_name, "Super Metroid");
 
     // Resolve conflict with UploadLocal
@@ -276,12 +268,14 @@ async fn request_conflict_resolved_by_matching_id() {
 
 #[tokio::test]
 async fn resolve_conflict_ignores_mismatched_request_id() {
-    let emitted_conflict = Arc::new(Mutex::new(None));
-    let emitted_clone = Arc::clone(&emitted_conflict);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let tx = Arc::new(Mutex::new(Some(tx)));
 
     let ctx = Arc::new(create_context(move |ev| {
-        if let SyncEvent::Conflict(req) = ev {
-            *emitted_clone.lock().unwrap() = Some(req);
+        if let SyncEvent::Conflict(req) = ev
+            && let Some(sender) = tx.lock().unwrap().take()
+        {
+            let _ = sender.send(req);
         }
     }));
 
@@ -292,15 +286,7 @@ async fn resolve_conflict_ignores_mismatched_request_id() {
             .await
     });
 
-    let mut conflict_req = None;
-    for _ in 0..50 {
-        tokio::time::sleep(Duration::from_millis(5)).await;
-        if let Some(req) = emitted_conflict.lock().unwrap().clone() {
-            conflict_req = Some(req);
-            break;
-        }
-    }
-    let conflict = conflict_req.expect("conflict should be emitted");
+    let conflict = rx.await.expect("conflict should be emitted");
 
     // Attempt resolution with a mismatched RequestId
     let fake_conflict = SaveConflict {
@@ -316,6 +302,52 @@ async fn resolve_conflict_ignores_mismatched_request_id() {
 
     let decision = task.await.unwrap();
     assert_eq!(decision, Decision::UploadLocal);
+}
+
+#[tokio::test]
+async fn aborted_conflict_request_cleans_up_pending_state_without_clobbering_newer_conflict() {
+    let (tx_events, mut rx_events) = tokio::sync::mpsc::unbounded_channel();
+
+    let ctx = Arc::new(create_context(move |ev| {
+        if let SyncEvent::Conflict(req) = ev {
+            let _ = tx_events.send(req);
+        }
+    }));
+
+    // 1. Launch first conflict request in a tokio task
+    let ctx_1 = Arc::clone(&ctx);
+    let task1 =
+        tokio::spawn(async move { ctx_1.request_conflict(1000, 2000, "Task 1".into()).await });
+
+    // 2. Wait deterministically for conflict 1 to be emitted
+    let conflict1 = rx_events.recv().await.expect("conflict 1 must be emitted");
+    assert_eq!(conflict1.game_name, "Task 1");
+
+    // 3. Abort task 1 and wait for it to finish as cancelled
+    task1.abort();
+    let join_err = task1.await.unwrap_err();
+    assert!(join_err.is_cancelled());
+
+    // 4. Verify that resolving conflict 1 now has no effect (CleanupGuard dropped and cleared pending)
+    ctx.resolve_conflict(&conflict1, Decision::UploadLocal);
+
+    // 5. Launch second conflict request in another task
+    let ctx_2 = Arc::clone(&ctx);
+    let task2 =
+        tokio::spawn(async move { ctx_2.request_conflict(3000, 4000, "Task 2".into()).await });
+
+    // Verify it receives a strictly higher RequestId
+    let conflict2 = rx_events.recv().await.expect("conflict 2 must be emitted");
+    assert_eq!(conflict2.game_name, "Task 2");
+    assert!(conflict2.request_id.0 > conflict1.request_id.0);
+
+    // Resolving conflict 1 again does not resolve conflict 2
+    ctx.resolve_conflict(&conflict1, Decision::UploadLocal);
+
+    // Resolving conflict 2 succeeds and delivers Decision::DownloadCloud
+    ctx.resolve_conflict(&conflict2, Decision::DownloadCloud);
+    let decision2 = task2.await.unwrap();
+    assert_eq!(decision2, Decision::DownloadCloud);
 }
 
 #[tokio::test]

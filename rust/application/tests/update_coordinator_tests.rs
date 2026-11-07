@@ -9,12 +9,22 @@ struct MockSource {
     download_error: Arc<Mutex<Option<String>>>,
     download_started: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     stall_download: Arc<Mutex<bool>>,
+    check_started: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    check_resume: Arc<Mutex<Option<tokio::sync::oneshot::Receiver<()>>>>,
 }
 
 impl UpdateSource for MockSource {
     type Error = String;
 
     async fn check(&self) -> Result<Option<UpdateInfo>, Self::Error> {
+        let start_tx = self.check_started.lock().unwrap().take();
+        if let Some(tx) = start_tx {
+            let _ = tx.send(());
+        }
+        let resume_rx = self.check_resume.lock().unwrap().take();
+        if let Some(rx) = resume_rx {
+            let _ = rx.await;
+        }
         if let Some(err) = self.check_error.lock().unwrap().clone() {
             return Err(err);
         }
@@ -28,11 +38,13 @@ impl UpdateSource for MockSource {
         mut on_progress: impl FnMut(f32) + Send,
     ) -> Result<(), Self::Error> {
         on_progress(0.5);
-        if let Some(tx) = self.download_started.lock().unwrap().take() {
+        let start_tx = self.download_started.lock().unwrap().take();
+        if let Some(tx) = start_tx {
             let _ = tx.send(());
         }
-        if *self.stall_download.lock().unwrap() {
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        let stall = *self.stall_download.lock().unwrap();
+        if stall {
+            std::future::pending::<()>().await;
         }
         if let Some(err) = self.download_error.lock().unwrap().clone() {
             return Err(err);
@@ -46,6 +58,7 @@ impl UpdateSource for MockSource {
 struct MockFiles {
     deleted_paths: Arc<Mutex<Vec<String>>>,
     destination: Arc<Mutex<String>>,
+    custom_size: Arc<Mutex<Option<u64>>>,
 }
 
 impl UpdateFiles for MockFiles {
@@ -56,6 +69,9 @@ impl UpdateFiles for MockFiles {
     }
 
     fn size(&self, _path: &str) -> Result<u64, Self::Error> {
+        if let Some(sz) = *self.custom_size.lock().unwrap() {
+            return Ok(sz);
+        }
         Ok(1024)
     }
 
@@ -68,6 +84,7 @@ impl UpdateFiles for MockFiles {
 #[derive(Clone, Default)]
 struct MockInstaller {
     restarted_path: Arc<Mutex<Option<String>>>,
+    restart_result: Arc<Mutex<Option<Result<bool, String>>>>,
 }
 
 impl UpdateInstaller for MockInstaller {
@@ -78,6 +95,9 @@ impl UpdateInstaller for MockInstaller {
     }
 
     fn restart(&self, path: &str) -> Result<bool, Self::Error> {
+        if let Some(res) = self.restart_result.lock().unwrap().clone() {
+            return res;
+        }
         *self.restarted_path.lock().unwrap() = Some(path.to_string());
         Ok(true)
     }
@@ -314,4 +334,126 @@ async fn reentrant_on_state_does_not_deadlock_and_can_check_while_checking() {
     // Both state() and can_check() were queryable inside on_state without deadlock
     let observed = observed_states_in_callback.lock().unwrap().clone();
     assert!(!observed.is_empty());
+}
+
+#[tokio::test]
+async fn download_size_mismatch_deletes_file_and_publishes_error_state() {
+    let source = MockSource::default();
+    let files = MockFiles::default();
+    *files.destination.lock().unwrap() = "/tmp/size_mismatch.tar.gz".into();
+    *files.custom_size.lock().unwrap() = Some(2048);
+
+    let installer = MockInstaller::default();
+
+    let published = Arc::new(Mutex::new(Vec::new()));
+    let published_clone = Arc::clone(&published);
+
+    let coordinator = UpdateCoordinator::new(source, files.clone(), installer, move |state| {
+        published_clone.lock().unwrap().push(state.clone());
+    });
+
+    let mut info = sample_update_info();
+    info.asset_size = 4096;
+
+    coordinator.download(&info).await;
+
+    // Verify DownloadGuard deleted the file
+    assert_eq!(
+        *files.deleted_paths.lock().unwrap(),
+        vec!["/tmp/size_mismatch.tar.gz".to_string()]
+    );
+
+    // Verify UpdateState::Error with expected size mismatch message
+    let current_state = coordinator.state();
+    match current_state {
+        UpdateState::Error(msg) => {
+            assert!(
+                msg.contains("expected 4096 bytes, received 2048"),
+                "Error message must specify expected vs received size, got: {msg}"
+            );
+        }
+        other => panic!("Expected UpdateState::Error, got: {other:?}"),
+    }
+
+    // Never published ReadyToRestart
+    let all_published = published.lock().unwrap().clone();
+    assert!(
+        !all_published
+            .iter()
+            .any(|s| matches!(s, UpdateState::ReadyToRestart { .. })),
+        "ReadyToRestart must never be published on size mismatch"
+    );
+
+    // Resets can_check to true
+    assert!(coordinator.can_check());
+}
+
+#[tokio::test]
+async fn stale_or_cancelled_check_does_not_overwrite_concurrent_download_or_ready_to_restart_and_failed_restart_publishes_error()
+ {
+    let source = MockSource::default();
+    let files = MockFiles::default();
+    *files.destination.lock().unwrap() = "/tmp/update-ready.tar.gz".into();
+    let installer = MockInstaller::default();
+
+    let (check_start_tx, check_start_rx) = tokio::sync::oneshot::channel();
+    let (check_resume_tx, check_resume_rx) = tokio::sync::oneshot::channel();
+    *source.check_started.lock().unwrap() = Some(check_start_tx);
+    *source.check_resume.lock().unwrap() = Some(check_resume_rx);
+
+    let info = sample_update_info();
+    *source.next_info.lock().unwrap() = Some(info.clone());
+
+    let published = Arc::new(Mutex::new(Vec::new()));
+    let published_clone = Arc::clone(&published);
+
+    let coordinator = Arc::new(UpdateCoordinator::new(
+        source,
+        files,
+        installer.clone(),
+        move |state| {
+            published_clone.lock().unwrap().push(state.clone());
+        },
+    ));
+
+    // Launch slow update check
+    let coord_task = Arc::clone(&coordinator);
+    let check_task = tokio::spawn(async move {
+        coord_task.check_for_updates().await;
+    });
+
+    // Wait until check_for_updates has started and suspended
+    check_start_rx.await.expect("check must have started");
+
+    // Perform download while check is pending, transitioning state to ReadyToRestart
+    coordinator.download(&info).await;
+    assert!(matches!(
+        coordinator.state(),
+        UpdateState::ReadyToRestart { .. }
+    ));
+
+    // Resume the stale check task
+    check_resume_tx.send(()).expect("check_resume send failed");
+    check_task.await.expect("check_task join failed");
+
+    // Check must NOT overwrite ReadyToRestart with Available
+    assert!(
+        matches!(coordinator.state(), UpdateState::ReadyToRestart { .. }),
+        "Stale check must not overwrite ReadyToRestart"
+    );
+
+    // Test failed restart publishes error state
+    *installer.restart_result.lock().unwrap() = Some(Ok(false));
+    let restart_success = coordinator.restart("/tmp/update-ready.tar.gz", false);
+    assert!(!restart_success);
+
+    match coordinator.state() {
+        UpdateState::Error(msg) => {
+            assert!(
+                msg.contains("Could not restart automatically. The update file is saved at: /tmp/update-ready.tar.gz"),
+                "Error must report restart failure and saved update path, got: {msg}"
+            );
+        }
+        other => panic!("Expected UpdateState::Error, got: {other:?}"),
+    }
 }

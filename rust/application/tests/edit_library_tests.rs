@@ -2,7 +2,7 @@ use emusync_application::{
     EditLibrary, GameOverrideChanges, SteamRegistration, build_game_entry,
     library::preserve_shared_cloud_root,
 };
-use emusync_domain::config::{AppConfig, ConfigurationStore};
+use emusync_domain::config::{AppConfig, ConfigurationStore, Credentials};
 use emusync_domain::library::{
     Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType, SteamLibrary,
 };
@@ -89,6 +89,8 @@ impl SteamLibrary for MockSteam {
 struct SpySynchronizer {
     renamed_entries: Arc<Mutex<Vec<(GameEntry, GameEntry)>>>,
     renamed_games: Arc<Mutex<Vec<(String, String)>>>,
+    rename_entry_result: Arc<Mutex<Option<Result<bool, String>>>>,
+    rename_game_result: Arc<Mutex<Option<Result<bool, String>>>>,
 }
 
 impl SaveSynchronizer for SpySynchronizer {
@@ -114,6 +116,9 @@ impl SaveSynchronizer for SpySynchronizer {
             .lock()
             .unwrap()
             .push((old_title.to_string(), new_title.to_string()));
+        if let Some(res) = self.rename_game_result.lock().unwrap().clone() {
+            return res;
+        }
         Ok(true)
     }
 
@@ -122,6 +127,9 @@ impl SaveSynchronizer for SpySynchronizer {
             .lock()
             .unwrap()
             .push((old.clone(), new.clone()));
+        if let Some(res) = self.rename_entry_result.lock().unwrap().clone() {
+            return res;
+        }
         Ok(true)
     }
 
@@ -695,4 +703,275 @@ impl CommonMutHelper for GameEntry {
             GameEntry::Emulator(e) => &mut e.common,
         }
     }
+}
+
+// --- Adversarial Edit Library Tests ---
+
+#[tokio::test]
+async fn edit_entry_and_edit_game_override_abort_without_store_or_steam_mutation_when_cloud_rename_fails()
+ {
+    let creds = Some(Credentials {
+        client_id: "c".into(),
+        client_secret: "s".into(),
+        refresh_token: Some("rt".into()),
+    });
+
+    let mut initial_entry = make_native("Game");
+    if let GameEntry::Native(ref mut n) = initial_entry {
+        n.common.steam_app_id = Some(12345);
+    }
+
+    let initial_config = AppConfig {
+        credentials: creds,
+        entries: vec![initial_entry.clone()],
+    };
+
+    let store = InMemoryStore {
+        config: Arc::new(Mutex::new(initial_config.clone())),
+    };
+    let steam = MockSteam::default();
+    let factory = SpyFactory::default();
+    let edit = EditLibrary::new(store.clone(), factory.clone(), steam.clone(), |_| {});
+
+    let mut new_entry = make_native("RenamedGame");
+    if let GameEntry::Native(ref mut n) = new_entry {
+        n.common.steam_app_id = Some(12345);
+    }
+
+    // 1. rename_entry returns Ok(false) -> aborts, no store mutation, no Steam register
+    *factory.synchronizer.rename_entry_result.lock().unwrap() = Some(Ok(false));
+    let res1 = edit
+        .edit_entry(&initial_config, &initial_entry, &new_entry)
+        .await
+        .unwrap();
+    assert!(
+        res1.is_none(),
+        "edit_entry must return Ok(None) when rename_entry is false"
+    );
+    assert_eq!(store.load().unwrap().entries[0].common().name, "Game");
+    assert!(
+        !steam
+            .registered_names
+            .lock()
+            .unwrap()
+            .contains("RenamedGame")
+    );
+
+    // 2. rename_entry returns Err("network error") -> aborts, no store mutation, no Steam register
+    *factory.synchronizer.rename_entry_result.lock().unwrap() = Some(Err("network error".into()));
+    let res2 = edit
+        .edit_entry(&initial_config, &initial_entry, &new_entry)
+        .await
+        .unwrap();
+    assert!(
+        res2.is_none(),
+        "edit_entry must return Ok(None) when rename_entry fails with error"
+    );
+    assert_eq!(store.load().unwrap().entries[0].common().name, "Game");
+    assert!(
+        !steam
+            .registered_names
+            .lock()
+            .unwrap()
+            .contains("RenamedGame")
+    );
+
+    // 3. edit_game_override with rename_game returning Ok(false) or Err
+    let emu_entry = GameEntry::Emulator(Emulator {
+        common: EntryCommon {
+            name: "EmuGame".into(),
+            steam_app_id: Some(12345),
+            ..EntryCommon::default()
+        },
+        save_targets_by_rom: vec![("rom.sfc".into(), vec![])],
+        title_by_rom: vec![("rom.sfc".into(), "Old ROM Title".into())],
+        ..Default::default()
+    });
+    *store.config.lock().unwrap() = AppConfig {
+        credentials: initial_config.credentials.clone(),
+        entries: vec![emu_entry.clone()],
+    };
+    let config_with_emu = store.load().unwrap();
+
+    let game = SyncGame {
+        entry: emu_entry.clone(),
+        name: "rom.sfc".into(),
+        effective_title: "Old ROM Title".into(),
+        rom_path: Some("/roms/rom.sfc".into()),
+        save_targets: Vec::new(),
+    };
+    let changes = GameOverrideChanges {
+        title: Some("New ROM Title".into()),
+        targets: vec![],
+        cover_path: None,
+    };
+
+    *factory.synchronizer.rename_game_result.lock().unwrap() = Some(Ok(false));
+    let res3 = edit
+        .edit_game_override(&config_with_emu, &game, &changes)
+        .await
+        .unwrap();
+    assert!(
+        res3.is_none(),
+        "edit_game_override must return Ok(None) when rename_game is false"
+    );
+    assert_eq!(store.load().unwrap().entries[0], emu_entry);
+
+    *factory.synchronizer.rename_game_result.lock().unwrap() = Some(Err("network error".into()));
+    let res4 = edit
+        .edit_game_override(&config_with_emu, &game, &changes)
+        .await
+        .unwrap();
+    assert!(
+        res4.is_none(),
+        "edit_game_override must return Ok(None) when rename_game fails with error"
+    );
+    assert_eq!(store.load().unwrap().entries[0], emu_entry);
+}
+
+#[tokio::test]
+async fn edit_game_override_merges_onto_latest_config_entry_instead_of_stale_sync_game_entry() {
+    // Config has an emulator entry that already contains an override for "rom_a.sfc"
+    let latest_emu = GameEntry::Emulator(Emulator {
+        common: EntryCommon {
+            name: "RetroArch".into(),
+            ..EntryCommon::default()
+        },
+        save_targets_by_rom: vec![(
+            "rom_a.sfc".into(),
+            vec![SaveTarget {
+                path: "/saves/rom_a.srm".into(),
+                kind: SaveTargetType::File,
+                cloud_path: None,
+            }],
+        )],
+        title_by_rom: vec![("rom_a.sfc".into(), "Title A".into())],
+        ..Default::default()
+    });
+
+    let config = AppConfig {
+        credentials: None,
+        entries: vec![latest_emu.clone()],
+    };
+
+    let store = InMemoryStore {
+        config: Arc::new(Mutex::new(config.clone())),
+    };
+    let steam = MockSteam::default();
+    let factory = SpyFactory::default();
+    let edit = EditLibrary::new(store.clone(), factory, steam, |_| {});
+
+    // Stale SyncGame for "rom_b.sfc" whose game.entry is a stale snapshot WITHOUT "rom_a.sfc"
+    let stale_emu = GameEntry::Emulator(Emulator {
+        common: EntryCommon {
+            name: "RetroArch".into(),
+            ..EntryCommon::default()
+        },
+        save_targets_by_rom: vec![],
+        title_by_rom: vec![],
+        ..Default::default()
+    });
+    let stale_game = SyncGame {
+        entry: stale_emu,
+        name: "rom_b.sfc".into(),
+        effective_title: "Title B".into(),
+        rom_path: Some("/roms/rom_b.sfc".into()),
+        save_targets: Vec::new(),
+    };
+
+    let changes = GameOverrideChanges {
+        title: Some("New Title B".into()),
+        targets: vec![SaveTarget {
+            path: "/saves/rom_b.srm".into(),
+            kind: SaveTargetType::File,
+            cloud_path: None,
+        }],
+        cover_path: None,
+    };
+
+    let res = edit
+        .edit_game_override(&config, &stale_game, &changes)
+        .await
+        .unwrap()
+        .expect("edit_game_override should succeed");
+
+    // Must merge onto latest, so both rom_a.sfc and rom_b.sfc overrides are preserved!
+    if let GameEntry::Emulator(ref updated) = res.entry {
+        let has_a = updated
+            .save_targets_by_rom
+            .iter()
+            .any(|(rom, targets)| rom == "rom_a.sfc" && targets[0].path == "/saves/rom_a.srm");
+        let has_b = updated
+            .save_targets_by_rom
+            .iter()
+            .any(|(rom, targets)| rom == "rom_b.sfc" && targets[0].path == "/saves/rom_b.srm");
+        assert!(
+            has_a,
+            "Override for rom_a.sfc must be retained from latest config"
+        );
+        assert!(has_b, "Override for rom_b.sfc must be added from changes");
+
+        assert!(
+            updated
+                .title_by_rom
+                .iter()
+                .any(|(rom, title)| rom == "rom_a.sfc" && title == "Title A")
+        );
+        assert!(
+            updated
+                .title_by_rom
+                .iter()
+                .any(|(rom, title)| rom == "rom_b.sfc" && title == "New Title B")
+        );
+    } else {
+        panic!("Expected emulator entry");
+    }
+}
+
+#[test]
+fn preserve_shared_cloud_root_does_not_force_cloud_folder_on_grouped_native_game_without_explicit_cloud_folder()
+ {
+    let old_entry = GameEntry::Native(NativeGame {
+        common: EntryCommon {
+            name: "Game1".into(),
+            group: Some("SharedGroup".into()),
+            cloud_folder: None,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let mut new_entry = GameEntry::Native(NativeGame {
+        common: EntryCommon {
+            name: "RenamedGame1".into(),
+            group: Some("SharedGroup".into()),
+            cloud_folder: None,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let sibling_entry = GameEntry::Native(NativeGame {
+        common: EntryCommon {
+            name: "Game2".into(),
+            group: Some("SharedGroup".into()),
+            cloud_folder: None,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let config = AppConfig {
+        credentials: None,
+        entries: vec![old_entry.clone(), sibling_entry],
+    };
+
+    // Because source_uses_root == false (group.is_some() && cloud_folder.is_none()),
+    // preserve_shared_cloud_root must leave cloud_folder as None!
+    preserve_shared_cloud_root(&config, &old_entry, &mut new_entry);
+    assert_eq!(
+        new_entry.common().cloud_folder,
+        None,
+        "preserve_shared_cloud_root must not force cloud_folder on grouped native game without explicit cloud_folder"
+    );
 }

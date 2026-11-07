@@ -1,7 +1,9 @@
 use emusync_application::{CloudEntryMigration, SyncContext, SyncServices};
 use emusync_domain::config::{AppConfig, CloudAuthorization, Credentials};
 use emusync_domain::execution::{GameLaunchRequest, GameLauncher, GameResult};
-use emusync_domain::library::{Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget};
+use emusync_domain::library::{
+    Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType,
+};
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, LocalSaveAccess, LocalSaveFiles, LocalSavePath,
     RemoteFile, RemoteState, SyncEvent,
@@ -71,8 +73,11 @@ impl LocalSaveAccess for DummyAccess {
     fn effective_targets_for_rom(
         &self,
         emu: &Emulator,
-        _rom: &str,
+        rom: &str,
     ) -> Result<Vec<SaveTarget>, Self::Error> {
+        if let Some((_, list)) = emu.save_targets_by_rom.iter().find(|(r, _)| r == rom) {
+            return Ok(list.clone());
+        }
         Ok(emu.common.save_targets.clone())
     }
 }
@@ -80,22 +85,27 @@ impl LocalSaveAccess for DummyAccess {
 #[derive(Clone, Default)]
 struct MockListing {
     files: Arc<Mutex<Vec<RemoteFile>>>,
+    files_by_folder: Arc<Mutex<std::collections::HashMap<String, Vec<RemoteFile>>>>,
 }
 
 impl CloudFileListing for MockListing {
     type Error = String;
-    async fn list_files(
-        &self,
-        _token: &str,
-        _folder: &str,
-    ) -> Result<Vec<RemoteFile>, Self::Error> {
+    async fn list_files(&self, _token: &str, folder: &str) -> Result<Vec<RemoteFile>, Self::Error> {
+        let lock = self.files_by_folder.lock().unwrap();
+        if let Some(list) = lock.get(folder) {
+            return Ok(list.clone());
+        }
         Ok(self.files.lock().unwrap().clone())
     }
     async fn list_children(
         &self,
         _token: &str,
-        _folder: &str,
+        folder: &str,
     ) -> Result<Vec<RemoteFile>, Self::Error> {
+        let lock = self.files_by_folder.lock().unwrap();
+        if let Some(list) = lock.get(folder) {
+            return Ok(list.clone());
+        }
         Ok(self.files.lock().unwrap().clone())
     }
 }
@@ -104,6 +114,7 @@ impl CloudFileListing for MockListing {
 struct MockFolders {
     folders: Arc<Mutex<std::collections::HashMap<String, String>>>,
     renamed: Arc<Mutex<Vec<(String, String)>>>,
+    move_log: Arc<Mutex<Vec<(String, String, String)>>>,
 }
 
 impl CloudFolderStore for MockFolders {
@@ -147,10 +158,15 @@ impl CloudFolderStore for MockFolders {
     async fn move_file(
         &self,
         _token: &str,
-        _file: &str,
-        _add_parent: &str,
-        _remove_parent: &str,
+        file: &str,
+        add_parent: &str,
+        remove_parent: &str,
     ) -> Result<(), Self::Error> {
+        self.move_log.lock().unwrap().push((
+            file.to_string(),
+            remove_parent.to_string(),
+            add_parent.to_string(),
+        ));
         Ok(())
     }
 }
@@ -247,6 +263,7 @@ type TestContext =
 struct MigrationHarness {
     ctx: TestContext,
     folders: MockFolders,
+    search: MockListing,
 }
 
 fn make_harness(
@@ -259,10 +276,11 @@ fn make_harness(
         should_fail: Arc::new(AtomicBool::new(false)),
     };
     let folders = MockFolders::default();
+    let search = MockListing::default();
 
     let services = SyncServices {
         files: DummyAccess,
-        search: MockListing::default(),
+        search: search.clone(),
         folders: folders.clone(),
         tracked_sync: DummyTracked,
         authorization: auth,
@@ -275,7 +293,11 @@ fn make_harness(
     };
 
     let ctx = SyncContext::new(config, services, on_event);
-    MigrationHarness { ctx, folders }
+    MigrationHarness {
+        ctx,
+        folders,
+        search,
+    }
 }
 
 fn sample_native(name: &str, cloud_folder: Option<&str>) -> GameEntry {
@@ -418,4 +440,218 @@ async fn rename_game_cloud_data_without_drive_returns_true_immediately() {
 
     assert!(res);
     assert!(harness.folders.renamed.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn rename_entry_aborts_when_old_path_is_used_by_another_entry_save_targets() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = Arc::clone(&events);
+
+    // Old entry: NativeGame with group = "SharedRoot", name = "SubGame", cloud_folder = None
+    // This resolves old_path to ["SharedRoot", "SubGame"] (len 2)
+    let e1 = GameEntry::Native(NativeGame {
+        common: EntryCommon {
+            name: "SubGame".to_string(),
+            executable_path: "/games/subgame".to_string(),
+            group: Some("SharedRoot".to_string()),
+            cloud_folder: None,
+            ..EntryCommon::default()
+        },
+        wait_for_process: None,
+        cover_path: None,
+    });
+
+    // Other entry: Emulator whose ROM targets resolve to ["SharedRoot", "SubGame"]
+    let e2 = GameEntry::Emulator(Emulator {
+        common: EntryCommon {
+            name: "RetroArch".to_string(),
+            cloud_folder: Some("SharedRoot".to_string()),
+            ..EntryCommon::default()
+        },
+        save_targets_by_rom: vec![(
+            "rom_sub.sfc".to_string(),
+            vec![SaveTarget {
+                path: "/saves/rom_sub.srm".into(),
+                kind: SaveTargetType::File,
+                cloud_path: None,
+            }],
+        )],
+        title_by_rom: vec![("rom_sub.sfc".to_string(), "SubGame".to_string())],
+        ..Default::default()
+    });
+
+    let creds = Credentials {
+        client_id: "c".into(),
+        client_secret: "s".into(),
+        refresh_token: Some("rt".into()),
+    };
+
+    let harness = make_harness(vec![e1.clone(), e2], Some(creds), move |ev| {
+        events_clone.lock().unwrap().push(ev);
+    });
+
+    let migration = CloudEntryMigration::new(&harness.ctx);
+
+    let mut e1_renamed = e1.clone();
+    if let GameEntry::Native(ref mut n) = e1_renamed {
+        n.common.group = Some("NewRoot".into());
+    }
+
+    let res = migration
+        .rename_entry_cloud_data(&e1, &e1_renamed)
+        .await
+        .unwrap();
+
+    // Must return false to abort migration
+    assert!(
+        !res,
+        "Must abort rename when old_path matches save_targets of another entry"
+    );
+
+    let evs = events.lock().unwrap().clone();
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            SyncEvent::Error(msg) if msg.contains("The cloud folder 'SharedRoot/SubGame' is shared with another entry.")
+        )),
+        "Must emit error about shared cloud folder, got: {:?}",
+        evs
+    );
+
+    // Must not attempt rename_folder or move_file
+    assert!(
+        harness.folders.renamed.lock().unwrap().is_empty(),
+        "Must not call rename_folder"
+    );
+    assert!(
+        harness.folders.move_log.lock().unwrap().is_empty(),
+        "Must not call move_file"
+    );
+}
+
+#[tokio::test]
+async fn rename_game_cloud_data_with_drive_connected_relocates_merges_and_aborts_on_post_merge_sync_error()
+ {
+    let creds = Credentials {
+        client_id: "c".into(),
+        client_secret: "s".into(),
+        refresh_token: Some("rt".into()),
+    };
+
+    let emu = GameEntry::Emulator(Emulator {
+        common: EntryCommon {
+            name: "Emu".to_string(),
+            cloud_folder: Some("CloudEmu".to_string()),
+            ..EntryCommon::default()
+        },
+        ..Default::default()
+    });
+
+    // Subcase 1: Relocation (old_folder_id = Some, new_folder_id = None)
+    {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = Arc::clone(&events);
+
+        let harness = make_harness(vec![emu.clone()], Some(creds.clone()), move |ev| {
+            events_clone.lock().unwrap().push(ev);
+        });
+
+        harness
+            .folders
+            .folders
+            .lock()
+            .unwrap()
+            .insert("CloudEmu/OldTitle".into(), "f_old".into());
+
+        let migration = CloudEntryMigration::new(&harness.ctx);
+        let target = SaveTarget {
+            path: "/saves/old.srm".into(),
+            kind: SaveTargetType::File,
+            cloud_path: None,
+        };
+
+        let res = migration
+            .rename_game_cloud_data(&emu, Some("rom.sfc"), "OldTitle", "NewTitle", &[target])
+            .await
+            .unwrap();
+
+        assert!(res, "Relocation should succeed");
+        assert_eq!(
+            *harness.folders.renamed.lock().unwrap(),
+            vec![("f_old".to_string(), "NewTitle".to_string())]
+        );
+        let evs = events.lock().unwrap().clone();
+        assert_eq!(evs.last(), Some(&SyncEvent::Idle));
+    }
+
+    // Subcase 2: Merge with unverified duplicate remote files in new_folder_id -> aborts post-merge sync
+    {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = Arc::clone(&events);
+
+        let harness = make_harness(vec![emu.clone()], Some(creds), move |ev| {
+            events_clone.lock().unwrap().push(ev);
+        });
+
+        harness
+            .folders
+            .folders
+            .lock()
+            .unwrap()
+            .insert("CloudEmu/OldTitle".into(), "f_old".into());
+        harness
+            .folders
+            .folders
+            .lock()
+            .unwrap()
+            .insert("CloudEmu/NewTitle".into(), "f_new".into());
+
+        // f_new contains unverified duplicate files
+        let dup1 = RemoteFile {
+            id: "id_dup1".into(),
+            name: "save.srm".into(),
+            modified: 1000,
+            is_folder: false,
+            sha256: None,
+            version: None,
+        };
+        let dup2 = RemoteFile {
+            id: "id_dup2".into(),
+            name: "save.srm".into(),
+            modified: 2000,
+            is_folder: false,
+            sha256: None,
+            version: None,
+        };
+        harness
+            .search
+            .files_by_folder
+            .lock()
+            .unwrap()
+            .insert("f_new".into(), vec![dup1, dup2]);
+
+        let migration = CloudEntryMigration::new(&harness.ctx);
+        let target = SaveTarget {
+            path: "/saves/save.srm".into(),
+            kind: SaveTargetType::File,
+            cloud_path: None,
+        };
+
+        let res = migration
+            .rename_game_cloud_data(&emu, Some("rom.sfc"), "OldTitle", "NewTitle", &[target])
+            .await
+            .unwrap();
+
+        assert!(!res, "Must return false on post-merge sync error");
+
+        let evs = events.lock().unwrap().clone();
+        assert!(
+            evs.iter().any(|e| matches!(
+                e,
+                SyncEvent::Error(msg) if msg.contains("Cloud rename error: Duplicate cloud file: save.srm")
+            )),
+            "Expected Cloud rename error for duplicate cloud file, got: {:?}",
+            evs
+        );
+    }
 }

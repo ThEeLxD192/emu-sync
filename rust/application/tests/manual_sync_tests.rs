@@ -1,3 +1,5 @@
+mod common;
+
 use emusync_application::{
     ManualEntrySync, ManualFileSync, PlannedSave, SyncContext, SyncServices,
 };
@@ -409,4 +411,220 @@ async fn apply_file_decision_rejects_unresolved_conflict() {
         res.unwrap_err(),
         "A conflict must be resolved before applying a save"
     );
+}
+
+#[tokio::test]
+async fn directory_sync_mixed_upload_and_download_decisions_prompts_single_conflict_and_respects_side_existence()
+ {
+    let entry = GameEntry::Native(NativeGame {
+        common: EntryCommon {
+            name: "DirGame".to_string(),
+            executable_path: "/games/dirgame".to_string(),
+            save_paths: vec!["/saves/dir".to_string()],
+            save_targets: vec![SaveTarget {
+                path: "/saves/dir".to_string(),
+                kind: SaveTargetType::Directory,
+                cloud_path: None,
+            }],
+            ..EntryCommon::default()
+        },
+        wait_for_process: None,
+        cover_path: None,
+    });
+
+    // Subcase A: User resolves conflict with DownloadCloud
+    {
+        let fs = common::MockFs::default();
+        fs.add_dir("/saves/dir");
+        fs.add_file("/saves/dir/local_only.sav", 1000);
+        fs.add_file("/saves/dir/in_sync.sav", 1000);
+
+        let drive = common::MockDrive::default();
+        drive.add_folder(&["DirGame".into()], "f_dir");
+        drive.add_file(
+            "f_dir",
+            common::sample_remote_file("rf1", "cloud_only.sav", 2000),
+        );
+        drive.add_file(
+            "f_dir",
+            common::sample_remote_file("rf2", "in_sync.sav", 1000),
+        );
+
+        let tracked = common::MockTrackedSync::default();
+        tracked
+            .planned_decisions
+            .lock()
+            .unwrap()
+            .insert("/saves/dir/local_only.sav".into(), Decision::UploadLocal);
+        tracked
+            .planned_decisions
+            .lock()
+            .unwrap()
+            .insert("/saves/dir/cloud_only.sav".into(), Decision::DownloadCloud);
+        tracked
+            .planned_decisions
+            .lock()
+            .unwrap()
+            .insert("/saves/dir/in_sync.sav".into(), Decision::InSync);
+
+        let (conflict_tx, conflict_rx) = tokio::sync::oneshot::channel();
+        let conflict_tx = Arc::new(Mutex::new(Some(conflict_tx)));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = Arc::clone(&events);
+
+        let auth = common::MockAuth::default();
+        *auth.token.lock().unwrap() = Some("valid_token".into());
+
+        let services = SyncServices {
+            files: fs,
+            search: drive.clone(),
+            folders: drive,
+            tracked_sync: tracked.clone(),
+            authorization: auth,
+            runner: common::MockLauncher::default(),
+        };
+
+        let mut cfg = common::sample_app_config();
+        cfg.entries = vec![entry.clone()];
+
+        let ctx = Arc::new(SyncContext::new(cfg, services, move |ev| {
+            events_clone.lock().unwrap().push(ev.clone());
+            if let SyncEvent::Conflict(req) = ev
+                && let Some(tx) = conflict_tx.lock().unwrap().take()
+            {
+                let _ = tx.send(req);
+            }
+        }));
+
+        let ctx_clone = Arc::clone(&ctx);
+        let entry_clone = entry.clone();
+        let handle = tokio::spawn(async move {
+            let sync = ManualEntrySync::new(&ctx_clone);
+            sync.sync_entry(&entry_clone).await
+        });
+
+        let conflict = conflict_rx.await.expect("conflict must be emitted");
+        assert_eq!(conflict.game_name, "DirGame");
+
+        // User chooses DownloadCloud
+        ctx.resolve_conflict(&conflict, Decision::DownloadCloud);
+
+        let res = handle.await.unwrap();
+        assert_eq!(res, Ok(true));
+
+        // Subcase A post-state verification:
+        // Only cloud_only.sav was downloaded via download_in_directory
+        assert_eq!(
+            *tracked.downloads.lock().unwrap(),
+            vec!["/saves/dir/cloud_only.sav"]
+        );
+        // local_only.sav was NOT uploaded because user chose DownloadCloud
+        assert!(tracked.uploads.lock().unwrap().is_empty());
+        // in_sync.sav was remembered
+        assert_eq!(
+            *tracked.remembers.lock().unwrap(),
+            vec!["/saves/dir/in_sync.sav"]
+        );
+        // Verify event lifecycle finished in Idle
+        let evs = events.lock().unwrap().clone();
+        assert_eq!(evs.last(), Some(&SyncEvent::Idle));
+    }
+
+    // Subcase B: User resolves conflict with UploadLocal
+    {
+        let fs = common::MockFs::default();
+        fs.add_dir("/saves/dir");
+        fs.add_file("/saves/dir/local_only.sav", 1000);
+        fs.add_file("/saves/dir/in_sync.sav", 1000);
+
+        let drive = common::MockDrive::default();
+        drive.add_folder(&["DirGame".into()], "f_dir");
+        drive.add_file(
+            "f_dir",
+            common::sample_remote_file("rf1", "cloud_only.sav", 2000),
+        );
+        drive.add_file(
+            "f_dir",
+            common::sample_remote_file("rf2", "in_sync.sav", 1000),
+        );
+
+        let tracked = common::MockTrackedSync::default();
+        tracked
+            .planned_decisions
+            .lock()
+            .unwrap()
+            .insert("/saves/dir/local_only.sav".into(), Decision::UploadLocal);
+        tracked
+            .planned_decisions
+            .lock()
+            .unwrap()
+            .insert("/saves/dir/cloud_only.sav".into(), Decision::DownloadCloud);
+        tracked
+            .planned_decisions
+            .lock()
+            .unwrap()
+            .insert("/saves/dir/in_sync.sav".into(), Decision::InSync);
+
+        let (conflict_tx, conflict_rx) = tokio::sync::oneshot::channel();
+        let conflict_tx = Arc::new(Mutex::new(Some(conflict_tx)));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = Arc::clone(&events);
+
+        let auth = common::MockAuth::default();
+        *auth.token.lock().unwrap() = Some("valid_token".into());
+
+        let services = SyncServices {
+            files: fs,
+            search: drive.clone(),
+            folders: drive,
+            tracked_sync: tracked.clone(),
+            authorization: auth,
+            runner: common::MockLauncher::default(),
+        };
+
+        let mut cfg = common::sample_app_config();
+        cfg.entries = vec![entry.clone()];
+
+        let ctx = Arc::new(SyncContext::new(cfg, services, move |ev| {
+            events_clone.lock().unwrap().push(ev.clone());
+            if let SyncEvent::Conflict(req) = ev
+                && let Some(tx) = conflict_tx.lock().unwrap().take()
+            {
+                let _ = tx.send(req);
+            }
+        }));
+
+        let ctx_clone = Arc::clone(&ctx);
+        let entry_clone = entry.clone();
+        let handle = tokio::spawn(async move {
+            let sync = ManualEntrySync::new(&ctx_clone);
+            sync.sync_entry(&entry_clone).await
+        });
+
+        let conflict = conflict_rx.await.expect("conflict must be emitted");
+        assert_eq!(conflict.game_name, "DirGame");
+
+        // User chooses UploadLocal
+        ctx.resolve_conflict(&conflict, Decision::UploadLocal);
+
+        let res = handle.await.unwrap();
+        assert_eq!(res, Ok(true));
+
+        // Subcase B post-state verification:
+        // Only local_only.sav was uploaded
+        assert_eq!(
+            *tracked.uploads.lock().unwrap(),
+            vec!["/saves/dir/local_only.sav"]
+        );
+        // cloud_only.sav was NOT downloaded because user chose UploadLocal
+        assert!(tracked.downloads.lock().unwrap().is_empty());
+        // in_sync.sav was remembered
+        assert_eq!(
+            *tracked.remembers.lock().unwrap(),
+            vec!["/saves/dir/in_sync.sav"]
+        );
+        // Verify event lifecycle finished in Idle
+        let evs = events.lock().unwrap().clone();
+        assert_eq!(evs.last(), Some(&SyncEvent::Idle));
+    }
 }

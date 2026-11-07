@@ -6,12 +6,15 @@ use std::sync::{Arc, Mutex};
 
 type RenameRecord = (String, String, Option<String>, Option<String>);
 
+type MoveFailPredicate = Box<dyn Fn(&str, &str, &str) -> bool + Send + Sync>;
+
 #[derive(Clone, Default)]
 struct MockDrive {
     folders: Arc<Mutex<HashMap<String, String>>>, // path -> folder_id
     files: Arc<Mutex<HashMap<String, Vec<RemoteFile>>>>, // folder_id -> files
     move_log: Arc<Mutex<Vec<(String, String, String)>>>, // (file_id, from_parent, to_parent)
     fail_on_move: Arc<Mutex<Option<String>>>,     // file_id that should fail
+    fail_move_predicate: Arc<Mutex<Option<MoveFailPredicate>>>,
     rename_log: Arc<Mutex<Vec<RenameRecord>>>,
 }
 
@@ -108,6 +111,11 @@ impl CloudFolderStore for MockDrive {
         add_parent: &str,
         remove_parent: &str,
     ) -> Result<(), Self::Error> {
+        if let Some(ref pred) = *self.fail_move_predicate.lock().unwrap()
+            && pred(file, remove_parent, add_parent)
+        {
+            return Err(format!("Simulated failure moving {file}"));
+        }
         if let Some(fail_id) = self.fail_on_move.lock().unwrap().as_deref()
             && file == fail_id
         {
@@ -328,4 +336,139 @@ async fn migrate_non_existent_source_returns_ok_immediately() {
     let res = migrator.migrate("token", &old_path, &new_path).await;
     assert!(res.is_ok());
     assert!(drive.rename_log.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn compound_move_and_rollback_failure_attempts_all_remaining_rollbacks_and_reports_stranded_files()
+ {
+    let drive = MockDrive::default();
+    drive.add_folder(&["OldFolder".to_string()], "old_id");
+    drive.add_folder(&["NewFolder".to_string()], "new_id");
+
+    let f1 = sample_remote_file("f1", "save1.dat", 1000);
+    let f2 = sample_remote_file("f2", "save2.dat", 2000);
+    let f3 = sample_remote_file("f3", "save3.dat", 3000);
+    let f4 = sample_remote_file("f4", "save4.dat", 4000);
+
+    drive.add_file("old_id", f1);
+    drive.add_file("old_id", f2);
+    drive.add_file("old_id", f3);
+    drive.add_file("old_id", f4);
+
+    // Fail f4 on forward move (old_id -> new_id), and fail f2 on rollback move (new_id -> old_id)
+    *drive.fail_move_predicate.lock().unwrap() =
+        Some(Box::new(|file, remove_parent, _add_parent| {
+            (file == "f4" && remove_parent == "old_id")
+                || (file == "f2" && remove_parent == "new_id")
+        }));
+
+    let migrator = CloudFolderMigrator::new(drive.clone(), drive.clone());
+    let old_path = vec!["OldFolder".to_string()];
+    let new_path = vec!["NewFolder".to_string()];
+
+    let res = migrator.migrate("token", &old_path, &new_path).await;
+
+    match &res {
+        Err(MigrationError::MoveFailed {
+            rollback_failures,
+            old_path: err_old,
+            new_path: err_new,
+            ..
+        }) => {
+            assert_eq!(
+                *rollback_failures,
+                vec!["save2.dat".to_string()],
+                "Only save2.dat should be recorded as failed rollback"
+            );
+            assert_eq!(*err_old, old_path);
+            assert_eq!(*err_new, new_path);
+        }
+        other => panic!("Expected MigrationError::MoveFailed, got: {other:?}"),
+    }
+
+    let err = res.unwrap_err();
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("Some files remain in 'NewFolder': save2.dat."),
+        "Error message must report stranded files, got: {err_str}"
+    );
+    assert!(
+        err_str.contains("No folders were deleted."),
+        "Error message must specify no folders were deleted, got: {err_str}"
+    );
+
+    // Check files state in MockDrive:
+    // f1 was rolled back -> in old_id
+    // f2 failed rollback -> remains stranded in new_id
+    // f3 was rolled back -> in old_id
+    // f4 was never moved -> remained in old_id
+    let files_lock = drive.files.lock().unwrap();
+    let old_files = files_lock.get("old_id").cloned().unwrap_or_default();
+    let new_files = files_lock.get("new_id").cloned().unwrap_or_default();
+
+    assert!(
+        old_files.iter().any(|f| f.id == "f1"),
+        "f1 must be in old_id"
+    );
+    assert!(
+        old_files.iter().any(|f| f.id == "f3"),
+        "f3 must be in old_id"
+    );
+    assert!(
+        old_files.iter().any(|f| f.id == "f4"),
+        "f4 must be in old_id"
+    );
+    assert!(
+        new_files.iter().any(|f| f.id == "f2"),
+        "f2 must remain stranded in new_id"
+    );
+}
+
+#[tokio::test]
+async fn cross_folder_and_destination_duplicate_names_abort_merge_before_any_move() {
+    let drive = MockDrive::default();
+    drive.add_folder(&["OldFolder".to_string()], "old_id");
+    drive.add_folder(&["NewFolder".to_string()], "new_id");
+
+    // Colliding name between old and new: "shared.sav"
+    drive.add_file(
+        "old_id",
+        sample_remote_file("f_old_shared", "shared.sav", 1000),
+    );
+    drive.add_file(
+        "new_id",
+        sample_remote_file("f_new_shared", "shared.sav", 2000),
+    );
+
+    // Internal duplicate inside new_id: "dup_dest.sav" repeated twice
+    drive.add_file(
+        "new_id",
+        sample_remote_file("f_dup_1", "dup_dest.sav", 1000),
+    );
+    drive.add_file(
+        "new_id",
+        sample_remote_file("f_dup_2", "dup_dest.sav", 1500),
+    );
+
+    let migrator = CloudFolderMigrator::new(drive.clone(), drive.clone());
+    let old_path = vec!["OldFolder".to_string()];
+    let new_path = vec!["NewFolder".to_string()];
+
+    let res = migrator.migrate("token", &old_path, &new_path).await;
+
+    match res {
+        Err(MigrationError::DuplicateNames(msg)) => {
+            assert!(
+                msg.contains("dup_dest.sav, shared.sav"),
+                "Expected alphabetical duplicate names 'dup_dest.sav, shared.sav', got: {msg}"
+            );
+        }
+        other => panic!("Expected MigrationError::DuplicateNames, got: {other:?}"),
+    }
+
+    // Verify move_log is completely empty (aborted before any moves)
+    assert!(
+        drive.move_log.lock().unwrap().is_empty(),
+        "No moves should be attempted when duplicates are detected"
+    );
 }

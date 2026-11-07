@@ -1,6 +1,6 @@
-use emusync_application::{SaveTargetMapping, SaveTargetMappingError, SaveTargetResolver};
-use emusync_domain::library::{EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType};
-use emusync_domain::sync::{LocalSaveAccess, LocalSavePath, RemoteFile, SyncGame};
+use emusync_application::{SaveTargetMapping, SaveTargetMappingError};
+use emusync_domain::library::{GameEntry, SaveTarget, SaveTargetType};
+use emusync_domain::sync::{LocalSaveAccess, LocalSavePath, RemoteFile};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -329,33 +329,6 @@ fn legacy_folders_ambiguity_detects_colliding_filenames_and_aborts() {
 }
 
 #[test]
-fn target_resolver_resolves_cloud_path_segments() {
-    let fs = MockFs::new();
-    let resolver = SaveTargetResolver::new(fs);
-
-    let entry = GameEntry::Native(NativeGame {
-        common: EntryCommon {
-            name: "Zelda".into(),
-            cloud_folder: Some("CustomZeldaFolder".into()),
-            ..EntryCommon::default()
-        },
-        wait_for_process: None,
-        cover_path: None,
-    });
-
-    let sync_game = SyncGame {
-        entry: entry.clone(),
-        name: "Zelda".into(),
-        effective_title: "The Legend of Zelda".into(),
-        rom_path: None,
-        save_targets: Vec::new(),
-    };
-
-    let segments = resolver.get_cloud_path_segments_game(&sync_game).unwrap();
-    assert_eq!(segments, vec!["CustomZeldaFolder"]);
-}
-
-#[test]
 fn conflicting_local_destinations_rejected() {
     let fs = MockFs::new();
     let mapping = SaveTargetMapping::new(fs);
@@ -458,102 +431,117 @@ fn project_directory_files_strips_prefix_and_filters() {
 }
 
 #[test]
-fn target_resolver_get_save_targets_for_native_and_emulator() {
-    let fs = MockFs::new();
-    let resolver = SaveTargetResolver::new(fs);
+fn sibling_legacy_directories_reserve_newer_files_and_report_all_ambiguity_categories() {
+    // Subcase A: newer_sibling_paths reserves file for dir_b, but not for dir_a
+    {
+        let fs = MockFs::new();
+        fs.add_dir("/saves/dir_a");
+        fs.add_file("/saves/dir_a/slot1.sav", 5000);
+        fs.add_dir("/saves/dir_b");
+        fs.add_file("/saves/dir_b/slot1.sav", 1000);
 
-    // 1. NativeGame
-    let native = GameEntry::Native(NativeGame {
-        common: EntryCommon {
-            name: "NativeGame".into(),
-            save_targets: vec![SaveTarget {
-                path: "/saves/native.sav".into(),
-                kind: SaveTargetType::File,
+        let target_a = SaveTarget {
+            path: "/saves/dir_a".into(),
+            kind: SaveTargetType::Directory,
+            cloud_path: None,
+        };
+        let target_b = SaveTarget {
+            path: "/saves/dir_b".into(),
+            kind: SaveTargetType::Directory,
+            cloud_path: None,
+        };
+        let all_targets = vec![target_a.clone(), target_b.clone()];
+
+        let mapping = SaveTargetMapping::new(fs);
+
+        // When inspecting dir_b, dir_a has a newer slot1.sav, so it must be reserved
+        let reserved_b = mapping
+            .reserved_cloud_names(&target_b, &all_targets, &[])
+            .unwrap();
+        assert!(
+            reserved_b.contains("slot1.sav"),
+            "slot1.sav must be reserved for dir_b because dir_a has a newer version"
+        );
+
+        // When inspecting dir_a, dir_b has an older slot1.sav, so it must NOT be reserved
+        let reserved_a = mapping
+            .reserved_cloud_names(&target_a, &all_targets, &[])
+            .unwrap();
+        assert!(
+            !reserved_a.contains("slot1.sav"),
+            "slot1.sav must not be reserved for dir_a because dir_a itself has the newer version"
+        );
+    }
+
+    // Subcase B: AmbiguousLegacyDirectories reports all three categories
+    {
+        let fs = MockFs::new();
+        // 1. dir1 and dir2 both exist and share colliding.sav -> "Names found in multiple save folders"
+        fs.add_dir("/saves/dir1");
+        fs.add_file("/saves/dir1/colliding.sav", 1000);
+        fs.add_dir("/saves/dir2");
+        fs.add_file("/saves/dir2/colliding.sav", 1000);
+
+        // missing_dir does NOT exist on disk -> "Folders unavailable on this device"
+        let targets = vec![
+            SaveTarget {
+                path: "/saves/missing_dir".into(),
+                kind: SaveTargetType::Directory,
                 cloud_path: None,
-            }],
-            ..Default::default()
-        },
-        ..Default::default()
-    });
-
-    let targets = resolver.get_save_targets(&native).unwrap();
-    assert_eq!(targets.len(), 1);
-    assert_eq!(targets[0].display_name, "NativeGame");
-    assert_eq!(targets[0].file.path(), "/saves/native.sav");
-    assert_eq!(targets[0].cloud_path_segments, vec!["NativeGame"]);
-
-    // 2. Emulator with global and per-ROM targets, including a duplicate
-    let emu = GameEntry::Emulator(emusync_domain::library::Emulator {
-        common: EntryCommon {
-            name: "RetroArch".into(),
-            cloud_folder: Some("CloudEmu".into()),
-            save_targets: vec![SaveTarget {
-                path: "/saves/global.sav".into(),
-                kind: SaveTargetType::File,
+            },
+            SaveTarget {
+                path: "/saves/dir1".into(),
+                kind: SaveTargetType::Directory,
                 cloud_path: None,
-            }],
-            ..Default::default()
-        },
-        save_targets_by_rom: vec![
-            (
-                "game1.sfc".into(),
-                vec![SaveTarget {
-                    path: "/saves/game1.srm".into(),
-                    kind: SaveTargetType::File,
-                    cloud_path: None,
-                }],
-            ),
-            (
-                "game2.sfc".into(),
-                vec![
-                    // duplicate of global.sav
-                    SaveTarget {
-                        path: "/saves/global.sav".into(),
-                        kind: SaveTargetType::File,
-                        cloud_path: None,
-                    },
-                ],
-            ),
-        ],
-        ..Default::default()
-    });
+            },
+            SaveTarget {
+                path: "/saves/dir2".into(),
+                kind: SaveTargetType::Directory,
+                cloud_path: None,
+            },
+        ];
 
-    let emu_targets = resolver.get_save_targets(&emu).unwrap();
-    // /saves/global.sav should only appear once due to deduplication
-    assert_eq!(emu_targets.len(), 2);
-    assert!(
-        emu_targets
-            .iter()
-            .any(|t| t.file.path() == "/saves/global.sav")
-    );
-    assert!(
-        emu_targets
-            .iter()
-            .any(|t| t.file.path() == "/saves/game1.srm")
-    );
-}
+        // Cloud files contain colliding.sav AND unmatched_remote.sav -> "Cloud files with no matching local save"
+        let cloud_files = vec![
+            RemoteFile {
+                id: "rf_col".into(),
+                name: "colliding.sav".into(),
+                modified: 1000,
+                is_folder: false,
+                sha256: None,
+                version: None,
+            },
+            RemoteFile {
+                id: "rf_unmatched".into(),
+                name: "unmatched_remote.sav".into(),
+                modified: 1000,
+                is_folder: false,
+                sha256: None,
+                version: None,
+            },
+        ];
 
-#[test]
-fn resolved_save_target_configured_preserves_target_properties() {
-    let fs = MockFs::new();
-    let resolver = SaveTargetResolver::new(fs);
-    let native = GameEntry::Native(NativeGame {
-        common: EntryCommon {
-            name: "Game".into(),
-            save_targets: vec![SaveTarget {
-                path: "/saves/game.sav".into(),
-                kind: SaveTargetType::File,
-                cloud_path: Some("custom.sav".into()),
-            }],
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+        let mapping = SaveTargetMapping::new(fs);
+        let err = mapping
+            .validate_save_target_mappings(&targets, &cloud_files)
+            .expect_err("Expected AmbiguousLegacyDirectories error");
 
-    let targets = resolver.get_save_targets(&native).unwrap();
-    assert_eq!(targets.len(), 1);
-    let configured = targets[0].configured();
-    assert_eq!(configured.path, "/saves/game.sav");
-    assert_eq!(configured.kind, SaveTargetType::File);
-    assert_eq!(configured.cloud_path, Some("custom.sav".into()));
+        match err {
+            SaveTargetMappingError::AmbiguousLegacyDirectories(msg) => {
+                assert!(
+                    msg.contains("Folders unavailable on this device"),
+                    "Error must contain 'Folders unavailable on this device', got:\n{msg}"
+                );
+                assert!(
+                    msg.contains("Names found in multiple save folders"),
+                    "Error must contain 'Names found in multiple save folders', got:\n{msg}"
+                );
+                assert!(
+                    msg.contains("Cloud files with no matching local save"),
+                    "Error must contain 'Cloud files with no matching local save', got:\n{msg}"
+                );
+            }
+            other => panic!("Expected AmbiguousLegacyDirectories, got: {other:?}"),
+        }
+    }
 }
