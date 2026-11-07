@@ -31,7 +31,18 @@ impl fmt::Display for TransferError {
         }
     }
 }
-impl std::error::Error for TransferError {}
+impl std::error::Error for TransferError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Download(e) => Some(e),
+            Self::Upload(e) => Some(e),
+            Self::Conditional(e) => Some(e),
+            Self::InvalidCreatedTimestamp(_)
+            | Self::InvalidUpdatedTimestamp(_)
+            | Self::Cancelled => None,
+        }
+    }
+}
 impl TransferError {
     /// True only when the failure proves that no remote write took effect: a
     /// cancellation before any write, a failed precondition or other rejection by
@@ -39,17 +50,25 @@ impl TransferError {
     /// its recovery state because the remote outcome may be unknown.
     pub fn leaves_remote_unchanged(&self) -> bool {
         match self {
-            Self::Cancelled | Self::Upload(UploadError::Cancelled) => true,
-            Self::Conditional(error) => {
-                matches!(
-                    error,
-                    ConditionalError::Changed
-                        | ConditionalError::MissingStrongEtag
-                        | ConditionalError::ControlMetadata(_)
-                        | ConditionalError::InvalidEndpoint
-                        | ConditionalError::Cancelled
-                ) || matches!(error, ConditionalError::Http(status) if status.is_client_error())
-            }
+            Self::Cancelled
+            | Self::Upload(
+                UploadError::Cancelled
+                | UploadError::Io(_)
+                | UploadError::InvalidSession
+                | UploadError::Transport(_)
+                | UploadError::Http(_),
+            ) => true,
+            Self::Conditional(error) => matches!(
+                error,
+                ConditionalError::Changed
+                    | ConditionalError::MissingStrongEtag
+                    | ConditionalError::ControlMetadata(_)
+                    | ConditionalError::InvalidEndpoint
+                    | ConditionalError::Cancelled
+                    | ConditionalError::Transport(_)
+                    | ConditionalError::Io(_)
+                    | ConditionalError::Http(_)
+            ),
             _ => false,
         }
     }

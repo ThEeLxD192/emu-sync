@@ -249,3 +249,40 @@ async fn get_by_id_in_parent_verifies_parent_presence() {
 
     server.join().unwrap();
 }
+
+#[tokio::test]
+async fn invalid_identities_in_get_by_id_fail_without_network() {
+    use emusync_data_drive::ListingError;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+    listener.set_nonblocking(true).unwrap();
+
+    let listing = DriveListing::new(Client::new(), url);
+
+    for invalid_id in [
+        "",
+        "   ",
+        ".",
+        "..",
+        "invalid/slash",
+        "invalid\\slash",
+        "null\0char",
+    ] {
+        assert!(matches!(
+            listing.get_by_id("synthetic", invalid_id).await,
+            Err(ListingError::InvalidIdentity)
+        ));
+        assert!(matches!(
+            listing
+                .get_by_id_in_parent("synthetic", invalid_id, "valid_parent")
+                .await,
+            Err(ListingError::InvalidIdentity)
+        ));
+    }
+
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}

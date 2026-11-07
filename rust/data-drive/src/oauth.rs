@@ -28,7 +28,19 @@ impl fmt::Display for OAuthError {
         }
     }
 }
-impl std::error::Error for OAuthError {}
+impl std::error::Error for OAuthError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Transport(error) => Some(error),
+            Self::MissingCredentials
+            | Self::ConnectionChanged
+            | Self::AuthenticationRequired
+            | Self::TimedOut
+            | Self::Provider(_)
+            | Self::Store(_) => None,
+        }
+    }
+}
 impl From<reqwest::Error> for OAuthError {
     fn from(error: reqwest::Error) -> Self {
         Self::Transport(error)
@@ -108,10 +120,15 @@ where
             .send()
             .await?;
         if response.status() == StatusCode::OK {
-            return Ok(Ok(response.json().await?));
+            let tokens: Tokens = crate::http::read_metadata(response, Duration::from_secs(60))
+                .await
+                .map_err(|e| match e {
+                    crate::ResponseMetadataError::Transport(err) => OAuthError::Transport(err),
+                    other => OAuthError::Provider(other.to_string()),
+                })?;
+            return Ok(Ok(tokens));
         }
-        let code = response
-            .json::<ProviderError>()
+        let code = crate::http::read_metadata::<ProviderError>(response, Duration::from_secs(60))
             .await
             .ok()
             .and_then(|e| e.error);
@@ -147,6 +164,7 @@ where
         let mut credentials = config
             .credentials
             .clone()
+            .filter(|c| !c.client_id.trim().is_empty() && !c.client_secret.trim().is_empty())
             .ok_or(OAuthError::MissingCredentials)?;
         let mut expected = self.snapshot(config)?;
         if expected.credentials.as_ref() != Some(&credentials) {
@@ -167,7 +185,12 @@ where
                 .await;
             self.current(config, &expected)?;
             match result? {
-                Ok(tokens) => return Ok((tokens.access_token, expected)),
+                Ok(tokens) => {
+                    if tokens.access_token.trim().is_empty() {
+                        return Err(OAuthError::Provider("missing access token".into()));
+                    }
+                    return Ok((tokens.access_token, expected));
+                }
                 Err(Some(code)) if code == "invalid_grant" => {
                     credentials.refresh_token = None;
                     self.persist(config, &expected, credentials.clone())?;
@@ -201,7 +224,10 @@ where
             ])
             .await?
             .map_err(|e| OAuthError::Provider(e.unwrap_or_else(|| "exchange failed".into())))?;
-        credentials.refresh_token = tokens.refresh_token;
+        if tokens.access_token.trim().is_empty() {
+            return Err(OAuthError::Provider("missing access token".into()));
+        }
+        credentials.refresh_token = tokens.refresh_token.filter(|s| !s.trim().is_empty());
         self.persist(config, &expected, credentials.clone())?;
         if expected.credentials.as_ref() != Some(&credentials) {
             expected.credentials = Some(credentials);

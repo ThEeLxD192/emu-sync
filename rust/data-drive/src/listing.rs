@@ -1,4 +1,7 @@
-use crate::{ResponseMetadataError, http::read_metadata};
+use crate::{
+    ResponseMetadataError,
+    http::{escape_query, item_url, read_metadata},
+};
 use emusync_domain::sync::{CloudFileListing, RemoteFile};
 use reqwest::{Client, StatusCode, Url};
 use serde::Deserialize;
@@ -29,7 +32,19 @@ impl fmt::Display for ListingError {
         }
     }
 }
-impl std::error::Error for ListingError {}
+impl std::error::Error for ListingError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Transport(e) => Some(e),
+            Self::Metadata(e) => Some(e),
+            Self::Http(_)
+            | Self::Timestamp
+            | Self::RepeatedPage
+            | Self::InvalidEndpoint
+            | Self::InvalidIdentity => None,
+        }
+    }
+}
 impl From<reqwest::Error> for ListingError {
     fn from(e: reqwest::Error) -> Self {
         Self::Transport(e)
@@ -71,13 +86,6 @@ struct Page {
     #[serde(default)]
     files: Vec<File>,
     next_page_token: Option<String>,
-}
-fn escape_query(s: &str) -> std::borrow::Cow<'_, str> {
-    if s.contains('\\') || s.contains('\'') {
-        std::borrow::Cow::Owned(s.replace('\\', "\\\\").replace('\'', "\\'"))
-    } else {
-        std::borrow::Cow::Borrowed(s)
-    }
 }
 
 /// Drive v3 listing, with an injectable files endpoint for isolated testing.
@@ -147,11 +155,12 @@ impl DriveListing {
     }
     /// Fetch metadata for a single Drive ID.
     pub async fn get_by_id(&self, token: &str, id: &str) -> Result<RemoteFile, ListingError> {
-        let mut url = self.files_url.clone();
-        url.path_segments_mut()
-            .map_err(|_| ListingError::InvalidEndpoint)?
-            .pop_if_empty()
-            .push(id);
+        let url = item_url(
+            &self.files_url,
+            id,
+            ListingError::InvalidIdentity,
+            ListingError::InvalidEndpoint,
+        )?;
         let response = self
             .client
             .get(url)
@@ -174,11 +183,12 @@ impl DriveListing {
         id: &str,
         parent: &str,
     ) -> Result<Option<RemoteFile>, ListingError> {
-        let mut url = self.files_url.clone();
-        url.path_segments_mut()
-            .map_err(|_| ListingError::InvalidEndpoint)?
-            .pop_if_empty()
-            .push(id);
+        let url = item_url(
+            &self.files_url,
+            id,
+            ListingError::InvalidIdentity,
+            ListingError::InvalidEndpoint,
+        )?;
         let response = self
             .client
             .get(url)

@@ -3,6 +3,7 @@ use serde::de::DeserializeOwned;
 use std::{fmt, time::Duration};
 
 const MAX_RESPONSE_METADATA_BYTES: usize = 1024 * 1024;
+const INITIAL_METADATA_CAP: usize = 64 * 1024;
 
 #[derive(Debug)]
 pub enum ResponseMetadataError {
@@ -21,7 +22,15 @@ impl fmt::Display for ResponseMetadataError {
         }
     }
 }
-impl std::error::Error for ResponseMetadataError {}
+impl std::error::Error for ResponseMetadataError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Transport(error) => Some(error),
+            Self::InvalidJson(error) => Some(error),
+            Self::Inactive | Self::TooLarge => None,
+        }
+    }
+}
 
 pub(crate) async fn read_metadata<T: DeserializeOwned>(
     mut response: reqwest::Response,
@@ -29,8 +38,11 @@ pub(crate) async fn read_metadata<T: DeserializeOwned>(
 ) -> Result<T, ResponseMetadataError> {
     let initial_cap = response
         .content_length()
-        .map(|cl| (cl as usize).min(MAX_RESPONSE_METADATA_BYTES))
-        .unwrap_or(0);
+        .and_then(|cl| usize::try_from(cl).ok())
+        .map_or(0, |cl| {
+            cl.min(MAX_RESPONSE_METADATA_BYTES)
+                .min(INITIAL_METADATA_CAP)
+        });
     let mut body = Vec::with_capacity(initial_cap);
     loop {
         let chunk = tokio::time::timeout(inactivity, response.chunk())
@@ -49,6 +61,43 @@ pub(crate) async fn read_metadata<T: DeserializeOwned>(
             }
         }
     }
+}
+
+pub(crate) fn escape_query(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.contains(['\\', '\'']) {
+        std::borrow::Cow::Borrowed(s)
+    } else {
+        let mut escaped = String::with_capacity(s.len() + 4);
+        for c in s.chars() {
+            match c {
+                '\\' => escaped.push_str("\\\\"),
+                '\'' => escaped.push_str("\\'"),
+                _ => escaped.push(c),
+            }
+        }
+        std::borrow::Cow::Owned(escaped)
+    }
+}
+
+pub(crate) fn is_valid_id(id: &str) -> bool {
+    !id.trim().is_empty() && id != "." && id != ".." && !id.contains(['/', '\\', '\0'])
+}
+
+pub(crate) fn item_url<E>(
+    base: &reqwest::Url,
+    id: &str,
+    invalid_id: E,
+    invalid_endpoint: E,
+) -> Result<reqwest::Url, E> {
+    if !is_valid_id(id) {
+        return Err(invalid_id);
+    }
+    let mut url = base.clone();
+    url.path_segments_mut()
+        .map_err(|_| invalid_endpoint)?
+        .pop_if_empty()
+        .push(id);
+    Ok(url)
 }
 
 /// Wraps an upload body so that its hand-over to the HTTP stack can be observed.

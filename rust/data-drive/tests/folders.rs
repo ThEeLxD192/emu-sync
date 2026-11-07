@@ -317,3 +317,84 @@ async fn unusable_folder_search_response_is_a_read_failure_without_creating() {
         std::io::ErrorKind::WouldBlock
     );
 }
+
+#[tokio::test]
+async fn invalid_folder_identities_fail_without_network() {
+    use emusync_data_drive::FolderError;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+    listener.set_nonblocking(true).unwrap();
+
+    let folders = DriveFolders::new(Client::new(), url);
+
+    for invalid_id in [
+        "",
+        "   ",
+        ".",
+        "..",
+        "invalid/slash",
+        "invalid\\slash",
+        "null\0char",
+    ] {
+        assert!(matches!(
+            folders.delete_folder("synthetic", invalid_id).await,
+            Err(FolderError::InvalidFolderIdentity)
+        ));
+        assert!(matches!(
+            folders
+                .rename_folder("synthetic", invalid_id, "valid_name", None, None)
+                .await,
+            Err(FolderError::InvalidFolderIdentity)
+        ));
+        assert!(matches!(
+            folders
+                .move_file("synthetic", invalid_id, "add_parent", "rem_parent")
+                .await,
+            Err(FolderError::InvalidFolderIdentity)
+        ));
+    }
+
+    assert!(matches!(
+        folders
+            .rename_folder("synthetic", "valid_id", "", None, None)
+            .await,
+        Err(FolderError::InvalidFolderIdentity)
+    ));
+    assert!(matches!(
+        folders
+            .rename_folder("synthetic", "valid_id", "   ", None, None)
+            .await,
+        Err(FolderError::InvalidFolderIdentity)
+    ));
+    assert!(matches!(
+        folders
+            .rename_folder("synthetic", "valid_id", "name", Some(""), None)
+            .await,
+        Err(FolderError::InvalidFolderIdentity)
+    ));
+    assert!(matches!(
+        folders
+            .rename_folder("synthetic", "valid_id", "name", None, Some("  "))
+            .await,
+        Err(FolderError::InvalidFolderIdentity)
+    ));
+
+    assert!(matches!(
+        folders
+            .move_file("synthetic", "valid_id", "", "valid_remove")
+            .await,
+        Err(FolderError::InvalidFolderIdentity)
+    ));
+    assert!(matches!(
+        folders
+            .move_file("synthetic", "valid_id", "valid_add", "  ")
+            .await,
+        Err(FolderError::InvalidFolderIdentity)
+    ));
+
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}

@@ -1,4 +1,7 @@
-use crate::{ResponseMetadataError, http::read_metadata};
+use crate::{
+    ResponseMetadataError,
+    http::{escape_query, is_valid_id, item_url, read_metadata},
+};
 use emusync_domain::sync::CloudFolderStore;
 use reqwest::{Client, StatusCode, Url};
 use serde::Deserialize;
@@ -44,7 +47,19 @@ impl fmt::Display for FolderError {
         }
     }
 }
-impl std::error::Error for FolderError {}
+impl std::error::Error for FolderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Transport(e) | Self::MutationOutcomeUnknown(e) => Some(e),
+            Self::Metadata(e) | Self::MutationResponseUnknown(e) => Some(e),
+            Self::ServerOutcomeUnknown(_)
+            | Self::MutationIdentityUnknown
+            | Self::InvalidFolderIdentity
+            | Self::Http(_)
+            | Self::InvalidEndpoint => None,
+        }
+    }
+}
 impl From<reqwest::Error> for FolderError {
     fn from(e: reqwest::Error) -> Self {
         Self::Transport(e)
@@ -58,13 +73,6 @@ struct Folder {
 struct FolderPage {
     #[serde(default)]
     files: Vec<Folder>,
-}
-fn escape_query(s: &str) -> std::borrow::Cow<'_, str> {
-    if s.contains('\\') || s.contains('\'') {
-        std::borrow::Cow::Owned(s.replace('\\', "\\\\").replace('\'', "\\'"))
-    } else {
-        std::borrow::Cow::Borrowed(s)
-    }
 }
 
 /// Drive v3 folder operations. No cache is shared across OAuth connections.
@@ -89,12 +97,12 @@ impl DriveFolders {
         self
     }
     fn item_url(&self, id: &str) -> Result<Url, FolderError> {
-        let mut url = self.files_url.clone();
-        url.path_segments_mut()
-            .map_err(|_| FolderError::InvalidEndpoint)?
-            .pop_if_empty()
-            .push(id);
-        Ok(url)
+        item_url(
+            &self.files_url,
+            id,
+            FolderError::InvalidFolderIdentity,
+            FolderError::InvalidEndpoint,
+        )
     }
     async fn search(
         &self,
@@ -261,6 +269,12 @@ impl CloudFolderStore for DriveFolders {
         add: Option<&str>,
         remove: Option<&str>,
     ) -> Result<(), Self::Error> {
+        if name.trim().is_empty()
+            || add.is_some_and(|p| !is_valid_id(p))
+            || remove.is_some_and(|p| !is_valid_id(p))
+        {
+            return Err(FolderError::InvalidFolderIdentity);
+        }
         self.patch(token, folder, Some(name), add, remove).await
     }
     async fn move_file(
@@ -270,6 +284,9 @@ impl CloudFolderStore for DriveFolders {
         add: &str,
         remove: &str,
     ) -> Result<(), Self::Error> {
+        if !is_valid_id(add) || !is_valid_id(remove) {
+            return Err(FolderError::InvalidFolderIdentity);
+        }
         self.patch(token, file, None, Some(add), Some(remove)).await
     }
 }

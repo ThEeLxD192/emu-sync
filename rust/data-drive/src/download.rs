@@ -25,7 +25,15 @@ impl fmt::Display for DownloadError {
         }
     }
 }
-impl std::error::Error for DownloadError {}
+impl std::error::Error for DownloadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Transport(e) => Some(e),
+            Self::Io(e) => Some(e),
+            Self::Cancelled | Self::Http(_) | Self::InvalidEndpoint | Self::Worker => None,
+        }
+    }
+}
 impl From<reqwest::Error> for DownloadError {
     fn from(e: reqwest::Error) -> Self {
         Self::Transport(e)
@@ -83,11 +91,12 @@ impl DriveDownload {
         cancel: &CancellationToken,
         options: DownloadOptions<'_>,
     ) -> Result<(), DownloadError> {
-        let mut url = self.files_url.clone();
-        url.path_segments_mut()
-            .map_err(|_| DownloadError::InvalidEndpoint)?
-            .pop_if_empty()
-            .push(id);
+        let url = crate::http::item_url(
+            &self.files_url,
+            id,
+            DownloadError::InvalidEndpoint,
+            DownloadError::InvalidEndpoint,
+        )?;
         let request = self
             .client
             .get(url)
@@ -97,6 +106,9 @@ impl DriveDownload {
         let mut response = tokio::select! { biased; () = cancel.cancelled() => return Err(DownloadError::Cancelled), result = request => result? };
         if response.status() != StatusCode::OK {
             return Err(DownloadError::Http(response.status()));
+        }
+        if cancel.is_cancelled() {
+            return Err(DownloadError::Cancelled);
         }
         let total = response.content_length();
         let mut transferred = 0u64;
@@ -133,7 +145,6 @@ impl DriveDownload {
                     None => break,
                 }
             }
-            file.flush().await?;
             if cancel.is_cancelled() {
                 return Err(DownloadError::Cancelled);
             }
@@ -149,7 +160,7 @@ impl DriveDownload {
         tokio::task::spawn_blocking(move || -> Result<(), DownloadError> {
             if let Err(error) = result {
                 drop(file);
-                temp.close()?;
+                let _ = temp.close();
                 return Err(error);
             }
             if let Err(error) = flush {

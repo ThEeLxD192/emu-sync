@@ -89,7 +89,23 @@ impl fmt::Display for UploadError {
         }
     }
 }
-impl std::error::Error for UploadError {}
+impl std::error::Error for UploadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::RecoveryFailed { cause, .. } => Some(cause),
+            Self::Transport(e) => Some(e),
+            Self::Io(e) => Some(e),
+            Self::ResponseMetadata(e) => Some(e),
+            Self::Cancelled
+            | Self::OutcomeUnknown(_)
+            | Self::Http(_)
+            | Self::InvalidSession
+            | Self::InvalidRange
+            | Self::NoProgress
+            | Self::PrematureCompletion(_) => None,
+        }
+    }
+}
 impl From<reqwest::Error> for UploadError {
     fn from(e: reqwest::Error) -> Self {
         Self::Transport(e)
@@ -174,7 +190,10 @@ impl ResumableUpload {
             .upload_url
             .join(location)
             .map_err(|_| UploadError::InvalidSession)?;
-        // Never send bearer credentials to a different origin supplied in a response.
+        self.validate_session_url(&url)?;
+        Ok(url)
+    }
+    fn validate_session_url(&self, url: &Url) -> Result<(), UploadError> {
         if url.origin() != self.upload_url.origin()
             || !url.username().is_empty()
             || url.password().is_some()
@@ -182,7 +201,7 @@ impl ResumableUpload {
         {
             return Err(UploadError::InvalidSession);
         }
-        Ok(url)
+        Ok(())
     }
     async fn decode(
         response: reqwest::Response,
@@ -228,6 +247,8 @@ impl ResumableUpload {
         }
     }
     async fn query(&self, token: &str, session: &UploadSession) -> Result<Progress, UploadError> {
+        self.validate_session_url(&session.url)
+            .map_err(|e| Self::recovery_error(session, e))?;
         let total = session.total;
         for attempt in 0..3 {
             let result = self
@@ -251,7 +272,9 @@ impl ResumableUpload {
                     }
                 }
             }
-            tokio::time::sleep(Duration::from_millis(250 << attempt)).await;
+            if attempt < 2 {
+                tokio::time::sleep(Duration::from_millis(250 << attempt)).await;
+            }
         }
         Err(UploadError::OutcomeUnknown(Box::new(session.clone())))
     }
@@ -324,9 +347,14 @@ impl ResumableUpload {
             };
             let mut offset = 0u64;
             let mut no_progress = 0u32;
+            let mut put_sent = false;
             loop {
                 if cancel.is_cancelled() {
-                    return Err(UploadError::Cancelled);
+                    return if put_sent {
+                        Err(UploadError::OutcomeUnknown(Box::new(session)))
+                    } else {
+                        Err(UploadError::Cancelled)
+                    };
                 }
                 file.seek(io::SeekFrom::Start(offset))
                     .await
@@ -357,16 +385,13 @@ impl ResumableUpload {
                 // accepts it, so the end-of-body signal is not raised while most of
                 // a large chunk is still queued.
                 let bytes = bytes::Bytes::from(chunk);
-                let slices = (0..bytes.len())
-                    .step_by(BODY_SLICE)
-                    .map(|start| {
-                        Ok::<_, io::Error>(
-                            bytes.slice(start..(start + BODY_SLICE).min(bytes.len())),
-                        )
-                    })
-                    .collect::<Vec<_>>();
+                let len = bytes.len();
+                let slices = (0..len).step_by(BODY_SLICE).map(move |start| {
+                    Ok::<_, io::Error>(bytes.slice(start..(start + BODY_SLICE).min(len)))
+                });
                 let (request_body, body_end) =
                     observe_body_end(futures_util::stream::iter(slices), size as u64);
+                put_sent = true;
                 let request = request.body(request_body).send();
                 let result = tokio::select! {
                     biased;
@@ -456,7 +481,11 @@ impl ResumableUpload {
                         if no_progress > 3 {
                             return Err(Self::recovery_error(&session, UploadError::NoProgress));
                         }
-                        tokio::time::sleep(Duration::from_millis(250 << (no_progress - 1))).await;
+                        tokio::select! {
+                            biased;
+                            () = cancel.cancelled() => return Err(UploadError::OutcomeUnknown(Box::new(session))),
+                            () = tokio::time::sleep(Duration::from_millis(250 << (no_progress - 1))) => {}
+                        }
                     }
                     Progress::Offset(next) => {
                         offset = next;

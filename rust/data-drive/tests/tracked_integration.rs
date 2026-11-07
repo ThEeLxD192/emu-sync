@@ -764,3 +764,152 @@ async fn pinned_tracked_download_creates_nested_directories_and_records_revision
     assert!(!history.backup_directory().exists());
     server.join().unwrap();
 }
+
+#[tokio::test]
+async fn transfer_error_leaves_remote_unchanged_classification() {
+    use emusync_data_drive::{
+        ConditionalError, CreatedFile, ResponseMetadataError, TransferError, UploadError,
+        UploadedFile,
+    };
+    use reqwest::StatusCode;
+
+    let reqwest_err = Client::new()
+        .get("http://127.0.0.1:1")
+        .send()
+        .await
+        .unwrap_err();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/upload", listener.local_addr().unwrap())).unwrap();
+    let server = thread::spawn(move || {
+        let (mut s, _) = listener.accept().unwrap();
+        request(&mut s);
+        write!(
+            s,
+            "HTTP/1.1 200 OK\r\nLocation: /session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+
+        let (mut s, _) = listener.accept().unwrap();
+        request(&mut s);
+        drop(s);
+
+        let (mut s, _) = listener.accept().unwrap();
+        request(&mut s);
+        write!(
+            s,
+            "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("snapshot");
+    std::fs::write(&path, b"test").unwrap();
+
+    let error = emusync_data_drive::ResumableUpload::new(Client::new(), url)
+        .upload(
+            "synthetic",
+            &path,
+            "test.dat",
+            "folder",
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+
+    let session = match error {
+        UploadError::RecoveryFailed { session, .. } => *session,
+        other => panic!("expected RecoveryFailed, got: {other:?}"),
+    };
+    server.join().unwrap();
+
+    let uploaded_file = || {
+        serde_json::from_str::<UploadedFile>(
+            r#"{"id":"f1","title":"t1","modifiedDate":"2026-01-01T00:00:00Z"}"#,
+        )
+        .unwrap()
+    };
+
+    let created_file = CreatedFile {
+        id: "c1".into(),
+        name: "test.dat".into(),
+        modified_time: "2026-01-01T00:00:00Z".into(),
+        sha256_checksum: None,
+        version: None,
+        parents: vec![],
+    };
+
+    let pre_write_failures = [
+        TransferError::Cancelled,
+        TransferError::Upload(UploadError::Cancelled),
+        TransferError::Upload(UploadError::Io(std::io::Error::other("io error"))),
+        TransferError::Upload(UploadError::InvalidSession),
+        TransferError::Upload(UploadError::Transport(
+            Client::new()
+                .get("http://127.0.0.1:1")
+                .send()
+                .await
+                .unwrap_err(),
+        )),
+        TransferError::Upload(UploadError::Http(StatusCode::UNAUTHORIZED)),
+        TransferError::Conditional(ConditionalError::Changed),
+        TransferError::Conditional(ConditionalError::MissingStrongEtag),
+        TransferError::Conditional(ConditionalError::ControlMetadata(
+            ResponseMetadataError::Inactive,
+        )),
+        TransferError::Conditional(ConditionalError::InvalidEndpoint),
+        TransferError::Conditional(ConditionalError::Cancelled),
+        TransferError::Conditional(ConditionalError::Transport(
+            Client::new()
+                .get("http://127.0.0.1:1")
+                .send()
+                .await
+                .unwrap_err(),
+        )),
+        TransferError::Conditional(ConditionalError::Io(std::io::Error::other("io error"))),
+        TransferError::Conditional(ConditionalError::Http(StatusCode::SERVICE_UNAVAILABLE)),
+    ];
+
+    for failure in &pre_write_failures {
+        assert!(
+            failure.leaves_remote_unchanged(),
+            "expected {failure:?} to leave remote unchanged"
+        );
+    }
+
+    let uncertain_outcome_failures = [
+        TransferError::Upload(UploadError::OutcomeUnknown(Box::new(session.clone()))),
+        TransferError::Upload(UploadError::RecoveryFailed {
+            session: Box::new(session),
+            cause: Box::new(UploadError::NoProgress),
+        }),
+        TransferError::Conditional(ConditionalError::OutcomeUnknown(reqwest_err)),
+        TransferError::Conditional(ConditionalError::HeadersTimedOut),
+        TransferError::Conditional(ConditionalError::CancelledOutcomeUnknown),
+        TransferError::Conditional(ConditionalError::ServerOutcomeUnknown(
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+        TransferError::Conditional(ConditionalError::ResponseMetadata(
+            ResponseMetadataError::Inactive,
+        )),
+        TransferError::Conditional(ConditionalError::UnexpectedResponse(Box::new(
+            uploaded_file(),
+        ))),
+        TransferError::InvalidCreatedTimestamp(Box::new(created_file)),
+        TransferError::InvalidUpdatedTimestamp(Box::new(uploaded_file())),
+    ];
+
+    for failure in &uncertain_outcome_failures {
+        assert!(
+            !failure.leaves_remote_unchanged(),
+            "expected {failure:?} to NOT leave remote unchanged"
+        );
+    }
+
+    assert!(std::error::Error::source(&TransferError::Cancelled).is_none());
+    assert!(
+        std::error::Error::source(&TransferError::Upload(UploadError::InvalidSession)).is_some()
+    );
+    assert!(std::error::Error::source(&UploadError::InvalidSession).is_none());
+}

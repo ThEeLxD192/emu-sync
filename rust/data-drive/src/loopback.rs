@@ -53,30 +53,45 @@ where
         let mut request = Vec::new();
         let read = tokio::time::timeout(Duration::from_secs(5), async {
             let mut buf = [0; 1024];
-            while request.len() < 8192 && !request.windows(4).any(|w| w == b"\r\n\r\n") {
-                let count = stream.read(&mut buf).await?;
+            let mut has_header_end = false;
+            while request.len() < 8192 && !has_header_end {
+                let max_read = (8192 - request.len()).min(buf.len());
+                if max_read == 0 {
+                    break;
+                }
+                let count = stream.read(&mut buf[..max_read]).await?;
                 if count == 0 {
                     break;
                 }
+                let check_start = request.len().saturating_sub(3);
                 request.extend_from_slice(&buf[..count]);
+                if request[check_start..].windows(4).any(|w| w == b"\r\n\r\n") {
+                    has_header_end = true;
+                }
             }
-            std::io::Result::Ok(())
+            std::io::Result::Ok(has_header_end)
         })
         .await;
-        if !matches!(read, Ok(Ok(()))) {
-            continue;
-        }
+        let has_header_end = match read {
+            Ok(Ok(found)) => found,
+            _ => continue,
+        };
         let first = request.split(|b| *b == b'\n').next().unwrap_or_default();
-        let first = std::str::from_utf8(first).unwrap_or_default();
+        let first = std::str::from_utf8(first)
+            .unwrap_or_default()
+            .trim_end_matches('\r');
         let mut parts = first.split_whitespace();
         let method = parts.next();
         let target = parts.next();
+        let version = parts.next();
         let parsed =
             target.and_then(|target| Url::parse("http://localhost/").ok()?.join(target).ok());
         let params: HashMap<String, String> = parsed
             .map(|url| url.query_pairs().into_owned().collect())
             .unwrap_or_default();
-        let valid = method == Some("GET")
+        let valid = has_header_end
+            && version.is_some_and(|v| v.starts_with("HTTP/1."))
+            && method == Some("GET")
             && params
                 .get("state")
                 .is_some_and(|s| bool::from(s.as_bytes().ct_eq(state.as_bytes())));
@@ -93,7 +108,11 @@ where
             "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
-        let _ = stream.write_all(response.as_bytes()).await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            stream.write_all(response.as_bytes()).await?;
+            stream.shutdown().await
+        })
+        .await;
         if terminal {
             if let Some(error) = error {
                 return Err(OAuthError::Provider(

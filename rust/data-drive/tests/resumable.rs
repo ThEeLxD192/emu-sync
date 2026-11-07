@@ -1575,3 +1575,62 @@ async fn all_bytes_acknowledged_without_completion_retains_uncertain_session() {
         std::io::ErrorKind::WouldBlock
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancellation_during_no_progress_backoff_returns_unknown_outcome() {
+    use emusync_data_drive::UploadError;
+    use std::{sync::mpsc, time::Duration};
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/upload", listener.local_addr().unwrap())).unwrap();
+    let (query_done_tx, query_done_rx) = mpsc::channel();
+
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        read_request(&mut stream);
+        reply(&mut stream, "200 OK", "Location: /session\r\n", "");
+
+        let (mut stream, _) = listener.accept().unwrap();
+        let (_, body) = read_request(&mut stream);
+        assert_eq!(body, b"abc");
+        drop(stream);
+
+        let (mut stream, _) = listener.accept().unwrap();
+        let (headers, body) = read_request(&mut stream);
+        assert!(
+            headers
+                .to_ascii_lowercase()
+                .contains("content-range: bytes */3")
+        );
+        assert!(body.is_empty());
+        reply(&mut stream, "308 Resume Incomplete", "", "");
+        query_done_tx.send(()).unwrap();
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("snapshot");
+    std::fs::write(&path, b"abc").unwrap();
+
+    let cancel = CancellationToken::new();
+    let cancel_for_task = cancel.clone();
+    let task = tokio::spawn(async move {
+        ResumableUpload::new(Client::new(), url)
+            .upload("synthetic", &path, "save", "folder", &cancel_for_task)
+            .await
+    });
+
+    query_done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    cancel.cancel();
+
+    let result = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(matches!(result, Err(UploadError::OutcomeUnknown(_))));
+    assert!(!matches!(result, Err(UploadError::Cancelled)));
+
+    server.join().unwrap();
+}

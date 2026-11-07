@@ -80,7 +80,25 @@ impl fmt::Display for ConditionalError {
         }
     }
 }
-impl std::error::Error for ConditionalError {}
+impl std::error::Error for ConditionalError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Transport(e) | Self::OutcomeUnknown(e) => Some(e),
+            Self::ResponseMetadata(e) => Some(e),
+            Self::ControlMetadata(e) => Some(e),
+            Self::Io(e) => Some(e),
+            Self::Changed
+            | Self::MissingStrongEtag
+            | Self::UnexpectedResponse(_)
+            | Self::ServerOutcomeUnknown(_)
+            | Self::Http(_)
+            | Self::HeadersTimedOut
+            | Self::CancelledOutcomeUnknown
+            | Self::InvalidEndpoint
+            | Self::Cancelled => None,
+        }
+    }
+}
 impl From<reqwest::Error> for ConditionalError {
     fn from(e: reqwest::Error) -> Self {
         Self::Transport(e)
@@ -155,12 +173,12 @@ impl ConditionalUpdate {
         )
     }
     fn file_url(base: &Url, id: &str) -> Result<Url, ConditionalError> {
-        let mut url = base.clone();
-        url.path_segments_mut()
-            .map_err(|_| ConditionalError::InvalidEndpoint)?
-            .pop_if_empty()
-            .push(id);
-        Ok(url)
+        crate::http::item_url(
+            base,
+            id,
+            ConditionalError::InvalidEndpoint,
+            ConditionalError::InvalidEndpoint,
+        )
     }
     /// The source must be an immutable snapshot retained for the duration of this request.
     pub async fn update(
@@ -206,9 +224,16 @@ impl ConditionalUpdate {
         if cancel.is_cancelled() {
             return Err(ConditionalError::Cancelled);
         }
+        let get_url = Self::file_url(&self.files, &observed.id)?;
+        let put_url = Self::file_url(&self.uploads, &observed.id)?;
+        let observed_version = observed.version.as_deref().filter(|v| !v.trim().is_empty());
+        let observed_sha256 = observed.sha256.as_deref().filter(|h| !h.trim().is_empty());
+        if observed_version.is_none() && observed_sha256.is_none() {
+            return Err(ConditionalError::Changed);
+        }
         let request = self
             .metadata
-            .get(Self::file_url(&self.files, &observed.id)?)
+            .get(get_url)
             .bearer_auth(token)
             .query(&[("fields", FIELDS)])
             .send();
@@ -228,13 +253,18 @@ impl ConditionalUpdate {
             () = cancel.cancelled() => return Err(ConditionalError::Cancelled),
             result = read_metadata(response, self.response_inactivity) => result.map_err(ConditionalError::ControlMetadata)?,
         };
-        let unchanged = match (&observed.version, &current.version) {
+        let current_version = current.version.as_deref().filter(|v| !v.trim().is_empty());
+        let current_sha256 = current
+            .sha256_checksum
+            .as_deref()
+            .filter(|h| !h.trim().is_empty());
+        let unchanged = match (observed_version, current_version) {
             (Some(a), Some(b)) => a == b,
             _ => {
-                matches!((&observed.sha256, &current.sha256_checksum), (Some(a), Some(b)) if a.eq_ignore_ascii_case(b))
+                matches!((observed_sha256, current_sha256), (Some(a), Some(b)) if a.eq_ignore_ascii_case(b))
             }
         };
-        let hash_changed = matches!((&observed.sha256, &current.sha256_checksum), (Some(a), Some(b)) if !a.eq_ignore_ascii_case(b));
+        let hash_changed = matches!((observed_sha256, current_sha256), (Some(a), Some(b)) if !a.eq_ignore_ascii_case(b));
         if !unchanged || hash_changed || current.id != observed.id || current.title != remote_name {
             return Err(ConditionalError::Changed);
         }
@@ -274,7 +304,7 @@ impl ConditionalUpdate {
         };
         let (request_body, body_end) = observe_body_end(body, length);
         let request = client
-            .put(Self::file_url(&self.uploads, &observed.id)?)
+            .put(put_url)
             .bearer_auth(token)
             .header(header::IF_MATCH, etag)
             .header(header::CONTENT_TYPE, "application/octet-stream")
