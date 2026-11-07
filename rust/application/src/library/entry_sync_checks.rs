@@ -34,7 +34,7 @@ impl<F: SaveSynchronizerFactory> EntrySyncChecks<F> {
     }
 
     pub fn begin(&self, entry: &GameEntry, config: &AppConfig) -> SyncCheckRequest {
-        let request = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let request = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
         self.checks
             .lock()
             .unwrap()
@@ -48,12 +48,27 @@ impl<F: SaveSynchronizerFactory> EntrySyncChecks<F> {
     }
 
     pub fn is_current(&self, request: &SyncCheckRequest, current: Option<&AppConfig>) -> bool {
-        let checks = self.checks.lock().unwrap();
-        checks.get(&request.entry.common().name) == Some(&request.generation)
-            && self.operations.revision() == request.operation_revision
-            && !self.operations.is_busy()
-            && current.map(|c| &c.credentials) == Some(&request.config.credentials)
-            && current.is_some_and(|c| c.entries.iter().any(|e| e == &request.entry))
+        if self.operations.revision() != request.operation_revision || self.operations.is_busy() {
+            return false;
+        }
+
+        let Some(current_config) = current else {
+            return false;
+        };
+
+        if current_config.credentials != request.config.credentials {
+            return false;
+        }
+
+        if !current_config.entries.iter().any(|e| e == &request.entry) {
+            return false;
+        }
+
+        self.checks
+            .lock()
+            .unwrap()
+            .get(&request.entry.common().name)
+            .is_some_and(|&g| g == request.generation)
     }
 
     pub async fn read(

@@ -14,7 +14,7 @@ pub enum OperationEvent {
 pub struct OperationCoordinator {
     generation: AtomicU64,
     busy: AtomicBool,
-    on_event: Box<dyn Fn(OperationEvent) + Send + Sync + 'static>,
+    on_event: Option<Box<dyn Fn(OperationEvent) + Send + Sync + 'static>>,
 }
 
 struct OperationGuard<'a> {
@@ -25,24 +25,34 @@ struct OperationGuard<'a> {
 impl<'a> Drop for OperationGuard<'a> {
     fn drop(&mut self) {
         if !self.completed {
-            (self.coordinator.on_event)(OperationEvent::Cancelled);
+            self.coordinator.emit(OperationEvent::Cancelled);
         }
         self.coordinator.generation.fetch_add(1, Ordering::SeqCst);
-        (self.coordinator.on_event)(OperationEvent::Finished);
+        self.coordinator.emit(OperationEvent::Finished);
         self.coordinator.busy.store(false, Ordering::Release);
     }
 }
 
 impl OperationCoordinator {
     pub fn new() -> Self {
-        Self::with_listener(|_| {})
+        Self {
+            generation: AtomicU64::new(0),
+            busy: AtomicBool::new(false),
+            on_event: None,
+        }
     }
 
     pub fn with_listener(on_event: impl Fn(OperationEvent) + Send + Sync + 'static) -> Self {
         Self {
             generation: AtomicU64::new(0),
             busy: AtomicBool::new(false),
-            on_event: Box::new(on_event),
+            on_event: Some(Box::new(on_event)),
+        }
+    }
+
+    fn emit(&self, event: OperationEvent) {
+        if let Some(ref listener) = self.on_event {
+            listener(event);
         }
     }
 
@@ -51,7 +61,7 @@ impl OperationCoordinator {
     }
 
     pub fn is_busy(&self) -> bool {
-        self.busy.load(Ordering::SeqCst)
+        self.busy.load(Ordering::Acquire)
     }
 
     pub async fn run_if_idle<T>(&self, fut: impl Future<Output = T>) -> Option<T> {
@@ -63,7 +73,7 @@ impl OperationCoordinator {
             return None;
         }
         self.generation.fetch_add(1, Ordering::SeqCst);
-        (self.on_event)(OperationEvent::Started);
+        self.emit(OperationEvent::Started);
 
         let mut guard = OperationGuard {
             coordinator: self,

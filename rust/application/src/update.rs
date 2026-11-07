@@ -176,12 +176,16 @@ where
                 .map_err(|e| e.to_string())?;
             destination = Some(dest.clone());
 
+            let mut last_progress = 0.0f32;
             self.source
                 .download(info, &dest, |p| {
-                    self.publish(UpdateState::Downloading {
-                        progress: p,
-                        info: info.clone(),
-                    });
+                    if (p - last_progress).abs() >= 0.01 || p >= 1.0 {
+                        last_progress = p;
+                        self.publish(UpdateState::Downloading {
+                            progress: p,
+                            info: info.clone(),
+                        });
+                    }
                 })
                 .await
                 .map_err(|e| e.to_string())?;

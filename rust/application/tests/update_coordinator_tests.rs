@@ -156,6 +156,46 @@ async fn failed_download_cleans_up_destination_file() {
     assert!(states.iter().any(|s| matches!(s, UpdateState::Error(_))));
 }
 
+#[tokio::test]
+async fn successful_download_publishes_progress_and_ready_to_restart() {
+    let source = MockSource::default();
+    let files = MockFiles::default();
+    let installer = MockInstaller::default();
+
+    *files.destination.lock().unwrap() = "/tmp/update.tar.gz".into();
+
+    let published = Arc::new(Mutex::new(Vec::new()));
+    let published_clone = Arc::clone(&published);
+
+    let coordinator = UpdateCoordinator::new(
+        source.clone(),
+        files.clone(),
+        installer.clone(),
+        move |state| {
+            published_clone.lock().unwrap().push(state.clone());
+        },
+    );
+
+    let info = sample_update_info();
+    coordinator.download(&info).await;
+
+    // File must NOT be deleted upon success
+    let deleted = files.deleted_paths.lock().unwrap().clone();
+    assert!(deleted.is_empty());
+
+    // States must include initial downloading (0.0), intermediate progress, and ReadyToRestart
+    let states = published.lock().unwrap().clone();
+    assert!(matches!(states[0], UpdateState::Downloading { progress, .. } if progress == 0.0));
+    assert!(matches!(states[1], UpdateState::Downloading { progress, .. } if progress == 0.5));
+    assert_eq!(
+        *states.last().unwrap(),
+        UpdateState::ReadyToRestart {
+            downloaded_path: "/tmp/update.tar.gz".into(),
+            is_steam_game_mode: false,
+        }
+    );
+}
+
 #[test]
 fn restart_is_blocked_when_operation_is_in_progress() {
     let source = MockSource::default();

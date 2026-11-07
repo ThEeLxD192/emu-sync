@@ -202,10 +202,16 @@ impl LocalSaveAccess for MockFs {
 
     fn effective_targets_for_rom(
         &self,
-        _entry: &emusync_domain::library::Emulator,
-        _rom: &str,
+        entry: &emusync_domain::library::Emulator,
+        rom: &str,
     ) -> Result<Vec<SaveTarget>, Self::Error> {
-        Ok(Vec::new())
+        let targets = entry
+            .save_targets_by_rom
+            .iter()
+            .find(|(r, _)| r == rom)
+            .map(|(_, t)| t.clone())
+            .unwrap_or_default();
+        Ok(targets)
     }
 }
 
@@ -347,4 +353,207 @@ fn target_resolver_resolves_cloud_path_segments() {
 
     let segments = resolver.get_cloud_path_segments_game(&sync_game).unwrap();
     assert_eq!(segments, vec!["CustomZeldaFolder"]);
+}
+
+#[test]
+fn conflicting_local_destinations_rejected() {
+    let fs = MockFs::new();
+    let mapping = SaveTargetMapping::new(fs);
+
+    let targets = vec![
+        SaveTarget {
+            path: "/saves/slot1.sav".into(),
+            kind: SaveTargetType::File,
+            cloud_path: Some("cloud1.sav".into()),
+        },
+        SaveTarget {
+            path: "/saves/slot1.sav".into(),
+            kind: SaveTargetType::File,
+            cloud_path: Some("cloud2.sav".into()),
+        },
+    ];
+
+    let res = mapping.validate_save_target_mappings(&targets, &[]);
+    assert_eq!(
+        res,
+        Err(SaveTargetMappingError::ConflictingLocalDestinations)
+    );
+}
+
+#[test]
+fn file_is_parent_of_another_rejected() {
+    let fs = MockFs::new();
+    fs.add_file("/saves/parent.sav", 1000);
+    fs.add_file("/saves/parent.sav/child.sav", 1000);
+    let mapping = SaveTargetMapping::new(fs);
+
+    let targets = vec![
+        SaveTarget {
+            path: "/saves/parent.sav".into(),
+            kind: SaveTargetType::File,
+            cloud_path: None,
+        },
+        SaveTarget {
+            path: "/saves/parent.sav/child.sav".into(),
+            kind: SaveTargetType::File,
+            cloud_path: None,
+        },
+    ];
+
+    let res = mapping.validate_save_target_mappings(&targets, &[]);
+    assert_eq!(res, Err(SaveTargetMappingError::FileIsParentOfAnother));
+}
+
+#[test]
+fn overlapping_directory_scopes_rejected() {
+    let fs = MockFs::new();
+    fs.add_dir("/saves/dir1");
+    fs.add_dir("/saves/dir2");
+    let mapping = SaveTargetMapping::new(fs);
+
+    let targets = vec![
+        SaveTarget {
+            path: "/saves/dir1".into(),
+            kind: SaveTargetType::Directory,
+            cloud_path: Some("common".into()),
+        },
+        SaveTarget {
+            path: "/saves/dir2".into(),
+            kind: SaveTargetType::Directory,
+            cloud_path: Some("common/sub".into()),
+        },
+    ];
+
+    let res = mapping.validate_save_target_mappings(&targets, &[]);
+    assert_eq!(res, Err(SaveTargetMappingError::OverlappingDirectoryScopes));
+}
+
+#[test]
+fn project_directory_files_strips_prefix_and_filters() {
+    let files = vec![
+        RemoteFile {
+            id: "1".into(),
+            name: "sub/save1.dat".into(),
+            modified: 1000,
+            is_folder: false,
+            sha256: None,
+            version: None,
+        },
+        RemoteFile {
+            id: "2".into(),
+            name: "other/save2.dat".into(),
+            modified: 1000,
+            is_folder: false,
+            sha256: None,
+            version: None,
+        },
+    ];
+
+    let projected = emusync_application::project_directory_files(&files, Some("sub"));
+    assert_eq!(projected.len(), 1);
+    assert_eq!(projected[0].name, "save1.dat");
+
+    let all_files = emusync_application::project_directory_files(&files, None);
+    assert_eq!(all_files.len(), 2);
+}
+
+#[test]
+fn target_resolver_get_save_targets_for_native_and_emulator() {
+    let fs = MockFs::new();
+    let resolver = SaveTargetResolver::new(fs);
+
+    // 1. NativeGame
+    let native = GameEntry::Native(NativeGame {
+        common: EntryCommon {
+            name: "NativeGame".into(),
+            save_targets: vec![SaveTarget {
+                path: "/saves/native.sav".into(),
+                kind: SaveTargetType::File,
+                cloud_path: None,
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let targets = resolver.get_save_targets(&native).unwrap();
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].display_name, "NativeGame");
+    assert_eq!(targets[0].file.path(), "/saves/native.sav");
+    assert_eq!(targets[0].cloud_path_segments, vec!["NativeGame"]);
+
+    // 2. Emulator with global and per-ROM targets, including a duplicate
+    let emu = GameEntry::Emulator(emusync_domain::library::Emulator {
+        common: EntryCommon {
+            name: "RetroArch".into(),
+            cloud_folder: Some("CloudEmu".into()),
+            save_targets: vec![SaveTarget {
+                path: "/saves/global.sav".into(),
+                kind: SaveTargetType::File,
+                cloud_path: None,
+            }],
+            ..Default::default()
+        },
+        save_targets_by_rom: vec![
+            (
+                "game1.sfc".into(),
+                vec![SaveTarget {
+                    path: "/saves/game1.srm".into(),
+                    kind: SaveTargetType::File,
+                    cloud_path: None,
+                }],
+            ),
+            (
+                "game2.sfc".into(),
+                vec![
+                    // duplicate of global.sav
+                    SaveTarget {
+                        path: "/saves/global.sav".into(),
+                        kind: SaveTargetType::File,
+                        cloud_path: None,
+                    },
+                ],
+            ),
+        ],
+        ..Default::default()
+    });
+
+    let emu_targets = resolver.get_save_targets(&emu).unwrap();
+    // /saves/global.sav should only appear once due to deduplication
+    assert_eq!(emu_targets.len(), 2);
+    assert!(
+        emu_targets
+            .iter()
+            .any(|t| t.file.path() == "/saves/global.sav")
+    );
+    assert!(
+        emu_targets
+            .iter()
+            .any(|t| t.file.path() == "/saves/game1.srm")
+    );
+}
+
+#[test]
+fn resolved_save_target_configured_preserves_target_properties() {
+    let fs = MockFs::new();
+    let resolver = SaveTargetResolver::new(fs);
+    let native = GameEntry::Native(NativeGame {
+        common: EntryCommon {
+            name: "Game".into(),
+            save_targets: vec![SaveTarget {
+                path: "/saves/game.sav".into(),
+                kind: SaveTargetType::File,
+                cloud_path: Some("custom.sav".into()),
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let targets = resolver.get_save_targets(&native).unwrap();
+    assert_eq!(targets.len(), 1);
+    let configured = targets[0].configured();
+    assert_eq!(configured.path, "/saves/game.sav");
+    assert_eq!(configured.kind, SaveTargetType::File);
+    assert_eq!(configured.cloud_path, Some("custom.sav".into()));
 }

@@ -46,6 +46,17 @@ where
         new_title: &str,
         local_save_targets: &[SaveTarget],
     ) -> Result<bool, String> {
+        if self
+            .context
+            .config
+            .credentials
+            .as_ref()
+            .and_then(|c| c.refresh_token.as_ref())
+            .is_none()
+        {
+            return Ok(true);
+        }
+
         let old_cloud_path = self
             .context
             .resolver
@@ -57,15 +68,7 @@ where
             .get_cloud_path_segments_entry(entry, rom_name, Some(new_title))
             .map_err(|e| format!("{e:?}"))?;
 
-        if old_cloud_path == new_cloud_path
-            || self
-                .context
-                .config
-                .credentials
-                .as_ref()
-                .and_then(|c| c.refresh_token.as_ref())
-                .is_none()
-        {
+        if old_cloud_path == new_cloud_path {
             return Ok(true);
         }
 
@@ -315,10 +318,8 @@ where
             .enumerate()
             .filter(|(i, _)| Some(*i) != entry_index)
             .any(|(_, other)| {
-                let other_path = self.entry_path(other);
-                other_path == old_path
-                    || (old_path.len() == 1
-                        && other.common().effective_cloud_folder() == old_path[0])
+                (old_path.len() == 1 && other.common().effective_cloud_folder() == old_path[0])
+                    || self.entry_path(other) == old_path
                     || self
                         .context
                         .resolver

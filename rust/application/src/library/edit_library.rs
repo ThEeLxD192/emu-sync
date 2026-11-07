@@ -44,42 +44,42 @@ where
         from_index: usize,
         to_index: usize,
     ) -> Result<AppConfig, S::Error> {
-        let mut entries = config.entries.clone();
-        if from_index >= entries.len() || to_index >= entries.len() || from_index == to_index {
+        let len = config.entries.len();
+        if from_index >= len || to_index >= len || from_index == to_index {
             return Ok(config.clone());
         }
+        let mut entries = config.entries.clone();
         let item = entries.remove(from_index);
         entries.insert(to_index, item);
         self.reorder_entries_list(&entries)
     }
 
     pub fn reorder_entries_list(&self, new_entries: &[GameEntry]) -> Result<AppConfig, S::Error> {
-        self.store.update(|current| {
-            let mut ordered = Vec::new();
+        self.store.update(|mut current| {
+            let mut ordered = Vec::with_capacity(current.entries.len());
             for target in new_entries {
+                let target_name = &target.common().name;
                 if let Some(existing) = current
                     .entries
                     .iter()
-                    .find(|e| e.common().name == target.common().name)
+                    .find(|e| &e.common().name == target_name)
                     && !ordered
                         .iter()
-                        .any(|e: &GameEntry| e.common().name == existing.common().name)
+                        .any(|e: &GameEntry| &e.common().name == target_name)
                 {
                     ordered.push(existing.clone());
                 }
             }
-            for candidate in &current.entries {
+            for candidate in current.entries {
                 if !ordered
                     .iter()
                     .any(|e| e.common().name == candidate.common().name)
                 {
-                    ordered.push(candidate.clone());
+                    ordered.push(candidate);
                 }
             }
-            AppConfig {
-                entries: ordered,
-                ..current
-            }
+            current.entries = ordered;
+            current
         })
     }
 
@@ -99,22 +99,18 @@ where
             ));
             return Ok(None);
         }
-        let updated = self.store.update(|current| {
-            let mut entries = current.entries;
-            entries.push(entry);
-            AppConfig { entries, ..current }
+        let updated = self.store.update(|mut current| {
+            current.entries.push(entry);
+            current
         })?;
         Ok(Some(updated))
     }
 
     pub fn delete_entry(&self, entry: &GameEntry) -> Result<AppConfig, S::Error> {
-        self.store.update(|current| {
-            let entries = current
-                .entries
-                .into_iter()
-                .filter(|e| e.common().name != entry.common().name)
-                .collect();
-            AppConfig { entries, ..current }
+        let target_name = &entry.common().name;
+        self.store.update(|mut current| {
+            current.entries.retain(|e| &e.common().name != target_name);
+            current
         })
     }
 
@@ -141,19 +137,16 @@ where
             return Ok(None);
         }
 
-        let updated = self.store.update(|current| {
-            let entries = current
+        let old_name = &old_entry.common().name;
+        let updated = self.store.update(|mut current| {
+            if let Some(pos) = current
                 .entries
-                .into_iter()
-                .map(|e| {
-                    if e.common().name == old_entry.common().name {
-                        edited.clone()
-                    } else {
-                        e
-                    }
-                })
-                .collect();
-            AppConfig { entries, ..current }
+                .iter()
+                .position(|e| &e.common().name == old_name)
+            {
+                current.entries[pos] = edited.clone();
+            }
+            current
         })?;
 
         if edited.common().steam_app_id.is_some() {

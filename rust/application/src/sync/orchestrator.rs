@@ -148,16 +148,8 @@ where
         config: AppConfig,
         on_status: impl Fn(SyncEvent) + Send + Sync + 'static,
     ) -> Self::Synchronizer {
-        let services = SyncServices {
-            files: self.services.files.clone(),
-            search: self.services.search.clone(),
-            folders: self.services.folders.clone(),
-            tracked_sync: self.services.tracked_sync.clone(),
-            authorization: self.services.authorization.clone(),
-            runner: self.services.runner.clone(),
-        };
         SyncOrchestrator {
-            context: Arc::new(SyncContext::new(config, services, on_status)),
+            context: Arc::new(SyncContext::new(config, self.services.clone(), on_status)),
         }
     }
 }

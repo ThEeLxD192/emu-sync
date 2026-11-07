@@ -12,7 +12,7 @@ struct State<T> {
 }
 
 pub struct OneshotSender<T> {
-    state: Arc<Mutex<State<T>>>,
+    state: Option<Arc<Mutex<State<T>>>>,
 }
 
 pub struct OneshotReceiver<T> {
@@ -20,20 +20,36 @@ pub struct OneshotReceiver<T> {
 }
 
 impl<T> OneshotSender<T> {
-    pub fn send(self, value: T) -> Result<(), T> {
-        let mut state = self.state.lock().unwrap();
-        if state.closed {
-            return Err(value);
+    pub fn send(mut self, value: T) -> Result<(), T> {
+        if let Some(state_arc) = self.state.take() {
+            let mut state = state_arc.lock().unwrap();
+            if state.closed {
+                return Err(value);
+            }
+            state.value = Some(value);
+            if let Some(waker) = state.waker.take() {
+                waker.wake();
+            }
+            Ok(())
+        } else {
+            Err(value)
         }
-        state.value = Some(value);
-        if let Some(waker) = state.waker.take() {
-            waker.wake();
-        }
-        Ok(())
     }
 }
 
 impl<T> Drop for OneshotSender<T> {
+    fn drop(&mut self) {
+        if let Some(state_arc) = self.state.take() {
+            let mut state = state_arc.lock().unwrap();
+            state.closed = true;
+            if let Some(waker) = state.waker.take() {
+                waker.wake();
+            }
+        }
+    }
+}
+
+impl<T> Drop for OneshotReceiver<T> {
     fn drop(&mut self) {
         let mut state = self.state.lock().unwrap();
         state.closed = true;
@@ -53,7 +69,10 @@ impl<T> Future for OneshotReceiver<T> {
         } else if state.closed {
             Poll::Ready(None)
         } else {
-            state.waker = Some(cx.waker().clone());
+            match &mut state.waker {
+                Some(w) if w.will_wake(cx.waker()) => {}
+                _ => state.waker = Some(cx.waker().clone()),
+            }
             Poll::Pending
         }
     }
@@ -67,7 +86,7 @@ pub fn oneshot<T>() -> (OneshotSender<T>, OneshotReceiver<T>) {
     }));
     (
         OneshotSender {
-            state: Arc::clone(&state),
+            state: Some(Arc::clone(&state)),
         },
         OneshotReceiver { state },
     )

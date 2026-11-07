@@ -20,25 +20,40 @@ impl<S: ConfigurationStore, St: SteamLibrary> LoadLibrary<S, St> {
             .steam
             .migrate_launchers(&config.entries)
             .unwrap_or_default();
-        let shortcut_map: HashMap<_, _> = shortcuts.into_iter().collect();
-        let mut modified = false;
-        let mut entries = config.entries.clone();
+
+        if shortcuts.is_empty()
+            && config
+                .entries
+                .iter()
+                .all(|e| e.common().steam_app_id.is_none())
+        {
+            return Ok(config);
+        }
+
+        let shortcut_map: HashMap<&str, i32> = shortcuts
+            .iter()
+            .map(|(k, id)| (k.strip_prefix("[EmuSync] ").unwrap_or(k.as_str()), *id))
+            .collect();
+
+        let modified = config.entries.iter().any(|entry| {
+            let app_id = shortcut_map.get(entry.common().name.as_str()).copied();
+            entry.common().steam_app_id != app_id
+        });
+
+        if !modified {
+            return Ok(config);
+        }
+
+        let mut entries = config.entries;
         for entry in &mut entries {
-            let key = format!("[EmuSync] {}", entry.common().name);
-            let app_id = shortcut_map.get(&key).copied();
+            let app_id = shortcut_map.get(entry.common().name.as_str()).copied();
             let common = match entry {
                 GameEntry::Emulator(e) => &mut e.common,
                 GameEntry::Native(n) => &mut n.common,
             };
-            if common.steam_app_id != app_id {
-                common.steam_app_id = app_id;
-                modified = true;
-            }
+            common.steam_app_id = app_id;
         }
-        if modified {
-            self.store.update(|c| AppConfig { entries, ..c })
-        } else {
-            Ok(config)
-        }
+
+        self.store.update(|c| AppConfig { entries, ..c })
     }
 }

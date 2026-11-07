@@ -218,6 +218,56 @@ async fn reordering_and_mutations_preserve_library_invariants() {
 }
 
 #[tokio::test]
+async fn reorder_by_index_and_validation_guards() {
+    let e1 = make_native("Alpha");
+    let e2 = make_native("Beta");
+    let e3 = make_native("Gamma");
+
+    let initial = AppConfig {
+        credentials: None,
+        entries: vec![e1.clone(), e2.clone(), e3.clone()],
+    };
+    let store = InMemoryStore {
+        config: Arc::new(Mutex::new(initial.clone())),
+    };
+    let steam = MockSteam::default();
+    let factory = SpyFactory::default();
+
+    let editor = EditLibrary::new(store.clone(), factory.clone(), steam.clone(), |_| {});
+
+    // 1. Reorder by index: move index 0 (Alpha) to index 2 -> [Beta, Gamma, Alpha]
+    let reordered = editor.reorder_entries(&initial, 0, 2).unwrap();
+    let names: Vec<_> = reordered
+        .entries
+        .iter()
+        .map(|e| e.common().name.as_str())
+        .collect();
+    assert_eq!(names, vec!["Beta", "Gamma", "Alpha"]);
+
+    // 2. Out-of-bounds or same-index reorder is a no-op
+    let same = editor.reorder_entries(&initial, 1, 1).unwrap();
+    assert_eq!(same, initial);
+    let oob = editor.reorder_entries(&initial, 0, 99).unwrap();
+    assert_eq!(oob, initial);
+
+    // 3. Add duplicate name rejected
+    let dup = make_native("Alpha");
+    let add_dup = editor.add_entry(&initial, dup).unwrap();
+    assert_eq!(add_dup, None);
+
+    // 4. Add empty name rejected
+    let empty = make_native("   ");
+    let add_empty = editor.add_entry(&initial, empty).unwrap();
+    assert_eq!(add_empty, None);
+
+    // 5. Edit entry colliding with existing name rejected
+    let mut colliding = e1.clone();
+    colliding.common_mut_test_helper().name = "Beta".into();
+    let edit_colliding = editor.edit_entry(&initial, &e1, &colliding).await.unwrap();
+    assert_eq!(edit_colliding, None);
+}
+
+#[tokio::test]
 async fn edit_entry_triggers_cloud_rename_and_updates_configuration() {
     let mut e1 = make_native("OldName");
     e1.common_mut_test_helper().cloud_folder = Some("CloudOld".into());
@@ -320,6 +370,189 @@ fn build_game_entry_applies_overrides() {
     } else {
         panic!("expected emulator entry");
     }
+}
+
+#[test]
+fn build_game_entry_clears_overrides_and_handles_native_games() {
+    // 1. Emulator override removal
+    let mut emu = Emulator::new("Snes9x", "/usr/bin/snes9x", "/roms", vec!["sfc".into()]);
+    emu.title_by_rom = vec![("smw.sfc".into(), "Custom Title".into())];
+    emu.cover_path_by_rom = vec![("smw.sfc".into(), "/covers/smw.png".into())];
+    emu.save_paths_by_rom = vec![("smw.sfc".into(), vec!["/saves/smw.srm".into()])];
+    emu.save_targets_by_rom = vec![(
+        "smw.sfc".into(),
+        vec![SaveTarget {
+            path: "/saves/smw.srm".into(),
+            kind: SaveTargetType::File,
+            cloud_path: None,
+        }],
+    )];
+
+    let game = SyncGame {
+        entry: GameEntry::Emulator(emu),
+        name: "Super Mario World".into(),
+        effective_title: "Custom Title".into(),
+        rom_path: Some("/roms/smw.sfc".into()),
+        save_targets: Vec::new(),
+    };
+
+    let clear_changes = GameOverrideChanges {
+        targets: Vec::new(),
+        cover_path: Some("".into()),
+        title: Some("   ".into()),
+    };
+
+    let cleared =
+        build_game_entry(&game, &clear_changes).expect("clearing overrides should succeed");
+    if let GameEntry::Emulator(e) = cleared {
+        assert_eq!(e.effective_title("smw.sfc", "fallback"), "fallback");
+        assert!(e.cover_path_by_rom.is_empty());
+        assert!(e.save_paths_by_rom.is_empty());
+        assert!(e.save_targets_by_rom.is_empty());
+    } else {
+        panic!("expected emulator entry");
+    }
+
+    // 2. Native PC Game overrides
+    let nat = make_native("NativeGame");
+    let nat_game = SyncGame {
+        entry: nat,
+        name: "NativeGame".into(),
+        effective_title: "NativeGame".into(),
+        rom_path: None,
+        save_targets: Vec::new(),
+    };
+
+    let nat_changes = GameOverrideChanges {
+        targets: vec![SaveTarget {
+            path: "/saves/native.dat".into(),
+            kind: SaveTargetType::File,
+            cloud_path: None,
+        }],
+        cover_path: Some("/covers/native.jpg".into()),
+        title: Some("Renamed Native Game".into()),
+    };
+
+    let nat_updated =
+        build_game_entry(&nat_game, &nat_changes).expect("native override should succeed");
+    if let GameEntry::Native(n) = nat_updated {
+        assert_eq!(n.common.name, "Renamed Native Game");
+        assert_eq!(n.cover_path.as_deref(), Some("/covers/native.jpg"));
+        assert_eq!(n.common.save_targets.len(), 1);
+        assert_eq!(n.common.save_paths, vec!["/saves/native.dat"]);
+    } else {
+        panic!("expected native entry");
+    }
+}
+
+#[test]
+fn build_game_entry_updates_existing_rom_overrides_and_resolves_rom_name() {
+    // 1. rom_path with Windows backslash and existing overrides being updated
+    let mut emu = Emulator::new("PCSX2", "/usr/bin/pcsx2", "/roms", vec!["iso".into()]);
+    emu.title_by_rom = vec![("game.iso".into(), "Old ISO Title".into())];
+    emu.save_paths_by_rom = vec![("game.iso".into(), vec!["/saves/old.mcd".into()])];
+    emu.save_targets_by_rom = vec![(
+        "game.iso".into(),
+        vec![SaveTarget {
+            path: "/saves/old.mcd".into(),
+            kind: SaveTargetType::File,
+            cloud_path: None,
+        }],
+    )];
+
+    let game = SyncGame {
+        entry: GameEntry::Emulator(emu),
+        name: "Game ISO".into(),
+        effective_title: "Old ISO Title".into(),
+        rom_path: Some(r"D:\Emulation\PS2\game.iso".into()),
+        save_targets: Vec::new(),
+    };
+
+    let changes = GameOverrideChanges {
+        targets: vec![SaveTarget {
+            path: "/saves/new.mcd".into(),
+            kind: SaveTargetType::File,
+            cloud_path: None,
+        }],
+        cover_path: Some("/covers/ps2.png".into()),
+        title: Some("New ISO Title".into()),
+    };
+
+    let updated = build_game_entry(&game, &changes).expect("build entry should succeed");
+    if let GameEntry::Emulator(e) = updated {
+        assert_eq!(e.title_by_rom.len(), 1);
+        assert_eq!(e.title_by_rom[0].1, "New ISO Title");
+        assert_eq!(e.save_paths_by_rom.len(), 1);
+        assert_eq!(e.save_paths_by_rom[0].1, vec!["/saves/new.mcd"]);
+        assert_eq!(e.save_targets_by_rom.len(), 1);
+        assert_eq!(e.save_targets_by_rom[0].1[0].path, "/saves/new.mcd");
+        assert_eq!(e.cover_path_by_rom.len(), 1);
+        assert_eq!(e.cover_path_by_rom[0].1, "/covers/ps2.png");
+    } else {
+        panic!("expected emulator");
+    }
+
+    // 2. rom_path is None -> falls back to game.name
+    let game_no_rom = SyncGame {
+        entry: GameEntry::Emulator(Emulator::new("Emu", "/bin/emu", "/roms", vec![])),
+        name: "FallbackRomKey".into(),
+        effective_title: "FallbackRomKey".into(),
+        rom_path: None,
+        save_targets: Vec::new(),
+    };
+    let changes2 = GameOverrideChanges {
+        targets: Vec::new(),
+        cover_path: None,
+        title: Some("Overridden By Name".into()),
+    };
+    let updated2 = build_game_entry(&game_no_rom, &changes2).expect("should succeed");
+    if let GameEntry::Emulator(e) = updated2 {
+        assert_eq!(
+            e.title_by_rom,
+            vec![("FallbackRomKey".into(), "Overridden By Name".into())]
+        );
+    } else {
+        panic!("expected emulator");
+    }
+}
+
+#[test]
+fn preserve_shared_cloud_root_respects_explicit_override_or_unshared_root() {
+    let mut emu1 = Emulator::new("E1", "/bin/e1", "/roms", vec![]);
+    emu1.common.cloud_folder = Some("CloudRoot".into());
+
+    let mut emu2 = Emulator::new("E2", "/bin/e2", "/roms", vec![]);
+    emu2.common.cloud_folder = Some("CloudRoot".into());
+
+    let config = AppConfig {
+        credentials: None,
+        entries: vec![GameEntry::Emulator(emu1.clone()), GameEntry::Emulator(emu2)],
+    };
+
+    // Case 1: user explicitly specified a non-blank cloud folder -> should NOT overwrite with old CloudRoot
+    let old_entry = GameEntry::Emulator(emu1.clone());
+    let mut new_entry = GameEntry::Emulator(Emulator::new("E1Renamed", "/bin/e1", "/roms", vec![]));
+    new_entry.common_mut_test_helper().cloud_folder = Some("CustomNewFolder".into());
+
+    preserve_shared_cloud_root(&config, &old_entry, &mut new_entry);
+    assert_eq!(
+        new_entry.common().cloud_folder.as_deref(),
+        Some("CustomNewFolder")
+    );
+
+    // Case 2: old entry's root was not shared with any other entry in config -> should NOT preserve
+    let mut solo = Emulator::new("Solo", "/bin/solo", "/roms", vec![]);
+    solo.common.cloud_folder = Some("UniqueCloudFolder".into());
+    let solo_config = AppConfig {
+        credentials: None,
+        entries: vec![GameEntry::Emulator(solo.clone())],
+    };
+    let mut new_solo =
+        GameEntry::Emulator(Emulator::new("SoloRenamed", "/bin/solo", "/roms", vec![]));
+    new_solo.common_mut_test_helper().cloud_folder = None;
+
+    preserve_shared_cloud_root(&solo_config, &GameEntry::Emulator(solo), &mut new_solo);
+    assert_eq!(new_solo.common().cloud_folder, None);
 }
 
 #[tokio::test]

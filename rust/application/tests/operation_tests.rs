@@ -106,3 +106,15 @@ async fn cancelled_task_guard_drop_increments_revision_publishes_cancelled_and_c
         ]
     );
 }
+
+#[tokio::test]
+async fn coordinator_default_runs_without_listener() {
+    let coordinator = OperationCoordinator::new();
+    assert!(!coordinator.is_busy());
+    assert_eq!(coordinator.revision(), 0);
+
+    let res = coordinator.run_if_idle(async { 123 }).await;
+    assert_eq!(res, Some(123));
+    assert_eq!(coordinator.revision(), 2);
+    assert!(!coordinator.is_busy());
+}

@@ -4,12 +4,15 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+type RenameRecord = (String, String, Option<String>, Option<String>);
+
 #[derive(Clone, Default)]
 struct MockDrive {
     folders: Arc<Mutex<HashMap<String, String>>>, // path -> folder_id
     files: Arc<Mutex<HashMap<String, Vec<RemoteFile>>>>, // folder_id -> files
     move_log: Arc<Mutex<Vec<(String, String, String)>>>, // (file_id, from_parent, to_parent)
     fail_on_move: Arc<Mutex<Option<String>>>,     // file_id that should fail
+    rename_log: Arc<Mutex<Vec<RenameRecord>>>,
 }
 
 impl MockDrive {
@@ -76,9 +79,15 @@ impl CloudFolderStore for MockDrive {
         _token: &str,
         folder: &str,
         name: &str,
-        _add_parent: Option<&str>,
-        _remove_parent: Option<&str>,
+        add_parent: Option<&str>,
+        remove_parent: Option<&str>,
     ) -> Result<(), Self::Error> {
+        self.rename_log.lock().unwrap().push((
+            folder.to_string(),
+            name.to_string(),
+            add_parent.map(String::from),
+            remove_parent.map(String::from),
+        ));
         let mut lock = self.folders.lock().unwrap();
         // find entry by id and rename key
         let found = lock
@@ -239,4 +248,84 @@ async fn cooperative_cancellation_triggers_reverse_rollback() {
             ("f1".into(), "new_id".into(), "old_id".into()),
         ]
     );
+}
+
+#[tokio::test]
+async fn relocate_in_same_parent_calls_rename_folder() {
+    let drive = MockDrive::default();
+    let old_path = vec!["Saves".to_string(), "OldGame".to_string()];
+    let new_path = vec!["Saves".to_string(), "NewGame".to_string()];
+
+    drive.add_folder(&old_path, "old_id");
+
+    let migrator = CloudFolderMigrator::new(drive.clone(), drive.clone());
+    let res = migrator.migrate("token", &old_path, &new_path).await;
+    assert!(res.is_ok());
+
+    let rename_log = drive.rename_log.lock().unwrap().clone();
+    assert_eq!(
+        rename_log,
+        vec![("old_id".to_string(), "NewGame".to_string(), None, None)]
+    );
+}
+
+#[tokio::test]
+async fn relocate_across_different_parents_calls_rename_folder_with_add_and_remove_parents() {
+    let drive = MockDrive::default();
+    let old_parent = vec!["OldParent".to_string()];
+    let old_path = vec!["OldParent".to_string(), "Game".to_string()];
+    let new_path = vec!["NewParent".to_string(), "Game".to_string()];
+
+    drive.add_folder(&old_parent, "old_parent_id");
+    drive.add_folder(&old_path, "source_id");
+
+    let migrator = CloudFolderMigrator::new(drive.clone(), drive.clone());
+    let res = migrator.migrate("token", &old_path, &new_path).await;
+    assert!(res.is_ok());
+
+    let rename_log = drive.rename_log.lock().unwrap().clone();
+    assert_eq!(
+        rename_log,
+        vec![(
+            "source_id".to_string(),
+            "Game".to_string(),
+            Some("id_NewParent".to_string()),
+            Some("old_parent_id".to_string())
+        )]
+    );
+}
+
+#[tokio::test]
+async fn migrate_same_path_or_same_id_returns_ok_immediately() {
+    let drive = MockDrive::default();
+    let old_path = vec!["Saves".to_string(), "Game".to_string()];
+
+    let migrator = CloudFolderMigrator::new(drive.clone(), drive.clone());
+
+    // 1. Identical path returns Ok without checking drive
+    let res = migrator.migrate("token", &old_path, &old_path).await;
+    assert!(res.is_ok());
+    assert!(drive.folders.lock().unwrap().is_empty());
+
+    // 2. Different path but resolves to same id
+    let new_path = vec!["Aliases".to_string(), "Game".to_string()];
+    drive.add_folder(&old_path, "shared_id");
+    drive.add_folder(&new_path, "shared_id");
+
+    let res2 = migrator.migrate("token", &old_path, &new_path).await;
+    assert!(res2.is_ok());
+    assert!(drive.rename_log.lock().unwrap().is_empty());
+    assert!(drive.move_log.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn migrate_non_existent_source_returns_ok_immediately() {
+    let drive = MockDrive::default();
+    let old_path = vec!["NonExistent".to_string()];
+    let new_path = vec!["Target".to_string()];
+
+    let migrator = CloudFolderMigrator::new(drive.clone(), drive.clone());
+    let res = migrator.migrate("token", &old_path, &new_path).await;
+    assert!(res.is_ok());
+    assert!(drive.rename_log.lock().unwrap().is_empty());
 }

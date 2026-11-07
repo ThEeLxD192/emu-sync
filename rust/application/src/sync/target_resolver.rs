@@ -4,6 +4,7 @@ use emusync_domain::library::{GameEntry, SaveTarget, SaveTargetType};
 use emusync_domain::sync::{
     LocalSaveAccess, LocalSavePath, SyncGame, cloud_path_segments, sanitize_cloud_folder_name,
 };
+use std::collections::{BTreeSet, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedSaveTarget<P> {
@@ -60,16 +61,15 @@ impl<A: LocalSaveAccess> SaveTargetResolver<A> {
     }
 
     pub fn get_cloud_path_segments_game(&self, item: &SyncGame) -> Result<Vec<String>, A::Error> {
-        let rom_name = item
-            .rom_path
-            .as_deref()
-            .map(|p| self.files.path(p).name().to_string())
-            .unwrap_or_else(|| item.name.clone());
-        self.get_cloud_path_segments_entry(
-            &item.entry,
-            Some(&rom_name),
-            Some(&item.effective_title),
-        )
+        let path_obj;
+        let rom_name = match &item.rom_path {
+            Some(p) => {
+                path_obj = self.files.path(p);
+                path_obj.name()
+            }
+            None => &item.name,
+        };
+        self.get_cloud_path_segments_entry(&item.entry, Some(rom_name), Some(&item.effective_title))
     }
 
     pub fn get_save_targets(
@@ -106,21 +106,22 @@ impl<A: LocalSaveAccess> SaveTargetResolver<A> {
                         });
                     }
                 }
-                let mut rom_names: Vec<String> = emu
+                let mut rom_names = BTreeSet::new();
+                for k in emu
                     .save_targets_by_rom
                     .iter()
-                    .map(|(k, _)| k.clone())
-                    .chain(emu.save_paths_by_rom.iter().map(|(k, _)| k.clone()))
-                    .collect();
-                rom_names.sort();
-                rom_names.dedup();
+                    .map(|(k, _)| k.as_str())
+                    .chain(emu.save_paths_by_rom.iter().map(|(k, _)| k.as_str()))
+                {
+                    rom_names.insert(k);
+                }
                 for rom_name in rom_names {
-                    let title = emu.effective_title(&rom_name, &rom_name);
+                    let title = emu.effective_title(rom_name, rom_name);
                     let rom_cloud_path = vec![
                         emu.common.effective_cloud_folder().to_string(),
                         sanitize_cloud_folder_name(&title),
                     ];
-                    for target in self.files.effective_targets_for_rom(emu, &rom_name)? {
+                    for target in self.files.effective_targets_for_rom(emu, rom_name)? {
                         targets.push(ResolvedSaveTarget {
                             file: self.files.path(&target.path),
                             kind: target.kind,
@@ -130,19 +131,14 @@ impl<A: LocalSaveAccess> SaveTargetResolver<A> {
                         });
                     }
                 }
-                let mut unique = Vec::new();
+                let mut seen = HashSet::with_capacity(targets.len());
+                let mut unique = Vec::with_capacity(targets.len());
                 for t in targets {
                     let abs = t
                         .file
                         .absolute_path()
                         .unwrap_or_else(|_| t.file.path().to_string());
-                    if !unique.iter().any(|u: &ResolvedSaveTarget<A::Path>| {
-                        let u_abs = u
-                            .file
-                            .absolute_path()
-                            .unwrap_or_else(|_| u.file.path().to_string());
-                        u_abs == abs && u.cloud_path == t.cloud_path
-                    }) {
+                    if seen.insert((abs, t.cloud_path.clone())) {
                         unique.push(t);
                     }
                 }

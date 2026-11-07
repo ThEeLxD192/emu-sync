@@ -12,6 +12,7 @@ pub mod status;
 pub mod target_mapping;
 pub mod target_resolver;
 
+pub use channel::{OneshotReceiver, OneshotSender, oneshot};
 pub use context::{SyncContext, SyncServices};
 pub use lifecycle::GameSyncLifecycle;
 pub use manual::{ManualEntrySync, ManualFileSync, PlannedSave};

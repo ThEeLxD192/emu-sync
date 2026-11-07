@@ -115,10 +115,11 @@ where
                 return EntrySyncStatus::Error;
             }
 
-            for target in folder_targets {
+            for (target, cfg) in folder_targets.into_iter().zip(&configured) {
                 if self
                     .observe_target(
                         target,
+                        cfg,
                         folder_id.as_deref().unwrap_or(""),
                         &cloud_files,
                         &configured,
@@ -138,6 +139,7 @@ where
     async fn observe_target(
         &self,
         target: &ResolvedSaveTarget<A::Path>,
+        cfg: &SaveTarget,
         folder_id: &str,
         cloud_files: &[RemoteFile],
         configured: &[SaveTarget],
@@ -146,13 +148,13 @@ where
         let reserved = self
             .context
             .mapping
-            .reserved_cloud_names(&target.configured(), configured, cloud_files)
+            .reserved_cloud_names(cfg, configured, cloud_files)
             .map_err(|_| ())?;
 
         let is_dir = self
             .context
             .mapping
-            .is_directory(&target.configured(), cloud_files, configured)
+            .is_directory(cfg, cloud_files, configured)
             .map_err(|_| ())?;
 
         if is_dir {
@@ -165,7 +167,7 @@ where
             self.observe_directory(target, folder_id, &remote_files, &reserved, observation)
                 .await?;
         } else {
-            let name = self.context.mapping.file_cloud_name(&target.configured());
+            let name = self.context.mapping.file_cloud_name(cfg);
             let remote = cloud_files.iter().find(|cf| cf.name == name);
             let remote_state = remote.map(remote_to_state);
             let decision = self
@@ -211,12 +213,11 @@ where
             }
         }
 
+        let remote_names: HashSet<&str> = remote_files.iter().map(|rf| rf.name.as_str()).collect();
         for local in local_files {
             if local.is_file().map_err(|_| ())? {
                 let relative = local.relative_to(root).map_err(|_| ())?;
-                if !reserved.contains(&relative)
-                    && !remote_files.iter().any(|rf| rf.name == relative)
-                {
+                if !reserved.contains(&relative) && !remote_names.contains(relative.as_str()) {
                     observation.record(Decision::UploadLocal);
                 }
             }

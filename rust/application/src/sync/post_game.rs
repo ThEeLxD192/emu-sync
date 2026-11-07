@@ -166,7 +166,7 @@ where
                 directory: None,
             };
             Ok(self
-                .upload_file(token, planned, &entry.common().name, all_reserved_names)
+                .upload_file(token, planned, &entry.common().name, &all_reserved_names)
                 .await)
         }
     }
@@ -237,7 +237,7 @@ where
                         directory: Some((root.path().to_owned(), relative)),
                     };
                     let res = self
-                        .upload_file(token, planned, display_name, all_reserved.clone())
+                        .upload_file(token, planned, display_name, &all_reserved)
                         .await;
                     completed += res.completed_count;
                     failed.extend(res.failed_targets);
@@ -257,7 +257,7 @@ where
         token: &str,
         file: PlannedSave<A::Path>,
         display_name: &str,
-        reserved: HashSet<String>,
+        reserved: &HashSet<String>,
     ) -> PostSyncResult<A::Path> {
         match self.sync_single_file_post(token, &file, display_name).await {
             Ok(()) => PostSyncResult {
@@ -272,7 +272,7 @@ where
                     kind: SaveTargetType::File,
                     drive_name: Some(file.drive_name),
                     failure_reason: Some(err),
-                    reserved_drive_names: reserved,
+                    reserved_drive_names: reserved.clone(),
                 }],
                 blocked_reasons: Vec::new(),
             },
@@ -550,10 +550,10 @@ where
     async fn finish_upload(
         &self,
         item: &SyncGame,
-        summary: UploadSummary<A::Path>,
+        mut summary: UploadSummary<A::Path>,
         mapping_targets: &[SaveTarget],
     ) -> Result<bool, String> {
-        let mut blocked = summary.blocked_reasons.clone();
+        let mut blocked = std::mem::take(&mut summary.blocked_reasons);
         blocked.sort();
         blocked.dedup();
 
@@ -585,7 +585,7 @@ where
         {
             reasons.push(r);
         }
-        reasons.extend(blocked.clone());
+        reasons.extend(blocked.iter().cloned());
         reasons.sort();
         reasons.dedup();
 
@@ -604,11 +604,11 @@ where
         };
 
         let item_clone = item.clone();
-        let configured_clone = summary.configured.clone();
-        let files_clone = summary.files.clone();
+        let configured_clone = summary.configured;
+        let files_clone = summary.files;
         let mapping_clone = mapping_targets.to_vec();
         let completed = summary.completed_count;
-        let blocked_clone = blocked.clone();
+        let blocked_clone = blocked;
 
         let context_clone = Arc::clone(&self.context);
         // Register retry closure

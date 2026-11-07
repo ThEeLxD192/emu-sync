@@ -427,6 +427,7 @@ type LaunchHook = Box<dyn Fn() + Send + Sync>;
 struct MockLauncher {
     launched_games: Arc<Mutex<Vec<String>>>,
     on_launch_hook: Arc<Mutex<Option<LaunchHook>>>,
+    exit_code: Arc<Mutex<i32>>,
 }
 
 impl GameLauncher for MockLauncher {
@@ -440,8 +441,9 @@ impl GameLauncher for MockLauncher {
         if let Some(hook) = self.on_launch_hook.lock().unwrap().as_ref() {
             hook();
         }
+        let code = *self.exit_code.lock().unwrap();
         Ok(GameResult {
-            exit_code: 0,
+            exit_code: code,
             duration_ms: 50,
         })
     }
@@ -1034,4 +1036,367 @@ async fn test_post_sync_failure_and_retry_by_request_id() {
     let good_retry = synchronizer.retry_post_sync(&failure).await;
     assert_eq!(good_retry, Ok(()));
     assert_eq!(*tracked.uploads.lock().unwrap(), vec!["/saves/retry.sav"]);
+}
+
+#[derive(Clone, Default)]
+struct CancelSetup;
+
+impl SaveSetup for CancelSetup {
+    type Error = String;
+
+    async fn request(&self, request: SaveSetupRequest) -> Result<SaveSetupResult, Self::Error> {
+        Ok(SaveSetupResult {
+            game: request.game,
+            targets: Vec::new(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn test_process_exit_code_failure_emits_error_and_does_not_upload() {
+    let fs = MockFs::default();
+    fs.add_file("/saves/crash.sav", 1000);
+
+    let drive = MockDrive::default();
+    drive.add_folder(&["CrashGame".into()], "f_crash");
+
+    let tracked = MockTrackedSync::default();
+    let auth = MockAuth::default();
+    *auth.token.lock().unwrap() = Some("token".into());
+
+    let launcher = MockLauncher::default();
+    *launcher.exit_code.lock().unwrap() = 1; // Process crashes / exits with non-zero
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = Arc::clone(&events);
+
+    let config = AppConfig {
+        credentials: Some(Credentials {
+            client_id: "c".into(),
+            client_secret: "s".into(),
+            refresh_token: Some("rt".into()),
+        }),
+        entries: Vec::new(),
+    };
+
+    let services = SyncServices {
+        files: fs,
+        search: drive.clone(),
+        folders: drive,
+        tracked_sync: tracked.clone(),
+        authorization: auth,
+        runner: launcher.clone(),
+    };
+
+    let factory = SyncOrchestratorFactory::new(services);
+    let synchronizer = factory.create(config, move |ev| {
+        events_clone.lock().unwrap().push(ev);
+    });
+
+    let game = sample_native_game("CrashGame", "/saves/crash.sav");
+    let res = synchronizer.play_with_sync(game, &MockSetup).await;
+    assert_eq!(res, Ok(()));
+
+    // Launched was recorded
+    assert_eq!(*launcher.launched_games.lock().unwrap(), vec!["CrashGame"]);
+
+    // No uploads attempted
+    assert!(tracked.uploads.lock().unwrap().is_empty());
+
+    // Error event was emitted
+    let evs = events.lock().unwrap().clone();
+    assert!(evs.iter().any(|ev| matches!(
+        ev,
+        SyncEvent::Error(msg) if msg.contains("CrashGame did not start")
+    )));
+}
+
+#[tokio::test]
+async fn test_play_without_drive_launches_directly_and_returns_idle() {
+    let fs = MockFs::default();
+    fs.add_file("/saves/local.sav", 1000);
+
+    let drive = MockDrive::default();
+    let tracked = MockTrackedSync::default();
+    let auth = MockAuth::default();
+    let launcher = MockLauncher::default();
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = Arc::clone(&events);
+
+    // No credentials configured
+    let config = AppConfig {
+        credentials: None,
+        entries: Vec::new(),
+    };
+
+    let services = SyncServices {
+        files: fs,
+        search: drive.clone(),
+        folders: drive,
+        tracked_sync: tracked.clone(),
+        authorization: auth,
+        runner: launcher.clone(),
+    };
+
+    let factory = SyncOrchestratorFactory::new(services);
+    let synchronizer = factory.create(config, move |ev| {
+        events_clone.lock().unwrap().push(ev);
+    });
+
+    let game = sample_native_game("LocalGame", "/saves/local.sav");
+    let res = synchronizer.play_with_sync(game, &MockSetup).await;
+    assert_eq!(res, Ok(()));
+
+    assert_eq!(*launcher.launched_games.lock().unwrap(), vec!["LocalGame"]);
+    assert!(tracked.uploads.lock().unwrap().is_empty());
+
+    let evs = events.lock().unwrap().clone();
+    assert_eq!(evs, vec![SyncEvent::Playing, SyncEvent::Idle]);
+}
+
+#[tokio::test]
+async fn test_save_setup_cancellation_aborts_launch() {
+    let fs = MockFs::default();
+    let drive = MockDrive::default();
+    drive.add_folder(&["UnconfiguredGame".into()], "f_unconf");
+    drive.add_file(
+        "f_unconf",
+        RemoteFile {
+            id: "rf_unconf".into(),
+            name: "unconf.sav".into(),
+            modified: 1000,
+            is_folder: false,
+            sha256: None,
+            version: None,
+        },
+    );
+
+    let tracked = MockTrackedSync::default();
+    let auth = MockAuth::default();
+    *auth.token.lock().unwrap() = Some("token".into());
+
+    let launcher = MockLauncher::default();
+
+    let config = AppConfig {
+        credentials: Some(Credentials {
+            client_id: "c".into(),
+            client_secret: "s".into(),
+            refresh_token: Some("rt".into()),
+        }),
+        entries: Vec::new(),
+    };
+
+    let services = SyncServices {
+        files: fs,
+        search: drive.clone(),
+        folders: drive,
+        tracked_sync: tracked,
+        authorization: auth,
+        runner: launcher.clone(),
+    };
+
+    let factory = SyncOrchestratorFactory::new(services);
+    let synchronizer = factory.create(config, |_| {});
+
+    // Game has NO local targets
+    let mut game = sample_native_game("UnconfiguredGame", "/saves/unconf.sav");
+    game.save_targets.clear();
+
+    // CancelSetup returns targets: Vec::new()
+    let res = synchronizer.play_with_sync(game, &CancelSetup).await;
+    assert_eq!(res, Ok(()));
+
+    // Game should NOT have been launched
+    assert!(launcher.launched_games.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_post_sync_directory_with_conflicting_file_emits_error() {
+    let fs = MockFs::default();
+    fs.add_file("/saves/dir/file.sav", 1000);
+
+    let drive = MockDrive::default();
+    drive.add_folder(&["DirGame".into()], "f_dir");
+
+    let tracked = MockTrackedSync::default();
+    let auth = MockAuth::default();
+    *auth.token.lock().unwrap() = Some("token".into());
+
+    let launcher = MockLauncher::default();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = Arc::clone(&events);
+
+    let config = AppConfig {
+        credentials: Some(Credentials {
+            client_id: "c".into(),
+            client_secret: "s".into(),
+            refresh_token: Some("rt".into()),
+        }),
+        entries: Vec::new(),
+    };
+
+    let services = SyncServices {
+        files: fs,
+        search: drive.clone(),
+        folders: drive,
+        tracked_sync: tracked,
+        authorization: auth,
+        runner: launcher,
+    };
+
+    let factory = SyncOrchestratorFactory::new(services);
+    let synchronizer = factory.create(config, move |ev| {
+        events_clone.lock().unwrap().push(ev);
+    });
+
+    let mut game = sample_native_game("DirGame", "/saves/dir");
+    game.save_targets = vec![
+        SaveTarget {
+            path: "/saves/dir".into(),
+            kind: SaveTargetType::Directory,
+            cloud_path: None,
+        },
+        SaveTarget {
+            path: "/saves/other/file.sav".into(),
+            kind: SaveTargetType::File,
+            cloud_path: None,
+        },
+    ];
+
+    let res = synchronizer.play_with_sync(game, &MockSetup).await;
+    assert_eq!(res, Ok(()));
+
+    let evs = events.lock().unwrap().clone();
+    assert!(evs.iter().any(|ev| matches!(
+        ev,
+        SyncEvent::Error(msg) if msg.contains("conflicts with another configured file target")
+    )));
+}
+
+#[tokio::test]
+async fn test_check_entry_sync_status_idle_out_of_sync_and_conflict() {
+    let files = MockFs::default();
+    files.add_file("/saves/idle_game.sav", 1000);
+
+    let drive = MockDrive::default();
+    drive.add_folder(&["Game".into()], "folder");
+
+    let tracked = MockTrackedSync::default();
+    let auth = MockAuth::default();
+    *auth.token.lock().unwrap() = Some("synthetic-token".into());
+    let config = AppConfig {
+        credentials: Some(Credentials {
+            client_id: "client".into(),
+            client_secret: "secret".into(),
+            refresh_token: Some("refresh".into()),
+        }),
+        entries: vec![],
+    };
+    let factory = SyncOrchestratorFactory::new(SyncServices {
+        files: files.clone(),
+        search: drive.clone(),
+        folders: drive.clone(),
+        tracked_sync: tracked.clone(),
+        authorization: auth,
+        runner: MockLauncher::default(),
+    });
+    let sync = factory.create(config, |_| {});
+
+    // 1. Idle when game has empty targets
+    let mut no_targets = sample_native_game("NoTargets", "/saves/idle_game.sav").entry;
+    if let GameEntry::Native(ref mut n) = no_targets {
+        n.common.save_targets.clear();
+    }
+    assert_eq!(
+        sync.check_entry(&no_targets).await,
+        Ok(EntrySyncStatus::Idle)
+    );
+
+    // 2. OutOfSync when decision is UploadLocal or DownloadCloud
+    let entry = sample_native_game("Game", "/saves/idle_game.sav").entry;
+    tracked
+        .planned_decisions
+        .lock()
+        .unwrap()
+        .insert("/saves/idle_game.sav".into(), Decision::UploadLocal);
+    assert_eq!(
+        sync.check_entry(&entry).await,
+        Ok(EntrySyncStatus::OutOfSync)
+    );
+
+    tracked
+        .planned_decisions
+        .lock()
+        .unwrap()
+        .insert("/saves/idle_game.sav".into(), Decision::DownloadCloud);
+    assert_eq!(
+        sync.check_entry(&entry).await,
+        Ok(EntrySyncStatus::OutOfSync)
+    );
+
+    // 3. Conflict when decision is Conflict
+    tracked
+        .planned_decisions
+        .lock()
+        .unwrap()
+        .insert("/saves/idle_game.sav".into(), Decision::Conflict);
+    assert_eq!(
+        sync.check_entry(&entry).await,
+        Ok(EntrySyncStatus::Conflict)
+    );
+}
+
+#[tokio::test]
+async fn test_orchestrator_delegates_sync_entry_and_renames() {
+    let fs = MockFs::default();
+    fs.add_file("/saves/game.sav", 1000);
+
+    let drive = MockDrive::default();
+    drive.add_folder(&["Game".into()], "f_game");
+
+    let tracked = MockTrackedSync::default();
+    let auth = MockAuth::default();
+    *auth.token.lock().unwrap() = Some("token".into());
+
+    let launcher = MockLauncher::default();
+    let config = AppConfig {
+        credentials: Some(Credentials {
+            client_id: "c".into(),
+            client_secret: "s".into(),
+            refresh_token: Some("rt".into()),
+        }),
+        entries: Vec::new(),
+    };
+
+    let services = SyncServices {
+        files: fs,
+        search: drive.clone(),
+        folders: drive.clone(),
+        tracked_sync: tracked,
+        authorization: auth,
+        runner: launcher,
+    };
+
+    let factory = SyncOrchestratorFactory::new(services);
+    let synchronizer = factory.create(config, |_| {});
+
+    let game = sample_native_game("Game", "/saves/game.sav");
+
+    // 1. sync_entry through SaveSynchronizer
+    let sync_res = synchronizer.sync_entry(&game.entry).await;
+    assert_eq!(sync_res, Ok(true));
+
+    // 2. rename_game through SaveSynchronizer
+    let rename_res = synchronizer
+        .rename_game(&game.entry, None, "Game", "NewGame", &game.save_targets)
+        .await;
+    assert_eq!(rename_res, Ok(true));
+
+    // 3. rename_entry through SaveSynchronizer
+    let new_game = sample_native_game("NewGame", "/saves/game.sav");
+    let rename_entry_res = synchronizer
+        .rename_entry(&game.entry, &new_game.entry)
+        .await;
+    assert_eq!(rename_entry_res, Ok(true));
 }

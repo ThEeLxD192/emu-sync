@@ -15,8 +15,9 @@ pub use library::{
 pub use operation::{OperationCoordinator, OperationEvent};
 pub use sync::{
     CloudEntryMigration, CloudFolderMigrator, GameSyncLifecycle, ManualEntrySync, ManualFileSync,
-    MigrationError, PlannedSave, PostGameSync, PostSaveSync, PostSyncResult, ResolvedSaveTarget,
-    SaveTargetMapping, SaveTargetMappingError, SaveTargetResolver, SaveUploadTarget, SyncContext,
-    SyncOrchestrator, SyncOrchestratorFactory, SyncServices, SyncStatusChecker,
+    MigrationError, OneshotReceiver, OneshotSender, PlannedSave, PostGameSync, PostSaveSync,
+    PostSyncResult, ResolvedSaveTarget, SaveTargetMapping, SaveTargetMappingError,
+    SaveTargetResolver, SaveUploadTarget, SyncContext, SyncOrchestrator, SyncOrchestratorFactory,
+    SyncServices, SyncStatusChecker, directory_cloud_name, oneshot, project_directory_files,
 };
 pub use update::{UpdateCoordinator, UpdateState};

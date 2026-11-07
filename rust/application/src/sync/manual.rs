@@ -7,7 +7,7 @@ use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, DirectoryDownload, LocalSaveAccess,
     LocalSaveFiles, LocalSavePath, RemoteFile, RemoteState, SyncEvent, canonical_cloud_files,
 };
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 pub struct PlannedSave<P> {
     pub local: P,
@@ -112,15 +112,10 @@ where
             }
         }
 
-        let mut names: Vec<String> = local_files
-            .keys()
-            .chain(remote_files.keys())
-            .cloned()
-            .collect();
-        names.sort();
-        names.dedup();
+        let mut names: BTreeSet<String> = local_files.keys().cloned().collect();
+        names.extend(remote_files.keys().cloned());
 
-        let mut actions = Vec::new();
+        let mut actions = Vec::with_capacity(names.len());
         for name in names {
             let local = match local_files.remove(&name) {
                 Some(f) => f,
@@ -429,21 +424,20 @@ where
                 .validate_save_target_mappings(&configured_targets, &cloud_files)
                 .map_err(|e| e.to_string())?;
 
-            for target in folder_targets {
+            for (target, configured) in folder_targets.into_iter().zip(&configured_targets) {
                 (self.context.on_status)(SyncEvent::Syncing(format!(
                     "Syncing {}...",
                     target.display_name
                 )));
-                let configured = target.configured();
                 let reserved = self
                     .context
                     .mapping
-                    .reserved_cloud_names(&configured, &configured_targets, &cloud_files)
+                    .reserved_cloud_names(configured, &configured_targets, &cloud_files)
                     .map_err(|e| e.to_string())?;
                 let is_dir = self
                     .context
                     .mapping
-                    .is_directory(&configured, &cloud_files, &configured_targets)
+                    .is_directory(configured, &cloud_files, &configured_targets)
                     .map_err(|e| e.to_string())?;
 
                 if is_dir {
@@ -473,7 +467,7 @@ where
                         )
                         .await?;
                 } else {
-                    let drive_name = self.context.mapping.file_cloud_name(&configured);
+                    let drive_name = self.context.mapping.file_cloud_name(configured);
                     manual
                         .sync_file_manual(
                             &token,

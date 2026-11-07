@@ -36,9 +36,7 @@ struct CleanupGuard<'a> {
 impl<'a> Drop for CleanupGuard<'a> {
     fn drop(&mut self) {
         let mut lock = self.pending.lock().unwrap();
-        if let Some((id, _)) = &*lock
-            && *id == self.req_id
-        {
+        if lock.as_ref().is_some_and(|(id, _)| *id == self.req_id) {
             *lock = None;
         }
     }
@@ -95,7 +93,7 @@ where
     }
 
     pub fn next_request_id(&self) -> RequestId {
-        RequestId(self.request_counter.fetch_add(1, Ordering::SeqCst) + 1)
+        RequestId(self.request_counter.fetch_add(1, Ordering::Relaxed) + 1)
     }
 
     pub async fn request_conflict(
@@ -128,12 +126,12 @@ where
 
     pub fn resolve_conflict(&self, request: &SaveConflict, decision: Decision) {
         let mut lock = self.pending_conflict.lock().unwrap();
-        if let Some((id, tx)) = lock.take() {
-            if id == request.request_id {
-                let _ = tx.send(decision);
-            } else {
-                *lock = Some((id, tx));
-            }
+        if lock
+            .as_ref()
+            .is_some_and(|(id, _)| *id == request.request_id)
+            && let Some((_, tx)) = lock.take()
+        {
+            let _ = tx.send(decision);
         }
     }
 
@@ -158,13 +156,11 @@ where
     pub async fn retry_post_sync(&self, failure: &PostSyncFailure) -> Result<(), String> {
         let retry_fn = {
             let mut lock = self.pending_retry.lock().unwrap();
-            if let Some((id, f)) = lock.take() {
-                if id == failure.request_id {
-                    Some(f)
-                } else {
-                    *lock = Some((id, f));
-                    None
-                }
+            if lock
+                .as_ref()
+                .is_some_and(|(id, _)| *id == failure.request_id)
+            {
+                lock.take().map(|(_, f)| f)
             } else {
                 None
             }

@@ -357,44 +357,46 @@ where
             }
         }
 
-        // 2. Validate local destinations
-        let mut destinations: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut normalized_paths = Vec::with_capacity(targets.len());
+        let mut is_dir = Vec::with_capacity(targets.len());
         for target in targets {
             let norm = self
                 .files
                 .path(&target.path)
                 .normalized_path()
                 .map_err(|e| SaveTargetMappingError::LocalAccess(format!("{e:?}")))?;
-            let identity = if self.is_directory(target, cloud_files, targets)? {
+            normalized_paths.push(norm);
+            is_dir.push(self.is_directory(target, cloud_files, targets)?);
+        }
+
+        // 2. Validate local destinations
+        let mut destinations: HashMap<&str, HashSet<String>> = HashMap::new();
+        for (i, target) in targets.iter().enumerate() {
+            let identity = if is_dir[i] {
                 format!("directory:{}", target.cloud_path.as_deref().unwrap_or(""))
             } else {
                 format!("file:{}", self.file_cloud_name(target))
             };
-            destinations.entry(norm).or_default().insert(identity);
+            destinations
+                .entry(&normalized_paths[i])
+                .or_default()
+                .insert(identity);
         }
         if destinations.values().any(|set| set.len() > 1) {
             return Err(SaveTargetMappingError::ConflictingLocalDestinations);
         }
 
-        for file_target in targets {
-            if !self.is_directory(file_target, cloud_files, targets)? {
-                let file_norm = self
-                    .files
-                    .path(&file_target.path)
-                    .normalized_path()
-                    .map_err(|e| SaveTargetMappingError::LocalAccess(format!("{e:?}")))?;
-                for other in targets {
-                    let other_norm = self
-                        .files
-                        .path(&other.path)
-                        .normalized_path()
-                        .map_err(|e| SaveTargetMappingError::LocalAccess(format!("{e:?}")))?;
+        for (i, _file_target) in targets.iter().enumerate() {
+            if !is_dir[i] {
+                let file_norm = &normalized_paths[i];
+                for (j, other) in targets.iter().enumerate() {
+                    let other_norm = &normalized_paths[j];
                     if file_norm != other_norm {
                         let ancestors =
                             self.files.path(&other.path).ancestors().map_err(|e| {
                                 SaveTargetMappingError::LocalAccess(format!("{e:?}"))
                             })?;
-                        if ancestors.contains(&file_norm) {
+                        if ancestors.contains(file_norm) {
                             return Err(SaveTargetMappingError::FileIsParentOfAnother);
                         }
                     }
@@ -404,32 +406,28 @@ where
 
         // 3. Validate directory scopes
         let mut directories = Vec::new();
-        for target in targets {
-            if self.is_directory(target, cloud_files, targets)? {
-                let norm = self
-                    .files
-                    .path(&target.path)
-                    .normalized_path()
-                    .map_err(|e| SaveTargetMappingError::LocalAccess(format!("{e:?}")))?;
+        for (i, target) in targets.iter().enumerate() {
+            if is_dir[i] {
+                let norm = &normalized_paths[i];
                 if !directories
                     .iter()
-                    .any(|(n, cp): &(String, Option<String>)| {
-                        *n == norm && *cp == target.cloud_path
-                    })
+                    .any(|(n, cp): &(String, Option<String>)| n == norm && *cp == target.cloud_path)
                 {
-                    directories.push((norm, target.cloud_path.clone()));
+                    directories.push((norm.clone(), target.cloud_path.clone()));
                 }
             }
         }
 
         let scoped: Vec<_> = targets
             .iter()
-            .filter(|t| {
-                self.is_directory(t, cloud_files, targets).unwrap_or(false)
+            .enumerate()
+            .filter(|&(i, t)| {
+                is_dir[i]
                     && t.cloud_path
                         .as_deref()
                         .is_some_and(|p| !p.trim().is_empty())
             })
+            .map(|(_, t)| t)
             .collect();
 
         for (i, target) in scoped.iter().enumerate() {
@@ -448,8 +446,8 @@ where
         }
 
         // 4. Validate directory files
-        for target in targets {
-            if self.is_directory(target, cloud_files, targets)? {
+        for (i, target) in targets.iter().enumerate() {
+            if is_dir[i] {
                 let reserved = self.reserved_cloud_names(target, targets, cloud_files)?;
                 let projected = project_directory_files(cloud_files, target.cloud_path.as_deref());
                 let target_path = self.files.path(&target.path);
@@ -469,10 +467,9 @@ where
                 if destination_names.values().any(|set| set.len() > 1) {
                     return Err(SaveTargetMappingError::ConflictingRemoteToLocalPaths);
                 }
-                let dest_paths: HashSet<_> = destination_names.keys().cloned().collect();
-                for path in &dest_paths {
+                for path in destination_names.keys() {
                     if let Ok(ancestors) = self.files.path(path).ancestors()
-                        && ancestors.iter().any(|a| dest_paths.contains(a))
+                        && ancestors.iter().any(|a| destination_names.contains_key(a))
                     {
                         return Err(SaveTargetMappingError::ConflictingRemoteToLocalPaths);
                     }
@@ -483,17 +480,19 @@ where
         // 5. Validate legacy directories
         let legacy: Vec<_> = targets
             .iter()
-            .filter(|t| {
-                self.is_directory(t, cloud_files, targets).unwrap_or(false)
-                    && t.cloud_path.as_deref().is_none_or(|p| p.trim().is_empty())
+            .enumerate()
+            .filter(|&(i, t)| {
+                is_dir[i] && t.cloud_path.as_deref().is_none_or(|p| p.trim().is_empty())
             })
+            .map(|(_, t)| t)
             .collect();
 
         if legacy.len() >= 2 {
             let file_names: HashSet<_> = targets
                 .iter()
-                .filter(|t| !self.is_directory(t, cloud_files, targets).unwrap_or(false))
-                .map(|t| self.file_cloud_name(t))
+                .enumerate()
+                .filter(|&(i, _)| !is_dir[i])
+                .map(|(_, t)| self.file_cloud_name(t))
                 .collect();
             let legacy_files: Vec<_> = cloud_files
                 .iter()

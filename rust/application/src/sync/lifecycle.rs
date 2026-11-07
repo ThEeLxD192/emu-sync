@@ -72,7 +72,7 @@ where
             .and_then(|c| c.refresh_token.as_ref())
             .is_some();
 
-        let ready = match self.prepare_play(&mut prepared, setup).await {
+        let ready = match self.prepare_play(&mut prepared, has_drive, setup).await {
             Ok(r) => r,
             Err(err) => {
                 (self.context.on_status)(SyncEvent::Error(format!("Error: {err}")));
@@ -98,15 +98,9 @@ where
     async fn prepare_play(
         &self,
         prepared: &mut PlayPreparation,
+        has_drive: bool,
         setup: &(impl SaveSetup + Sync),
     ) -> Result<bool, String> {
-        let has_drive = self
-            .context
-            .config
-            .credentials
-            .as_ref()
-            .and_then(|c| c.refresh_token.as_ref())
-            .is_some();
         if !has_drive {
             return Ok(true);
         }
@@ -192,7 +186,7 @@ where
                     .is_directory(target, &cloud_files, &prepared.targets)
                     .map_err(|e| e.to_string())?;
 
-                if is_dir {
+                let sync_res = if is_dir {
                     let projected =
                         project_directory_files(&cloud_files, target.cloud_path.as_deref());
                     let target_cloud_files = self
@@ -218,12 +212,6 @@ where
                             true,
                         )
                         .await
-                        .map_err(|e| {
-                            format!(
-                                "Could not finish preparing saves for {}. Retry synchronization before playing: {e}",
-                                prepared.item.effective_title
-                            )
-                        })?;
                 } else {
                     let drive_name = self.context.mapping.file_cloud_name(target);
                     manual
@@ -238,13 +226,14 @@ where
                             true,
                         )
                         .await
-                        .map_err(|e| {
-                            format!(
-                                "Could not finish preparing saves for {}. Retry synchronization before playing: {e}",
-                                prepared.item.effective_title
-                            )
-                        })?;
-                }
+                };
+
+                sync_res.map_err(|e| {
+                    format!(
+                        "Could not finish preparing saves for {}. Retry synchronization before playing: {e}",
+                        prepared.item.effective_title
+                    )
+                })?;
             }
         }
 

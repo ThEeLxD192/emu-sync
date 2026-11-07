@@ -1,7 +1,7 @@
 //! Cloud folder migration with duplicate checks and rollback on failure or cancellation.
 
 use emusync_domain::sync::{CloudFileListing, CloudFolderStore, RemoteFile};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,6 +22,25 @@ pub enum MigrationError {
     },
 }
 
+fn format_recovery(
+    rollback_failures: &[String],
+    old_path: &[String],
+    new_path: &[String],
+) -> String {
+    if rollback_failures.is_empty() {
+        format!(
+            "Previously moved files were restored to '{}'.",
+            old_path.join("/")
+        )
+    } else {
+        format!(
+            "Some files remain in '{}': {}.",
+            new_path.join("/"),
+            rollback_failures.join(", ")
+        )
+    }
+}
+
 impl Display for MigrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -34,18 +53,7 @@ impl Display for MigrationError {
                 old_path,
                 new_path,
             } => {
-                let recovery = if rollback_failures.is_empty() {
-                    format!(
-                        "Previously moved files were restored to '{}'.",
-                        old_path.join("/")
-                    )
-                } else {
-                    format!(
-                        "Some files remain in '{}': {}.",
-                        new_path.join("/"),
-                        rollback_failures.join(", ")
-                    )
-                };
+                let recovery = format_recovery(rollback_failures, old_path, new_path);
                 write!(
                     f,
                     "Cloud migration failed: {reason}. {recovery} No folders were deleted."
@@ -56,18 +64,7 @@ impl Display for MigrationError {
                 old_path,
                 new_path,
             } => {
-                let recovery = if rollback_failures.is_empty() {
-                    format!(
-                        "Previously moved files were restored to '{}'.",
-                        old_path.join("/")
-                    )
-                } else {
-                    format!(
-                        "Some files remain in '{}': {}.",
-                        new_path.join("/"),
-                        rollback_failures.join(", ")
-                    )
-                };
+                let recovery = format_recovery(rollback_failures, old_path, new_path);
                 write!(
                     f,
                     "Cloud migration cancelled. {recovery} No folders were deleted."
@@ -211,35 +208,29 @@ where
             .await
             .map_err(|e| MigrationError::Listing(format!("{e:?}")))?;
 
-        let mut name_counts = HashMap::new();
-        for file in &source_files {
-            *name_counts.entry(&file.name).or_insert(0) += 1;
-        }
-        let duplicates: HashSet<_> = name_counts
-            .into_iter()
-            .filter(|(_, count)| *count > 1)
-            .map(|(name, _)| name.clone())
-            .collect();
+        let mut source_names = HashSet::with_capacity(source_files.len());
+        let mut collisions = BTreeSet::new();
 
-        let dest_names: HashSet<_> = destination_files.iter().map(|f| &f.name).collect();
-        let mut collisions: Vec<_> = duplicates
-            .into_iter()
-            .chain(
-                source_files
-                    .iter()
-                    .filter(|f| dest_names.contains(&f.name))
-                    .map(|f| f.name.clone()),
-            )
-            .collect();
-        collisions.sort();
-        collisions.dedup();
+        for file in &source_files {
+            if !source_names.insert(&file.name) {
+                collisions.insert(file.name.clone());
+            }
+        }
+
+        let dest_names: HashSet<&str> = destination_files.iter().map(|f| f.name.as_str()).collect();
+        for file in &source_files {
+            if dest_names.contains(file.name.as_str()) {
+                collisions.insert(file.name.clone());
+            }
+        }
 
         if !collisions.is_empty() {
+            let collision_list: Vec<String> = collisions.into_iter().collect();
             let msg = format!(
                 "Cloud folders '{}' and '{}' contain duplicate names: {}. Both copies were kept. Resolve the duplicates in Google Drive before renaming.",
                 old_path.join("/"),
                 new_path.join("/"),
-                collisions.join(", ")
+                collision_list.join(", ")
             );
             return Err(MigrationError::DuplicateNames(msg));
         }

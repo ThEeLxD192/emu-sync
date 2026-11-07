@@ -131,4 +131,80 @@ async fn sync_check_freshness_invalidation_matrix() {
     let req3 = checks.begin(&entry, &config);
     assert!(!checks.is_current(&req2, Some(&config)));
     assert!(checks.is_current(&req3, Some(&config)));
+
+    // 8. Stale when entry is edited in-place in current configuration
+    let mut modified_entry = entry.clone();
+    if let GameEntry::Native(ref mut n) = modified_entry {
+        n.common.executable_path = "/games/Metroid_v2".into();
+    }
+    let config_with_edited_entry = AppConfig {
+        credentials: config.credentials.clone(),
+        entries: vec![modified_entry],
+    };
+    assert!(!checks.is_current(&req3, Some(&config_with_edited_entry)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sync_check_stale_while_operation_is_busy_and_supports_independent_entries() {
+    let operations = Arc::new(OperationCoordinator::new());
+    let checks = EntrySyncChecks::new(Arc::clone(&operations), MockFactory);
+
+    let game_a = sample_entry("Zelda");
+    let game_b = sample_entry("Mario");
+
+    let config = AppConfig {
+        credentials: Some(Credentials {
+            client_id: "c".into(),
+            client_secret: "s".into(),
+            refresh_token: Some("rt".into()),
+        }),
+        entries: vec![game_a.clone(), game_b.clone()],
+    };
+
+    let req_a = checks.begin(&game_a, &config);
+    let req_b = checks.begin(&game_b, &config);
+
+    // Both are valid initially and independent
+    assert!(checks.is_current(&req_a, Some(&config)));
+    assert!(checks.is_current(&req_b, Some(&config)));
+
+    // A new check for game A only invalidates game A's previous check, NOT game B
+    let req_a2 = checks.begin(&game_a, &config);
+    assert!(!checks.is_current(&req_a, Some(&config)));
+    assert!(checks.is_current(&req_a2, Some(&config)));
+    assert!(checks.is_current(&req_b, Some(&config)));
+
+    // While an operation is actively running (is_busy == true), checks are stale
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (finish_tx, finish_rx) = tokio::sync::oneshot::channel();
+
+    let ops_clone = Arc::clone(&operations);
+    let task = tokio::spawn(async move {
+        ops_clone
+            .run_if_idle(async move {
+                let _ = started_tx.send(());
+                let _ = finish_rx.await;
+            })
+            .await
+    });
+
+    started_rx.await.unwrap();
+    assert!(operations.is_busy());
+
+    // Both checks must report stale because the system is busy
+    assert!(!checks.is_current(&req_a2, Some(&config)));
+    assert!(!checks.is_current(&req_b, Some(&config)));
+
+    // Release operation
+    let _ = finish_tx.send(());
+    let _ = task.await;
+
+    assert!(!operations.is_busy());
+    // Once operation completes, revision also changed so previous checks remain stale
+    assert!(!checks.is_current(&req_a2, Some(&config)));
+    assert!(!checks.is_current(&req_b, Some(&config)));
+
+    // A fresh check after the operation completes is valid
+    let req_b2 = checks.begin(&game_b, &config);
+    assert!(checks.is_current(&req_b2, Some(&config)));
 }

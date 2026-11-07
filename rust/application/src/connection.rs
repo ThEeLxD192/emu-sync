@@ -112,17 +112,15 @@ impl<S: ConfigurationStore, A: CloudAuthorization> CloudConnection<S, A> {
                 authorized: false,
             };
         }
-        match self.authorization.authorize(cfg, true).await {
-            Ok(_) => ConnectionResult {
-                config: self.store.load().ok(),
-                message: "Google Drive successfully connected!".into(),
-                authorized: true,
-            },
-            Err(err) => ConnectionResult {
-                config: self.store.load().ok(),
-                message: format!("Google Drive login failed: {err}"),
-                authorized: false,
-            },
+        let (authorized, message) = match self.authorization.authorize(cfg, true).await {
+            Ok(_) => (true, "Google Drive successfully connected!".into()),
+            Err(err) => (false, format!("Google Drive login failed: {err}")),
+        };
+
+        ConnectionResult {
+            config: self.store.load().ok(),
+            message,
+            authorized,
         }
     }
 

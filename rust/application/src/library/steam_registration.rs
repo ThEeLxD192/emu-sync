@@ -1,7 +1,7 @@
 //! Registers or unregisters Steam shortcuts and updates the entry's steam_app_id.
 
 use super::edit_library::EntryEditResult;
-use emusync_domain::config::{AppConfig, ConfigurationStore};
+use emusync_domain::config::ConfigurationStore;
 use emusync_domain::library::{GameEntry, SteamLibrary};
 
 pub struct SteamRegistration<S, St> {
@@ -77,30 +77,28 @@ impl<S: ConfigurationStore, St: SteamLibrary> SteamRegistration<S, St> {
             None
         };
 
+        let latest_name = latest.common().name.clone();
         let updated = self
             .store
-            .update(|current| {
-                let entries = current
+            .update(|mut current| {
+                if let Some(e) = current
                     .entries
-                    .into_iter()
-                    .map(|mut e| {
-                        if e.common().name == latest.common().name {
-                            match &mut e {
-                                GameEntry::Emulator(emu) => emu.common.steam_app_id = app_id,
-                                GameEntry::Native(nat) => nat.common.steam_app_id = app_id,
-                            }
-                        }
-                        e
-                    })
-                    .collect();
-                AppConfig { entries, ..current }
+                    .iter_mut()
+                    .find(|e| e.common().name == latest_name)
+                {
+                    match e {
+                        GameEntry::Emulator(emu) => emu.common.steam_app_id = app_id,
+                        GameEntry::Native(nat) => nat.common.steam_app_id = app_id,
+                    }
+                }
+                current
             })
             .map_err(SteamRegistrationError::Store)?;
 
         let edited_entry = updated
             .entries
             .iter()
-            .find(|e| e.common().name == latest.common().name)
+            .find(|e| e.common().name == latest_name)
             .cloned()
             .ok_or(SteamRegistrationError::CategoryNotFound)?;
 
