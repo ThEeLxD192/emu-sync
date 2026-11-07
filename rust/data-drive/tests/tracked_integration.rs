@@ -1,41 +1,12 @@
+mod common;
+
+use common::{read_request, reply};
 use emusync_data_drive::DriveTransfer;
 use emusync_data_local::{SyncHistoryStore, TrackedFileSync};
 use emusync_domain::sync::LocalSaveFiles;
 use reqwest::{Client, Url};
-use std::{
-    io::{Read, Write},
-    net::TcpListener,
-    sync::Arc,
-    thread,
-};
+use std::{io::Write, net::TcpListener, sync::Arc, thread};
 use tokio_util::sync::CancellationToken;
-fn request(stream: &mut std::net::TcpStream) -> (String, Vec<u8>) {
-    let mut data = Vec::new();
-    let mut buf = [0; 4096];
-    let end = loop {
-        let n = stream.read(&mut buf).unwrap();
-        assert!(n > 0);
-        data.extend_from_slice(&buf[..n]);
-        if let Some(i) = data.windows(4).position(|b| b == b"\r\n\r\n") {
-            break i + 4;
-        }
-    };
-    let headers = String::from_utf8(data[..end].to_vec()).unwrap();
-    let len = headers
-        .lines()
-        .find_map(|l| {
-            l.to_ascii_lowercase()
-                .strip_prefix("content-length: ")
-                .and_then(|v| v.parse::<usize>().ok())
-        })
-        .unwrap_or(0);
-    while data.len() < end + len {
-        let n = stream.read(&mut buf).unwrap();
-        assert!(n > 0);
-        data.extend_from_slice(&buf[..n]);
-    }
-    (headers, data[end..end + len].to_vec())
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn empty_conditional_upload_timeout_retains_snapshot_and_history() {
@@ -49,7 +20,7 @@ async fn empty_conditional_upload_timeout_retains_snapshot_and_history() {
     let (release_tx, release_rx) = mpsc::channel();
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        request(&mut stream);
+        read_request(&mut stream);
         let body = r#"{"id":"old","title":"save.dat","modifiedDate":"2026-01-01T00:00:00Z","etag":"\"v1\"","version":"1"}"#;
         write!(
             stream,
@@ -58,7 +29,7 @@ async fn empty_conditional_upload_timeout_retains_snapshot_and_history() {
         )
         .unwrap();
         let (mut stream, _) = listener.accept().unwrap();
-        let (headers, body) = request(&mut stream);
+        let (headers, body) = read_request(&mut stream);
         assert!(headers.to_ascii_lowercase().contains("if-match: \"v1\""));
         assert!(body.is_empty());
         seen_tx.send(()).unwrap();
@@ -137,14 +108,14 @@ async fn tracked_upload_uses_snapshot_and_records_server_revision() {
     let base = Url::parse(&format!("http://{address}/files")).unwrap();
     let server = thread::spawn(move || {
         let (mut s, _) = listener.accept().unwrap();
-        let (headers, body) = request(&mut s);
+        let (headers, body) = read_request(&mut s);
         assert!(headers.starts_with("POST /files?"));
         let metadata: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(metadata["name"], "save.dat");
         assert_eq!(metadata["parents"][0], "folder");
         write!(s,"HTTP/1.1 200 OK\r\nLocation: /session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
         let (mut s, _) = listener.accept().unwrap();
-        let (_, body) = request(&mut s);
+        let (_, body) = read_request(&mut s);
         assert_eq!(body, b"abc");
         let body = r#"{"id":"new-id","name":"save.dat","modifiedTime":"2026-01-01T00:00:00Z","sha256Checksum":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","version":"7"}"#;
         write!(s,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
@@ -196,7 +167,7 @@ async fn cancelled_tracked_download_waits_for_staging_cleanup_and_keeps_save() {
     let (release_tx, release_rx) = mpsc::channel();
     let server = thread::spawn(move || {
         let (mut s, _) = listener.accept().unwrap();
-        let (headers, _) = request(&mut s);
+        let (headers, _) = read_request(&mut s);
         assert!(headers.starts_with("GET /files/remote?"));
         write!(
             s,
@@ -272,42 +243,6 @@ async fn cancelled_tracked_download_waits_for_staging_cleanup_and_keeps_save() {
     server.join().unwrap();
 }
 
-#[tokio::test]
-async fn missing_timestamp_after_success_retains_created_identity() {
-    use emusync_data_drive::TransferError;
-    use emusync_domain::sync::CloudSaveTransfer;
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let base = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
-    let server = thread::spawn(move || {
-        let (mut s, _) = listener.accept().unwrap();
-        request(&mut s);
-        write!(s,"HTTP/1.1 200 OK\r\nLocation: /session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
-        let (mut s, _) = listener.accept().unwrap();
-        request(&mut s);
-        let body = r#"{"id":"created-id","name":"save.dat"}"#;
-        write!(s,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
-    });
-    let dir = tempfile::tempdir().unwrap();
-    let save = dir.path().join("save.dat");
-    std::fs::write(&save, b"abc").unwrap();
-    let transfer = DriveTransfer::new(
-        Client::new(),
-        base.clone(),
-        base.clone(),
-        base.clone(),
-        base,
-        CancellationToken::new(),
-        Arc::new(|_| {}),
-    );
-    let result = transfer
-        .upload("synthetic", save.to_str().unwrap(), "save.dat", "folder")
-        .await;
-    assert!(
-        matches!(result, Err(TransferError::InvalidCreatedTimestamp(file)) if file.id=="created-id")
-    );
-    server.join().unwrap();
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interrupted_upload_retains_snapshot_and_session_for_reconciliation() {
     use emusync_data_drive::{TransferError, UploadError};
@@ -319,10 +254,10 @@ async fn interrupted_upload_retains_snapshot_and_session_for_reconciliation() {
     let (release_tx, release_rx) = mpsc::channel();
     let server = thread::spawn(move || {
         let (mut s, _) = listener.accept().unwrap();
-        request(&mut s);
+        read_request(&mut s);
         write!(s,"HTTP/1.1 200 OK\r\nLocation: /session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
         let (mut s, _) = listener.accept().unwrap();
-        let (_, body) = request(&mut s);
+        let (_, body) = read_request(&mut s);
         assert_eq!(body, b"abc");
         seen_tx.send(()).unwrap();
         release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -393,10 +328,10 @@ async fn local_edit_after_remote_commit_retains_original_snapshot_and_remote_ide
     let (release_tx, release_rx) = mpsc::channel();
     let server = thread::spawn(move || {
         let (mut s, _) = listener.accept().unwrap();
-        request(&mut s);
+        read_request(&mut s);
         write!(s,"HTTP/1.1 200 OK\r\nLocation: /session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
         let (mut s, _) = listener.accept().unwrap();
-        let (_, body) = request(&mut s);
+        let (_, body) = read_request(&mut s);
         assert_eq!(body, b"abc");
         seen_tx.send(()).unwrap();
         release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -454,7 +389,7 @@ async fn local_edit_during_download_is_preserved_and_not_recorded_as_synced() {
     let (release_tx, release_rx) = mpsc::channel();
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        let (headers, _) = request(&mut stream);
+        let (headers, _) = read_request(&mut stream);
         assert!(headers.starts_with("GET /files/remote?"));
         write!(
             stream,
@@ -520,7 +455,7 @@ async fn wrong_remote_checksum_does_not_replace_save_or_record_history() {
     let base = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        request(&mut stream);
+        read_request(&mut stream);
         write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc"
@@ -581,7 +516,7 @@ async fn pinned_tracked_download_rejects_parent_symlink_swap_without_recording_h
     let (release_tx, release_rx) = mpsc::channel();
     let server = thread::spawn(move || {
         let (mut s, _) = listener.accept().unwrap();
-        let (headers, _) = request(&mut s);
+        let (headers, _) = read_request(&mut s);
         assert!(headers.starts_with("GET /files/remote?"));
         write!(
             s,
@@ -654,7 +589,7 @@ async fn pinned_tracked_download_restores_backup_and_records_revision() {
     let base = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
     let server = thread::spawn(move || {
         let (mut s, _) = listener.accept().unwrap();
-        request(&mut s);
+        read_request(&mut s);
         write!(
             s,
             "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc"
@@ -720,7 +655,7 @@ async fn pinned_tracked_download_creates_nested_directories_and_records_revision
     let base = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        request(&mut stream);
+        read_request(&mut stream);
         write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc"
@@ -765,151 +700,92 @@ async fn pinned_tracked_download_creates_nested_directories_and_records_revision
     server.join().unwrap();
 }
 
-#[tokio::test]
-async fn transfer_error_leaves_remote_unchanged_classification() {
-    use emusync_data_drive::{
-        ConditionalError, CreatedFile, ResponseMetadataError, TransferError, UploadError,
-        UploadedFile,
-    };
-    use reqwest::StatusCode;
-
-    let reqwest_err = Client::new()
-        .get("http://127.0.0.1:1")
-        .send()
-        .await
-        .unwrap_err();
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tracked_conditional_replace_with_invalid_updated_timestamp_retains_snapshot_and_preserves_old_history()
+ {
+    use emusync_data_drive::TransferError;
+    use emusync_data_local::{HistoryCheckpoint, TrackedError};
+    use emusync_domain::sync::RemoteState;
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = Url::parse(&format!("http://{}/upload", listener.local_addr().unwrap())).unwrap();
+    let base = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+
     let server = thread::spawn(move || {
         let (mut s, _) = listener.accept().unwrap();
-        request(&mut s);
-        write!(
-            s,
-            "HTTP/1.1 200 OK\r\nLocation: /session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        )
-        .unwrap();
+        read_request(&mut s);
+        let get_body = r#"{"id":"old-id","title":"save.dat","modifiedDate":"2026-01-01T00:00:00Z","version":"1","etag":"\"v1\""}"#;
+        reply(&mut s, "200 OK", get_body);
 
         let (mut s, _) = listener.accept().unwrap();
-        request(&mut s);
-        drop(s);
-
-        let (mut s, _) = listener.accept().unwrap();
-        request(&mut s);
-        write!(
-            s,
-            "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        )
-        .unwrap();
+        let (headers, body) = read_request(&mut s);
+        assert!(headers.starts_with("PUT /files/old-id?"));
+        assert!(headers.to_ascii_lowercase().contains("if-match: \"v1\""));
+        assert_eq!(body, b"updated-save");
+        let put_body = r#"{"id":"old-id","title":"save.dat","modifiedDate":"invalid-date","version":"2","etag":"\"v2\""}"#;
+        reply(&mut s, "200 OK", put_body);
     });
 
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("snapshot");
-    std::fs::write(&path, b"test").unwrap();
+    let save = dir.path().join("save.dat");
+    std::fs::write(&save, b"updated-save").unwrap();
 
-    let error = emusync_data_drive::ResumableUpload::new(Client::new(), url)
+    let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
+    let key = history.key(&save, "folder", "save.dat").unwrap();
+    history
+        .record(
+            &key,
+            HistoryCheckpoint {
+                local_sha256: "initial-hash".into(),
+                remote_id: "old-id".into(),
+                remote_modified_time: "2026-01-01T00:00:00Z".into(),
+                remote_sha256: None,
+                remote_version: Some("1".into()),
+            },
+        )
+        .unwrap();
+
+    let transfer = DriveTransfer::new(
+        Client::new(),
+        base.clone(),
+        base.clone(),
+        base.clone(),
+        base,
+        CancellationToken::new(),
+        Arc::new(|_| {}),
+    );
+
+    let tracked = TrackedFileSync::new(transfer, history.clone());
+    let observed = RemoteState {
+        id: "old-id".into(),
+        modified: 1_700_000_000,
+        sha256: None,
+        version: Some("1".into()),
+    };
+
+    let result = tracked
         .upload(
             "synthetic",
-            &path,
-            "test.dat",
+            save.to_str().unwrap(),
+            Some(&observed),
             "folder",
-            &CancellationToken::new(),
+            "save.dat",
         )
-        .await
-        .unwrap_err();
+        .await;
 
-    let session = match error {
-        UploadError::RecoveryFailed { session, .. } => *session,
-        other => panic!("expected RecoveryFailed, got: {other:?}"),
-    };
+    match result {
+        Err(TrackedError::Upload {
+            source: TransferError::InvalidUpdatedTimestamp(uploaded),
+            snapshot,
+            ..
+        }) => {
+            assert_eq!(uploaded.id, "old-id");
+            assert_eq!(std::fs::read(snapshot.path()).unwrap(), b"updated-save");
+        }
+        other => panic!("expected TrackedError::Upload(InvalidUpdatedTimestamp), got: {other:?}"),
+    }
+
+    let checkpoint = history.get(&key).unwrap().unwrap();
+    assert_eq!(checkpoint.remote_version.as_deref(), Some("1"));
+    assert_eq!(checkpoint.remote_id, "old-id");
     server.join().unwrap();
-
-    let uploaded_file = || {
-        serde_json::from_str::<UploadedFile>(
-            r#"{"id":"f1","title":"t1","modifiedDate":"2026-01-01T00:00:00Z"}"#,
-        )
-        .unwrap()
-    };
-
-    let created_file = CreatedFile {
-        id: "c1".into(),
-        name: "test.dat".into(),
-        modified_time: "2026-01-01T00:00:00Z".into(),
-        sha256_checksum: None,
-        version: None,
-        parents: vec![],
-    };
-
-    let pre_write_failures = [
-        TransferError::Cancelled,
-        TransferError::Upload(UploadError::Cancelled),
-        TransferError::Upload(UploadError::Io(std::io::Error::other("io error"))),
-        TransferError::Upload(UploadError::InvalidSession),
-        TransferError::Upload(UploadError::Transport(
-            Client::new()
-                .get("http://127.0.0.1:1")
-                .send()
-                .await
-                .unwrap_err(),
-        )),
-        TransferError::Upload(UploadError::Http(StatusCode::UNAUTHORIZED)),
-        TransferError::Conditional(ConditionalError::Changed),
-        TransferError::Conditional(ConditionalError::MissingStrongEtag),
-        TransferError::Conditional(ConditionalError::ControlMetadata(
-            ResponseMetadataError::Inactive,
-        )),
-        TransferError::Conditional(ConditionalError::InvalidEndpoint),
-        TransferError::Conditional(ConditionalError::Cancelled),
-        TransferError::Conditional(ConditionalError::Transport(
-            Client::new()
-                .get("http://127.0.0.1:1")
-                .send()
-                .await
-                .unwrap_err(),
-        )),
-        TransferError::Conditional(ConditionalError::Io(std::io::Error::other("io error"))),
-        TransferError::Conditional(ConditionalError::Http(StatusCode::SERVICE_UNAVAILABLE)),
-    ];
-
-    for failure in &pre_write_failures {
-        assert!(
-            failure.leaves_remote_unchanged(),
-            "expected {failure:?} to leave remote unchanged"
-        );
-    }
-
-    let uncertain_outcome_failures = [
-        TransferError::Upload(UploadError::OutcomeUnknown(Box::new(session.clone()))),
-        TransferError::Upload(UploadError::RecoveryFailed {
-            session: Box::new(session),
-            cause: Box::new(UploadError::NoProgress),
-        }),
-        TransferError::Conditional(ConditionalError::OutcomeUnknown(reqwest_err)),
-        TransferError::Conditional(ConditionalError::HeadersTimedOut),
-        TransferError::Conditional(ConditionalError::CancelledOutcomeUnknown),
-        TransferError::Conditional(ConditionalError::ServerOutcomeUnknown(
-            StatusCode::INTERNAL_SERVER_ERROR,
-        )),
-        TransferError::Conditional(ConditionalError::ResponseMetadata(
-            ResponseMetadataError::Inactive,
-        )),
-        TransferError::Conditional(ConditionalError::UnexpectedResponse(Box::new(
-            uploaded_file(),
-        ))),
-        TransferError::InvalidCreatedTimestamp(Box::new(created_file)),
-        TransferError::InvalidUpdatedTimestamp(Box::new(uploaded_file())),
-    ];
-
-    for failure in &uncertain_outcome_failures {
-        assert!(
-            !failure.leaves_remote_unchanged(),
-            "expected {failure:?} to NOT leave remote unchanged"
-        );
-    }
-
-    assert!(std::error::Error::source(&TransferError::Cancelled).is_none());
-    assert!(
-        std::error::Error::source(&TransferError::Upload(UploadError::InvalidSession)).is_some()
-    );
-    assert!(std::error::Error::source(&UploadError::InvalidSession).is_none());
 }

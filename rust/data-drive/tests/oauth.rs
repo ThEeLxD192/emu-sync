@@ -1,7 +1,7 @@
 use emusync_data_drive::{OAuth, OAuthError};
 use emusync_data_local::ConfigManager;
 use emusync_domain::{
-    config::{AppConfig, ConfigurationStore, Credentials},
+    config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
     library::{GameEntry, NativeGame},
 };
 use reqwest::{Client, Url};
@@ -186,61 +186,51 @@ async fn invalid_grant_clears_only_current_refresh_token() {
     );
 }
 
-struct SyntheticBrowser {
-    callback: std::net::SocketAddr,
-}
-impl emusync_domain::execution::BrowserLauncher for SyntheticBrowser {
-    type Error = std::io::Error;
-    fn open(&self, url: &str) -> Result<(), Self::Error> {
-        let url = Url::parse(url).unwrap();
-        let state = url
-            .query_pairs()
-            .find(|(key, _)| key == "state")
-            .unwrap()
-            .1
-            .into_owned();
-        let address = self.callback;
-        thread::spawn(move || {
-            let mut stream = std::net::TcpStream::connect(address).unwrap();
-            write!(stream, "GET /?state={state}&code=synthetic-code HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").unwrap();
-            let mut response = String::new();
-            stream.read_to_string(&mut response).unwrap();
-            assert!(response.starts_with("HTTP/1.1 200"));
-        });
-        Ok(())
-    }
-}
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn composed_browser_callback_exchanges_and_persists_tokens() {
-    use emusync_data_drive::InteractiveOAuth;
-    use emusync_domain::config::CredentialStore;
-    let (_dir, store, config) = setup(None);
-    let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
-    let callback = reservation.local_addr().unwrap();
-    drop(reservation);
+async fn invalid_grant_with_interactive_allowed_clears_stale_refresh_and_completes_interactive_exchange()
+ {
+    let (_dir, store, config) = setup(Some("old"));
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let token_url =
-        Url::parse(&format!("http://{}/token", listener.local_addr().unwrap())).unwrap();
+    let url = Url::parse(&format!("http://{}/token", listener.local_addr().unwrap())).unwrap();
+
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        let mut request = [0; 4096];
-        let n = stream.read(&mut request).unwrap();
-        assert!(String::from_utf8_lossy(&request[..n]).starts_with("POST /token"));
-        let body = r#"{"access_token":"access","refresh_token":"refresh"}"#;
-        write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+        let mut data = [0; 4096];
+        let n = stream.read(&mut data).unwrap();
+        let req = String::from_utf8_lossy(&data[..n]);
+        assert!(req.starts_with("POST /token"));
+        assert!(req.contains("grant_type=refresh_token"));
+        let body = r#"{"error":"invalid_grant"}"#;
+        write!(
+            stream,
+            "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+
+        let (mut stream, _) = listener.accept().unwrap();
+        let n = stream.read(&mut data).unwrap();
+        let req = String::from_utf8_lossy(&data[..n]);
+        assert!(req.starts_with("POST /token"));
+        assert!(req.contains("grant_type=authorization_code"));
+        let body = r#"{"access_token":"fresh-access","refresh_token":"fresh-refresh"}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
     });
-    let oauth = InteractiveOAuth::with_endpoints(
-        Client::new(),
-        Shared(store.clone()),
-        Arc::new(SyntheticBrowser { callback }),
-        token_url,
-        Url::parse("https://example.invalid/auth").unwrap(),
-        callback,
-        format!("http://{callback}"),
-    );
-    let (access, revision) = oauth.authorize_scoped(&config, true).await.unwrap();
-    assert_eq!(revision, store.snapshot(&config).unwrap());
-    assert_eq!(access, "access");
+
+    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let (access, snapshot) = oauth
+        .authorize_scoped(&config, true, |_| async { Ok("interactive-code".into()) })
+        .await
+        .unwrap();
+
+    assert_eq!(access, "fresh-access");
+    assert_eq!(snapshot, store.snapshot(&config).unwrap());
+    assert_eq!(snapshot.revision, 3);
     assert_eq!(
         store
             .load()
@@ -249,7 +239,199 @@ async fn composed_browser_callback_exchanges_and_persists_tokens() {
             .unwrap()
             .refresh_token
             .as_deref(),
-        Some("refresh")
+        Some("fresh-refresh")
     );
     server.join().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn non_invalid_grant_refresh_failure_preserves_existing_refresh_token_and_never_starts_interactive()
+ {
+    let (_dir, store, config) = setup(Some("old"));
+    let (url, seen, go, server) =
+        server("400 Bad Request", r#"{"error":"temporarily_unavailable"}"#);
+    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+
+    let interactive_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let spy = interactive_started.clone();
+
+    let task = tokio::spawn(async move {
+        oauth
+            .authorize(&config, true, |_| {
+                spy.store(true, std::sync::atomic::Ordering::SeqCst);
+                async { Ok("code".into()) }
+            })
+            .await
+    });
+
+    seen.recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    go.send(()).unwrap();
+
+    let result = task.await.unwrap();
+    assert!(matches!(result, Err(OAuthError::Provider(_))));
+    assert!(!interactive_started.load(std::sync::atomic::Ordering::SeqCst));
+    server.join().unwrap();
+
+    assert_eq!(
+        store
+            .load()
+            .unwrap()
+            .credentials
+            .unwrap()
+            .refresh_token
+            .as_deref(),
+        Some("old")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejects_blank_access_tokens()
+ {
+    {
+        let (_dir, store, config) = setup(None);
+        let (url, seen, go, server) = server(
+            "200 OK",
+            r#"{"access_token":"fresh","refresh_token":"new-refresh"}"#,
+        );
+        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+
+        let task_config = config.clone();
+        let task = tokio::spawn(async move {
+            oauth
+                .authorize(&task_config, true, |_| async { Ok("code".into()) })
+                .await
+        });
+
+        seen.recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        store
+            .update(|mut current| {
+                current.credentials = Some(Credentials {
+                    client_id: "mutated-client".into(),
+                    client_secret: "mutated-secret".into(),
+                    refresh_token: Some("mutated-refresh".into()),
+                });
+                current
+            })
+            .unwrap();
+        go.send(()).unwrap();
+
+        let result = task.await.unwrap();
+        assert!(matches!(result, Err(OAuthError::ConnectionChanged)));
+        server.join().unwrap();
+
+        let loaded = store.load().unwrap().credentials.unwrap();
+        assert_eq!(loaded.client_id, "mutated-client");
+        assert_eq!(loaded.refresh_token.as_deref(), Some("mutated-refresh"));
+    }
+
+    {
+        let (_dir, store, _) = setup(None);
+        let oauth = OAuth::new(
+            Client::new(),
+            Shared(store.clone()),
+            Url::parse("http://127.0.0.1:1/token").unwrap(),
+        );
+
+        for (id, secret) in [("", "secret"), ("client", "  "), (" ", " ")] {
+            let config = AppConfig {
+                credentials: Some(Credentials {
+                    client_id: id.into(),
+                    client_secret: secret.into(),
+                    refresh_token: None,
+                }),
+                entries: vec![],
+            };
+            let result = oauth
+                .authorize(&config, true, |_| async { Ok("code".into()) })
+                .await;
+            assert!(matches!(result, Err(OAuthError::MissingCredentials)));
+        }
+    }
+
+    {
+        let (_dir, store, config) = setup(None);
+        let (url, seen, go, server) = server(
+            "200 OK",
+            r#"{"access_token":"   ","refresh_token":"should-not-persist"}"#,
+        );
+        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+
+        let task = tokio::spawn(async move {
+            oauth
+                .authorize(&config, true, |_| async { Ok("code".into()) })
+                .await
+        });
+
+        seen.recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        go.send(()).unwrap();
+
+        let result = task.await.unwrap();
+        match result {
+            Err(OAuthError::Provider(msg)) => {
+                assert_eq!(msg, "missing access token");
+            }
+            other => panic!("expected Provider('missing access token'), got: {other:?}"),
+        }
+        server.join().unwrap();
+
+        assert_eq!(
+            store.load().unwrap().credentials.unwrap().refresh_token,
+            None
+        );
+    }
+
+    {
+        let (_dir, store, _) = setup(None);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = Url::parse(&format!("http://{}/token", listener.local_addr().unwrap())).unwrap();
+        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+
+        let stale_config = AppConfig {
+            credentials: Some(Credentials {
+                client_id: "stale-client".into(),
+                client_secret: "stale-secret".into(),
+                refresh_token: None,
+            }),
+            entries: vec![],
+        };
+
+        let result = oauth
+            .authorize_scoped(&stale_config, true, |_| async { Ok("code".into()) })
+            .await;
+        assert!(matches!(result, Err(OAuthError::ConnectionChanged)));
+
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+
+    {
+        let (_dir, store, config) = setup(Some("old"));
+        let (url, seen, go, server) = server("200 OK", r#"{"access_token":"   "}"#);
+        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+
+        let task = tokio::spawn(async move {
+            oauth
+                .authorize(&config, true, |_| async { Ok("code".into()) })
+                .await
+        });
+
+        seen.recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        go.send(()).unwrap();
+
+        let result = task.await.unwrap();
+        match result {
+            Err(OAuthError::Provider(msg)) => {
+                assert_eq!(msg, "missing access token");
+            }
+            other => panic!("expected Provider('missing access token'), got: {other:?}"),
+        }
+        server.join().unwrap();
+    }
 }

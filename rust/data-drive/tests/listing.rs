@@ -286,3 +286,165 @@ async fn invalid_identities_in_get_by_id_fail_without_network() {
         std::io::ErrorKind::WouldBlock
     );
 }
+
+#[tokio::test]
+async fn repeated_page_token_aborts_pagination_loop_and_blank_next_token_terminates_cleanly() {
+    use emusync_data_drive::ListingError;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+
+    let server = thread::spawn(move || {
+        for i in 0..3 {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut buf = [0; 4096];
+            let n = s.read(&mut buf).unwrap();
+            let req = String::from_utf8_lossy(&buf[..n]);
+            let body = match i {
+                0 => r#"{"nextPageToken":"tok1","files":[]}"#,
+                1 => {
+                    assert!(req.contains("pageToken=tok1"));
+                    r#"{"nextPageToken":"tok2","files":[]}"#
+                }
+                2 => {
+                    assert!(req.contains("pageToken=tok2"));
+                    r#"{"nextPageToken":"tok1","files":[]}"#
+                }
+                _ => unreachable!(),
+            };
+            write!(
+                s,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        }
+
+        let (mut s, _) = listener.accept().unwrap();
+        let mut buf = [0; 4096];
+        let _ = s.read(&mut buf).unwrap();
+        let body = r#"{"nextPageToken":"   ","files":[{"id":"f1","name":"save1.dat","modifiedTime":"2026-01-01T00:00:00Z"}]}"#;
+        write!(
+            s,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+
+        listener.set_nonblocking(true).unwrap();
+        listener
+    });
+
+    let listing = DriveListing::new(Client::new(), url);
+
+    let res = listing.list_files("synthetic", "folder").await;
+    assert!(matches!(res, Err(ListingError::RepeatedPage)));
+
+    let files = listing.list_files("synthetic", "folder").await.unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].id, "f1");
+
+    let listener = server.join().unwrap();
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}
+
+#[tokio::test]
+async fn malformed_rfc3339_timestamp_and_non_200_status_fail_with_typed_listing_errors() {
+    use emusync_data_drive::ListingError;
+    use reqwest::StatusCode;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+
+    let server = thread::spawn(move || {
+        // 1. Corrupted modifiedTime in list_files
+        let (mut s, _) = listener.accept().unwrap();
+        let mut buf = [0; 1024];
+        let _ = s.read(&mut buf).unwrap();
+        let body = r#"{"files":[{"id":"f1","name":"save1.dat","modifiedTime":"corrupted-date"}]}"#;
+        write!(
+            s,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+
+        // 2. Corrupted modifiedTime in get_by_id
+        let (mut s, _) = listener.accept().unwrap();
+        let _ = s.read(&mut buf).unwrap();
+        let body = r#"{"id":"f1","name":"save1.dat","modifiedTime":"corrupted-date"}"#;
+        write!(
+            s,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+
+        // 3. 401 Unauthorized in list_files
+        let (mut s, _) = listener.accept().unwrap();
+        let _ = s.read(&mut buf).unwrap();
+        write!(
+            s,
+            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+
+        // 4. 401 Unauthorized in find_by_name
+        let (mut s, _) = listener.accept().unwrap();
+        let _ = s.read(&mut buf).unwrap();
+        write!(
+            s,
+            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+
+        // 5. 401 Unauthorized in get_by_id_in_parent
+        let (mut s, _) = listener.accept().unwrap();
+        let _ = s.read(&mut buf).unwrap();
+        write!(
+            s,
+            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+    });
+
+    let listing = DriveListing::new(Client::new(), url);
+
+    // 1. Corrupted timestamp in list_files
+    let res = listing.list_files("synthetic", "folder").await;
+    assert!(matches!(res, Err(ListingError::Timestamp)));
+
+    // 2. Corrupted timestamp in get_by_id
+    let res = listing.get_by_id("synthetic", "f1").await;
+    assert!(matches!(res, Err(ListingError::Timestamp)));
+
+    // 3. 401 Unauthorized in list_files
+    let res = listing.list_files("synthetic", "folder").await;
+    assert!(matches!(
+        res,
+        Err(ListingError::Http(StatusCode::UNAUTHORIZED))
+    ));
+
+    // 4. 401 Unauthorized in find_by_name
+    let res = listing
+        .find_by_name("synthetic", "save1.dat", Some("folder"))
+        .await;
+    assert!(matches!(
+        res,
+        Err(ListingError::Http(StatusCode::UNAUTHORIZED))
+    ));
+
+    // 5. 401 Unauthorized in get_by_id_in_parent
+    let res = listing
+        .get_by_id_in_parent("synthetic", "f1", "folder")
+        .await;
+    assert!(matches!(
+        res,
+        Err(ListingError::Http(StatusCode::UNAUTHORIZED))
+    ));
+
+    server.join().unwrap();
+}

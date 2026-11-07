@@ -1,11 +1,10 @@
+mod common;
+
+use common::{read_request, reply};
 use emusync_data_drive::DriveFolders;
 use emusync_domain::sync::CloudFolderStore;
 use reqwest::{Client, Url};
-use std::{
-    io::{Read, Write},
-    net::TcpListener,
-    thread,
-};
+use std::{io::Write, net::TcpListener, thread};
 #[tokio::test]
 async fn finds_root_creates_missing_child_and_moves_file() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -13,31 +12,7 @@ async fn finds_root_creates_missing_child_and_moves_file() {
     let server = thread::spawn(move || {
         for i in 0..4 {
             let (mut stream, _) = listener.accept().unwrap();
-            let mut bytes = Vec::new();
-            let mut buffer = [0; 4096];
-            let end = loop {
-                let n = stream.read(&mut buffer).unwrap();
-                assert!(n > 0);
-                bytes.extend_from_slice(&buffer[..n]);
-                if let Some(pos) = bytes.windows(4).position(|s| s == b"\r\n\r\n") {
-                    break pos + 4;
-                }
-            };
-            let headers = String::from_utf8(bytes[..end].to_vec()).unwrap();
-            let length = headers
-                .lines()
-                .find_map(|l| {
-                    l.to_ascii_lowercase()
-                        .strip_prefix("content-length: ")
-                        .and_then(|n| n.parse::<usize>().ok())
-                })
-                .unwrap_or(0);
-            while bytes.len() < end + length {
-                let n = stream.read(&mut buffer).unwrap();
-                assert!(n > 0);
-                bytes.extend_from_slice(&buffer[..n]);
-            }
-            let body = &bytes[end..end + length];
+            let (headers, body) = read_request(&mut stream);
             let response = match i {
                 0 => {
                     assert!(headers.starts_with("GET "));
@@ -49,7 +24,7 @@ async fn finds_root_creates_missing_child_and_moves_file() {
                 }
                 2 => {
                     assert!(headers.starts_with("POST "));
-                    let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
                     assert_eq!(body["name"], "Game");
                     assert_eq!(body["parents"][0], "root");
                     r#"{"id":"child"}"#
@@ -61,7 +36,7 @@ async fn finds_root_creates_missing_child_and_moves_file() {
                     "{}"
                 }
             };
-            write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",response.len()).unwrap();
+            reply(&mut stream, "200 OK", response);
         }
     });
     let folders = DriveFolders::new(Client::new(), url);
@@ -79,36 +54,6 @@ async fn finds_root_creates_missing_child_and_moves_file() {
     server.join().unwrap();
 }
 
-fn read_request(stream: &mut std::net::TcpStream) -> (String, Vec<u8>) {
-    let mut data = Vec::new();
-    let mut buf = [0; 4096];
-    let end = loop {
-        let n = stream.read(&mut buf).unwrap();
-        assert!(n > 0);
-        data.extend_from_slice(&buf[..n]);
-        if let Some(i) = data.windows(4).position(|v| v == b"\r\n\r\n") {
-            break i + 4;
-        }
-    };
-    let headers = String::from_utf8(data[..end].to_vec()).unwrap();
-    let length = headers
-        .lines()
-        .find_map(|l| {
-            l.to_ascii_lowercase()
-                .strip_prefix("content-length: ")
-                .and_then(|v| v.parse::<usize>().ok())
-        })
-        .unwrap_or(0);
-    while data.len() < end + length {
-        let n = stream.read(&mut buf).unwrap();
-        assert!(n > 0);
-        data.extend_from_slice(&buf[..n]);
-    }
-    (headers, data[end..end + length].to_vec())
-}
-fn respond(stream: &mut std::net::TcpStream, status: &str, body: &str) {
-    write!(stream,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
-}
 #[tokio::test]
 async fn folder_lookup_is_scoped_and_missing_child_does_not_create_it() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -117,7 +62,7 @@ async fn folder_lookup_is_scoped_and_missing_child_does_not_create_it() {
         let (mut s, _) = listener.accept().unwrap();
         let (headers, _) = read_request(&mut s);
         assert!(headers.starts_with("GET "));
-        respond(&mut s, "200 OK", r#"{"files":[{"id":"root"}]}"#);
+        reply(&mut s, "200 OK", r#"{"files":[{"id":"root"}]}"#);
         let (mut s, _) = listener.accept().unwrap();
         let (headers, _) = read_request(&mut s);
         let target = headers
@@ -133,7 +78,7 @@ async fn folder_lookup_is_scoped_and_missing_child_does_not_create_it() {
             params["q"],
             "name = 'O\\'Brien' and mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'root' in parents"
         );
-        respond(&mut s, "200 OK", r#"{"files":[]}"#);
+        reply(&mut s, "200 OK", r#"{"files":[]}"#);
         listener.set_nonblocking(true).unwrap();
         listener
     });
@@ -163,12 +108,12 @@ async fn rename_and_explicit_delete_send_exact_requests() {
         assert!(headers.contains("removeParents=old"));
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["name"], "O'Brien");
-        respond(&mut s, "200 OK", "{}");
+        reply(&mut s, "200 OK", "{}");
         let (mut s, _) = listener.accept().unwrap();
         let (headers, body) = read_request(&mut s);
         assert!(headers.starts_with("DELETE /files/id "));
         assert!(body.is_empty());
-        respond(&mut s, "204 No Content", "");
+        reply(&mut s, "204 No Content", "");
     });
     let folders = DriveFolders::new(Client::new(), url);
     folders
@@ -186,7 +131,7 @@ async fn lost_folder_create_response_is_unknown_and_never_retried_automatically(
     let server = thread::spawn(move || {
         let (mut s, _) = listener.accept().unwrap();
         read_request(&mut s);
-        respond(&mut s, "200 OK", r#"{"files":[]}"#);
+        reply(&mut s, "200 OK", r#"{"files":[]}"#);
         let (mut s, _) = listener.accept().unwrap();
         let (headers, _) = read_request(&mut s);
         assert!(headers.starts_with("POST "));
@@ -217,13 +162,13 @@ async fn blank_folder_id_never_authorizes_further_mutations() {
             let (headers, _) = read_request(&mut stream);
             assert!(headers.starts_with("GET "));
             if existing {
-                respond(&mut stream, "200 OK", r#"{"files":[{"id":"  "}]}"#);
+                reply(&mut stream, "200 OK", r#"{"files":[{"id":"  "}]}"#);
             } else {
-                respond(&mut stream, "200 OK", r#"{"files":[]}"#);
+                reply(&mut stream, "200 OK", r#"{"files":[]}"#);
                 let (mut stream, _) = listener.accept().unwrap();
                 let (headers, _) = read_request(&mut stream);
                 assert!(headers.starts_with("POST "));
-                respond(&mut stream, "200 OK", r#"{"id":"  "}"#);
+                reply(&mut stream, "200 OK", r#"{"id":"  "}"#);
             }
             listener.set_nonblocking(true).unwrap();
             listener
@@ -255,13 +200,13 @@ async fn unusable_folder_create_response_is_unknown_and_never_retried() {
         let server = thread::spawn(move || {
             let (mut s, _) = listener.accept().unwrap();
             read_request(&mut s);
-            respond(&mut s, "200 OK", r#"{"files":[]}"#);
+            reply(&mut s, "200 OK", r#"{"files":[]}"#);
             let (mut s, _) = listener.accept().unwrap();
             let (headers, _) = read_request(&mut s);
             assert!(headers.starts_with("POST "));
             if oversized {
                 let body = format!(r#"{{"id":"child","padding":"{}"}}"#, "a".repeat(2 << 20));
-                respond(&mut s, "200 OK", &body);
+                reply(&mut s, "200 OK", &body);
             } else {
                 write!(s, "HTTP/1.1 200 OK\r\nContent-Length: 40\r\n\r\n{{\"id\"").unwrap();
                 let _ = release_rx.recv_timeout(Duration::from_secs(5));
@@ -301,7 +246,7 @@ async fn unusable_folder_search_response_is_a_read_failure_without_creating() {
         let (mut s, _) = listener.accept().unwrap();
         read_request(&mut s);
         let body = format!(r#"{{"files":[],"padding":"{}"}}"#, "a".repeat(2 << 20));
-        respond(&mut s, "200 OK", &body);
+        reply(&mut s, "200 OK", &body);
         listener.set_nonblocking(true).unwrap();
         listener
     });
@@ -393,6 +338,140 @@ async fn invalid_folder_identities_fail_without_network() {
         Err(FolderError::InvalidFolderIdentity)
     ));
 
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}
+
+#[tokio::test]
+async fn server_5xx_and_dropped_connections_on_folder_mutations_report_unknown_outcome() {
+    use emusync_data_drive::FolderError;
+    use reqwest::StatusCode;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+
+    let server = thread::spawn(move || {
+        let (mut s, _) = listener.accept().unwrap();
+        read_request(&mut s);
+        write!(
+            s,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 12\r\nConnection: close\r\n\r\n{{\"files\":[]}}"
+        )
+        .unwrap();
+
+        let (mut s, _) = listener.accept().unwrap();
+        read_request(&mut s);
+        write!(
+            s,
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+
+        let (mut s, _) = listener.accept().unwrap();
+        read_request(&mut s);
+        write!(
+            s,
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+
+        let (mut s, _) = listener.accept().unwrap();
+        read_request(&mut s);
+        drop(s);
+
+        let (mut s, _) = listener.accept().unwrap();
+        read_request(&mut s);
+        drop(s);
+    });
+
+    let folders = DriveFolders::new(Client::new(), url);
+
+    let res = folders.ensure_path("synthetic", &["EmuSync".into()]).await;
+    assert!(matches!(
+        res,
+        Err(FolderError::ServerOutcomeUnknown(
+            StatusCode::SERVICE_UNAVAILABLE
+        ))
+    ));
+
+    let res = folders.delete_folder("synthetic", "target-folder").await;
+    assert!(matches!(
+        res,
+        Err(FolderError::ServerOutcomeUnknown(
+            StatusCode::SERVICE_UNAVAILABLE
+        ))
+    ));
+
+    let res = folders
+        .rename_folder("synthetic", "target-folder", "new-name", None, None)
+        .await;
+    assert!(matches!(res, Err(FolderError::MutationOutcomeUnknown(_))));
+
+    let res = folders
+        .move_file("synthetic", "target-file", "new-parent", "old-parent")
+        .await;
+    assert!(matches!(res, Err(FolderError::MutationOutcomeUnknown(_))));
+
+    server.join().unwrap();
+}
+
+#[tokio::test]
+async fn ensure_path_trims_and_skips_blank_segments_and_accepts_201_created() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+
+    let server = thread::spawn(move || {
+        let (mut s, _) = listener.accept().unwrap();
+        let (headers, _) = read_request(&mut s);
+        assert!(headers.starts_with("GET "));
+        let body = r#"{"files":[{"id":"root-id"}]}"#;
+        write!(
+            s,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+
+        let (mut s, _) = listener.accept().unwrap();
+        let (headers, _) = read_request(&mut s);
+        assert!(headers.starts_with("GET "));
+        let body = r#"{"files":[]}"#;
+        write!(
+            s,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+
+        let (mut s, _) = listener.accept().unwrap();
+        let (headers, body_bytes) = read_request(&mut s);
+        assert!(headers.starts_with("POST "));
+        let payload: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(payload["name"], "child");
+        assert_eq!(payload["parents"][0], "root-id");
+        let body = r#"{"id":"child-id"}"#;
+        write!(
+            s,
+            "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+
+        listener.set_nonblocking(true).unwrap();
+        listener
+    });
+
+    let folders = DriveFolders::new(Client::new(), url);
+    let result = folders
+        .ensure_path("synthetic", &["   ".into(), "child".into(), "".into()])
+        .await
+        .unwrap();
+
+    assert_eq!(result, "child-id");
+
+    let listener = server.join().unwrap();
     assert_eq!(
         listener.accept().unwrap_err().kind(),
         std::io::ErrorKind::WouldBlock

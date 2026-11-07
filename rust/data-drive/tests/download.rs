@@ -173,3 +173,126 @@ async fn http_error_response_preserves_destination_and_reports_error() {
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     server.join().unwrap();
 }
+
+#[tokio::test]
+async fn invalid_download_file_ids_fail_without_network_or_touching_destination() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let dest_dir = dir.path().join("sub");
+    let destination = dest_dir.join("save.dat");
+
+    let invalid_ids = ["", "   ", ".", "..", "sub/id", "sub\\id", "id\0null"];
+    let client = DriveDownload::new(Client::new(), url);
+    let cancel = CancellationToken::new();
+
+    for id in invalid_ids {
+        let result = client
+            .download("synthetic", id, &destination, &cancel)
+            .await;
+        assert!(matches!(result, Err(DownloadError::InvalidEndpoint)));
+        assert!(!destination.exists());
+        assert!(!dest_dir.exists());
+    }
+
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+}
+
+#[tokio::test]
+async fn inactivity_timeout_and_pre_epoch_timestamp_preserve_stage_hygiene() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+    let (release_tx, release_rx) = mpsc::channel();
+
+    let server = thread::spawn(move || {
+        let (mut s, _) = listener.accept().unwrap();
+        let mut buf = [0; 1024];
+        let _ = s.read(&mut buf).unwrap();
+        write!(
+            s,
+            "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nabc"
+        )
+        .unwrap();
+        s.flush().unwrap();
+        let _ = release_rx.recv();
+
+        let (mut s, _) = listener.accept().unwrap();
+        let _ = s.read(&mut buf).unwrap();
+        write!(
+            s,
+            "HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\nnew-content"
+        )
+        .unwrap();
+        s.flush().unwrap();
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    let destination = dir.path().join("save.dat");
+    std::fs::write(&destination, b"original").unwrap();
+
+    let client = Client::builder()
+        .read_timeout(Duration::from_millis(150))
+        .build()
+        .unwrap();
+    let downloader = DriveDownload::new(client, url);
+
+    let res = downloader
+        .download(
+            "synthetic",
+            "file-id",
+            &destination,
+            &CancellationToken::new(),
+        )
+        .await;
+    assert!(matches!(res, Err(DownloadError::Transport(ref e)) if e.is_timeout()));
+    assert_eq!(std::fs::read(&destination).unwrap(), b"original");
+    let has_parts = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .any(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .contains(".emusync-download-")
+        });
+    assert!(!has_parts);
+
+    let _ = release_tx.send(());
+
+    downloader
+        .download_with(
+            "synthetic",
+            "file-id",
+            &destination,
+            &CancellationToken::new(),
+            DownloadOptions {
+                modified: Some(-1_500_000_000),
+                progress_name: "save",
+                on_progress: &|_| {},
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(std::fs::read(&destination).unwrap(), b"new-content");
+    let has_parts = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .any(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .contains(".emusync-download-")
+        });
+    assert!(!has_parts);
+
+    let mtime =
+        filetime::FileTime::from_last_modification_time(&std::fs::metadata(&destination).unwrap());
+    assert_eq!(mtime.unix_seconds(), -2);
+    assert_eq!(mtime.nanoseconds(), 500_000_000);
+
+    server.join().unwrap();
+}
