@@ -2,6 +2,7 @@
 
 pub mod game_grid;
 pub mod header;
+pub mod icons;
 pub mod sidebar;
 pub mod toast;
 

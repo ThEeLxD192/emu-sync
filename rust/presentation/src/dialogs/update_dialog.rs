@@ -4,8 +4,8 @@ use crate::theme::{
     DIVIDER, ERROR, ON_BACKGROUND, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, SUCCESS, SURFACE,
 };
 use egui::{
-    Align2, Button, Color32, CornerRadius, Frame, Margin, ProgressBar, RichText, ScrollArea,
-    Stroke, Vec2, Window,
+    Button, Color32, CornerRadius, Frame, Id, Margin, Modal, ProgressBar, RichText, ScrollArea,
+    Stroke, Vec2,
 };
 use emusync_application::UpdateState;
 use emusync_domain::update::UpdateInfo;
@@ -20,10 +20,8 @@ pub fn render_update_dialog(
     on_restart: &mut impl FnMut(PathBuf),
     on_close: &mut impl FnMut(),
 ) {
-    Window::new("Software Update")
-        .collapsible(false)
-        .resizable(false)
-        .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+    Modal::new(Id::unique("update_dialog_modal"))
+        .backdrop_color(Color32::from_black_alpha(160))
         .frame(
             Frame::new()
                 .fill(SURFACE)

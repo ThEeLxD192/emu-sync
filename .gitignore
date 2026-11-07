@@ -35,6 +35,7 @@ replay_pid*
 # Local synchronization history and recovery saves
 *.sync-state.json
 *.sync-backups/
+*.sync-recovery/
 
 # Local audit notes
 /AUDIT_STATUS.md

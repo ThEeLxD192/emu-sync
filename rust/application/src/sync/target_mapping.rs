@@ -201,21 +201,22 @@ where
         }
     }
 
-    pub fn cloud_files_for_save_target<'f>(
+    pub fn cloud_files_for_save_target(
         &self,
         kind: &SaveTargetType,
         path: &A::Path,
-        cloud_files: &'f [RemoteFile],
+        cloud_files: &[RemoteFile],
         reserved_sibling_names: &HashSet<String>,
-    ) -> Result<Vec<&'f RemoteFile>, SaveTargetMappingError> {
+    ) -> Result<Vec<RemoteFile>, SaveTargetMappingError> {
         let is_dir =
             self.is_directory_save_target(kind, path, cloud_files, reserved_sibling_names, None)?;
         if !is_dir {
-            return Ok(cloud_files.iter().collect());
+            return Ok(cloud_files.to_vec());
         }
         Ok(cloud_files
             .iter()
             .filter(|f| !reserved_sibling_names.contains(&f.name))
+            .cloned()
             .collect())
     }
 

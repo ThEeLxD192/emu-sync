@@ -22,9 +22,10 @@ pub enum ActiveDialog {
     None,
     Entry(Box<EntryFormState>),
     GameEdit {
-        form: GameEditFormState,
+        form: Box<GameEditFormState>,
         notice: Option<String>,
         cloud_files: Vec<String>,
+        game: Box<GameItem>,
     },
     DriveSetup(DriveSetupDialogState),
     Update,
@@ -76,18 +77,20 @@ impl EmuSyncApp {
     pub fn open_edit_game(&mut self, game: &GameItem) {
         let targets = &game.entry.common().save_targets;
         self.active_dialog = ActiveDialog::GameEdit {
-            form: GameEditFormState::new(game, targets),
+            form: Box::new(GameEditFormState::new(game, targets)),
             notice: None,
             cloud_files: Vec::new(),
+            game: Box::new(game.clone()),
         };
     }
 
     pub fn open_save_setup(&mut self, request: &SaveSetupRequest) {
         let targets = &request.item.entry.common().save_targets;
         self.active_dialog = ActiveDialog::GameEdit {
-            form: GameEditFormState::new(&request.item, targets),
+            form: Box::new(GameEditFormState::new(&request.item, targets)),
             notice: request.notice.clone(),
             cloud_files: request.cloud_file_names.clone(),
+            game: Box::new(request.item.clone()),
         };
     }
 
@@ -147,6 +150,9 @@ impl EmuSyncApp {
             self.open_update_dialog();
         }
 
+        let is_modal_active = !matches!(self.state.status, AppStatus::Idle)
+            || !matches!(self.active_dialog, ActiveDialog::None);
+
         let mut actions = Vec::new();
         let mut open_drive = false;
         let mut open_update = false;
@@ -157,61 +163,79 @@ impl EmuSyncApp {
 
         // Top Panel: Header
         Panel::top("top_header").show(ui, |ui| {
-            render_header(
-                ui,
-                &self.state,
-                &mut |action| actions.push(action),
-                &mut || open_drive = true,
-                &mut || open_update = true,
-            );
+            ui.add_enabled_ui(!is_modal_active, |ui| {
+                render_header(
+                    ui,
+                    &self.state,
+                    &mut |action| actions.push(action),
+                    &mut || open_drive = true,
+                    &mut || open_update = true,
+                );
+            });
         });
 
         // Left Panel: Sidebar
         Panel::left("left_sidebar")
-            .resizable(false)
-            .default_size(240.0)
+            .resizable(true)
+            .default_size(260.0)
+            .min_size(220.0)
+            .max_size(400.0)
             .show(ui, |ui| {
-                render_sidebar(
-                    ui,
-                    &self.state,
-                    &mut |action| actions.push(action),
-                    &mut || open_add = true,
-                );
+                ui.add_enabled_ui(!is_modal_active, |ui| {
+                    render_sidebar(
+                        ui,
+                        &self.state,
+                        &mut |action| actions.push(action),
+                        &mut || open_add = true,
+                    );
+                });
             });
+
+        for action in &actions {
+            if let UiAction::SelectEntry(entry) = action {
+                self.state.selected_entry = entry.clone();
+            }
+        }
 
         // Center Panel: Game Grid
         CentralPanel::default()
             .frame(Frame::new().fill(BACKGROUND).inner_margin(Margin::same(16)))
             .show(ui, |ui| {
-                render_game_grid(
-                    ui,
-                    &self.state,
-                    &mut self.cover_cache,
-                    &mut |action| actions.push(action),
-                    &mut |item| edit_game = Some(item),
-                    &mut |entry| edit_category = Some(entry),
-                    &mut |entry| delete_category = Some(entry),
-                );
+                ui.add_enabled_ui(!is_modal_active, |ui| {
+                    render_game_grid(
+                        ui,
+                        &self.state,
+                        &mut self.cover_cache,
+                        &mut |action| actions.push(action),
+                        &mut |item| edit_game = Some(item),
+                        &mut |entry| edit_category = Some(entry),
+                        &mut |entry| delete_category = Some(entry),
+                    );
+                });
             });
 
-        // Handle navigation triggers from the main view
-        if open_drive {
-            self.open_drive_setup();
-        }
-        if open_update {
-            self.open_update_dialog();
-        }
-        if open_add {
-            self.open_add_entry();
-        }
-        if let Some(game) = edit_game {
-            self.open_edit_game(&game);
-        }
-        if let Some(entry) = edit_category {
-            self.open_edit_entry(&entry);
-        }
-        if let Some(entry) = delete_category {
-            actions.push(UiAction::DeleteEntry(entry));
+        // Handle navigation triggers from the main view (only when no modal is active)
+        if is_modal_active {
+            actions.clear();
+        } else {
+            if open_drive {
+                self.open_drive_setup();
+            }
+            if open_update {
+                self.open_update_dialog();
+            }
+            if open_add {
+                self.open_add_entry();
+            }
+            if let Some(game) = edit_game {
+                self.open_edit_game(&game);
+            }
+            if let Some(entry) = edit_category {
+                self.open_edit_entry(&entry);
+            }
+            if let Some(entry) = delete_category {
+                actions.push(UiAction::DeleteEntry(entry));
+            }
         }
 
         // Modals
@@ -251,6 +275,7 @@ impl EmuSyncApp {
                 form,
                 notice,
                 cloud_files,
+                game,
             } => {
                 let mut saved_result = None;
                 let mut pick = None;
@@ -274,10 +299,9 @@ impl EmuSyncApp {
                             cover_path: cover,
                         });
                         self.state.save_setup_request = None;
-                    } else if let Some(selected) = &self.state.selected_entry {
-                        let item = GameItem::new(form.custom_title.clone(), selected.clone(), None);
+                    } else {
                         actions.push(UiAction::EditGameOverride {
-                            item,
+                            item: *game.clone(),
                             title,
                             targets,
                             cover_path: cover,

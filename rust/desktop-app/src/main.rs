@@ -221,6 +221,7 @@ impl ApplicationHandler for App {
                                 ActiveDialog::Entry(form) => match target {
                                     PathTarget::Executable => form.executable_path = path,
                                     PathTarget::RomsDirectory => form.roms_directory = path,
+                                    PathTarget::CoverPath => form.cover_path = path,
                                     PathTarget::SavePath(idx) => {
                                         if let Some(row) = form.saves.rows.get_mut(idx) {
                                             row.path = path;
@@ -242,6 +243,7 @@ impl ApplicationHandler for App {
                                 },
                                 _ => {}
                             }
+                            window.request_redraw();
                         }
                         AppEvent::CloseNotice(notice) => {
                             self.close_notice = true;
@@ -259,6 +261,15 @@ impl ApplicationHandler for App {
                 // Drain and dispatch UI actions
                 let actions = self.emusync_app.take_actions();
                 for action in actions {
+                    if let UiAction::SelectEntry(ref entry) = action {
+                        self.emusync_app.state.selected_entry = entry.clone();
+                        if let Some(entry) = entry {
+                            self.emusync_app.state.game_items = scan_entry_games(entry);
+                        } else {
+                            self.emusync_app.state.game_items.clear();
+                        }
+                        window.request_redraw();
+                    }
                     if matches!(action, UiAction::Exit) {
                         self.close_notice = false;
                         self.closing = true;

@@ -156,7 +156,12 @@ where
             .map_err(|_| ())?;
 
         if is_dir {
-            let remote_files = project_directory_files(cloud_files, target.cloud_path.as_deref());
+            let projected = project_directory_files(cloud_files, target.cloud_path.as_deref());
+            let remote_files = self
+                .context
+                .mapping
+                .cloud_files_for_save_target(&target.kind, &target.file, &projected, &reserved)
+                .map_err(|_| ())?;
             self.observe_directory(target, folder_id, &remote_files, &reserved, observation)
                 .await?;
         } else {

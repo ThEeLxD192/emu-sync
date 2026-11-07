@@ -7,6 +7,7 @@ use crate::{
 use emusync_application::{
     EntryEditResult, LoadLibrary, SteamRegistration,
     library::entry_edits::{GameOverrideChanges, build_game_entry},
+    operation::OperationCoordinator,
     sync::{SyncOrchestrator, SyncOrchestratorFactory, SyncServices},
 };
 use emusync_data_drive::{
@@ -145,6 +146,7 @@ pub struct DesktopCoordinator {
     active_retry_failure: Arc<Mutex<Option<emusync_domain::sync::PostSyncFailure>>>,
     active_retry_runner: Arc<Mutex<Option<RetryRunner>>>,
     active_cancel: Arc<Mutex<Option<CancellationToken>>>,
+    operations: Arc<OperationCoordinator>,
 }
 
 impl DesktopCoordinator {
@@ -172,6 +174,7 @@ impl DesktopCoordinator {
             active_retry_failure: Arc::new(Mutex::new(None)),
             active_retry_runner: Arc::new(Mutex::new(None)),
             active_cancel: Arc::new(Mutex::new(None)),
+            operations: Arc::new(OperationCoordinator::new()),
         }
     }
 
@@ -724,14 +727,13 @@ impl DesktopCoordinator {
                 cfg
             }) {
                 Ok(updated) => {
-                    if let Some(entry) = updated
-                        .entries
-                        .iter()
-                        .find(|e| e.common().name == entry_name)
+                    let new_name = updated_entry.common().name.clone();
+                    if let Some(entry) =
+                        updated.entries.iter().find(|e| e.common().name == new_name)
                     {
                         let scanned = scan_entry_games(entry);
                         self.send_event(AppEvent::EntryGamesScanned {
-                            entry_name,
+                            entry_name: new_name,
                             games: scanned,
                         });
                     }
@@ -872,6 +874,10 @@ impl DesktopCoordinator {
     }
 
     fn open_emulator(&self, emulator: Emulator) {
+        if self.operations.is_busy() {
+            return;
+        }
+
         let exec = emulator.common.executable_path.trim().to_string();
         if exec.is_empty() {
             self.send_event(AppEvent::Toast("No emulator executable configured.".into()));
@@ -880,15 +886,25 @@ impl DesktopCoordinator {
 
         let steam_launches = Arc::new(self.steam.clone());
         let runner = GameRunner::new(steam_launches);
+        let coordinator = self.clone();
 
         self.tokio_handle.spawn(async move {
-            if let Err(e) = runner.open_emulator(&emulator).await {
-                eprintln!("Failed to launch emulator: {e:?}");
-            }
+            let _ = coordinator
+                .operations
+                .run_if_idle(async move {
+                    if let Err(e) = runner.open_emulator(&emulator).await {
+                        eprintln!("Failed to launch emulator: {e:?}");
+                    }
+                })
+                .await;
         });
     }
 
     fn launch_game(&self, item: GameItem) {
+        if self.operations.is_busy() {
+            return;
+        }
+
         let config = match self.config_manager.load() {
             Ok(c) => c,
             Err(e) => {
@@ -910,35 +926,41 @@ impl DesktopCoordinator {
                 message: format!("Preparing {}...", effective_title),
             }));
 
+            let coordinator = self.clone();
             self.tokio_handle.spawn(async move {
-                let req = emusync_domain::execution::GameLaunchRequest {
-                    steam_app_id: item.entry.common().steam_app_id,
-                    entry: item.entry.clone(),
-                    rom_path: item
-                        .rom_file
-                        .as_ref()
-                        .map(|p| p.to_string_lossy().to_string()),
-                };
+                let _ = coordinator
+                    .operations
+                    .run_if_idle(async move {
+                        let req = emusync_domain::execution::GameLaunchRequest {
+                            steam_app_id: item.entry.common().steam_app_id,
+                            entry: item.entry.clone(),
+                            rom_path: item
+                                .rom_file
+                                .as_ref()
+                                .map(|p| p.to_string_lossy().to_string()),
+                        };
 
-                let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::Playing));
-                (redraw)();
+                        let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::Playing));
+                        (redraw)();
 
-                match runner.launch(req).await {
-                    Ok(result) => {
-                        let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::Idle));
-                        let _ = event_tx.send(AppEvent::Toast(format!(
-                            "Session finished ({}s)",
-                            result.duration_ms / 1000
-                        )));
-                        (redraw)();
-                    }
-                    Err(err) => {
-                        let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::Error {
-                            message: format!("Launch failed: {err:?}"),
-                        }));
-                        (redraw)();
-                    }
-                }
+                        match runner.launch(req).await {
+                            Ok(result) => {
+                                let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::Idle));
+                                let _ = event_tx.send(AppEvent::Toast(format!(
+                                    "Session finished ({}s)",
+                                    result.duration_ms / 1000
+                                )));
+                                (redraw)();
+                            }
+                            Err(err) => {
+                                let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::Error {
+                                    message: format!("Launch failed: {err:?}"),
+                                }));
+                                (redraw)();
+                            }
+                        }
+                    })
+                    .await;
             });
             return;
         }
@@ -984,23 +1006,33 @@ impl DesktopCoordinator {
         let coordinator = self.clone();
         let entry = item.entry.clone();
         self.tokio_handle.spawn(async move {
-            match orchestrator
-                .play_with_sync(sync_game, &DesktopSaveSetup)
-                .await
-            {
-                Ok(()) => {
+            let res = coordinator
+                .operations
+                .run_if_idle(async {
+                    orchestrator
+                        .play_with_sync(sync_game, &DesktopSaveSetup)
+                        .await
+                })
+                .await;
+
+            match res {
+                Some(Ok(())) => {
                     coordinator.check_sync_entry(entry);
                 }
-                Err(err) => {
+                Some(Err(err)) => {
                     coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
                         message: format!("Synchronization error: {err}"),
                     }));
                 }
+                None => {}
             }
         });
     }
 
     fn check_sync_entry(&self, entry: GameEntry) {
+        if self.operations.is_busy() {
+            return;
+        }
         let name = entry.common().name.clone();
         let config = match self.config_manager.load() {
             Ok(c) => c,
@@ -1075,6 +1107,10 @@ impl DesktopCoordinator {
     }
 
     fn sync_entry(&self, entry: GameEntry) {
+        if self.operations.is_busy() {
+            return;
+        }
+
         let name = entry.common().name.clone();
         let config = match self.config_manager.load() {
             Ok(c) => c,
@@ -1114,8 +1150,13 @@ impl DesktopCoordinator {
         let coordinator = self.clone();
         let entry_clone = entry.clone();
         self.tokio_handle.spawn(async move {
-            match orchestrator.sync_entry(&entry_clone).await {
-                Ok(true) => {
+            let res = coordinator
+                .operations
+                .run_if_idle(orchestrator.sync_entry(&entry_clone))
+                .await;
+
+            match res {
+                Some(Ok(true)) => {
                     coordinator.send_event(AppEvent::SyncStatusUpdated {
                         entry_name: name.clone(),
                         status: CloudSyncStatus::InSync,
@@ -1123,11 +1164,11 @@ impl DesktopCoordinator {
                     coordinator.send_event(AppEvent::StatusChanged(AppStatus::Idle));
                     coordinator.send_event(AppEvent::Toast(format!("'{}' synchronized.", name)));
                 }
-                Ok(false) => {
+                Some(Ok(false)) => {
                     coordinator.check_sync_entry(entry_clone);
                     coordinator.send_event(AppEvent::StatusChanged(AppStatus::Idle));
                 }
-                Err(err) => {
+                Some(Err(err)) => {
                     coordinator.send_event(AppEvent::SyncStatusUpdated {
                         entry_name: name.clone(),
                         status: CloudSyncStatus::Error,
@@ -1136,6 +1177,7 @@ impl DesktopCoordinator {
                         message: format!("Sync failed: {err}"),
                     }));
                 }
+                None => {}
             }
         });
     }
@@ -1236,7 +1278,7 @@ impl DesktopCoordinator {
             PickMode::Directory => PickerType::Directory,
         };
 
-        tokio::task::spawn_blocking(move || {
+        self.tokio_handle.spawn_blocking(move || {
             if let Ok(Some(path)) = picker.pick("Select path", "", kind) {
                 let _ = tx.send(AppEvent::PathPicked { target, path });
                 (redraw)();

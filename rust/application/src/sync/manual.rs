@@ -447,8 +447,18 @@ where
                     .map_err(|e| e.to_string())?;
 
                 if is_dir {
-                    let target_cloud_files =
+                    let projected =
                         project_directory_files(&cloud_files, target.cloud_path.as_deref());
+                    let target_cloud_files = self
+                        .context
+                        .mapping
+                        .cloud_files_for_save_target(
+                            &target.kind,
+                            &target.file,
+                            &projected,
+                            &reserved,
+                        )
+                        .map_err(|e| e.to_string())?;
                     manual
                         .sync_directory_manual(
                             &token,

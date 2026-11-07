@@ -559,6 +559,96 @@ async fn status_reports_errors_instead_of_claiming_unverified_saves_are_in_sync(
 }
 
 #[tokio::test]
+async fn multiple_directory_targets_sharing_folder_evaluates_to_in_sync() {
+    let files = MockFs::default();
+    files.add_dir("/game/saves/savedata");
+    files.add_file("/game/saves/savedata/save1.dat", 1000);
+    files.add_dir("/game/saves/trophies");
+    files.add_file("/game/saves/trophies/trophy.dat", 1000);
+
+    let drive = MockDrive::default();
+    drive.add_folder(&["DualDirectoryGame".into()], "f_dual");
+    drive.add_file(
+        "f_dual",
+        RemoteFile {
+            id: "id_save1".into(),
+            name: "save1.dat".into(),
+            modified: 1000,
+            is_folder: false,
+            sha256: Some("sha_save1".into()),
+            version: None,
+        },
+    );
+    drive.add_file(
+        "f_dual",
+        RemoteFile {
+            id: "id_trophy".into(),
+            name: "trophy.dat".into(),
+            modified: 1000,
+            is_folder: false,
+            sha256: Some("sha_trophy".into()),
+            version: None,
+        },
+    );
+
+    let tracked = MockTrackedSync::default();
+    // If files are planned against the wrong sibling directory, return DownloadCloud
+    tracked.planned_decisions.lock().unwrap().insert(
+        "/game/saves/savedata/trophy.dat".into(),
+        Decision::DownloadCloud,
+    );
+    tracked.planned_decisions.lock().unwrap().insert(
+        "/game/saves/trophies/save1.dat".into(),
+        Decision::DownloadCloud,
+    );
+
+    let target1 = SaveTarget {
+        path: "/game/saves/savedata".into(),
+        kind: SaveTargetType::Directory,
+        cloud_path: None,
+    };
+    let target2 = SaveTarget {
+        path: "/game/saves/trophies".into(),
+        kind: SaveTargetType::Directory,
+        cloud_path: None,
+    };
+
+    let entry = GameEntry::Native(NativeGame {
+        common: EntryCommon {
+            name: "DualDirectoryGame".into(),
+            executable_path: "/games/app".into(),
+            save_targets: vec![target1, target2],
+            ..EntryCommon::default()
+        },
+        wait_for_process: None,
+        cover_path: None,
+    });
+
+    let config = AppConfig {
+        credentials: Some(Credentials {
+            client_id: "client".into(),
+            client_secret: "secret".into(),
+            refresh_token: Some("refresh".into()),
+        }),
+        entries: vec![entry.clone()],
+    };
+
+    let auth = MockAuth::default();
+    *auth.token.lock().unwrap() = Some("valid_token".into());
+
+    let factory = SyncOrchestratorFactory::new(SyncServices {
+        files,
+        search: drive.clone(),
+        folders: drive,
+        tracked_sync: tracked,
+        authorization: auth,
+        runner: MockLauncher::default(),
+    });
+    let sync = factory.create(config, |_| {});
+    assert_eq!(sync.check_entry(&entry).await, Ok(EntrySyncStatus::InSync));
+}
+
+#[tokio::test]
 async fn test_full_lifecycle_pre_sync_launch_post_sync() {
     let fs = MockFs::default();
     fs.add_file("/saves/metroid.sav", 1000);

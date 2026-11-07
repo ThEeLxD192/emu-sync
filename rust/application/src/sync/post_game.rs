@@ -129,7 +129,16 @@ where
             .map_err(|e| e.to_string())?;
 
         let active_cloud_files = if is_directory {
-            project_directory_files(&cloud_files, cloud_path)
+            let projected = project_directory_files(&cloud_files, cloud_path);
+            self.context
+                .mapping
+                .cloud_files_for_save_target(
+                    target_type,
+                    local_save_path,
+                    &projected,
+                    &all_reserved_names,
+                )
+                .map_err(|e| e.to_string())?
         } else {
             cloud_files
         };

@@ -6,8 +6,8 @@ use crate::{
     theme::{DIVIDER, ERROR, ON_BACKGROUND, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, SURFACE, WARNING},
 };
 use egui::{
-    Align2, Button, Checkbox, Color32, CornerRadius, Frame, Margin, RichText, ScrollArea, Stroke,
-    TextEdit, Vec2, Window,
+    Button, Checkbox, Color32, CornerRadius, Frame, Id, Margin, Modal, RichText, ScrollArea,
+    Stroke, TextEdit, Vec2,
 };
 use emusync_domain::library::{SaveTarget, SaveTargetType};
 
@@ -27,11 +27,8 @@ pub fn render_game_edit_dialog(
         "Edit Game Overrides"
     };
 
-    Window::new(title)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(520.0)
-        .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+    Modal::new(Id::unique("game_edit_dialog_modal"))
+        .backdrop_color(Color32::from_black_alpha(160))
         .frame(
             Frame::new()
                 .fill(SURFACE)
@@ -40,8 +37,13 @@ pub fn render_game_edit_dialog(
                 .inner_margin(Margin::same(20)),
         )
         .show(ctx, |ui| {
-            ScrollArea::vertical().max_height(560.0).show(ui, |ui| {
-                ui.vertical(|ui| {
+            ui.set_width(520.0);
+            ui.vertical(|ui| {
+                ui.label(RichText::new(title).size(16.0).strong().color(ON_BACKGROUND));
+                ui.add_space(10.0);
+
+                ScrollArea::vertical().max_height(560.0).show(ui, |ui| {
+                    ui.vertical(|ui| {
                     // Notice banner if present
                     if let Some(msg) = notice {
                         Frame::new()
@@ -175,7 +177,7 @@ pub fn render_game_edit_dialog(
                                     .desired_width(110.0),
                             );
 
-                            if ui.button("✕").clicked() {
+                            if ui.button("x").clicked() {
                                 rows_to_remove.push(idx);
                             }
                         });
@@ -229,4 +231,5 @@ pub fn render_game_edit_dialog(
                 });
             });
         });
+    });
 }

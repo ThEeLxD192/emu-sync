@@ -4,7 +4,7 @@ use crate::theme::{
     DIVIDER, ERROR, ON_BACKGROUND, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, SUCCESS, SURFACE,
 };
 use egui::{
-    Align2, Button, Color32, CornerRadius, Frame, Margin, RichText, Stroke, TextEdit, Vec2, Window,
+    Button, Color32, CornerRadius, Frame, Id, Margin, Modal, RichText, Stroke, TextEdit, Vec2,
 };
 
 /// State for the drive setup dialog.
@@ -36,10 +36,8 @@ pub fn render_drive_setup_dialog(
     on_open_config: &mut impl FnMut(),
     on_close: &mut impl FnMut(),
 ) {
-    Window::new("Google Drive Sync")
-        .collapsible(false)
-        .resizable(false)
-        .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+    Modal::new(Id::unique("drive_setup_dialog_modal"))
+        .backdrop_color(Color32::from_black_alpha(160))
         .frame(
             Frame::new()
                 .fill(SURFACE)
@@ -54,7 +52,7 @@ pub fn render_drive_setup_dialog(
                 // Header
                 ui.horizontal(|ui| {
                     let (status_text, status_color) = if state.is_linked {
-                        ("● Account Linked and Active", SUCCESS)
+                        ("Account Linked and Active", SUCCESS)
                     } else {
                         ("Configure Cross-Device Save Synchronization", ON_SURFACE_DIM)
                     };

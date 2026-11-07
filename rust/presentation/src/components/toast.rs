@@ -25,7 +25,7 @@ pub fn render_toast(ui: &mut Ui, message: &str, on_dismiss: &mut impl FnMut()) {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui
                         .add(
-                            Button::new(RichText::new("✕").size(11.0).color(ON_SURFACE))
+                            Button::new(RichText::new("x").size(11.0).color(ON_SURFACE))
                                 .min_size(Vec2::new(20.0, 20.0)),
                         )
                         .clicked()

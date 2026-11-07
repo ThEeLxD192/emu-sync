@@ -7,7 +7,7 @@ use crate::{
         WARNING,
     },
 };
-use egui::{Align2, Button, Color32, CornerRadius, Frame, RichText, Stroke, Vec2, Window};
+use egui::{Button, Color32, CornerRadius, Frame, Id, Modal, RichText, Stroke, Vec2};
 use emusync_domain::sync::Decision;
 
 /// Renders the status overlay over the application based on current AppStatus.
@@ -18,13 +18,12 @@ pub fn render_status_overlay(
     on_retry_post_sync: &mut impl FnMut(),
     on_dismiss: &mut impl FnMut(),
 ) {
+    let backdrop = Color32::from_black_alpha(160);
+
     match status {
         AppStatus::Syncing { message } => {
-            Window::new("Syncing")
-                .title_bar(false)
-                .collapsible(false)
-                .resizable(false)
-                .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            Modal::new(Id::unique("syncing_modal"))
+                .backdrop_color(backdrop)
                 .frame(
                     Frame::new()
                         .fill(SURFACE)
@@ -53,11 +52,8 @@ pub fn render_status_overlay(
                 });
         }
         AppStatus::Playing => {
-            Window::new("Playing")
-                .title_bar(false)
-                .collapsible(false)
-                .resizable(false)
-                .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            Modal::new(Id::unique("playing_modal"))
+                .backdrop_color(backdrop)
                 .frame(
                     Frame::new()
                         .fill(SURFACE)
@@ -68,7 +64,7 @@ pub fn render_status_overlay(
                 .show(ctx, |ui| {
                     ui.set_width(360.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("🎮 Game Running").size(16.0).strong().color(SUCCESS));
+                        ui.label(RichText::new("Game Running").size(16.0).strong().color(SUCCESS));
                         ui.add_space(8.0);
                         ui.label(
                             RichText::new(
@@ -81,11 +77,8 @@ pub fn render_status_overlay(
                 });
         }
         AppStatus::Loading => {
-            Window::new("Loading")
-                .title_bar(false)
-                .collapsible(false)
-                .resizable(false)
-                .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            Modal::new(Id::unique("loading_modal"))
+                .backdrop_color(backdrop)
                 .frame(
                     Frame::new()
                         .fill(SURFACE)
@@ -111,10 +104,8 @@ pub fn render_status_overlay(
             local_date,
             cloud_date,
         } => {
-            Window::new("Save Conflict Detected")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            Modal::new(Id::unique("conflict_modal"))
+                .backdrop_color(backdrop)
                 .frame(
                     Frame::new()
                         .fill(SURFACE)
@@ -145,12 +136,12 @@ pub fn render_status_overlay(
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.vertical(|ui| {
-                                        ui.label(RichText::new("💻 Local Device").size(12.0).strong().color(ON_BACKGROUND));
+                                        ui.label(RichText::new("Local Device").size(12.0).strong().color(ON_BACKGROUND));
                                         ui.label(RichText::new(format!("Modified: {local_date}")).size(11.0).color(ON_SURFACE_DIM));
                                     });
                                     ui.add_space(20.0);
                                     ui.vertical(|ui| {
-                                        ui.label(RichText::new("☁ Google Drive").size(12.0).strong().color(ON_BACKGROUND));
+                                        ui.label(RichText::new("Google Drive").size(12.0).strong().color(ON_BACKGROUND));
                                         ui.label(RichText::new(format!("Modified: {cloud_date}")).size(11.0).color(ON_SURFACE_DIM));
                                     });
                                 });
@@ -192,10 +183,8 @@ pub fn render_status_overlay(
             completed_save_count,
             pending_save_count,
         } => {
-            Window::new("Save Kept Locally")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            Modal::new(Id::unique("post_sync_failed_modal"))
+                .backdrop_color(backdrop)
                 .frame(
                     Frame::new()
                         .fill(SURFACE)
@@ -253,10 +242,8 @@ pub fn render_status_overlay(
                 });
         }
         AppStatus::Error { message } => {
-            Window::new("Error")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            Modal::new(Id::unique("error_modal"))
+                .backdrop_color(backdrop)
                 .frame(
                     Frame::new()
                         .fill(SURFACE)

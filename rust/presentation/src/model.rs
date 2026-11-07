@@ -76,6 +76,7 @@ pub struct GameItem {
     pub name: String,
     pub entry: GameEntry,
     pub rom_file: Option<PathBuf>,
+    pub cover_path: Option<String>,
 }
 
 impl GameItem {
@@ -84,7 +85,13 @@ impl GameItem {
             name: name.into(),
             entry,
             rom_file,
+            cover_path: None,
         }
+    }
+
+    pub fn with_cover_path(mut self, cover_path: Option<String>) -> Self {
+        self.cover_path = cover_path;
+        self
     }
 
     pub fn effective_title(&self) -> String {
@@ -116,6 +123,12 @@ impl GameItem {
     }
 
     pub fn effective_cover_path(&self) -> Option<String> {
+        if let Some(ref path) = self.cover_path {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
         match &self.entry {
             GameEntry::Native(native) => native.cover_path.as_deref().and_then(|p| {
                 let trimmed = p.trim();

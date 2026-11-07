@@ -6,8 +6,8 @@ use crate::{
     theme::{DIVIDER, ERROR, ON_BACKGROUND, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, SURFACE},
 };
 use egui::{
-    Align2, Button, Color32, CornerRadius, Frame, Margin, RichText, ScrollArea, Stroke, TextEdit,
-    Vec2, Window,
+    Button, Color32, CornerRadius, Frame, Id, Margin, Modal, RichText, ScrollArea, Stroke,
+    TextEdit, Vec2,
 };
 use emusync_domain::library::{GameEntry, SaveTargetType};
 
@@ -26,11 +26,8 @@ pub fn render_entry_dialog(
         "Add Category"
     };
 
-    Window::new(title)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(540.0)
-        .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+    Modal::new(Id::unique("entry_dialog_modal"))
+        .backdrop_color(Color32::from_black_alpha(160))
         .frame(
             Frame::new()
                 .fill(SURFACE)
@@ -39,8 +36,13 @@ pub fn render_entry_dialog(
                 .inner_margin(Margin::same(20)),
         )
         .show(ctx, |ui| {
-            ScrollArea::vertical().max_height(580.0).show(ui, |ui| {
-                ui.vertical(|ui| {
+            ui.set_width(540.0);
+            ui.vertical(|ui| {
+                ui.label(RichText::new(title).size(16.0).strong().color(ON_BACKGROUND));
+                ui.add_space(10.0);
+
+                ScrollArea::vertical().max_height(580.0).show(ui, |ui| {
+                    ui.vertical(|ui| {
                     // Type selector
                     ui.horizontal(|ui| {
                         let is_emu = form.entry_type == EntryType::Emulator;
@@ -213,7 +215,7 @@ pub fn render_entry_dialog(
                             );
 
                             // Delete button
-                            if ui.button("✕").clicked() {
+                            if ui.button("x").clicked() {
                                 rows_to_remove.push(idx);
                             }
                         });
@@ -268,4 +270,5 @@ pub fn render_entry_dialog(
                 });
             });
         });
+    });
 }
