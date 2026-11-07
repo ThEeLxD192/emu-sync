@@ -18,13 +18,7 @@ pub fn resolve_remote_file(root: &Path, name: &str) -> io::Result<Option<PathBuf
     let mut resolved = root.clone();
     for segment in segments {
         // A Windows component can contain a drive prefix even within a name.
-        if !matches!(
-            Path::new(segment)
-                .components()
-                .collect::<Vec<_>>()
-                .as_slice(),
-            [Component::Normal(_)]
-        ) {
+        if !is_normal_component(segment) {
             return Ok(None);
         }
         resolved.push(segment);
@@ -65,4 +59,9 @@ fn normalize(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+pub(crate) fn is_normal_component(segment: &str) -> bool {
+    let mut components = Path::new(segment).components();
+    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
 }

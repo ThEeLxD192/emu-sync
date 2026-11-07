@@ -67,7 +67,7 @@ impl SaveTargetAccess for LocalSaveTargets {
         if destination.trim().is_empty() {
             return Ok(Vec::new());
         }
-        let mut targets = Vec::new();
+        let mut targets = Vec::with_capacity(names.len());
         for name in names {
             if let Some(path) = resolve_remote_file(Path::new(destination), name)? {
                 let path = path

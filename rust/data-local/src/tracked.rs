@@ -101,7 +101,7 @@ impl<S> RecoveryCredentials<S> {
                 hash.update(part.as_bytes());
             }
         }
-        hash.finalize().iter().map(|b| format!("{b:02x}")).collect()
+        crate::history::bytes_to_hex(&hash.finalize())
     }
 }
 impl<S: CredentialTransaction<Error = io::Error>> RecoveryCredentials<S> {

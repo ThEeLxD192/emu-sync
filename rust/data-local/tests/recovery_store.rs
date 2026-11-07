@@ -198,3 +198,48 @@ fn symbolic_link_recovery_directory_is_refused() {
     assert!(store.stage(&snapshot, record(&snapshot)).is_err());
     assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0);
 }
+
+#[test]
+fn has_unresolved_matches_exact_entry_and_ignores_mismatches_or_unverifiable() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config.json");
+    let store = RecoveryStore::new(&config).unwrap();
+    let snapshot = snapshot(dir.path(), b"save bytes");
+    let rec = record(&snapshot);
+    let local_path = Path::new(&rec.local);
+    assert!(
+        !store
+            .has_unresolved(local_path, &rec.folder, &rec.remote_name)
+            .unwrap()
+    );
+
+    let id = store.stage(&snapshot, rec.clone()).unwrap();
+    assert!(
+        store
+            .has_unresolved(local_path, &rec.folder, &rec.remote_name)
+            .unwrap()
+    );
+    assert!(
+        !store
+            .has_unresolved(Path::new("/other/save.dat"), &rec.folder, &rec.remote_name)
+            .unwrap()
+    );
+    assert!(
+        !store
+            .has_unresolved(local_path, "other-folder", &rec.remote_name)
+            .unwrap()
+    );
+    assert!(
+        !store
+            .has_unresolved(local_path, &rec.folder, "other.sav")
+            .unwrap()
+    );
+
+    // Tampering snapshot makes it Unverifiable, which should not count as unresolved
+    fs::write(entry_dir(&config, &id).join("snapshot"), b"corrupted").unwrap();
+    assert!(
+        !store
+            .has_unresolved(local_path, &rec.folder, &rec.remote_name)
+            .unwrap()
+    );
+}

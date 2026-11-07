@@ -41,7 +41,7 @@ impl LocalSavePath for DesktopSavePath {
     fn absolute_path(&self) -> io::Result<String> {
         let path = Path::new(&self.path);
         if path.is_absolute() {
-            string(path)
+            Ok(self.path.clone())
         } else {
             string(&std::env::current_dir()?.join(path))
         }

@@ -5,7 +5,7 @@ use std::{
     fs::File,
     io,
     os::{fd::AsRawFd, unix::fs::MetadataExt},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 /// Holds the parent directory itself, rather than resolving it again by pathname.
@@ -29,15 +29,10 @@ impl PinnedRemoteDestination {
         let Some(segments) = remote_path_segments(remote_name) else {
             return Ok(None);
         };
-        if segments.iter().any(|segment| {
-            !matches!(
-                Path::new(segment)
-                    .components()
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-                [Component::Normal(_)]
-            )
-        }) {
+        if segments
+            .iter()
+            .any(|segment| !crate::restore_paths::is_normal_component(segment))
+        {
             return Ok(None);
         }
         if create {

@@ -76,7 +76,7 @@ impl SyncHistoryStore {
         hash.update(folder_id.as_bytes());
         hash.update([0]);
         hash.update(remote_name.as_bytes());
-        Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
+        Ok(bytes_to_hex(&hash.finalize()))
     }
     pub fn get(&self, key: &str) -> io::Result<Option<HistoryCheckpoint>> {
         let _guard = self
@@ -193,5 +193,15 @@ pub(crate) fn reader_sha256(file: &mut impl Read) -> io::Result<String> {
         }
         hash.update(&buffer[..count]);
     }
-    Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    Ok(bytes_to_hex(&hash.finalize()))
+}
+
+pub(crate) fn bytes_to_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0xf) as usize] as char);
+    }
+    s
 }
