@@ -1,6 +1,6 @@
 use emusync_application::{
     EditLibrary, GameOverrideChanges, SteamRegistration, build_game_entry,
-    preserve_shared_cloud_root,
+    library::preserve_shared_cloud_root,
 };
 use emusync_domain::config::{AppConfig, ConfigurationStore};
 use emusync_domain::library::{
@@ -143,6 +143,7 @@ impl SaveSynchronizer for SpySynchronizer {
 #[derive(Clone, Default)]
 struct SpyFactory {
     synchronizer: SpySynchronizer,
+    status_emitter: Arc<Mutex<Option<SyncEvent>>>,
 }
 
 impl SaveSynchronizerFactory for SpyFactory {
@@ -151,8 +152,11 @@ impl SaveSynchronizerFactory for SpyFactory {
     fn create(
         &self,
         _config: AppConfig,
-        _on_status: impl Fn(SyncEvent) + Send + Sync + 'static,
+        on_status: impl Fn(SyncEvent) + Send + Sync + 'static,
     ) -> Self::Synchronizer {
+        if let Some(ev) = self.status_emitter.lock().unwrap().take() {
+            on_status(ev);
+        }
         self.synchronizer.clone()
     }
 }
@@ -362,7 +366,7 @@ fn build_game_entry_applies_overrides() {
         title: Some("SMW Customized".into()),
     };
 
-    let updated = build_game_entry(&game, &changes).expect("build entry should succeed");
+    let updated = build_game_entry(&game, &changes);
     if let GameEntry::Emulator(e) = updated {
         assert_eq!(e.effective_title("smw.sfc", "fallback"), "SMW Customized");
         assert_eq!(e.cover_path_by_rom.len(), 1);
@@ -402,8 +406,7 @@ fn build_game_entry_clears_overrides_and_handles_native_games() {
         title: Some("   ".into()),
     };
 
-    let cleared =
-        build_game_entry(&game, &clear_changes).expect("clearing overrides should succeed");
+    let cleared = build_game_entry(&game, &clear_changes);
     if let GameEntry::Emulator(e) = cleared {
         assert_eq!(e.effective_title("smw.sfc", "fallback"), "fallback");
         assert!(e.cover_path_by_rom.is_empty());
@@ -433,8 +436,7 @@ fn build_game_entry_clears_overrides_and_handles_native_games() {
         title: Some("Renamed Native Game".into()),
     };
 
-    let nat_updated =
-        build_game_entry(&nat_game, &nat_changes).expect("native override should succeed");
+    let nat_updated = build_game_entry(&nat_game, &nat_changes);
     if let GameEntry::Native(n) = nat_updated {
         assert_eq!(n.common.name, "Renamed Native Game");
         assert_eq!(n.cover_path.as_deref(), Some("/covers/native.jpg"));
@@ -478,7 +480,7 @@ fn build_game_entry_updates_existing_rom_overrides_and_resolves_rom_name() {
         title: Some("New ISO Title".into()),
     };
 
-    let updated = build_game_entry(&game, &changes).expect("build entry should succeed");
+    let updated = build_game_entry(&game, &changes);
     if let GameEntry::Emulator(e) = updated {
         assert_eq!(e.title_by_rom.len(), 1);
         assert_eq!(e.title_by_rom[0].1, "New ISO Title");
@@ -505,7 +507,7 @@ fn build_game_entry_updates_existing_rom_overrides_and_resolves_rom_name() {
         cover_path: None,
         title: Some("Overridden By Name".into()),
     };
-    let updated2 = build_game_entry(&game_no_rom, &changes2).expect("should succeed");
+    let updated2 = build_game_entry(&game_no_rom, &changes2);
     if let GameEntry::Emulator(e) = updated2 {
         assert_eq!(
             e.title_by_rom,
@@ -582,6 +584,104 @@ async fn steam_registration_registers_and_unregisters_shortcuts() {
     let unreg_result = registration.unregister(&unreg_entry).unwrap();
     assert_eq!(unreg_result.config.entries[0].common().steam_app_id, None);
     assert!(!steam.is_registered(&entry).unwrap());
+}
+
+#[tokio::test]
+async fn edit_entry_forwards_synchronizer_events_to_on_status() {
+    let mut e1 = make_native("OldName");
+    e1.common_mut_test_helper().cloud_folder = Some("CloudOld".into());
+
+    let initial = AppConfig {
+        credentials: Some(emusync_domain::config::Credentials {
+            client_id: "c".into(),
+            client_secret: "s".into(),
+            refresh_token: Some("rt".into()),
+        }),
+        entries: vec![e1.clone()],
+    };
+    let store = InMemoryStore {
+        config: Arc::new(Mutex::new(initial.clone())),
+    };
+    let steam = MockSteam::default();
+    let factory = SpyFactory::default();
+    *factory.status_emitter.lock().unwrap() = Some(SyncEvent::Error("Cloud sync failure".into()));
+
+    let received_events = Arc::new(Mutex::new(Vec::new()));
+    let rx_clone = Arc::clone(&received_events);
+    let editor = EditLibrary::new(store.clone(), factory.clone(), steam.clone(), move |ev| {
+        rx_clone.lock().unwrap().push(ev);
+    });
+
+    let mut edited = e1.clone();
+    edited.common_mut_test_helper().name = "NewName".into();
+
+    let _ = editor.edit_entry(&initial, &e1, &edited).await;
+
+    let events = received_events.lock().unwrap().clone();
+    assert_eq!(events, vec![SyncEvent::Error("Cloud sync failure".into())]);
+}
+
+#[test]
+fn build_game_entry_sanitizes_targets_and_filters_empty_in_emulator_and_native() {
+    // 1. Emulator trimming and filtering
+    let emu = Emulator::new("Snes9x", "/usr/bin/snes9x", "/roms", vec!["sfc".into()]);
+    let emu_game = SyncGame {
+        entry: GameEntry::Emulator(emu),
+        name: "Super Mario World".into(),
+        effective_title: "Super Mario World".into(),
+        rom_path: Some("/roms/smw.sfc".into()),
+        save_targets: Vec::new(),
+    };
+    let changes = GameOverrideChanges {
+        targets: vec![
+            SaveTarget {
+                path: "   ".into(),
+                kind: SaveTargetType::File,
+                cloud_path: None,
+            },
+            SaveTarget {
+                path: "  /saves/smw.srm  ".into(),
+                kind: SaveTargetType::File,
+                cloud_path: Some("  smw_cloud.srm  ".into()),
+            },
+        ],
+        cover_path: None,
+        title: None,
+    };
+    let updated_emu = build_game_entry(&emu_game, &changes);
+    if let GameEntry::Emulator(e) = updated_emu {
+        assert_eq!(e.save_paths_by_rom[0].1, vec!["/saves/smw.srm"]);
+        assert_eq!(e.save_targets_by_rom[0].1.len(), 1);
+        assert_eq!(e.save_targets_by_rom[0].1[0].path, "/saves/smw.srm");
+        assert_eq!(
+            e.save_targets_by_rom[0].1[0].cloud_path.as_deref(),
+            Some("smw_cloud.srm")
+        );
+    } else {
+        panic!("expected emulator");
+    }
+
+    // 2. Native trimming and filtering
+    let nat = make_native("NativeGame");
+    let nat_game = SyncGame {
+        entry: nat,
+        name: "NativeGame".into(),
+        effective_title: "NativeGame".into(),
+        rom_path: None,
+        save_targets: Vec::new(),
+    };
+    let updated_nat = build_game_entry(&nat_game, &changes);
+    if let GameEntry::Native(n) = updated_nat {
+        assert_eq!(n.common.save_paths, vec!["/saves/smw.srm"]);
+        assert_eq!(n.common.save_targets.len(), 1);
+        assert_eq!(n.common.save_targets[0].path, "/saves/smw.srm");
+        assert_eq!(
+            n.common.save_targets[0].cloud_path.as_deref(),
+            Some("smw_cloud.srm")
+        );
+    } else {
+        panic!("expected native");
+    }
 }
 
 trait CommonMutHelper {

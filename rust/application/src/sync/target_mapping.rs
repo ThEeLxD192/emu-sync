@@ -2,7 +2,7 @@
 
 use emusync_domain::library::{SaveTarget, SaveTargetType};
 use emusync_domain::sync::{LocalSaveAccess, LocalSavePath, RemoteFile, remote_path_segments};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Display;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,22 +47,26 @@ impl Display for SaveTargetMappingError {
 
 impl std::error::Error for SaveTargetMappingError {}
 
+fn strip_cloud_prefix<'a>(name: &'a str, prefix: &str) -> Option<&'a str> {
+    name.strip_prefix(prefix)?.strip_prefix('/')
+}
+
 pub fn project_directory_files(files: &[RemoteFile], prefix: Option<&str>) -> Vec<RemoteFile> {
     let Some(pref) = prefix.filter(|p| !p.trim().is_empty()) else {
         return files.to_vec();
     };
-    let prefix_slash = format!("{pref}/");
     files
         .iter()
-        .filter(|f| f.name.starts_with(&prefix_slash))
-        .map(|f| RemoteFile {
-            name: f.name[prefix_slash.len()..].to_string(),
-            ..f.clone()
+        .filter_map(|f| {
+            strip_cloud_prefix(&f.name, pref).map(|stripped| RemoteFile {
+                name: stripped.to_string(),
+                ..f.clone()
+            })
         })
         .collect()
 }
 
-pub fn directory_cloud_name(prefix: Option<&str>, relative_path: &str) -> String {
+pub(crate) fn directory_cloud_name(prefix: Option<&str>, relative_path: &str) -> String {
     match prefix.filter(|p| !p.trim().is_empty()) {
         Some(p) => format!("{p}/{relative_path}"),
         None => relative_path.to_string(),
@@ -73,20 +77,18 @@ pub struct SaveTargetMapping<A> {
     files: A,
 }
 
+impl<A> SaveTargetMapping<A> {
+    pub const fn new(files: A) -> Self {
+        Self { files }
+    }
+}
+
 impl<A> SaveTargetMapping<A>
 where
     A: LocalSaveAccess,
     A::Error: std::fmt::Debug,
     <A::Path as LocalSavePath>::Error: std::fmt::Debug,
 {
-    pub fn new(files: A) -> Self {
-        Self { files }
-    }
-
-    pub fn files(&self) -> &A {
-        &self.files
-    }
-
     pub fn get_sibling_reserved_names(
         &self,
         target_path: &A::Path,
@@ -279,8 +281,7 @@ where
                         names.insert(name);
                     }
                     Some(p) => {
-                        let prefix_slash = format!("{p}/");
-                        if let Some(stripped) = name.strip_prefix(&prefix_slash) {
+                        if let Some(stripped) = strip_cloud_prefix(&name, p) {
                             names.insert(stripped.to_string());
                         }
                     }
@@ -327,9 +328,8 @@ where
                 other.cloud_path.as_deref().filter(|p| !p.trim().is_empty())
                 && Some(other_cloud) != target.cloud_path.as_deref()
             {
-                let other_prefix = format!("{other_cloud}/");
                 for file in cloud_files {
-                    if file.name.starts_with(&other_prefix)
+                    if strip_cloud_prefix(&file.name, other_cloud).is_some()
                         && let Some(projected) = project_cloud_name(&file.name, prefix)
                     {
                         reserved.insert(projected);
@@ -386,38 +386,31 @@ where
             return Err(SaveTargetMappingError::ConflictingLocalDestinations);
         }
 
-        for (i, _file_target) in targets.iter().enumerate() {
-            if !is_dir[i] {
-                let file_norm = &normalized_paths[i];
-                for (j, other) in targets.iter().enumerate() {
-                    let other_norm = &normalized_paths[j];
-                    if file_norm != other_norm {
-                        let ancestors =
-                            self.files.path(&other.path).ancestors().map_err(|e| {
-                                SaveTargetMappingError::LocalAccess(format!("{e:?}"))
-                            })?;
-                        if ancestors.contains(file_norm) {
-                            return Err(SaveTargetMappingError::FileIsParentOfAnother);
-                        }
-                    }
+        let file_norms: HashSet<&str> = normalized_paths
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| !is_dir[i])
+            .map(|(_, p)| p.as_str())
+            .collect();
+
+        if !file_norms.is_empty() {
+            for (j, other) in targets.iter().enumerate() {
+                let other_norm = &normalized_paths[j];
+                let ancestors = self
+                    .files
+                    .path(&other.path)
+                    .ancestors()
+                    .map_err(|e| SaveTargetMappingError::LocalAccess(format!("{e:?}")))?;
+                if ancestors
+                    .iter()
+                    .any(|a| a != other_norm && file_norms.contains(a.as_str()))
+                {
+                    return Err(SaveTargetMappingError::FileIsParentOfAnother);
                 }
             }
         }
 
         // 3. Validate directory scopes
-        let mut directories = Vec::new();
-        for (i, target) in targets.iter().enumerate() {
-            if is_dir[i] {
-                let norm = &normalized_paths[i];
-                if !directories
-                    .iter()
-                    .any(|(n, cp): &(String, Option<String>)| n == norm && *cp == target.cloud_path)
-                {
-                    directories.push((norm.clone(), target.cloud_path.clone()));
-                }
-            }
-        }
-
         let scoped: Vec<_> = targets
             .iter()
             .enumerate()
@@ -432,13 +425,11 @@ where
 
         for (i, target) in scoped.iter().enumerate() {
             let target_path = target.cloud_path.as_deref().unwrap();
-            let target_slash = format!("{target_path}/");
             for other in scoped.iter().skip(i + 1) {
                 let other_path = other.cloud_path.as_deref().unwrap();
-                let other_slash = format!("{other_path}/");
                 if other_path == target_path
-                    || other_path.starts_with(&target_slash)
-                    || target_path.starts_with(&other_slash)
+                    || strip_cloud_prefix(other_path, target_path).is_some()
+                    || strip_cloud_prefix(target_path, other_path).is_some()
                 {
                     return Err(SaveTargetMappingError::OverlappingDirectoryScopes);
                 }
@@ -499,8 +490,8 @@ where
                 .filter(|f| {
                     !file_names.contains(&f.name)
                         && !scoped.iter().any(|s| {
-                            let prefix = format!("{}/", s.cloud_path.as_deref().unwrap());
-                            f.name.starts_with(&prefix)
+                            let prefix = s.cloud_path.as_deref().unwrap();
+                            strip_cloud_prefix(&f.name, prefix).is_some()
                         })
                 })
                 .collect();
@@ -511,7 +502,7 @@ where
                 .map(|t| t.path.clone())
                 .collect();
 
-            let mut local_names_count: HashMap<String, usize> = HashMap::new();
+            let mut local_names_count: BTreeMap<String, usize> = BTreeMap::new();
             for target in &legacy {
                 let root = self.files.path(&target.path);
                 if root.is_directory().unwrap_or(false)
@@ -587,10 +578,7 @@ where
 fn project_cloud_name(name: &str, prefix: Option<&str>) -> Option<String> {
     match prefix {
         None => Some(name.to_string()),
-        Some(p) => {
-            let prefix_slash = format!("{p}/");
-            name.strip_prefix(&prefix_slash).map(str::to_string)
-        }
+        Some(p) => strip_cloud_prefix(name, p).map(str::to_string),
     }
 }
 

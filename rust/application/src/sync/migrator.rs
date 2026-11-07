@@ -22,18 +22,21 @@ pub enum MigrationError {
     },
 }
 
-fn format_recovery(
+fn write_recovery(
+    f: &mut std::fmt::Formatter<'_>,
     rollback_failures: &[String],
     old_path: &[String],
     new_path: &[String],
-) -> String {
+) -> std::fmt::Result {
     if rollback_failures.is_empty() {
-        format!(
+        write!(
+            f,
             "Previously moved files were restored to '{}'.",
             old_path.join("/")
         )
     } else {
-        format!(
+        write!(
+            f,
             "Some files remain in '{}': {}.",
             new_path.join("/"),
             rollback_failures.join(", ")
@@ -53,22 +56,18 @@ impl Display for MigrationError {
                 old_path,
                 new_path,
             } => {
-                let recovery = format_recovery(rollback_failures, old_path, new_path);
-                write!(
-                    f,
-                    "Cloud migration failed: {reason}. {recovery} No folders were deleted."
-                )
+                write!(f, "Cloud migration failed: {reason}. ")?;
+                write_recovery(f, rollback_failures, old_path, new_path)?;
+                write!(f, " No folders were deleted.")
             }
             Self::Cancelled {
                 rollback_failures,
                 old_path,
                 new_path,
             } => {
-                let recovery = format_recovery(rollback_failures, old_path, new_path);
-                write!(
-                    f,
-                    "Cloud migration cancelled. {recovery} No folders were deleted."
-                )
+                write!(f, "Cloud migration cancelled. ")?;
+                write_recovery(f, rollback_failures, old_path, new_path)?;
+                write!(f, " No folders were deleted.")
             }
         }
     }
@@ -102,6 +101,47 @@ where
             .await
     }
 
+    pub(crate) async fn migrate_resolved(
+        &self,
+        token: &str,
+        source_id: &str,
+        destination_id: Option<&str>,
+        old_path: &[String],
+        new_path: &[String],
+    ) -> Result<(), MigrationError> {
+        self.migrate_resolved_with_cancel(
+            token,
+            source_id,
+            destination_id,
+            old_path,
+            new_path,
+            || false,
+        )
+        .await
+    }
+
+    async fn migrate_resolved_with_cancel(
+        &self,
+        token: &str,
+        source_id: &str,
+        destination_id: Option<&str>,
+        old_path: &[String],
+        new_path: &[String],
+        is_cancelled: impl Fn() -> bool,
+    ) -> Result<(), MigrationError> {
+        if destination_id == Some(source_id) {
+            return Ok(());
+        }
+
+        match destination_id {
+            None => self.relocate(token, source_id, old_path, new_path).await,
+            Some(dest_id) => {
+                self.merge(token, source_id, dest_id, old_path, new_path, is_cancelled)
+                    .await
+            }
+        }
+    }
+
     pub async fn migrate_with_cancel(
         &self,
         token: &str,
@@ -127,24 +167,15 @@ where
             .await
             .map_err(|e| MigrationError::Folder(format!("{e:?}")))?;
 
-        if destination.as_deref() == Some(&source_id) {
-            return Ok(());
-        }
-
-        match destination {
-            None => self.relocate(token, &source_id, old_path, new_path).await,
-            Some(dest_id) => {
-                self.merge(
-                    token,
-                    &source_id,
-                    &dest_id,
-                    old_path,
-                    new_path,
-                    is_cancelled,
-                )
-                .await
-            }
-        }
+        self.migrate_resolved_with_cancel(
+            token,
+            &source_id,
+            destination.as_deref(),
+            old_path,
+            new_path,
+            is_cancelled,
+        )
+        .await
     }
 
     async fn relocate(
@@ -202,30 +233,37 @@ where
             .list_children(token, source)
             .await
             .map_err(|e| MigrationError::Listing(format!("{e:?}")))?;
+
+        if source_files.is_empty() {
+            return Ok(());
+        }
+
         let destination_files = self
             .search
             .list_children(token, destination)
             .await
             .map_err(|e| MigrationError::Listing(format!("{e:?}")))?;
 
-        let mut source_names = HashSet::with_capacity(source_files.len());
+        let mut dest_names = HashSet::with_capacity(destination_files.len());
         let mut collisions = BTreeSet::new();
 
-        for file in &source_files {
-            if !source_names.insert(&file.name) {
-                collisions.insert(file.name.clone());
+        for file in &destination_files {
+            let name = file.name.as_str();
+            if !dest_names.insert(name) {
+                collisions.insert(name);
             }
         }
 
-        let dest_names: HashSet<&str> = destination_files.iter().map(|f| f.name.as_str()).collect();
+        let mut source_names = HashSet::with_capacity(source_files.len());
         for file in &source_files {
-            if dest_names.contains(file.name.as_str()) {
-                collisions.insert(file.name.clone());
+            let name = file.name.as_str();
+            if !source_names.insert(name) || dest_names.contains(name) {
+                collisions.insert(name);
             }
         }
 
         if !collisions.is_empty() {
-            let collision_list: Vec<String> = collisions.into_iter().collect();
+            let collision_list: Vec<&str> = collisions.into_iter().collect();
             let msg = format!(
                 "Cloud folders '{}' and '{}' contain duplicate names: {}. Both copies were kept. Resolve the duplicates in Google Drive before renaming.",
                 old_path.join("/"),

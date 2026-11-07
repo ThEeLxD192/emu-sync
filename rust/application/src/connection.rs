@@ -45,19 +45,13 @@ impl<S: ConfigurationStore, A: CloudAuthorization> CloudConnection<S, A> {
                 authorized: false,
             });
         }
-        let updated = self.store.update_credentials(|current| {
-            let refresh_token = current.and_then(|c| {
-                if c.client_id == id && c.client_secret == secret {
-                    c.refresh_token
-                } else {
-                    None
-                }
-            });
-            Some(Credentials {
+        let updated = self.store.update_credentials(|current| match current {
+            Some(c) if c.client_id == id && c.client_secret == secret => Some(c),
+            _ => Some(Credentials {
                 client_id: id.to_owned(),
                 client_secret: secret.to_owned(),
-                refresh_token,
-            })
+                refresh_token: None,
+            }),
         })?;
         Ok(ConnectionResult {
             config: Some(updated),
@@ -118,7 +112,7 @@ impl<S: ConfigurationStore, A: CloudAuthorization> CloudConnection<S, A> {
         };
 
         ConnectionResult {
-            config: self.store.load().ok(),
+            config: self.store.load().ok().or_else(|| Some(cfg.clone())),
             message,
             authorized,
         }

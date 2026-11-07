@@ -5,8 +5,9 @@ use crate::{
     scanner_helper::scan_entry_games,
 };
 use emusync_application::{
-    EntryEditResult, LoadLibrary, SteamRegistration,
-    library::entry_edits::{GameOverrideChanges, build_game_entry},
+    library::{
+        EntryEditResult, GameOverrideChanges, LoadLibrary, SteamRegistration, build_game_entry,
+    },
     operation::OperationCoordinator,
     sync::{SyncOrchestrator, SyncOrchestratorFactory, SyncServices},
 };
@@ -700,10 +701,7 @@ impl DesktopCoordinator {
             targets: targets.clone(),
         };
 
-        let updated_entry = match build_game_entry(&sync_game, &changes) {
-            Some(e) => e,
-            None => return,
-        };
+        let updated_entry = build_game_entry(&sync_game, &changes);
 
         let config = match self.config_manager.load() {
             Ok(c) => c,

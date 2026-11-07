@@ -449,11 +449,11 @@ fn project_directory_files_strips_prefix_and_filters() {
         },
     ];
 
-    let projected = emusync_application::project_directory_files(&files, Some("sub"));
+    let projected = emusync_application::sync::project_directory_files(&files, Some("sub"));
     assert_eq!(projected.len(), 1);
     assert_eq!(projected[0].name, "save1.dat");
 
-    let all_files = emusync_application::project_directory_files(&files, None);
+    let all_files = emusync_application::sync::project_directory_files(&files, None);
     assert_eq!(all_files.len(), 2);
 }
 

@@ -1,4 +1,4 @@
-use emusync_application::oneshot;
+use emusync_application::sync::oneshot;
 use std::time::Duration;
 
 #[tokio::test]

@@ -24,17 +24,24 @@ struct OperationGuard<'a> {
 
 impl<'a> Drop for OperationGuard<'a> {
     fn drop(&mut self) {
+        struct BusyRelease<'b>(&'b OperationCoordinator);
+        impl<'b> Drop for BusyRelease<'b> {
+            fn drop(&mut self) {
+                self.0.generation.fetch_add(1, Ordering::SeqCst);
+                self.0.busy.store(false, Ordering::SeqCst);
+            }
+        }
+
+        let _release = BusyRelease(self.coordinator);
         if !self.completed {
             self.coordinator.emit(OperationEvent::Cancelled);
         }
-        self.coordinator.generation.fetch_add(1, Ordering::SeqCst);
         self.coordinator.emit(OperationEvent::Finished);
-        self.coordinator.busy.store(false, Ordering::Release);
     }
 }
 
 impl OperationCoordinator {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             generation: AtomicU64::new(0),
             busy: AtomicBool::new(false),
@@ -61,24 +68,26 @@ impl OperationCoordinator {
     }
 
     pub fn is_busy(&self) -> bool {
-        self.busy.load(Ordering::Acquire)
+        self.busy.load(Ordering::SeqCst)
     }
 
     pub async fn run_if_idle<T>(&self, fut: impl Future<Output = T>) -> Option<T> {
         if self
             .busy
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
             return None;
         }
-        self.generation.fetch_add(1, Ordering::SeqCst);
-        self.emit(OperationEvent::Started);
 
         let mut guard = OperationGuard {
             coordinator: self,
             completed: false,
         };
+
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        self.emit(OperationEvent::Started);
+
         let result = fut.await;
         guard.completed = true;
         Some(result)

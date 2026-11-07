@@ -15,17 +15,10 @@ use emusync_domain::sync::{
 };
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct SyncOrchestrator<A, L, F, T, Auth, R>
 where
-    A: LocalSaveAccess + Clone + Send + Sync + 'static,
-    A::Path: Clone + Send + Sync + 'static,
-    A::Error: std::fmt::Debug + Send + Sync + 'static,
-    <A::Path as LocalSavePath>::Error: std::fmt::Debug + Send + Sync + 'static,
-    L: CloudFileListing + Clone + Send + Sync + 'static,
-    F: CloudFolderStore + Clone + Send + Sync + 'static,
-    T: LocalSaveFiles + Clone + Send + Sync + 'static,
-    Auth: CloudAuthorization + Clone + Send + Sync + 'static,
-    R: GameLauncher + Clone + Send + Sync + 'static,
+    A: LocalSaveAccess,
 {
     context: Arc<SyncContext<A, L, F, T, Auth, R>>,
 }
@@ -102,24 +95,8 @@ pub struct SyncOrchestratorFactory<A, L, F, T, Auth, R> {
     services: SyncServices<A, L, F, T, Auth, R>,
 }
 
-impl<A, L, F, T, Auth, R> SyncOrchestratorFactory<A, L, F, T, Auth, R>
-where
-    A: LocalSaveAccess + Clone + Send + Sync + 'static,
-    A::Path: Clone + Send + Sync + 'static,
-    A::Error: std::fmt::Debug + Send + Sync + 'static,
-    <A::Path as LocalSavePath>::Error: std::fmt::Debug + Send + Sync + 'static,
-    L: CloudFileListing + Clone + Send + Sync + 'static,
-    L::Error: std::fmt::Debug + Send + Sync + 'static,
-    F: CloudFolderStore + Clone + Send + Sync + 'static,
-    F::Error: std::fmt::Debug + Send + Sync + 'static,
-    T: LocalSaveFiles + Clone + Send + Sync + 'static,
-    T::Error: std::fmt::Debug + Send + Sync + 'static,
-    Auth: CloudAuthorization + Clone + Send + Sync + 'static,
-    Auth::Error: std::fmt::Display + Send + Sync + 'static,
-    R: GameLauncher + Clone + Send + Sync + 'static,
-    R::Error: std::fmt::Debug + Send + Sync + 'static,
-{
-    pub fn new(services: SyncServices<A, L, F, T, Auth, R>) -> Self {
+impl<A, L, F, T, Auth, R> SyncOrchestratorFactory<A, L, F, T, Auth, R> {
+    pub const fn new(services: SyncServices<A, L, F, T, Auth, R>) -> Self {
         Self { services }
     }
 }

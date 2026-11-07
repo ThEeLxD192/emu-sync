@@ -44,21 +44,22 @@ pub fn preserve_shared_cloud_root(
     }
 }
 
-pub fn build_game_entry(game: &SyncGame, changes: &GameOverrideChanges) -> Option<GameEntry> {
+pub(crate) fn resolve_rom_name(game: &SyncGame) -> &str {
+    game.rom_path
+        .as_deref()
+        .and_then(|p| {
+            p.rsplit(['/', '\\'])
+                .next()
+                .filter(|name| !name.trim().is_empty())
+        })
+        .unwrap_or(game.name.as_str())
+}
+
+pub fn build_game_entry(game: &SyncGame, changes: &GameOverrideChanges) -> GameEntry {
     match &game.entry {
         GameEntry::Emulator(emu) => {
-            let rom_name = game
-                .rom_path
-                .as_deref()
-                .and_then(|p| {
-                    p.rsplit(['/', '\\'])
-                        .next()
-                        .filter(|name| !name.trim().is_empty())
-                })
-                .unwrap_or(game.name.as_str());
-            Some(GameEntry::Emulator(update_emulator_overrides(
-                emu, rom_name, changes,
-            )))
+            let rom_name = resolve_rom_name(game);
+            GameEntry::Emulator(update_emulator_overrides(emu, rom_name, changes))
         }
         GameEntry::Native(native) => {
             let mut updated = native.clone();
@@ -78,11 +79,34 @@ pub fn build_game_entry(game: &SyncGame, changes: &GameOverrideChanges) -> Optio
                     Some(clean.to_string())
                 };
             }
-            updated.common.save_paths = changes.targets.iter().map(|t| t.path.clone()).collect();
-            updated.common.save_targets = changes.targets.clone();
-            Some(GameEntry::Native(updated))
+            let (valid_paths, valid_targets) = sanitize_targets(&changes.targets);
+            updated.common.save_paths = valid_paths;
+            updated.common.save_targets = valid_targets;
+            GameEntry::Native(updated)
         }
     }
+}
+
+fn sanitize_targets(targets: &[SaveTarget]) -> (Vec<String>, Vec<SaveTarget>) {
+    let mut valid_paths = Vec::with_capacity(targets.len());
+    let mut valid_targets = Vec::with_capacity(targets.len());
+    for t in targets {
+        let trimmed = t.path.trim();
+        if !trimmed.is_empty() {
+            valid_paths.push(trimmed.to_string());
+            valid_targets.push(SaveTarget {
+                path: trimmed.to_string(),
+                kind: t.kind.clone(),
+                cloud_path: t
+                    .cloud_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+            });
+        }
+    }
+    (valid_paths, valid_targets)
 }
 
 fn update_emulator_overrides(
@@ -91,22 +115,12 @@ fn update_emulator_overrides(
     changes: &GameOverrideChanges,
 ) -> Emulator {
     let mut updated = emu.clone();
+    let (valid_paths, valid_targets) = sanitize_targets(&changes.targets);
 
-    let has_valid_targets = changes.targets.iter().any(|t| !t.path.trim().is_empty());
-
-    if !has_valid_targets {
+    if valid_targets.is_empty() {
         updated.save_paths_by_rom.retain(|(k, _)| k != rom_name);
         updated.save_targets_by_rom.retain(|(k, _)| k != rom_name);
     } else {
-        let mut valid_paths = Vec::with_capacity(changes.targets.len());
-        let mut valid_targets = Vec::with_capacity(changes.targets.len());
-        for t in &changes.targets {
-            let trimmed = t.path.trim();
-            if !trimmed.is_empty() {
-                valid_paths.push(trimmed.to_string());
-                valid_targets.push(t.clone());
-            }
-        }
         if let Some(entry) = updated
             .save_paths_by_rom
             .iter_mut()

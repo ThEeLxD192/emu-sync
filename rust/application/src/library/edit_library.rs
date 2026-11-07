@@ -1,9 +1,12 @@
 //! Library mutations (reordering, adding, deleting, and editing entries) with cloud synchronization.
 
-use super::entry_edits::{GameOverrideChanges, build_game_entry, preserve_shared_cloud_root};
+use super::entry_edits::{
+    GameOverrideChanges, build_game_entry, preserve_shared_cloud_root, resolve_rom_name,
+};
 use emusync_domain::config::{AppConfig, ConfigurationStore};
 use emusync_domain::library::{GameEntry, SteamLibrary};
 use emusync_domain::sync::{SaveSynchronizer, SaveSynchronizerFactory, SyncEvent, SyncGame};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EntryEditResult {
@@ -15,7 +18,7 @@ pub struct EditLibrary<S, F, St> {
     store: S,
     synchronizers: F,
     steam: St,
-    on_status: Box<dyn Fn(SyncEvent) + Send + Sync + 'static>,
+    on_status: Arc<dyn Fn(SyncEvent) + Send + Sync + 'static>,
 }
 
 impl<S, F, St> EditLibrary<S, F, St>
@@ -34,7 +37,7 @@ where
             store,
             synchronizers,
             steam,
-            on_status: Box::new(on_status),
+            on_status: Arc::new(on_status),
         }
     }
 
@@ -59,25 +62,15 @@ where
             let mut ordered = Vec::with_capacity(current.entries.len());
             for target in new_entries {
                 let target_name = &target.common().name;
-                if let Some(existing) = current
+                if let Some(pos) = current
                     .entries
                     .iter()
-                    .find(|e| &e.common().name == target_name)
-                    && !ordered
-                        .iter()
-                        .any(|e: &GameEntry| &e.common().name == target_name)
+                    .position(|e| &e.common().name == target_name)
                 {
-                    ordered.push(existing.clone());
+                    ordered.push(current.entries.remove(pos));
                 }
             }
-            for candidate in current.entries {
-                if !ordered
-                    .iter()
-                    .any(|e| e.common().name == candidate.common().name)
-                {
-                    ordered.push(candidate);
-                }
-            }
+            ordered.append(&mut current.entries);
             current.entries = ordered;
             current
         })
@@ -100,7 +93,13 @@ where
             return Ok(None);
         }
         let updated = self.store.update(|mut current| {
-            current.entries.push(entry);
+            if !current
+                .entries
+                .iter()
+                .any(|e| e.common().name == entry.common().name)
+            {
+                current.entries.push(entry);
+            }
             current
         })?;
         Ok(Some(updated))
@@ -127,7 +126,10 @@ where
         preserve_shared_cloud_root(config, old_entry, &mut edited);
 
         let migrated = if config.credentials.is_some() {
-            let sync = self.synchronizers.create(config.clone(), |_| {});
+            let on_status = Arc::clone(&self.on_status);
+            let sync = self
+                .synchronizers
+                .create(config.clone(), move |ev| on_status(ev));
             sync.rename_entry(old_entry, &edited).await.unwrap_or(false)
         } else {
             true
@@ -176,9 +178,7 @@ where
             entry: latest.clone(),
             ..game.clone()
         };
-        let Some(edited) = build_game_entry(&current_game, changes) else {
-            return Ok(None);
-        };
+        let edited = build_game_entry(&current_game, changes);
 
         let migrated = self
             .migrate_game_title(config, &current_game, &edited, changes)
@@ -225,11 +225,7 @@ where
         changes: &GameOverrideChanges,
     ) -> bool {
         let old_title = &current.effective_title;
-        let rom_name = current
-            .rom_path
-            .as_deref()
-            .and_then(|p| p.rsplit(['/', '\\']).next())
-            .unwrap_or(current.name.as_str());
+        let rom_name = resolve_rom_name(current);
         let new_title = match edited {
             GameEntry::Emulator(emu) => emu.effective_title(rom_name, &current.name),
             GameEntry::Native(nat) => nat.common.name.clone(),
@@ -247,7 +243,10 @@ where
         } else {
             &changes.targets
         };
-        let sync = self.synchronizers.create(config.clone(), |_| {});
+        let on_status = Arc::clone(&self.on_status);
+        let sync = self
+            .synchronizers
+            .create(config.clone(), move |ev| on_status(ev));
         sync.rename_game(edited, Some(rom_name), old_title, &new_title, local_targets)
             .await
             .unwrap_or(false)

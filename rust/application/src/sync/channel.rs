@@ -22,12 +22,15 @@ pub struct OneshotReceiver<T> {
 impl<T> OneshotSender<T> {
     pub fn send(mut self, value: T) -> Result<(), T> {
         if let Some(state_arc) = self.state.take() {
-            let mut state = state_arc.lock().unwrap();
-            if state.closed {
-                return Err(value);
-            }
-            state.value = Some(value);
-            if let Some(waker) = state.waker.take() {
+            let waker = {
+                let mut state = state_arc.lock().unwrap();
+                if state.closed {
+                    return Err(value);
+                }
+                state.value = Some(value);
+                state.waker.take()
+            };
+            if let Some(waker) = waker {
                 waker.wake();
             }
             Ok(())
@@ -40,9 +43,12 @@ impl<T> OneshotSender<T> {
 impl<T> Drop for OneshotSender<T> {
     fn drop(&mut self) {
         if let Some(state_arc) = self.state.take() {
-            let mut state = state_arc.lock().unwrap();
-            state.closed = true;
-            if let Some(waker) = state.waker.take() {
+            let waker = {
+                let mut state = state_arc.lock().unwrap();
+                state.closed = true;
+                state.waker.take()
+            };
+            if let Some(waker) = waker {
                 waker.wake();
             }
         }
@@ -53,9 +59,8 @@ impl<T> Drop for OneshotReceiver<T> {
     fn drop(&mut self) {
         let mut state = self.state.lock().unwrap();
         state.closed = true;
-        if let Some(waker) = state.waker.take() {
-            waker.wake();
-        }
+        state.waker = None;
+        state.value = None;
     }
 }
 

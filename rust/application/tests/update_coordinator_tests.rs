@@ -7,6 +7,8 @@ struct MockSource {
     next_info: Arc<Mutex<Option<UpdateInfo>>>,
     check_error: Arc<Mutex<Option<String>>>,
     download_error: Arc<Mutex<Option<String>>>,
+    download_started: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    stall_download: Arc<Mutex<bool>>,
 }
 
 impl UpdateSource for MockSource {
@@ -26,6 +28,12 @@ impl UpdateSource for MockSource {
         mut on_progress: impl FnMut(f32) + Send,
     ) -> Result<(), Self::Error> {
         on_progress(0.5);
+        if let Some(tx) = self.download_started.lock().unwrap().take() {
+            let _ = tx.send(());
+        }
+        if *self.stall_download.lock().unwrap() {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
         if let Some(err) = self.download_error.lock().unwrap().clone() {
             return Err(err);
         }
@@ -216,4 +224,94 @@ fn restart_is_blocked_when_operation_is_in_progress() {
         *installer.restarted_path.lock().unwrap(),
         Some("/path/to/update".to_string())
     );
+}
+
+#[tokio::test]
+async fn cancelled_download_cleans_up_destination_and_restores_available_state() {
+    let source = MockSource::default();
+    *source.stall_download.lock().unwrap() = true;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    *source.download_started.lock().unwrap() = Some(tx);
+
+    let files = MockFiles::default();
+    *files.destination.lock().unwrap() = "/tmp/update-cancel.tar.gz".to_string();
+    let installer = MockInstaller::default();
+
+    let published = Arc::new(Mutex::new(Vec::new()));
+    let published_clone = Arc::clone(&published);
+
+    let coordinator = Arc::new(UpdateCoordinator::new(
+        source,
+        files.clone(),
+        installer,
+        move |state| {
+            published_clone.lock().unwrap().push(state.clone());
+        },
+    ));
+
+    let info = sample_update_info();
+    let coord_task = Arc::clone(&coordinator);
+    let info_task = info.clone();
+    let handle = tokio::spawn(async move {
+        coord_task.download(&info_task).await;
+    });
+
+    // Wait until download starts and stalls
+    rx.await.expect("download should have started");
+
+    // While downloading, can_check should be false
+    assert!(!coordinator.can_check());
+
+    // Abort the task to trigger cancellation drop
+    handle.abort();
+    let _ = handle.await;
+
+    // Verify temp file was cleaned up on cancellation
+    let deleted = files.deleted_paths.lock().unwrap().clone();
+    assert_eq!(deleted, vec!["/tmp/update-cancel.tar.gz"]);
+
+    // Verify coordinator is no longer busy and state reverted to Available
+    assert!(coordinator.can_check());
+    assert_eq!(coordinator.state(), UpdateState::Available(info));
+}
+
+#[tokio::test]
+async fn reentrant_on_state_does_not_deadlock_and_can_check_while_checking() {
+    type TestCoordinator = UpdateCoordinator<MockSource, MockFiles, MockInstaller>;
+
+    let source = MockSource::default();
+    let files = MockFiles::default();
+    let installer = MockInstaller::default();
+
+    let coord_holder: Arc<Mutex<Option<Arc<TestCoordinator>>>> = Arc::new(Mutex::new(None));
+    let coord_holder_clone = Arc::clone(&coord_holder);
+
+    let observed_states_in_callback = Arc::new(Mutex::new(Vec::new()));
+    let observed_clone = Arc::clone(&observed_states_in_callback);
+
+    let coordinator = Arc::new(UpdateCoordinator::new(
+        source,
+        files,
+        installer,
+        move |_state| {
+            if let Some(coord) = coord_holder_clone.lock().unwrap().as_ref() {
+                // Must not deadlock when calling state() or can_check() inside on_state
+                let current = coord.state();
+                let can = coord.can_check();
+                observed_clone.lock().unwrap().push((current, can));
+            }
+        },
+    ));
+
+    *coord_holder.lock().unwrap() = Some(Arc::clone(&coordinator));
+
+    // can_check() is true initially
+    assert!(coordinator.can_check());
+
+    // check_for_updates should not deadlock
+    coordinator.check_for_updates().await;
+
+    // Both state() and can_check() were queryable inside on_state without deadlock
+    let observed = observed_states_in_callback.lock().unwrap().clone();
+    assert!(!observed.is_empty());
 }

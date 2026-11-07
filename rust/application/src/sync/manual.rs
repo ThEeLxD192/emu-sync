@@ -7,7 +7,7 @@ use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, DirectoryDownload, LocalSaveAccess,
     LocalSaveFiles, LocalSavePath, RemoteFile, RemoteState, SyncEvent, canonical_cloud_files,
 };
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 pub struct PlannedSave<P> {
     pub local: P,
@@ -47,10 +47,9 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn sync_directory_manual(
+    pub(crate) async fn sync_directory_manual(
         &self,
         token: &str,
-        _entry: &GameEntry,
         local_save_path: &A::Path,
         folder_id: &str,
         cloud_files: &[RemoteFile],
@@ -88,7 +87,8 @@ where
         reserved: &HashSet<String>,
         prefix: Option<&str>,
     ) -> Result<Vec<DirectoryAction<A::Path>>, String> {
-        let mut local_files = BTreeMap::new();
+        let mut files: BTreeMap<String, DirectoryFileEntry<A::Path>> = BTreeMap::new();
+
         if root.is_directory().unwrap_or(false)
             && let Ok(walked) = root.walk_top_down()
         {
@@ -97,7 +97,7 @@ where
                     && let Ok(rel) = file.relative_to(root)
                     && !reserved.contains(&rel)
                 {
-                    local_files.insert(rel, file);
+                    files.entry(rel).or_default().local = Some(file);
                 }
             }
         }
@@ -105,26 +105,24 @@ where
         let canonical_remote = canonical_cloud_files(cloud_files)
             .map_err(|e| format!("Unverified duplicate remote file: {}", e.name))?;
 
-        let mut remote_files = BTreeMap::new();
         for file in canonical_remote {
-            if let Ok(Some(_)) = root.resolve_remote(&file.name) {
-                remote_files.insert(file.name.clone(), file);
+            if let Ok(Some(resolved)) = root.resolve_remote(&file.name) {
+                let name = file.name.clone();
+                files.entry(name).or_default().remote = Some((file, resolved));
             }
         }
 
-        let mut names: BTreeSet<String> = local_files.keys().cloned().collect();
-        names.extend(remote_files.keys().cloned());
+        let mut actions = Vec::with_capacity(files.len());
+        let root_path = root.path().to_owned();
 
-        let mut actions = Vec::with_capacity(names.len());
-        for name in names {
-            let local = match local_files.remove(&name) {
-                Some(f) => f,
-                None => root
-                    .resolve_remote(&name)
-                    .map_err(|e| format!("{e:?}"))?
-                    .ok_or_else(|| format!("Invalid remote save path: {name}"))?,
+        for (name, entry) in files {
+            let (local, remote) = match (entry.local, entry.remote) {
+                (Some(local), Some((remote, _))) => (local, Some(remote)),
+                (Some(local), None) => (local, None),
+                (None, Some((remote, resolved))) => (resolved, Some(remote)),
+                (None, None) => continue,
             };
-            let remote = remote_files.remove(&name);
+
             let drive_name = directory_cloud_name(prefix, &name);
             let remote_state = remote.as_ref().map(remote_to_state);
             let decision = self
@@ -141,7 +139,7 @@ where
                     remote,
                     folder_id: folder_id.to_string(),
                     drive_name,
-                    directory: Some((root.path().to_owned(), name)),
+                    directory: Some((root_path.clone(), name)),
                 },
                 decision,
             });
@@ -208,10 +206,9 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn sync_file_manual(
+    pub(crate) async fn sync_file_manual(
         &self,
         token: &str,
-        _entry: &GameEntry,
         local_save_path: &A::Path,
         folder_id: &str,
         cloud_files: &[RemoteFile],
@@ -333,12 +330,26 @@ where
     }
 }
 
-pub struct DirectoryAction<P> {
-    pub file: PlannedSave<P>,
-    pub decision: Decision,
+struct DirectoryFileEntry<P> {
+    local: Option<P>,
+    remote: Option<(RemoteFile, P)>,
 }
 
-pub fn remote_to_state(remote: &RemoteFile) -> RemoteState {
+impl<P> Default for DirectoryFileEntry<P> {
+    fn default() -> Self {
+        Self {
+            local: None,
+            remote: None,
+        }
+    }
+}
+
+struct DirectoryAction<P> {
+    file: PlannedSave<P>,
+    decision: Decision,
+}
+
+pub(crate) fn remote_to_state(remote: &RemoteFile) -> RemoteState {
     RemoteState {
         id: remote.id.clone(),
         modified: remote.modified,
@@ -376,13 +387,8 @@ where
     }
 
     pub async fn sync_entry(&self, entry: &GameEntry) -> Result<bool, String> {
-        let token = match self.connect().await {
-            Ok(Some(tok)) => tok,
-            Ok(None) => return Ok(false),
-            Err(e) => {
-                (self.context.on_status)(SyncEvent::Error(format!("Sync error: {e}")));
-                return Ok(false);
-            }
+        let Some(token) = self.connect().await else {
+            return Ok(false);
         };
 
         let targets = self
@@ -393,9 +399,10 @@ where
         let manual = ManualFileSync::new(self.context);
 
         let mut targets_by_folder: BTreeMap<Vec<String>, Vec<_>> = BTreeMap::new();
-        for t in targets {
+        for mut t in targets {
+            let folder_segments = std::mem::take(&mut t.cloud_path_segments);
             targets_by_folder
-                .entry(t.cloud_path_segments.clone())
+                .entry(folder_segments)
                 .or_default()
                 .push(t);
         }
@@ -456,7 +463,6 @@ where
                     manual
                         .sync_directory_manual(
                             &token,
-                            entry,
                             &target.file,
                             &folder_id,
                             &target_cloud_files,
@@ -471,7 +477,6 @@ where
                     manual
                         .sync_file_manual(
                             &token,
-                            entry,
                             &target.file,
                             &folder_id,
                             &cloud_files,
@@ -488,14 +493,14 @@ where
         Ok(true)
     }
 
-    async fn connect(&self) -> Result<Option<String>, String> {
+    async fn connect(&self) -> Option<String> {
         let creds = self.context.config.credentials.as_ref();
         if creds.and_then(|c| c.refresh_token.as_ref()).is_none() {
             (self.context.on_status)(SyncEvent::Error(
                 "Google Drive is not connected. Click 'Connect Drive' in the top bar to sign in."
                     .into(),
             ));
-            return Ok(None);
+            return None;
         }
         (self.context.on_status)(SyncEvent::Syncing("Connecting to Google Drive...".into()));
         match self
@@ -505,12 +510,12 @@ where
             .authorize(&self.context.config, false)
             .await
         {
-            Ok(token) => Ok(Some(token)),
+            Ok(token) => Some(token),
             Err(err) => {
                 (self.context.on_status)(SyncEvent::Error(format!(
                     "Could not connect to Google Drive ({err}). Please reconnect your account by clicking 'Connect Drive'."
                 )));
-                Ok(None)
+                None
             }
         }
     }

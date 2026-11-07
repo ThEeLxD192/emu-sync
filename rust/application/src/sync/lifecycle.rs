@@ -5,14 +5,13 @@ use super::manual::ManualFileSync;
 use super::post_game::PostGameSync;
 use super::target_mapping::project_directory_files;
 use emusync_domain::execution::{GameLaunchRequest, GameLauncher};
-use emusync_domain::library::SaveTarget;
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, LocalSaveAccess, LocalSaveFiles, LocalSavePath, SaveSetup,
     SaveSetupRequest, SyncEvent, SyncGame, canonical_cloud_files,
 };
 use std::sync::Arc;
 
-pub struct GameSyncLifecycle<A, L, F, T, Auth, R>
+pub(crate) struct GameSyncLifecycle<A, L, F, T, Auth, R>
 where
     A: LocalSaveAccess,
 {
@@ -21,7 +20,6 @@ where
 
 struct PlayPreparation {
     item: SyncGame,
-    targets: Vec<SaveTarget>,
     cloud_path: Vec<String>,
 }
 
@@ -42,16 +40,15 @@ where
     R: GameLauncher + Clone + Send + Sync + 'static,
     R::Error: std::fmt::Debug + Send + Sync + 'static,
 {
-    pub fn new(context: Arc<SyncContext<A, L, F, T, Auth, R>>) -> Self {
+    pub(crate) fn new(context: Arc<SyncContext<A, L, F, T, Auth, R>>) -> Self {
         Self { context }
     }
 
-    pub async fn play_with_sync(
+    pub(crate) async fn play_with_sync(
         &self,
         game: SyncGame,
         setup: &(impl SaveSetup + Sync),
     ) -> Result<(), String> {
-        let targets = game.save_targets.clone();
         let cloud_path = self
             .context
             .resolver
@@ -60,7 +57,6 @@ where
 
         let mut prepared = PlayPreparation {
             item: game,
-            targets,
             cloud_path,
         };
 
@@ -125,7 +121,7 @@ where
             return Ok(false);
         }
 
-        if !prepared.targets.is_empty() {
+        if !prepared.item.save_targets.is_empty() {
             (self.context.on_status)(SyncEvent::Syncing(format!(
                 "Syncing saves for {}...",
                 prepared.item.effective_title
@@ -169,21 +165,21 @@ where
             // Mapping errors must NOT allow offline play!
             self.context
                 .mapping
-                .validate_save_target_mappings(&prepared.targets, &cloud_files)
+                .validate_save_target_mappings(&prepared.item.save_targets, &cloud_files)
                 .map_err(|e| e.to_string())?;
 
             let manual = ManualFileSync::new(&self.context);
-            for target in &prepared.targets {
+            for target in &prepared.item.save_targets {
                 let local_path = self.context.services.files.path(&target.path);
                 let reserved = self
                     .context
                     .mapping
-                    .reserved_cloud_names(target, &prepared.targets, &cloud_files)
+                    .reserved_cloud_names(target, &prepared.item.save_targets, &cloud_files)
                     .map_err(|e| e.to_string())?;
                 let is_dir = self
                     .context
                     .mapping
-                    .is_directory(target, &cloud_files, &prepared.targets)
+                    .is_directory(target, &cloud_files, &prepared.item.save_targets)
                     .map_err(|e| e.to_string())?;
 
                 let sync_res = if is_dir {
@@ -202,7 +198,6 @@ where
                     manual
                         .sync_directory_manual(
                             &token,
-                            &prepared.item.entry,
                             &local_path,
                             &folder_id,
                             &target_cloud_files,
@@ -217,7 +212,6 @@ where
                     manual
                         .sync_file_manual(
                             &token,
-                            &prepared.item.entry,
                             &local_path,
                             &folder_id,
                             &cloud_files,
@@ -246,25 +240,31 @@ where
         prepared: &mut PlayPreparation,
         setup: &(impl SaveSetup + Sync),
     ) -> Result<bool, String> {
-        if !prepared.targets.is_empty() {
+        if !prepared.item.save_targets.is_empty() {
             return Ok(true);
         }
-        let folder_id = self
+        let folder_id = match self
             .context
             .services
             .folders
             .find_path(token, &prepared.cloud_path)
             .await
-            .map_err(|e| format!("{e:?}"))?;
+        {
+            Ok(f) => f,
+            Err(_) => {
+                // Transport error allows offline play
+                return Ok(true);
+            }
+        };
 
         let cloud_files = match folder_id {
-            Some(id) => self
-                .context
-                .services
-                .search
-                .list_files(token, &id)
-                .await
-                .map_err(|e| format!("{e:?}"))?,
+            Some(id) => match self.context.services.search.list_files(token, &id).await {
+                Ok(f) => f,
+                Err(_) => {
+                    // Transport error allows offline play
+                    return Ok(true);
+                }
+            },
             None => Vec::new(),
         };
 
@@ -284,8 +284,8 @@ where
         if requested.targets.is_empty() {
             Ok(false)
         } else {
-            prepared.targets = requested.targets;
             prepared.item = requested.game;
+            prepared.item.save_targets = requested.targets;
             prepared.cloud_path = self
                 .context
                 .resolver
@@ -324,7 +324,7 @@ where
             return Ok(false);
         }
 
-        if prepared.targets.is_empty()
+        if prepared.item.save_targets.is_empty()
             && let Ok(requested) = setup
                 .request(SaveSetupRequest {
                     game: prepared.item.clone(),
@@ -332,8 +332,8 @@ where
                 })
                 .await
         {
-            prepared.targets = requested.targets;
             prepared.item = requested.game;
+            prepared.item.save_targets = requested.targets;
         }
 
         if !has_drive {
@@ -341,7 +341,7 @@ where
         }
 
         PostGameSync::new(Arc::clone(&self.context))
-            .upload_after_play(&prepared.item, &prepared.targets)
+            .upload_after_play(&prepared.item, &prepared.item.save_targets)
             .await
     }
 }

@@ -13,19 +13,19 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SaveUploadTarget<P> {
-    pub file: P,
-    pub kind: SaveTargetType,
-    pub drive_name: Option<String>,
-    pub failure_reason: Option<String>,
-    pub reserved_drive_names: HashSet<String>,
+struct SaveUploadTarget<P> {
+    file: P,
+    kind: SaveTargetType,
+    drive_name: Option<String>,
+    failure_reason: Option<String>,
+    reserved_drive_names: HashSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PostSyncResult<P> {
-    pub completed_count: usize,
-    pub failed_targets: Vec<SaveUploadTarget<P>>,
-    pub blocked_reasons: Vec<String>,
+struct PostSyncResult<P> {
+    completed_count: usize,
+    failed_targets: Vec<SaveUploadTarget<P>>,
+    blocked_reasons: Vec<String>,
 }
 
 impl<P> Default for PostSyncResult<P> {
@@ -38,7 +38,7 @@ impl<P> Default for PostSyncResult<P> {
     }
 }
 
-pub struct PostSaveSync<'a, A, L, F, T, Auth, R>
+struct PostSaveSync<'a, A, L, F, T, Auth, R>
 where
     A: LocalSaveAccess,
 {
@@ -62,18 +62,19 @@ where
     R: GameLauncher + Clone + Send + Sync + 'static,
     R::Error: std::fmt::Debug + Send + Sync + 'static,
 {
-    pub fn new(context: &'a SyncContext<A, L, F, T, Auth, R>) -> Self {
+    fn new(context: &'a SyncContext<A, L, F, T, Auth, R>) -> Self {
         Self { context }
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn sync(
+    async fn sync(
         &self,
         token: &str,
         entry: &GameEntry,
         local_save_path: &A::Path,
         target_type: &SaveTargetType,
-        cloud_path_segments: &[String],
+        folder_id: &str,
+        cloud_files: &[RemoteFile],
         drive_name_override: Option<&str>,
         known_file_sibling_names: &HashSet<String>,
         reserved_sibling_names: &HashSet<String>,
@@ -93,24 +94,6 @@ where
             return Ok(blocked);
         }
 
-        let folder_id = self
-            .context
-            .services
-            .folders
-            .ensure_path(token, cloud_path_segments)
-            .await
-            .map_err(|e| format!("{e:?}"))?;
-
-        let raw_cloud_files = self
-            .context
-            .services
-            .search
-            .list_files(token, &folder_id)
-            .await
-            .map_err(|e| format!("{e:?}"))?;
-        let cloud_files = canonical_cloud_files(&raw_cloud_files)
-            .map_err(|e| format!("Duplicate cloud file: {}", e.name))?;
-
         let all_reserved_names: HashSet<String> = known_file_sibling_names
             .union(reserved_sibling_names)
             .cloned()
@@ -122,15 +105,16 @@ where
             .is_directory_save_target(
                 target_type,
                 local_save_path,
-                &cloud_files,
+                cloud_files,
                 &all_reserved_names,
                 cloud_path,
             )
             .map_err(|e| e.to_string())?;
 
-        let active_cloud_files = if is_directory {
-            let projected = project_directory_files(&cloud_files, cloud_path);
-            self.context
+        if is_directory {
+            let projected = project_directory_files(cloud_files, cloud_path);
+            let active_cloud_files = self
+                .context
                 .mapping
                 .cloud_files_for_save_target(
                     target_type,
@@ -138,16 +122,12 @@ where
                     &projected,
                     &all_reserved_names,
                 )
-                .map_err(|e| e.to_string())?
-        } else {
-            cloud_files
-        };
+                .map_err(|e| e.to_string())?;
 
-        if is_directory {
             self.upload_directory(
                 token,
                 local_save_path,
-                &folder_id,
+                folder_id,
                 &active_cloud_files,
                 &entry.common().name,
                 cloud_path,
@@ -158,10 +138,8 @@ where
         } else {
             let planned = PlannedSave {
                 local: local_save_path.clone(),
-                remote: active_cloud_files
-                    .into_iter()
-                    .find(|f| f.name == drive_name),
-                folder_id,
+                remote: cloud_files.iter().find(|f| f.name == drive_name).cloned(),
+                folder_id: folder_id.to_string(),
                 drive_name,
                 directory: None,
             };
@@ -220,6 +198,7 @@ where
             Vec::new()
         };
 
+        let root_path = root.path();
         for file in local_files {
             if file.is_file().unwrap_or(false)
                 && let Ok(relative) = file.relative_to(root)
@@ -234,7 +213,7 @@ where
                         remote: cloud_files.iter().find(|f| f.name == relative).cloned(),
                         folder_id: folder_id.to_string(),
                         drive_name: directory_cloud_name(prefix, &relative),
-                        directory: Some((root.path().to_owned(), relative)),
+                        directory: Some((root_path.to_owned(), relative)),
                     };
                     let res = self
                         .upload_file(token, planned, display_name, &all_reserved)
@@ -349,7 +328,7 @@ impl<P> UploadSummary<P> {
     }
 }
 
-pub struct PostGameSync<A, L, F, T, Auth, R>
+pub(crate) struct PostGameSync<A, L, F, T, Auth, R>
 where
     A: LocalSaveAccess,
 {
@@ -373,11 +352,11 @@ where
     R: GameLauncher + Clone + Send + Sync + 'static,
     R::Error: std::fmt::Debug + Send + Sync + 'static,
 {
-    pub fn new(context: Arc<SyncContext<A, L, F, T, Auth, R>>) -> Self {
+    pub(crate) fn new(context: Arc<SyncContext<A, L, F, T, Auth, R>>) -> Self {
         Self { context }
     }
 
-    pub async fn upload_after_play(
+    pub(crate) async fn upload_after_play(
         &self,
         item: &SyncGame,
         sync_targets: &[SaveTarget],
@@ -385,6 +364,46 @@ where
         let summary = UploadSummary::new(0, Vec::new());
         self.upload_batch(item, sync_targets, &[], summary, sync_targets)
             .await
+    }
+
+    async fn prepare_batch_cloud_state(
+        &self,
+        item: &SyncGame,
+    ) -> Result<(String, String, Vec<RemoteFile>), String> {
+        let token = self
+            .context
+            .services
+            .authorization
+            .authorize(&self.context.config, false)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let cloud_path = self
+            .context
+            .resolver
+            .get_cloud_path_segments_game(item)
+            .map_err(|e| format!("{e:?}"))?;
+
+        let folder_id = self
+            .context
+            .services
+            .folders
+            .ensure_path(&token, &cloud_path)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+
+        let raw_files = self
+            .context
+            .services
+            .search
+            .list_files(&token, &folder_id)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+
+        let cloud_files = canonical_cloud_files(&raw_files)
+            .map_err(|dup| format!("Duplicate cloud file: {}", dup.name))?;
+
+        Ok((token, folder_id, cloud_files))
     }
 
     async fn upload_batch(
@@ -400,154 +419,97 @@ where
             item.effective_title
         )));
 
-        let auth_res = self
-            .context
-            .services
-            .authorization
-            .authorize(&self.context.config, false)
-            .await;
-
-        match auth_res {
-            Ok(token) => {
-                let cloud_path = self
+        match self.prepare_batch_cloud_state(item).await {
+            Ok((token, folder_id, cloud_files)) => {
+                if let Err(mapping_err) = self
                     .context
-                    .resolver
-                    .get_cloud_path_segments_game(item)
-                    .map_err(|e| format!("{e:?}"))?;
-                let folder_res = self
-                    .context
-                    .services
-                    .folders
-                    .ensure_path(&token, &cloud_path)
-                    .await;
-                match folder_res {
-                    Ok(folder_id) => {
-                        let list_res = self
-                            .context
-                            .services
-                            .search
-                            .list_files(&token, &folder_id)
-                            .await;
-                        match list_res {
-                            Ok(raw_files) => match canonical_cloud_files(&raw_files) {
-                                Ok(cloud_files) => {
-                                    if let Err(mapping_err) =
-                                        self.context.mapping.validate_save_target_mappings(
-                                            mapping_targets,
-                                            &cloud_files,
-                                        )
-                                    {
-                                        (self.context.on_status)(SyncEvent::Error(
-                                            mapping_err.to_string(),
-                                        ));
-                                        return Ok(false);
-                                    }
-                                    let saves = PostSaveSync::new(&self.context);
-                                    for target in retry_targets {
-                                        if target.file.exists().unwrap_or(false) {
-                                            match saves
-                                                .sync(
-                                                    &token,
-                                                    &item.entry,
-                                                    &target.file,
-                                                    &target.kind,
-                                                    &cloud_path,
-                                                    target.drive_name.as_deref(),
-                                                    &target.reserved_drive_names,
-                                                    &HashSet::new(),
-                                                    None,
-                                                )
-                                                .await
-                                            {
-                                                Ok(res) => summary.accept(res),
-                                                Err(err) => {
-                                                    if summary.first_failure_reason.is_none() {
-                                                        summary.first_failure_reason =
-                                                            Some(err.clone());
-                                                    }
-                                                    summary.files.push(target.clone());
-                                                }
-                                            }
-                                        }
-                                    }
+                    .mapping
+                    .validate_save_target_mappings(mapping_targets, &cloud_files)
+                {
+                    (self.context.on_status)(SyncEvent::Error(mapping_err.to_string()));
+                    return Ok(false);
+                }
 
-                                    for target in sync_targets {
-                                        let local = self.context.services.files.path(&target.path);
-                                        if !local.exists().unwrap_or(false) {
-                                            continue;
-                                        }
-                                        let siblings = self
-                                            .context
-                                            .mapping
-                                            .file_sibling_cloud_names(
-                                                target,
-                                                mapping_targets,
-                                                &cloud_files,
-                                            )
-                                            .unwrap_or_default();
-                                        let reserved = self
-                                            .context
-                                            .mapping
-                                            .reserved_cloud_names(
-                                                target,
-                                                mapping_targets,
-                                                &cloud_files,
-                                            )
-                                            .unwrap_or_default();
-                                        match saves
-                                            .sync(
-                                                &token,
-                                                &item.entry,
-                                                &local,
-                                                &target.kind,
-                                                &cloud_path,
-                                                None,
-                                                &siblings,
-                                                &reserved,
-                                                target.cloud_path.as_deref(),
-                                            )
-                                            .await
-                                        {
-                                            Ok(res) => summary.accept(res),
-                                            Err(err) => {
-                                                if summary.first_failure_reason.is_none() {
-                                                    summary.first_failure_reason =
-                                                        Some(err.clone());
-                                                }
-                                                summary.configured.push(target.clone());
-                                            }
-                                        }
-                                    }
+                let saves = PostSaveSync::new(&self.context);
+                for target in retry_targets {
+                    if target.file.exists().unwrap_or(false) {
+                        match saves
+                            .sync(
+                                &token,
+                                &item.entry,
+                                &target.file,
+                                &target.kind,
+                                &folder_id,
+                                &cloud_files,
+                                target.drive_name.as_deref(),
+                                &target.reserved_drive_names,
+                                &HashSet::new(),
+                                None,
+                            )
+                            .await
+                        {
+                            Ok(res) => summary.accept(res),
+                            Err(err) => {
+                                if summary.first_failure_reason.is_none() {
+                                    summary.first_failure_reason = Some(err.clone());
                                 }
-                                Err(dup) => {
-                                    summary.first_failure_reason =
-                                        Some(format!("Duplicate cloud file: {}", dup.name));
-                                    summary.configured.extend(sync_targets.iter().cloned());
-                                }
-                            },
-                            Err(e) => {
-                                summary.first_failure_reason = Some(format!("{e:?}"));
-                                summary.configured.extend(sync_targets.iter().cloned());
+                                summary.files.push(target.clone());
                             }
                         }
                     }
-                    Err(e) => {
-                        summary.first_failure_reason = Some(format!("{e:?}"));
-                        summary.configured.extend(sync_targets.iter().cloned());
+                }
+
+                for target in sync_targets {
+                    let local = self.context.services.files.path(&target.path);
+                    if !local.exists().unwrap_or(false) {
+                        continue;
+                    }
+                    let siblings = self
+                        .context
+                        .mapping
+                        .file_sibling_cloud_names(target, mapping_targets, &cloud_files)
+                        .unwrap_or_default();
+                    let reserved = self
+                        .context
+                        .mapping
+                        .reserved_cloud_names(target, mapping_targets, &cloud_files)
+                        .unwrap_or_default();
+                    match saves
+                        .sync(
+                            &token,
+                            &item.entry,
+                            &local,
+                            &target.kind,
+                            &folder_id,
+                            &cloud_files,
+                            None,
+                            &siblings,
+                            &reserved,
+                            target.cloud_path.as_deref(),
+                        )
+                        .await
+                    {
+                        Ok(res) => summary.accept(res),
+                        Err(err) => {
+                            if summary.first_failure_reason.is_none() {
+                                summary.first_failure_reason = Some(err.clone());
+                            }
+                            summary.configured.push(target.clone());
+                        }
                     }
                 }
             }
             Err(e) => {
-                summary.first_failure_reason = Some(e.to_string());
+                summary.first_failure_reason = Some(e);
                 summary.configured.extend(sync_targets.iter().cloned());
                 summary.files.extend(retry_targets.iter().cloned());
             }
         }
 
-        self.finish_upload(item, summary, mapping_targets).await
+        self.finish_upload(item, summary, mapping_targets)
     }
 
-    async fn finish_upload(
+    fn finish_upload(
         &self,
         item: &SyncGame,
         mut summary: UploadSummary<A::Path>,

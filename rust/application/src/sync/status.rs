@@ -12,7 +12,7 @@ use emusync_domain::sync::{
 };
 use std::collections::{BTreeMap, HashSet};
 
-pub struct SyncStatusChecker<'a, A, L, F, T, Auth, R>
+pub(crate) struct SyncStatusChecker<'a, A, L, F, T, Auth, R>
 where
     A: LocalSaveAccess,
 {
@@ -36,11 +36,11 @@ where
     R: GameLauncher + Clone + Send + Sync + 'static,
     R::Error: std::fmt::Debug + Send + Sync + 'static,
 {
-    pub fn new(context: &'a SyncContext<A, L, F, T, Auth, R>) -> Self {
+    pub(crate) const fn new(context: &'a SyncContext<A, L, F, T, Auth, R>) -> Self {
         Self { context }
     }
 
-    pub async fn check_entry_sync_status(
+    pub(crate) async fn check_entry_sync_status(
         &self,
         entry: &GameEntry,
     ) -> Result<EntrySyncStatus, String> {
@@ -75,17 +75,17 @@ where
 
         let mut observation = StatusObservation::default();
 
-        let mut targets_by_folder: BTreeMap<Vec<String>, Vec<&ResolvedSaveTarget<A::Path>>> =
+        let mut targets_by_folder: BTreeMap<&[String], Vec<&ResolvedSaveTarget<A::Path>>> =
             BTreeMap::new();
         for t in targets {
             targets_by_folder
-                .entry(t.cloud_path_segments.clone())
+                .entry(t.cloud_path_segments.as_slice())
                 .or_default()
                 .push(t);
         }
 
         for (path, folder_targets) in targets_by_folder {
-            let folder_id = match self.context.services.folders.find_path(&token, &path).await {
+            let folder_id = match self.context.services.folders.find_path(&token, path).await {
                 Ok(folder) => folder,
                 Err(_) => return EntrySyncStatus::Error,
             };
@@ -191,6 +191,24 @@ where
         observation: &mut StatusObservation,
     ) -> Result<(), ()> {
         let root = &target.file;
+
+        for remote in remote_files {
+            let local = root
+                .resolve_remote(&remote.name)
+                .map_err(|_| ())?
+                .ok_or(())?;
+            let drive_name = directory_cloud_name(target.cloud_path.as_deref(), &remote.name);
+            let state = remote_to_state(remote);
+            let decision = self
+                .context
+                .services
+                .tracked_sync
+                .plan(local.path(), Some(&state), folder_id, &drive_name)
+                .await
+                .map_err(|_| ())?;
+            observation.record(decision);
+        }
+
         let local_files =
             if root.exists().map_err(|_| ())? && root.is_directory().map_err(|_| ())? {
                 root.walk_top_down().map_err(|_| ())?
@@ -198,27 +216,15 @@ where
                 Vec::new()
             };
 
-        for remote in remote_files {
-            if let Some(local) = root.resolve_remote(&remote.name).map_err(|_| ())? {
-                let drive_name = directory_cloud_name(target.cloud_path.as_deref(), &remote.name);
-                let state = remote_to_state(remote);
-                let decision = self
-                    .context
-                    .services
-                    .tracked_sync
-                    .plan(local.path(), Some(&state), folder_id, &drive_name)
-                    .await
-                    .map_err(|_| ())?;
-                observation.record(decision);
-            }
-        }
-
-        let remote_names: HashSet<&str> = remote_files.iter().map(|rf| rf.name.as_str()).collect();
-        for local in local_files {
-            if local.is_file().map_err(|_| ())? {
-                let relative = local.relative_to(root).map_err(|_| ())?;
-                if !reserved.contains(&relative) && !remote_names.contains(relative.as_str()) {
-                    observation.record(Decision::UploadLocal);
+        if !local_files.is_empty() {
+            let remote_names: HashSet<&str> =
+                remote_files.iter().map(|rf| rf.name.as_str()).collect();
+            for local in local_files {
+                if local.is_file().map_err(|_| ())? {
+                    let relative = local.relative_to(root).map_err(|_| ())?;
+                    if !reserved.contains(&relative) && !remote_names.contains(relative.as_str()) {
+                        observation.record(Decision::UploadLocal);
+                    }
                 }
             }
         }

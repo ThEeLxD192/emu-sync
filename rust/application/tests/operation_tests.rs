@@ -118,3 +118,47 @@ async fn coordinator_default_runs_without_listener() {
     assert_eq!(coordinator.revision(), 2);
     assert!(!coordinator.is_busy());
 }
+
+#[tokio::test]
+async fn panic_in_task_unwinds_safely_and_clears_busy() {
+    let coordinator = Arc::new(OperationCoordinator::new());
+    let coord_clone = Arc::clone(&coordinator);
+
+    let res = tokio::spawn(async move {
+        coord_clone
+            .run_if_idle(async {
+                panic!("intentional panic inside task");
+            })
+            .await
+    })
+    .await;
+
+    assert!(res.is_err());
+    assert!(
+        !coordinator.is_busy(),
+        "busy must be cleared after task panic"
+    );
+    assert_eq!(coordinator.revision(), 2);
+
+    let ok = coordinator.run_if_idle(async { "recovered" }).await;
+    assert_eq!(ok, Some("recovered"));
+    assert_eq!(coordinator.revision(), 4);
+}
+
+#[tokio::test]
+async fn panic_in_listener_unwinds_safely_and_clears_busy() {
+    let coordinator = Arc::new(OperationCoordinator::with_listener(|event| {
+        if event == OperationEvent::Started {
+            panic!("intentional panic on Started event");
+        }
+    }));
+
+    let coord_clone = Arc::clone(&coordinator);
+    let res = tokio::spawn(async move { coord_clone.run_if_idle(async { 42 }).await }).await;
+
+    assert!(res.is_err());
+    assert!(
+        !coordinator.is_busy(),
+        "busy must be cleared if listener panics on Started"
+    );
+}

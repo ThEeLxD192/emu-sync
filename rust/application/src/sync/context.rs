@@ -25,7 +25,7 @@ pub struct SyncServices<A, L, F, T, Auth, R> {
     pub runner: R,
 }
 
-pub type RetryFn =
+type RetryFn =
     Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + 'static>;
 
 struct CleanupGuard<'a> {
@@ -46,12 +46,12 @@ pub struct SyncContext<A, L, F, T, Auth, R>
 where
     A: LocalSaveAccess,
 {
-    pub config: AppConfig,
-    pub services: SyncServices<A, L, F, T, Auth, R>,
-    pub on_status: Arc<dyn Fn(SyncEvent) + Send + Sync + 'static>,
-    pub migrator: CloudFolderMigrator<F, L>,
-    pub mapping: SaveTargetMapping<A>,
-    pub resolver: SaveTargetResolver<A>,
+    pub(crate) config: AppConfig,
+    pub(crate) services: SyncServices<A, L, F, T, Auth, R>,
+    pub(crate) on_status: Arc<dyn Fn(SyncEvent) + Send + Sync + 'static>,
+    pub(crate) migrator: CloudFolderMigrator<F, L>,
+    pub(crate) mapping: SaveTargetMapping<A>,
+    pub(crate) resolver: SaveTargetResolver<A>,
     request_counter: AtomicU64,
     pending_conflict: Mutex<Option<(RequestId, OneshotSender<Decision>)>>,
     pending_retry: Mutex<Option<(RequestId, RetryFn)>>,
@@ -114,23 +114,30 @@ where
             let mut lock = self.pending_conflict.lock().unwrap();
             *lock = Some((req_id, tx));
         }
-        (self.on_status)(SyncEvent::Conflict(conflict));
 
         let _guard = CleanupGuard {
             pending: &self.pending_conflict,
             req_id,
         };
 
+        (self.on_status)(SyncEvent::Conflict(conflict));
+
         rx.await.unwrap_or(Decision::Conflict)
     }
 
     pub fn resolve_conflict(&self, request: &SaveConflict, decision: Decision) {
-        let mut lock = self.pending_conflict.lock().unwrap();
-        if lock
-            .as_ref()
-            .is_some_and(|(id, _)| *id == request.request_id)
-            && let Some((_, tx)) = lock.take()
-        {
+        let tx = {
+            let mut lock = self.pending_conflict.lock().unwrap();
+            if lock
+                .as_ref()
+                .is_some_and(|(id, _)| *id == request.request_id)
+            {
+                lock.take().map(|(_, tx)| tx)
+            } else {
+                None
+            }
+        };
+        if let Some(tx) = tx {
             let _ = tx.send(decision);
         }
     }
@@ -148,8 +155,7 @@ where
                 Box::pin(retry())
             },
         );
-        let mut lock = self.pending_retry.lock().unwrap();
-        *lock = Some((req_id, boxed));
+        *self.pending_retry.lock().unwrap() = Some((req_id, boxed));
         (self.on_status)(SyncEvent::PostSyncFailed(failure));
     }
 

@@ -34,11 +34,12 @@ impl<F: SaveSynchronizerFactory> EntrySyncChecks<F> {
     }
 
     pub fn begin(&self, entry: &GameEntry, config: &AppConfig) -> SyncCheckRequest {
-        let request = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
-        self.checks
-            .lock()
-            .unwrap()
-            .insert(entry.common().name.clone(), request);
+        let request = {
+            let mut checks = self.checks.lock().unwrap();
+            let req = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+            checks.insert(entry.common().name.clone(), req);
+            req
+        };
         SyncCheckRequest {
             entry: entry.clone(),
             config: config.clone(),
@@ -48,7 +49,7 @@ impl<F: SaveSynchronizerFactory> EntrySyncChecks<F> {
     }
 
     pub fn is_current(&self, request: &SyncCheckRequest, current: Option<&AppConfig>) -> bool {
-        if self.operations.revision() != request.operation_revision || self.operations.is_busy() {
+        if self.operations.is_busy() || self.operations.revision() != request.operation_revision {
             return false;
         }
 
@@ -60,15 +61,21 @@ impl<F: SaveSynchronizerFactory> EntrySyncChecks<F> {
             return false;
         }
 
-        if !current_config.entries.iter().any(|e| e == &request.entry) {
-            return false;
-        }
-
-        self.checks
+        let is_latest = self
+            .checks
             .lock()
             .unwrap()
             .get(&request.entry.common().name)
-            .is_some_and(|&g| g == request.generation)
+            .is_some_and(|&g| g == request.generation);
+        if !is_latest {
+            return false;
+        }
+
+        current_config
+            .entries
+            .iter()
+            .find(|e| e.common().name == request.entry.common().name)
+            .is_some_and(|e| e == &request.entry)
     }
 
     pub async fn read(

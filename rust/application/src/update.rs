@@ -5,8 +5,9 @@ use std::fmt::Display;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum UpdateState {
+    #[default]
     Idle,
     Checking,
     Available(UpdateInfo),
@@ -29,6 +30,54 @@ pub struct UpdateCoordinator<S, F, I> {
     download_busy: AtomicBool,
     generation: AtomicU64,
     on_state: Box<dyn Fn(&UpdateState) + Send + Sync + 'static>,
+}
+
+struct DownloadGuard<'a, S: UpdateSource + Sync, F: UpdateFiles + Sync, I: UpdateInstaller + Sync> {
+    coord: &'a UpdateCoordinator<S, F, I>,
+    destination: Option<String>,
+    keep_download: bool,
+    fallback_info: UpdateInfo,
+}
+
+impl<'a, S: UpdateSource + Sync, F: UpdateFiles + Sync, I: UpdateInstaller + Sync> Drop
+    for DownloadGuard<'a, S, F, I>
+{
+    fn drop(&mut self) {
+        let mut pending_notify = None;
+        if !self.keep_download {
+            if let Some(ref dest) = self.destination {
+                let _ = self.coord.files.delete(dest);
+            }
+            let mut state = self.coord.state.lock().unwrap();
+            if matches!(*state, UpdateState::Downloading { .. }) {
+                *state = UpdateState::Available(self.fallback_info.clone());
+                pending_notify = Some(state.clone());
+            }
+        }
+        self.coord.download_busy.store(false, Ordering::SeqCst);
+        if let Some(new_state) = pending_notify {
+            (self.coord.on_state)(&new_state);
+        }
+    }
+}
+
+struct CancelGuard<'a, S: UpdateSource + Sync, F: UpdateFiles + Sync, I: UpdateInstaller + Sync> {
+    coord: &'a UpdateCoordinator<S, F, I>,
+    request: u64,
+    previous: Option<UpdateState>,
+}
+
+impl<'a, S: UpdateSource + Sync, F: UpdateFiles + Sync, I: UpdateInstaller + Sync> Drop
+    for CancelGuard<'a, S, F, I>
+{
+    fn drop(&mut self) {
+        if let Some(prev) = self.previous.take()
+            && self.coord.generation.load(Ordering::SeqCst) == self.request
+            && !self.coord.download_busy.load(Ordering::SeqCst)
+        {
+            self.coord.publish(prev);
+        }
+    }
 }
 
 impl<S, F, I> UpdateCoordinator<S, F, I>
@@ -79,50 +128,39 @@ where
     where
         S::Error: Display,
     {
-        if !self.can_check() {
+        if self.download_busy.load(Ordering::SeqCst) {
             return;
         }
-        let request = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        let previous = match self.state() {
-            UpdateState::Checking => UpdateState::Idle,
-            other => other,
-        };
-        self.publish(UpdateState::Checking);
 
-        struct CancelGuard<
-            'a,
-            S: UpdateSource + Sync,
-            F: UpdateFiles + Sync,
-            I: UpdateInstaller + Sync,
-        > {
-            coord: &'a UpdateCoordinator<S, F, I>,
-            request: u64,
-            previous: UpdateState,
-            completed: bool,
-        }
-        impl<'a, S: UpdateSource + Sync, F: UpdateFiles + Sync, I: UpdateInstaller + Sync> Drop
-            for CancelGuard<'a, S, F, I>
-        {
-            fn drop(&mut self) {
-                if !self.completed
-                    && self.coord.generation.load(Ordering::SeqCst) == self.request
-                    && !self.coord.download_busy.load(Ordering::SeqCst)
-                {
-                    self.coord.publish(self.previous.clone());
-                }
+        let request = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+
+        let (previous, should_notify) = {
+            let mut lock = self.state.lock().unwrap();
+            if matches!(*lock, UpdateState::ReadyToRestart { .. }) {
+                return;
             }
-        }
+            let prev_raw = std::mem::replace(&mut *lock, UpdateState::Checking);
+            let should_notify = prev_raw != UpdateState::Checking;
+            let prev = match prev_raw {
+                UpdateState::Checking => UpdateState::Idle,
+                other => other,
+            };
+            (prev, should_notify)
+        };
 
         let mut guard = CancelGuard {
             coord: self,
             request,
-            previous,
-            completed: false,
+            previous: Some(previous),
         };
+
+        if should_notify {
+            (self.on_state)(&UpdateState::Checking);
+        }
 
         match self.source.check().await {
             Ok(info) => {
-                guard.completed = true;
+                guard.previous = None;
                 if self.generation.load(Ordering::SeqCst) == request
                     && !self.download_busy.load(Ordering::SeqCst)
                 {
@@ -130,7 +168,7 @@ where
                 }
             }
             Err(err) => {
-                guard.completed = true;
+                guard.previous = None;
                 if self.generation.load(Ordering::SeqCst) == request
                     && !self.download_busy.load(Ordering::SeqCst)
                 {
@@ -146,27 +184,34 @@ where
         F::Error: Display,
         I::Error: Display,
     {
-        if matches!(
-            *self.state.lock().unwrap(),
-            UpdateState::ReadyToRestart { .. }
-        ) {
-            return;
-        }
         if self
             .download_busy
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
             return;
         }
+
+        if matches!(
+            *self.state.lock().unwrap(),
+            UpdateState::ReadyToRestart { .. }
+        ) {
+            self.download_busy.store(false, Ordering::SeqCst);
+            return;
+        }
+
+        let mut guard = DownloadGuard {
+            coord: self,
+            destination: None,
+            keep_download: false,
+            fallback_info: info.clone(),
+        };
+
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.publish(UpdateState::Downloading {
             progress: 0.0,
             info: info.clone(),
         });
-
-        let mut destination: Option<String> = None;
-        let mut keep_download = false;
 
         let res = async {
             let dest = self
@@ -174,7 +219,7 @@ where
                 .prepare_destination(info)
                 .await
                 .map_err(|e| e.to_string())?;
-            destination = Some(dest.clone());
+            guard.destination = Some(dest.clone());
 
             let mut last_progress = 0.0f32;
             self.source
@@ -195,7 +240,7 @@ where
                     .files
                     .size(&dest)
                     .map_err(|e| format!("Could not read update size: {e}"))?;
-                if actual_size as i64 != info.asset_size {
+                if actual_size != info.asset_size as u64 {
                     return Err(format!(
                         "The update size does not match the release: expected {} bytes, received {actual_size}",
                         info.asset_size
@@ -209,7 +254,7 @@ where
 
         match res {
             Ok((dest, is_steam)) => {
-                keep_download = true;
+                guard.keep_download = true;
                 self.publish(UpdateState::ReadyToRestart {
                     downloaded_path: dest,
                     is_steam_game_mode: is_steam,
@@ -221,11 +266,6 @@ where
                 )));
             }
         }
-
-        if !keep_download && let Some(dest) = destination {
-            let _ = self.files.delete(&dest);
-        }
-        self.download_busy.store(false, Ordering::Release);
     }
 
     pub fn restart(&self, path: &str, operation_in_progress: bool) -> bool {

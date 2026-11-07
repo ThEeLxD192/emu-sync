@@ -31,6 +31,13 @@ impl<E1: std::fmt::Display, E2: std::fmt::Display> std::fmt::Display
 impl<E1: std::error::Error + 'static, E2: std::error::Error + 'static> std::error::Error
     for SteamRegistrationError<E1, E2>
 {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Store(e) => Some(e),
+            Self::Steam(e) => Some(e),
+            Self::CategoryNotFound => None,
+        }
+    }
 }
 
 impl<S: ConfigurationStore, St: SteamLibrary> SteamRegistration<S, St> {
@@ -77,30 +84,27 @@ impl<S: ConfigurationStore, St: SteamLibrary> SteamRegistration<S, St> {
             None
         };
 
-        let latest_name = latest.common().name.clone();
+        let target_name = &entry.common().name;
+        let mut edited_entry = None;
         let updated = self
             .store
             .update(|mut current| {
                 if let Some(e) = current
                     .entries
                     .iter_mut()
-                    .find(|e| e.common().name == latest_name)
+                    .find(|e| &e.common().name == target_name)
                 {
                     match e {
                         GameEntry::Emulator(emu) => emu.common.steam_app_id = app_id,
                         GameEntry::Native(nat) => nat.common.steam_app_id = app_id,
                     }
+                    edited_entry = Some(e.clone());
                 }
                 current
             })
             .map_err(SteamRegistrationError::Store)?;
 
-        let edited_entry = updated
-            .entries
-            .iter()
-            .find(|e| e.common().name == latest_name)
-            .cloned()
-            .ok_or(SteamRegistrationError::CategoryNotFound)?;
+        let edited_entry = edited_entry.ok_or(SteamRegistrationError::CategoryNotFound)?;
 
         Ok(EntryEditResult {
             config: updated,

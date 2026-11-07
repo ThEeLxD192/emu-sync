@@ -44,16 +44,15 @@ impl<S: ConfigurationStore, St: SteamLibrary> LoadLibrary<S, St> {
             return Ok(config);
         }
 
-        let mut entries = config.entries;
-        for entry in &mut entries {
-            let app_id = shortcut_map.get(entry.common().name.as_str()).copied();
-            let common = match entry {
-                GameEntry::Emulator(e) => &mut e.common,
-                GameEntry::Native(n) => &mut n.common,
-            };
-            common.steam_app_id = app_id;
-        }
-
-        self.store.update(|c| AppConfig { entries, ..c })
+        self.store.update(|mut current| {
+            for entry in &mut current.entries {
+                let app_id = shortcut_map.get(entry.common().name.as_str()).copied();
+                match entry {
+                    GameEntry::Emulator(e) => e.common.steam_app_id = app_id,
+                    GameEntry::Native(n) => n.common.steam_app_id = app_id,
+                }
+            }
+            current
+        })
     }
 }

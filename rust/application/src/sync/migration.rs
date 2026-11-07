@@ -92,30 +92,42 @@ where
             }
         };
 
-        let old_folder_id = self
+        let old_folder_id = match self
             .context
             .services
             .folders
             .find_path(&token, &old_cloud_path)
             .await
-            .map_err(|e| format!("{e:?}"))?;
-        let new_folder_id = self
+        {
+            Ok(id) => id,
+            Err(err) => {
+                (self.context.on_status)(SyncEvent::Error(format!("Cloud rename error: {err:?}")));
+                return Ok(false);
+            }
+        };
+        let new_folder_id = match self
             .context
             .services
             .folders
             .find_path(&token, &new_cloud_path)
             .await
-            .map_err(|e| format!("{e:?}"))?;
+        {
+            Ok(id) => id,
+            Err(err) => {
+                (self.context.on_status)(SyncEvent::Error(format!("Cloud rename error: {err:?}")));
+                return Ok(false);
+            }
+        };
 
         match (old_folder_id, new_folder_id) {
-            (Some(_), None) => {
+            (Some(old_id), None) => {
                 (self.context.on_status)(SyncEvent::Syncing(format!(
                     "Renaming cloud folder to {new_title}..."
                 )));
                 if let Err(err) = self
                     .context
                     .migrator
-                    .migrate(&token, &old_cloud_path, &new_cloud_path)
+                    .migrate_resolved(&token, &old_id, None, &old_cloud_path, &new_cloud_path)
                     .await
                 {
                     (self.context.on_status)(SyncEvent::Error(format!(
@@ -135,7 +147,13 @@ where
                     && let Err(err) = self
                         .context
                         .migrator
-                        .migrate(&token, &old_cloud_path, &new_cloud_path)
+                        .migrate_resolved(
+                            &token,
+                            &old,
+                            Some(&new_id),
+                            &old_cloud_path,
+                            &new_cloud_path,
+                        )
                         .await
                 {
                     (self.context.on_status)(SyncEvent::Error(format!(
@@ -143,8 +161,15 @@ where
                     )));
                     return Ok(false);
                 }
-                self.sync_renamed_folder(&token, entry, new_title, local_save_targets, &new_id)
-                    .await?;
+                if let Err(err) = self
+                    .sync_renamed_folder(&token, new_title, local_save_targets, &new_id)
+                    .await
+                {
+                    (self.context.on_status)(SyncEvent::Error(format!(
+                        "Cloud rename error: {err}"
+                    )));
+                    return Ok(false);
+                }
                 (self.context.on_status)(SyncEvent::Idle);
                 Ok(true)
             }
@@ -158,11 +183,14 @@ where
     async fn sync_renamed_folder(
         &self,
         token: &str,
-        entry: &GameEntry,
         new_title: &str,
         local_save_targets: &[SaveTarget],
         new_folder_id: &str,
     ) -> Result<(), String> {
+        if local_save_targets.is_empty() {
+            return Ok(());
+        }
+
         let raw_files = self
             .context
             .services
@@ -202,7 +230,6 @@ where
                 manual
                     .sync_directory_manual(
                         token,
-                        entry,
                         &save_path,
                         new_folder_id,
                         &target_cloud_files,
@@ -217,7 +244,6 @@ where
                 manual
                     .sync_file_manual(
                         token,
-                        entry,
                         &save_path,
                         new_folder_id,
                         &cloud_files,
@@ -303,21 +329,13 @@ where
     }
 
     fn can_migrate_entry(&self, old_entry: &GameEntry, old_path: &[String]) -> bool {
-        let entry_index = self
-            .context
-            .config
-            .entries
-            .iter()
-            .position(|e| e.common().name == old_entry.common().name);
-
         let shared = self
             .context
             .config
             .entries
             .iter()
-            .enumerate()
-            .filter(|(i, _)| Some(*i) != entry_index)
-            .any(|(_, other)| {
+            .filter(|other| other.common().name != old_entry.common().name)
+            .any(|other| {
                 (old_path.len() == 1 && other.common().effective_cloud_folder() == old_path[0])
                     || self.entry_path(other) == old_path
                     || self
