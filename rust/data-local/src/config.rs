@@ -40,25 +40,16 @@ impl ConfigManager {
     pub fn path(&self) -> &Path {
         &self.path
     }
-    fn load_inner(&self, auto_create: bool) -> io::Result<AppConfig> {
+    fn read_raw(&self) -> io::Result<Option<AppConfig>> {
         let data = match fs::read(&self.path) {
             Ok(data) if !data.is_empty() => data,
             Ok(_) => {
-                if !auto_create {
-                    return Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        "empty configuration",
-                    ));
-                }
-                let default = AppConfig::default();
-                self.save_inner(&default)?;
-                return Ok(default);
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "empty configuration",
+                ));
             }
-            Err(e) if e.kind() == io::ErrorKind::NotFound && auto_create => {
-                let default = AppConfig::default();
-                self.save_inner(&default)?;
-                return Ok(default);
-            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e),
         };
         let mut value: serde_json::Value = serde_json::from_slice(&data)?;
@@ -73,7 +64,20 @@ impl ConfigManager {
             }
         }
         let document: Document = serde_json::from_value(value)?;
-        let config: AppConfig = document.into();
+        Ok(Some(AppConfig::from(document)))
+    }
+    fn load_inner(&self, auto_create: bool) -> io::Result<AppConfig> {
+        let Some(config) = self.read_raw()? else {
+            if auto_create {
+                let default = AppConfig::default();
+                self.save_inner(&default)?;
+                return Ok(default);
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "missing configuration",
+            ));
+        };
         let mut migrated = config.clone();
         for entry in &mut migrated.entries {
             migrate(entry);
@@ -92,10 +96,10 @@ impl ConfigManager {
             .state
             .lock()
             .map_err(|_| io::Error::other("configuration lock poisoned"))?;
-        let previous = if self.path.exists() {
-            self.load_inner(false).ok().map(|config| config.credentials)
-        } else {
-            Some(None)
+        let previous = match self.read_raw() {
+            Ok(Some(c)) => Some(c.credentials),
+            Ok(None) => Some(None),
+            Err(_) => None,
         };
         self.save_inner(config)?;
         if previous.as_ref() != Some(&config.credentials) {
@@ -146,13 +150,12 @@ impl CredentialStore for ConfigManager {
     type Error = io::Error;
     fn snapshot(&self, fallback: &AppConfig) -> io::Result<CredentialSnapshot> {
         let state = self.lock()?;
-        let config = if self.path.exists() {
-            self.load_inner(false)?
-        } else {
-            fallback.clone()
+        let credentials = match self.read_raw()? {
+            Some(config) => config.credentials,
+            None => fallback.credentials.clone(),
         };
         Ok(CredentialSnapshot {
-            credentials: config.credentials,
+            credentials,
             revision: state.revision,
         })
     }
@@ -163,15 +166,24 @@ impl CredentialStore for ConfigManager {
         fallback: &AppConfig,
     ) -> io::Result<bool> {
         let mut state = self.lock()?;
-        let mut current = if self.path.exists() {
-            self.load_inner(false)?
-        } else {
-            fallback.clone()
+        let current = self.read_raw()?;
+        let current_credentials = match &current {
+            Some(c) => &c.credentials,
+            None => &fallback.credentials,
         };
-        if state.revision != expected.revision || current.credentials != expected.credentials {
+        if state.revision != expected.revision || current_credentials != &expected.credentials {
             return Ok(false);
         }
-        if current.credentials != credentials {
+        if current_credentials != &credentials {
+            let mut current = match current {
+                Some(mut c) => {
+                    for entry in &mut c.entries {
+                        migrate(entry);
+                    }
+                    c
+                }
+                None => fallback.clone(),
+            };
             current.credentials = credentials;
             self.save_inner(&current)?;
             state.revision = state.revision.wrapping_add(1);
@@ -187,12 +199,11 @@ impl CredentialTransaction for ConfigManager {
         action: impl FnOnce() -> R,
     ) -> io::Result<Option<R>> {
         let state = self.lock()?;
-        let current = if self.path.exists() {
-            self.load_inner(false)?
-        } else {
-            fallback.clone()
+        let current_credentials = match self.read_raw()? {
+            Some(config) => config.credentials,
+            None => fallback.credentials.clone(),
         };
-        if state.revision != expected.revision || current.credentials != expected.credentials {
+        if state.revision != expected.revision || current_credentials != expected.credentials {
             return Ok(None);
         }
         Ok(Some(action()))
@@ -269,15 +280,20 @@ fn migrate_emulator(e: &mut Emulator) {
         targets.iter_mut().for_each(resolve);
     }
     for (rom, paths) in &e.save_paths_by_rom {
-        if !paths.is_empty() && !e.save_targets_by_rom.iter().any(|(k, _)| k == rom) {
-            e.save_targets_by_rom.push((
-                rom.clone(),
-                paths
-                    .iter()
-                    .filter(|p| !p.trim().is_empty())
-                    .map(|p| infer(p))
-                    .collect(),
-            ));
+        let inferred: Vec<_> = paths
+            .iter()
+            .filter(|p| !p.trim().is_empty())
+            .map(|p| infer(p))
+            .collect();
+        if inferred.is_empty() {
+            continue;
+        }
+        if let Some((_, targets)) = e.save_targets_by_rom.iter_mut().find(|(k, _)| k == rom) {
+            if targets.is_empty() {
+                *targets = inferred;
+            }
+        } else {
+            e.save_targets_by_rom.push((rom.clone(), inferred));
         }
     }
 }

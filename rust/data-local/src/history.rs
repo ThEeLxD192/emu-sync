@@ -141,34 +141,41 @@ impl SyncHistoryStore {
         let location = self.backup_directory.join(key);
         let version = location.join(digest);
         fs::create_dir_all(&version)?;
+        restrict_directory(&self.backup_directory)?;
+        restrict_directory(&location)?;
         restrict_directory(&version)?;
         let destination = version.join(
             original
                 .file_name()
                 .ok_or_else(|| io::Error::other("save has no filename"))?,
         );
-        if destination.exists() {
-            if file_sha256(&destination)? != digest {
-                return Err(io::Error::other("existing recovery copy was modified"));
+        match fs::symlink_metadata(&destination) {
+            Ok(meta) if meta.file_type().is_file() => {
+                if !file_sha256(&destination)?.eq_ignore_ascii_case(digest) {
+                    return Err(io::Error::other("existing recovery copy was modified"));
+                }
             }
-        } else {
-            let temp = tempfile::Builder::new()
-                .prefix(".save.")
-                .suffix(".tmp")
-                .tempfile_in(&version)?;
-            fs::copy(file, temp.path())?;
-            restrict_file(temp.path())?;
-            if file_sha256(temp.path())? != digest {
-                return Err(io::Error::other("save changed while creating backup"));
+            Ok(_) => {
+                return Err(io::Error::other(
+                    "existing recovery copy is not a regular file",
+                ));
             }
-            temp.as_file().sync_all()?;
-            temp.persist_noclobber(&destination).map_err(|e| e.error)?;
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                let temp = tempfile::Builder::new()
+                    .prefix(".save.")
+                    .suffix(".tmp")
+                    .tempfile_in(&version)?;
+                fs::copy(file, temp.path())?;
+                restrict_file(temp.path())?;
+                if !file_sha256(temp.path())?.eq_ignore_ascii_case(digest) {
+                    return Err(io::Error::other("save changed while creating backup"));
+                }
+                temp.as_file().sync_all()?;
+                temp.persist_noclobber(&destination).map_err(|e| e.error)?;
+            }
+            Err(e) => return Err(e),
         }
-        let original = if original.is_absolute() {
-            original.to_owned()
-        } else {
-            std::env::current_dir()?.join(original)
-        };
+        let original = absolute(original)?;
         let source = serde_json::json!({"originalPath": original.to_string_lossy()});
         atomic_write(
             &location.join("source.json"),

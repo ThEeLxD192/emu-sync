@@ -108,20 +108,42 @@ impl RecoveryStore {
     }
 
     fn ensure_root(&self) -> io::Result<()> {
-        fs::create_dir_all(&self.root)?;
-        if fs::symlink_metadata(&self.root)?.file_type().is_symlink() {
-            return Err(io::Error::other("recovery directory is a symbolic link"));
+        match fs::symlink_metadata(&self.root) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(io::Error::other("recovery directory is a symbolic link"));
+            }
+            Ok(meta) if !meta.file_type().is_dir() => {
+                return Err(io::Error::other("recovery path is not a directory"));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                fs::create_dir_all(&self.root)?;
+                let meta = fs::symlink_metadata(&self.root)?;
+                if !meta.file_type().is_dir() || meta.file_type().is_symlink() {
+                    return Err(io::Error::other("recovery directory is a symbolic link"));
+                }
+            }
+            Err(e) => return Err(e),
         }
         restrict_directory(&self.root)
     }
 
     fn lock(&self) -> io::Result<DirectoryLock> {
         self.ensure_root()?;
+        let lock_path = self.root.join(LOCK);
+        match fs::symlink_metadata(&lock_path) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(io::Error::other("recovery lock is a symbolic link"));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
         let file = fs::OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
-            .open(self.root.join(LOCK))?;
+            .open(lock_path)?;
         file.lock()?;
         Ok(DirectoryLock(file))
     }
@@ -178,14 +200,19 @@ impl RecoveryStore {
 
     /// List every entry. Entries that cannot be verified are reported, never repaired or removed.
     pub fn list(&self) -> io::Result<Vec<RecoveryEntry>> {
-        if !self.root.exists() {
-            return Ok(Vec::new());
+        match fs::symlink_metadata(&self.root) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(io::Error::other("recovery directory is a symbolic link"));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
         }
         let _guard = self.lock()?;
         let mut entries = Vec::new();
         for item in fs::read_dir(&self.root)? {
             let item = item?;
-            let Some(id) = item.file_name().to_str().map(str::to_owned) else {
+            let Ok(id) = item.file_name().into_string() else {
                 continue;
             };
             if !valid_id(&id) || !item.file_type()?.is_dir() {

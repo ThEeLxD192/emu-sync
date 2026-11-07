@@ -43,17 +43,26 @@ impl SaveTargetAccess for LocalSaveTargets {
         if let Some((_, targets)) = e
             .save_targets_by_rom
             .iter()
-            .find(|(k, _)| k == rom)
-            .or_else(|| e.save_targets_by_rom.iter().find(|(k, _)| k == stem))
+            .find(|(k, t)| k == rom && !t.is_empty())
+            .or_else(|| {
+                e.save_targets_by_rom
+                    .iter()
+                    .find(|(k, t)| k == stem && !t.is_empty())
+            })
         {
             let mut targets = targets.clone();
             targets.iter_mut().for_each(resolve);
             return Ok(targets);
         }
+        let has_non_empty_paths = |paths: &[String]| paths.iter().any(|p| !p.trim().is_empty());
         Ok(e.save_paths_by_rom
             .iter()
-            .find(|(k, _)| k == rom)
-            .or_else(|| e.save_paths_by_rom.iter().find(|(k, _)| k == stem))
+            .find(|(k, paths)| k == rom && has_non_empty_paths(paths))
+            .or_else(|| {
+                e.save_paths_by_rom
+                    .iter()
+                    .find(|(k, paths)| k == stem && has_non_empty_paths(paths))
+            })
             .map(|(_, paths)| {
                 paths
                     .iter()
@@ -67,8 +76,12 @@ impl SaveTargetAccess for LocalSaveTargets {
         if destination.trim().is_empty() {
             return Ok(Vec::new());
         }
+        let mut seen = std::collections::HashSet::<&str>::with_capacity(names.len());
         let mut targets = Vec::with_capacity(names.len());
         for name in names {
+            if !seen.insert(name.as_str()) {
+                continue;
+            }
             if let Some(path) = resolve_remote_file(Path::new(destination), name)? {
                 let path = path
                     .to_str()
@@ -76,14 +89,11 @@ impl SaveTargetAccess for LocalSaveTargets {
                         io::Error::new(io::ErrorKind::InvalidInput, "path is not UTF-8")
                     })?
                     .to_owned();
-                let target = SaveTarget {
+                targets.push(SaveTarget {
                     path,
                     kind: SaveTargetType::File,
                     cloud_path: Some(name.clone()),
-                };
-                if !targets.contains(&target) {
-                    targets.push(target);
-                }
+                });
             }
         }
         Ok(targets)

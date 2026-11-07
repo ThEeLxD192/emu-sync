@@ -71,3 +71,24 @@ fn upload_evidence_recovered_constructor() {
     let debug = format!("{evidence:?}");
     assert!(debug.contains("save.sav"));
 }
+
+#[test]
+fn staged_restore_rejects_existing_directory_and_rejects_concurrent_new_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let sub = dir.path().join("directory_target");
+    fs::create_dir(&sub).unwrap();
+    assert!(StagedRestore::prepare(&sub).is_err());
+
+    let save = dir.path().join("new_save.dat");
+    let store = SyncHistoryStore::new(&dir.path().join("config.json")).unwrap();
+    let key = store.key(&save, "folder", "new_save.dat").unwrap();
+    let stage = StagedRestore::prepare(&save).unwrap();
+    fs::write(stage.path(), b"downloaded").unwrap();
+
+    // Concurrently create save file before commit
+    fs::write(&save, b"concurrently created").unwrap();
+
+    // Commit must fail and preserve the concurrent file
+    assert!(stage.commit(None, &store, &key).is_err());
+    assert_eq!(fs::read(&save).unwrap(), b"concurrently created");
+}

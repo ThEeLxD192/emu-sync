@@ -14,6 +14,7 @@ pub struct PinnedRemoteDestination {
     parent: File,
     leaf: String,
     logical: PathBuf,
+    depth: usize,
 }
 impl PinnedRemoteDestination {
     /// Pin an existing selected root and existing intermediate directories. The selected
@@ -64,6 +65,7 @@ impl PinnedRemoteDestination {
             logical: segments
                 .iter()
                 .fold(root.to_path_buf(), |path, segment| path.join(segment)),
+            depth: segments.len() - 1,
         }))
     }
     pub(crate) fn parent_path(&self) -> PathBuf {
@@ -81,6 +83,12 @@ impl PinnedRemoteDestination {
             .logical
             .parent()
             .ok_or_else(|| io::Error::other("save has no parent"))?;
+        for ancestor in parent.ancestors().take(self.depth) {
+            let meta = std::fs::symlink_metadata(ancestor)?;
+            if meta.file_type().is_symlink() {
+                return Err(io::Error::other("save directory changed during restore"));
+            }
+        }
         let current = std::fs::metadata(parent)?;
         if pinned.dev() != current.dev() || pinned.ino() != current.ino() {
             return Err(io::Error::other("save directory changed during restore"));

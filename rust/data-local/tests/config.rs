@@ -147,3 +147,87 @@ fn literal_config_preserves_all_nondefault_fields_and_ordered_titles() {
     assert_eq!(emu.title_by_rom[0].0, "first");
     assert_eq!(emu.title_by_rom[1].0, "second");
 }
+
+#[test]
+fn read_only_operations_do_not_rewrite_config_and_blank_paths_do_not_block_stem_fallback() {
+    use emusync_data_local::LocalSaveTargets;
+    use emusync_domain::{
+        config::CredentialTransaction,
+        library::{Emulator, SaveTarget, SaveTargetAccess},
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    let target_save = dir.path().join("target.sav");
+
+    let initial_json = serde_json::json!({
+        "googleDrive": {
+            "clientId": "client",
+            "clientSecret": "secret"
+        },
+        "entries": [
+            {
+                "type": "native",
+                "name": "Game",
+                "executablePath": "game",
+                "savePaths": [target_save.to_str().unwrap()],
+                "saveTargets": [
+                    {
+                        "path": target_save.to_str().unwrap(),
+                        "type": "unknown"
+                    }
+                ]
+            }
+        ]
+    });
+    fs::write(
+        &config_path,
+        serde_json::to_vec_pretty(&initial_json).unwrap(),
+    )
+    .unwrap();
+
+    let before_bytes = fs::read(&config_path).unwrap();
+
+    // Now create the save file on disk
+    fs::write(&target_save, b"save contents").unwrap();
+
+    let store = ConfigManager::new(&config_path).unwrap();
+    let fallback = emusync_domain::config::AppConfig::default();
+
+    // snapshot should not trigger migration or disk write
+    let snapshot = store.snapshot(&fallback).unwrap();
+    assert_eq!(fs::read(&config_path).unwrap(), before_bytes);
+
+    // while_current should also not trigger migration or disk write
+    let called = store.while_current(&snapshot, &fallback, || 123).unwrap();
+    assert_eq!(called, Some(123));
+    assert_eq!(fs::read(&config_path).unwrap(), before_bytes);
+
+    // Verify LocalSaveTargets::for_rom with blank-only paths does not block stem fallback
+    let emulator = Emulator {
+        save_paths_by_rom: vec![
+            ("game.iso".into(), vec!["   ".into(), "".into()]),
+            ("game".into(), vec!["/saves/fallback.srm".into()]),
+        ],
+        save_targets_by_rom: vec![
+            ("other.iso".into(), vec![]),
+            (
+                "other".into(),
+                vec![SaveTarget {
+                    path: "/saves/stem_target.srm".into(),
+                    kind: emusync_domain::library::SaveTargetType::File,
+                    cloud_path: None,
+                }],
+            ),
+        ],
+        ..Emulator::default()
+    };
+
+    let rom_result = LocalSaveTargets.for_rom(&emulator, "game.iso").unwrap();
+    assert_eq!(rom_result.len(), 1);
+    assert_eq!(rom_result[0].path, "/saves/fallback.srm");
+
+    let target_result = LocalSaveTargets.for_rom(&emulator, "other.iso").unwrap();
+    assert_eq!(target_result.len(), 1);
+    assert_eq!(target_result[0].path, "/saves/stem_target.srm");
+}

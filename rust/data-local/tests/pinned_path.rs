@@ -239,3 +239,28 @@ fn pinned_restore_creates_selected_root_and_accepts_user_selected_root_symlink()
     stage.commit(None, &history, &key).unwrap();
     assert_eq!(fs::read(root.join("other/save")).unwrap(), b"linked");
 }
+
+#[test]
+fn pinned_restore_rejects_descendant_directory_swapped_to_symlink_pointing_to_moved_target() {
+    use emusync_data_local::{StagedRestore, SyncHistoryStore};
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(root.join("slot")).unwrap();
+    fs::write(root.join("slot/save.dat"), b"original").unwrap();
+    let history = SyncHistoryStore::new(&temp.path().join("config.json")).unwrap();
+    let logical = root.join("slot/save.dat");
+    let key = history.key(&logical, "folder", "slot/save.dat").unwrap();
+    let stage = StagedRestore::prepare_pinned(&root, "slot/save.dat")
+        .unwrap()
+        .unwrap();
+    fs::write(stage.path(), b"restored").unwrap();
+    fs::rename(root.join("slot"), root.join("moved_slot")).unwrap();
+    symlink(root.join("moved_slot"), root.join("slot")).unwrap();
+    assert!(stage.commit(None, &history, &key).is_err());
+    assert_eq!(
+        fs::read(root.join("moved_slot/save.dat")).unwrap(),
+        b"original"
+    );
+    assert!(!history.backup_directory().exists());
+}

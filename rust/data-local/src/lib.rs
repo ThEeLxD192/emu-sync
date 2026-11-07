@@ -11,6 +11,7 @@ mod staging;
 mod storage;
 mod targets;
 mod tracked;
+mod tracked_commit;
 
 pub use config::ConfigManager;
 pub use history::{HistoryCheckpoint, SyncHistoryStore, file_sha256};

@@ -50,9 +50,11 @@ fn atomic_write_with(
     contents: &[u8],
     before_replace: impl FnOnce() -> io::Result<()>,
 ) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::other("missing parent directory"))?;
+    let parent = match path.parent() {
+        Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
+        Some(parent) => parent,
+        None => return Err(io::Error::other("missing parent directory")),
+    };
     fs::create_dir_all(parent)?;
     let mut temp = tempfile::Builder::new()
         .prefix(".emusync.")

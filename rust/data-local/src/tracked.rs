@@ -1,18 +1,18 @@
+use crate::tracked_commit::{as_checkpoint, history_checkpoint, record_reconciled, text_path};
+
 use crate::{
-    HistoryCheckpoint, RecoveryRecord, RecoveryStore, StagedRestore, SyncHistoryStore,
-    UploadEvidence, UploadSnapshot, file_sha256,
+    RecoveryRecord, RecoveryStore, StagedRestore, SyncHistoryStore, UploadEvidence, UploadSnapshot,
+    file_sha256,
 };
 use emusync_domain::config::{AppConfig, CredentialSnapshot, CredentialTransaction};
 use emusync_domain::sync::{
-    Checkpoint, CloudSaveTransfer, Decision, DirectoryDownload, LocalSaveFiles, RemoteState,
-    plan_tracked,
+    CloudSaveTransfer, Decision, DirectoryDownload, LocalSaveFiles, RemoteState, plan_tracked,
 };
 use std::{
-    fmt, fs, io,
+    fmt, io,
     path::{Path, PathBuf},
     sync::Arc,
 };
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 /// Original inputs retained with an uncertain or locally incomplete upload.
 #[derive(Clone, Debug)]
@@ -53,7 +53,14 @@ impl<E: fmt::Display> fmt::Display for TrackedError<E> {
         }
     }
 }
-impl<E: std::error::Error + 'static> std::error::Error for TrackedError<E> {}
+impl<E: std::error::Error + 'static> std::error::Error for TrackedError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Local(e) | Self::AfterUpload { source: e, .. } => Some(e),
+            Self::Transfer(e) | Self::Upload { source: e, .. } => Some(e),
+        }
+    }
+}
 impl<E> From<io::Error> for TrackedError<E> {
     fn from(e: io::Error) -> Self {
         Self::Local(e)
@@ -451,38 +458,6 @@ where
     }
 }
 
-#[cfg(all(test, unix))]
-mod timestamp_tests {
-    use super::*;
-    use std::os::unix::fs::symlink;
-
-    #[test]
-    fn replacing_path_after_open_does_not_change_other_file_timestamp() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("save");
-        let moved = dir.path().join("moved");
-        let other = dir.path().join("other");
-        fs::write(&path, b"abc").unwrap();
-        fs::write(&other, b"abc").unwrap();
-        filetime::set_file_mtime(&other, filetime::FileTime::from_unix_time(100, 0)).unwrap();
-        let digest = file_sha256(&path).unwrap();
-        let mut file = fs::File::open(&path).unwrap();
-        fs::rename(&path, &moved).unwrap();
-        symlink(&other, &path).unwrap();
-        set_checked_file_mtime(&mut file, &digest, 200_000_000_000).unwrap();
-        assert_eq!(
-            filetime::FileTime::from_last_modification_time(&fs::metadata(&other).unwrap())
-                .unix_seconds(),
-            100
-        );
-        assert_eq!(
-            filetime::FileTime::from_last_modification_time(&fs::metadata(&moved).unwrap())
-                .unix_seconds(),
-            200
-        );
-    }
-}
-
 #[cfg(target_os = "linux")]
 impl<T> TrackedFileSync<T>
 where
@@ -637,95 +612,7 @@ async fn blocking<R: Send + 'static>(
         .await
         .map_err(|e| io::Error::other(format!("local worker failed: {e}")))?
 }
-fn record_reconciled(
-    history: &SyncHistoryStore,
-    evidence: UploadEvidence,
-    remote: RemoteState,
-    local: PathBuf,
-    folder: String,
-    name: String,
-) -> io::Result<()> {
-    if file_sha256(&evidence.path)? != evidence.digest
-        || remote
-            .sha256
-            .as_ref()
-            .is_some_and(|hash| !hash.eq_ignore_ascii_case(&evidence.digest))
-    {
-        return Err(io::Error::other(
-            "reconciled upload content could not be verified",
-        ));
-    }
-    let key = history.key(&local, &folder, &name)?;
-    history.record(&key, history_checkpoint(evidence.digest.clone(), &remote)?)?;
-    set_checked_path_mtime(&local, &evidence.digest, remote.modified)
-}
-fn set_checked_path_mtime(path: &Path, digest: &str, modified: i128) -> io::Result<()> {
-    let mut file = fs::File::open(path)?;
-    #[cfg(unix)]
-    {
-        set_checked_file_mtime(&mut file, digest, modified)
-    }
-    #[cfg(not(unix))]
-    {
-        if crate::history::reader_sha256(&mut file)? != digest {
-            return Err(io::Error::other("save changed during upload"));
-        }
-        let seconds =
-            i64::try_from(modified.div_euclid(1_000_000_000)).map_err(io::Error::other)?;
-        let nanos = u32::try_from(modified.rem_euclid(1_000_000_000)).map_err(io::Error::other)?;
-        filetime::set_file_mtime(path, filetime::FileTime::from_unix_time(seconds, nanos))
-    }
-}
-#[cfg(unix)]
-fn set_checked_file_mtime(file: &mut fs::File, digest: &str, modified: i128) -> io::Result<()> {
-    if crate::history::reader_sha256(file)? != digest {
-        return Err(io::Error::other("save changed during upload"));
-    }
-    let seconds = i64::try_from(modified.div_euclid(1_000_000_000)).map_err(io::Error::other)?;
-    let nanos = u32::try_from(modified.rem_euclid(1_000_000_000)).map_err(io::Error::other)?;
-    filetime::set_file_handle_times(
-        file,
-        None,
-        Some(filetime::FileTime::from_unix_time(seconds, nanos)),
-    )
-}
-fn as_checkpoint(c: HistoryCheckpoint) -> io::Result<Checkpoint> {
-    let modified = OffsetDateTime::parse(&c.remote_modified_time, &Rfc3339)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
-        .unix_timestamp_nanos();
-    Ok(Checkpoint {
-        local_sha256: c.local_sha256,
-        remote_id: c.remote_id,
-        remote_modified: modified,
-        remote_sha256: c.remote_sha256,
-        remote_version: c.remote_version,
-    })
-}
-fn history_checkpoint(digest: String, remote: &RemoteState) -> io::Result<HistoryCheckpoint> {
-    let modified = OffsetDateTime::from_unix_timestamp_nanos(remote.modified)
-        .map_err(io::Error::other)?
-        .format(&Rfc3339)
-        .map_err(io::Error::other)?;
-    Ok(HistoryCheckpoint {
-        local_sha256: digest,
-        remote_id: remote.id.clone(),
-        remote_modified_time: modified,
-        remote_sha256: remote.sha256.clone(),
-        remote_version: remote.version.clone(),
-    })
-}
-fn optional_hash(path: &Path) -> io::Result<Option<String>> {
-    match fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => Ok(Some(file_sha256(path)?)),
-        Ok(_) => Ok(None),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-fn text_path(path: &Path) -> io::Result<&str> {
-    path.to_str()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path is not UTF-8"))
-}
+
 impl<T> LocalSaveFiles for TrackedFileSync<T>
 where
     T: CloudSaveTransfer + Sync,
@@ -745,7 +632,7 @@ where
         let name = remote_name.to_owned();
         let remote = remote.cloned();
         Ok(blocking(move || {
-            let digest = optional_hash(&path)?;
+            let digest = crate::staging::digest_if_file(&path)?;
             let key = history.key(&path, &folder, &name)?;
             let previous = history.get(&key)?.map(as_checkpoint).transpose()?;
             Ok(plan_tracked(
@@ -861,20 +748,14 @@ where
         let name = remote_name.to_owned();
         tokio::task::spawn_blocking(move || {
             let verify = || -> io::Result<()> {
-                if result
-                    .sha256
-                    .as_ref()
-                    .is_some_and(|h| !h.eq_ignore_ascii_case(snapshot.digest()))
-                {
-                    return Err(io::Error::other("uploaded content could not be verified"));
-                }
-                let key = history.key(&path, &folder, &name)?;
-                history.record(
-                    &key,
-                    history_checkpoint(snapshot.digest().to_owned(), &result)?,
-                )?;
-                set_checked_path_mtime(&path, snapshot.digest(), result.modified)?;
-                Ok(())
+                record_reconciled(
+                    &history,
+                    snapshot.evidence(),
+                    result.clone(),
+                    path,
+                    folder,
+                    name,
+                )
             };
             match verify() {
                 Ok(()) => Ok(()),

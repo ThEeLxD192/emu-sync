@@ -144,6 +144,7 @@ impl StagedRestore {
         if expected_remote_hash.is_some_and(|expected| !expected.eq_ignore_ascii_case(&digest)) {
             return Err(io::Error::other("downloaded content could not be verified"));
         }
+        self.temp.as_file().sync_all()?;
         #[cfg(target_os = "linux")]
         if let Some(pinned) = &self.pinned {
             use std::os::fd::AsRawFd;
@@ -177,14 +178,20 @@ impl StagedRestore {
         {
             history.backup(key, &self.destination, old)?;
         }
-        self.temp.persist(&self.destination).map_err(|e| e.error)?;
+        if self.original_digest.is_none() {
+            self.temp
+                .persist_noclobber(&self.destination)
+                .map_err(|e| e.error)?;
+        } else {
+            self.temp.persist(&self.destination).map_err(|e| e.error)?;
+        }
         Ok(digest)
     }
 }
-fn digest_if_file(path: &Path) -> io::Result<Option<String>> {
+pub(crate) fn digest_if_file(path: &Path) -> io::Result<Option<String>> {
     match fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => Ok(Some(file_sha256(path)?)),
-        Ok(_) => Ok(None),
+        Ok(_) => Err(io::Error::other("save is not a regular file")),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }

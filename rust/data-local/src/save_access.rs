@@ -87,7 +87,10 @@ impl LocalSavePath for DesktopSavePath {
     }
     fn walk_top_down(&self) -> io::Result<Vec<Self>> {
         let mut result = Vec::new();
-        let mut todo = vec![(PathBuf::from(&self.path), Vec::<PathBuf>::new())];
+        let mut todo = vec![(
+            PathBuf::from(&self.path),
+            std::sync::Arc::new(Vec::<PathBuf>::new()),
+        )];
         while let Some((path, ancestors)) = todo.pop() {
             let metadata = match fs::metadata(&path) {
                 Ok(m) => m,
@@ -99,12 +102,18 @@ impl LocalSavePath for DesktopSavePath {
                 if ancestors.contains(&canonical) {
                     return Err(io::Error::other("cyclic save directory"));
                 }
-                let mut descendants = ancestors;
+                let mut descendants = (*ancestors).clone();
                 descendants.push(canonical);
+                let descendants = std::sync::Arc::new(descendants);
                 let entries = fs::read_dir(&path)?
                     .map(|e| e.map(|e| e.path()))
                     .collect::<io::Result<Vec<_>>>()?;
-                todo.extend(entries.into_iter().rev().map(|p| (p, descendants.clone())));
+                todo.extend(
+                    entries
+                        .into_iter()
+                        .rev()
+                        .map(|p| (p, std::sync::Arc::clone(&descendants))),
+                );
             }
             result.push(Self {
                 path: string(&path)?,

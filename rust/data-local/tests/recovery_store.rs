@@ -243,3 +243,25 @@ fn has_unresolved_matches_exact_entry_and_ignores_mismatches_or_unverifiable() {
             .unwrap()
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn dangling_symlink_recovery_directory_fails_closed_without_creating_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let nonexistent_target = dir.path().join("does_not_exist");
+    let config = dir.path().join("config.json");
+    let recovery_dir = dir.path().join("config.json.sync-recovery");
+    std::os::unix::fs::symlink(&nonexistent_target, &recovery_dir).unwrap();
+
+    let store = RecoveryStore::new(&config).unwrap();
+    assert!(store.list().is_err());
+    assert!(
+        store
+            .has_unresolved(Path::new("/save"), "folder", "save.dat")
+            .is_err()
+    );
+
+    let snapshot = snapshot(dir.path(), b"x");
+    assert!(store.stage(&snapshot, record(&snapshot)).is_err());
+    assert!(!nonexistent_target.exists());
+}

@@ -9,56 +9,68 @@ pub fn resolve_remote_file(root: &Path, name: &str) -> io::Result<Option<PathBuf
     let Some(segments) = remote_path_segments(name) else {
         return Ok(None);
     };
-    let absolute = if root.is_absolute() {
-        root.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(root)
-    };
-    let root = normalize(&absolute);
+    let root = crate::storage::absolute(root)?;
     let mut resolved = root.clone();
-    for segment in segments {
+    for (index, segment) in segments.iter().enumerate() {
         // A Windows component can contain a drive prefix even within a name.
         if !is_normal_component(segment) {
             return Ok(None);
         }
         resolved.push(segment);
         match std::fs::symlink_metadata(&resolved) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(None),
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Ok(None);
+                }
+                if index + 1 < segments.len() && !metadata.file_type().is_dir() {
+                    return Ok(None);
+                }
+            }
+            Err(error)
+                if error.kind() == io::ErrorKind::NotFound
+                    || error.kind() == io::ErrorKind::NotADirectory => {}
             Err(error) => return Err(error),
         }
     }
-    let canonical_root = match std::fs::symlink_metadata(&root) {
-        Ok(_) => std::fs::canonicalize(&root)?,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => root.clone(),
-        Err(error) => return Err(error),
+    let (canonical_root, check_target) = if std::fs::metadata(&root).is_ok() {
+        (std::fs::canonicalize(&root)?, resolved.as_path())
+    } else {
+        let Some(existing_root) = first_existing_ancestor(&root)? else {
+            return Ok(None);
+        };
+        let canonical_root = std::fs::canonicalize(&existing_root)?;
+        let target = resolved.parent().unwrap_or(&resolved);
+        (canonical_root, target)
     };
-    if let Some(parent) = resolved.parent() {
-        match std::fs::canonicalize(parent) {
-            Ok(canonical_parent) if !canonical_parent.starts_with(canonical_root) => {
-                return Ok(None);
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
+    let Some(existing_target) = first_existing_ancestor(check_target)? else {
+        return Ok(None);
+    };
+    let canonical_target = std::fs::canonicalize(&existing_target)?;
+    if !canonical_target.starts_with(&canonical_root) {
+        return Ok(None);
     }
     Ok(Some(resolved))
 }
 
-fn normalize(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
+fn first_existing_ancestor(path: &Path) -> io::Result<Option<PathBuf>> {
+    for ancestor in path.ancestors() {
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() && std::fs::metadata(ancestor).is_err() {
+                    continue;
+                }
+                return Ok(Some(ancestor.to_path_buf()));
             }
-            other => normalized.push(other.as_os_str()),
+            Err(e)
+                if e.kind() == io::ErrorKind::NotFound
+                    || e.kind() == io::ErrorKind::NotADirectory =>
+            {
+                continue;
+            }
+            Err(e) => return Err(e),
         }
     }
-    normalized
+    Ok(None)
 }
 
 pub(crate) fn is_normal_component(segment: &str) -> bool {
