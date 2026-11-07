@@ -17,7 +17,9 @@ Cancelación de operaciones debe esperar limpieza y rollback asíncrono antes de
 ## Skills
 
 - [rust-development](.agents/skills/rust-development/SKILL.md): diseño y desarrollo Rust de EmuSync.
+- [rust-code-auditor](.agents/skills/rust-code-auditor/SKILL.md): auditoría profunda de código Rust (`src/`) en solo lectura (bugs, concurrencia, arquitectura y optimización) con entrega de prompt para otro agente (ejemplo: *"Usa la skill `rust-code-auditor` para auditar `rust/<crate>`"*).
 - [rust-valuable-tests](.agents/skills/rust-valuable-tests/SKILL.md): pruebas y trazabilidad de migración por riesgos y contratos.
+- [rust-adversarial-test-architect](.agents/skills/rust-adversarial-test-architect/SKILL.md): auditoría `src/` vs `tests/`, separación modular y diseño de pruebas adversariales en solo lectura con entrega de prompt para otro agente (ejemplo: *"Usa la skill `rust-adversarial-test-architect` para auditar `rust/<crate>`, los tests van en `rust/<crate>/tests/`"*).
 - [rust-testing](.agents/skills/rust-testing/SKILL.md): técnicas de pruebas Rust; usar solo técnicas aplicables.
 - [rust-concurrency](.agents/skills/rust-concurrency/SKILL.md): concurrencia, cancelación y ciclo de vida.
 - [rust-style-clippy](.agents/skills/rust-style-clippy/SKILL.md): formato y análisis estático.
