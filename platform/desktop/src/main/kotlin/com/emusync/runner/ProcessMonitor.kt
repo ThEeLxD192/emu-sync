@@ -35,7 +35,11 @@ internal class ProcessMonitor {
 
         return ProcessHandle.allProcesses().use { handles ->
             handles
-                .filter { it.isAlive && processMatches(it, cleanName, targetWithoutExtension) }
+                .filter {
+                    it.isAlive &&
+                        isActuallyAlive(it) &&
+                        processMatches(it, cleanName, targetWithoutExtension)
+                }
                 .map { it.pid() }
                 .toList()
                 .toSet()
@@ -84,6 +88,27 @@ internal class ProcessMonitor {
                     ProcessBuilder("pgrep", "-x", File(cleanName).nameWithoutExtension).start()
                 process.waitFor() == 0
             }
+        } catch (_: Exception) {
+            false
+        }
+    }
+}
+
+internal fun isActuallyAlive(handle: ProcessHandle): Boolean {
+    val os = System.getProperty("os.name", "").lowercase()
+    if (!os.contains("linux")) return handle.isAlive
+    val statusFile = File("/proc/${handle.pid()}/status")
+    return if (!statusFile.exists()) {
+        false
+    } else {
+        try {
+            val state =
+                statusFile
+                    .useLines { lines -> lines.firstOrNull { it.startsWith("State:") } }
+                    ?.substringAfter("State:")
+                    ?.trim()
+                    ?.firstOrNull()
+            state != null && state != 'Z' && state != 'X'
         } catch (_: Exception) {
             false
         }

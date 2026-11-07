@@ -124,6 +124,7 @@ impl Default for DriveHttpPolicy {
         }
     }
 }
+#[derive(Clone)]
 pub struct DriveHttpClients {
     pub metadata: Client,
     pub transfer: Client,

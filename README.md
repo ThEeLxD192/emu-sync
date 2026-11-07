@@ -122,6 +122,20 @@ Rust toolchain installed, run `cargo xtask quality` for formatting, Clippy and
 architecture checks, or `cargo xtask check` to include Rust tests. The Rust
 preview does not implement synchronization.
 
+For a Linux x86-64 development package built on Debian Bookworm, provide an
+existing `appimagetool` executable and a new output path:
+
+```bash
+APPIMAGETOOL=/path/to/appimagetool \
+  ./scripts/build-rust-container-dev.sh /tmp/EmuSync-rust-dev-x86_64.AppImage
+/tmp/EmuSync-rust-dev-x86_64.AppImage --config /tmp/emusync-rust-dev-config.json
+```
+
+This experimental package includes window-system libraries but still requires
+host graphics drivers and system libraries; it is not a release. Use a
+synthetic configuration and isolated save data while the migration is incomplete.
+The Docker and Gradle commands below continue to build the Kotlin application.
+
 The hook checks an isolated copy of the staged commit when Kotlin, Rust, Gradle or
 quality configuration changes, running the checks relevant to the staged files. Unstaged edits remain untouched. Documentation-only
 and image-only commits skip these checks. The hook never formats or stages files

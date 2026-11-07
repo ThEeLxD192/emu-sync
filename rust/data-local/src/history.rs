@@ -37,6 +37,7 @@ fn is_version_one(version: &u32) -> bool {
 }
 
 /// Synchronization evidence and recovery copies, serialized across instances in this process.
+#[derive(Clone)]
 pub struct SyncHistoryStore {
     state_file: PathBuf,
     backup_directory: PathBuf,

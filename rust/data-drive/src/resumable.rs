@@ -107,6 +107,7 @@ enum Progress {
     Retry,
 }
 /// Resumable creation of new Drive files. Existing files must use conditional updates.
+#[derive(Clone)]
 pub struct ResumableUpload {
     control: Client,
     transfer: Client,

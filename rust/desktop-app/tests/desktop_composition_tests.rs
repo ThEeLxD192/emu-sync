@@ -1,7 +1,7 @@
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{AppEvent, DesktopCoordinator, scan_entry_games};
 use emusync_domain::{
-    config::{AppConfig, ConfigurationStore},
+    config::{AppConfig, ConfigurationStore, Credentials},
     library::{Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType},
 };
 use emusync_presentation::{
@@ -36,6 +36,12 @@ fn test_emulator_entry(name: &str) -> GameEntry {
     })
 }
 
+#[test]
+fn displayed_version_matches_application_package() {
+    let app = EmuSyncApp::new();
+    assert_eq!(app.state.current_version, env!("CARGO_PKG_VERSION"));
+}
+
 fn test_native_entry(name: &str) -> GameEntry {
     GameEntry::Native(NativeGame {
         common: EntryCommon {
@@ -52,6 +58,113 @@ fn test_native_entry(name: &str) -> GameEntry {
         },
         ..Default::default()
     })
+}
+
+#[tokio::test]
+async fn invalid_drive_connect_is_rejected_and_preserves_credentials() {
+    let dir = tempdir().unwrap();
+    let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
+    let entry = test_native_entry("Game");
+    let original = AppConfig {
+        credentials: Some(Credentials {
+            client_id: "existing-id".into(),
+            client_secret: "existing-secret".into(),
+            refresh_token: Some("existing-token".into()),
+        }),
+        entries: vec![entry.clone()],
+    };
+    manager.update(|_| original.clone()).unwrap();
+    let (tx, rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager.clone(),
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
+
+    coordinator.handle_action(UiAction::ConnectDrive {
+        client_id: "".into(),
+        client_secret: "".into(),
+    });
+    coordinator.handle_action(UiAction::CheckForUpdates { manual: true });
+
+    assert_eq!(manager.load().unwrap(), original);
+    let events: Vec<_> = rx.try_iter().collect();
+    assert!(events.iter().any(
+        |event| matches!(event, AppEvent::Toast(message) if message.contains("cannot be empty"))
+    ));
+    assert!(events.iter().any(|event| matches!(event, AppEvent::Toast(message) if message.contains("Updates are not yet available"))));
+}
+
+#[tokio::test]
+async fn connected_launch_runs_under_sync_lifecycle() {
+    let dir = tempdir().unwrap();
+    let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
+    let entry = test_native_entry("Game");
+    manager
+        .update(|_| AppConfig {
+            credentials: Some(Credentials {
+                client_id: "id".into(),
+                client_secret: "secret".into(),
+                refresh_token: Some("token".into()),
+            }),
+            entries: vec![entry.clone()],
+        })
+        .unwrap();
+    let (tx, rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager,
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
+
+    coordinator.handle_action(UiAction::LaunchGame(GameItem::new("Game", entry, None)));
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let events: Vec<_> = rx.try_iter().collect();
+    assert!(!events.is_empty());
+}
+
+#[tokio::test]
+async fn connected_edits_do_not_change_paths_without_cloud_migration() {
+    let dir = tempdir().unwrap();
+    let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
+    let entry = test_native_entry("Game");
+    let original = AppConfig {
+        credentials: Some(Credentials {
+            client_id: "id".into(),
+            client_secret: "secret".into(),
+            refresh_token: Some("token".into()),
+        }),
+        entries: vec![entry.clone()],
+    };
+    manager.update(|_| original.clone()).unwrap();
+    let (tx, rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager.clone(),
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
+
+    coordinator.handle_action(UiAction::EditEntry {
+        old: Box::new(entry.clone()),
+        new: Box::new(test_native_entry("Renamed")),
+    });
+    coordinator.handle_action(UiAction::EditGameOverride {
+        item: GameItem::new("Game", entry, None),
+        title: Some("Renamed game".into()),
+        targets: vec![],
+        cover_path: None,
+    });
+
+    assert_eq!(manager.load().unwrap(), original);
+    let events: Vec<_> = rx.try_iter().collect();
+    assert!(events.iter().any(
+        |event| matches!(event, AppEvent::StatusChanged(AppStatus::Syncing { message }) if message.contains("Migrating cloud folder"))
+    ));
 }
 
 #[tokio::test]

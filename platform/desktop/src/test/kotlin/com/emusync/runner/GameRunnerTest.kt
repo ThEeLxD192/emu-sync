@@ -227,6 +227,13 @@ class GameRunnerTest {
                 setExecutable(true)
             }
         val decoy = ProcessBuilder(gameScript.absolutePath, "6").start()
+        val deadline = System.currentTimeMillis() + 3_000
+        while (
+            runner.matchingProcessIds(gameScript.name).isEmpty() &&
+                System.currentTimeMillis() < deadline
+        ) {
+            delay(10)
+        }
         val launcher =
             File(tempDir, "launcher.sh").apply {
                 writeText("#!/bin/sh\n\"${gameScript.absolutePath}\" 1 &\nexit 0\n")

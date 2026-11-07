@@ -7,7 +7,7 @@ internal class ExternalProcessTracker(
     private val matchingProcessIds: (String) -> Set<Long>,
     private val isSteamShaderCompiling: () -> Boolean,
     private val isProcessAlive: (Long) -> Boolean = { pid ->
-        ProcessHandle.of(pid).map { it.isAlive }.orElse(false)
+        ProcessHandle.of(pid).map { it.isAlive && isActuallyAlive(it) }.orElse(false)
     },
     private val currentTimeMs: () -> Long = System::currentTimeMillis,
 ) {

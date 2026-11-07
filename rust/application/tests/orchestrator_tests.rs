@@ -3,9 +3,9 @@ use emusync_domain::config::{AppConfig, CloudAuthorization, Credentials};
 use emusync_domain::execution::{GameLaunchRequest, GameLauncher, GameResult};
 use emusync_domain::library::{EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType};
 use emusync_domain::sync::{
-    CloudFileListing, CloudFolderStore, Decision, LocalSaveAccess, LocalSaveFiles, LocalSavePath,
-    RemoteFile, RemoteState, SaveSetup, SaveSetupRequest, SaveSetupResult, SaveSynchronizer,
-    SaveSynchronizerFactory, SyncEvent, SyncGame,
+    CloudFileListing, CloudFolderStore, Decision, EntrySyncStatus, LocalSaveAccess, LocalSaveFiles,
+    LocalSavePath, RemoteFile, RemoteState, SaveSetup, SaveSetupRequest, SaveSetupResult,
+    SaveSynchronizer, SaveSynchronizerFactory, SyncEvent, SyncGame,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -231,6 +231,8 @@ impl LocalSaveAccess for MockFs {
 struct MockDrive {
     folders: Arc<Mutex<HashMap<String, String>>>,
     files: Arc<Mutex<HashMap<String, Vec<RemoteFile>>>>,
+    fail_find: Arc<AtomicBool>,
+    fail_list: Arc<AtomicBool>,
 }
 
 impl MockDrive {
@@ -253,6 +255,9 @@ impl CloudFileListing for MockDrive {
     type Error = String;
 
     async fn list_files(&self, _token: &str, folder: &str) -> Result<Vec<RemoteFile>, Self::Error> {
+        if self.fail_list.load(Ordering::SeqCst) {
+            return Err("listing failed".into());
+        }
         let lock = self.files.lock().unwrap();
         Ok(lock.get(folder).cloned().unwrap_or_default())
     }
@@ -287,6 +292,9 @@ impl CloudFolderStore for MockDrive {
         _token: &str,
         segments: &[String],
     ) -> Result<Option<String>, Self::Error> {
+        if self.fail_find.load(Ordering::SeqCst) {
+            return Err("folder lookup failed".into());
+        }
         let key = segments.join("/");
         let lock = self.folders.lock().unwrap();
         Ok(lock.get(&key).cloned())
@@ -323,6 +331,7 @@ struct MockTrackedSync {
     uploads: Arc<Mutex<Vec<String>>>,
     remembers: Arc<Mutex<Vec<String>>>,
     fail_upload_for: Arc<Mutex<Option<String>>>,
+    fail_plan: Arc<AtomicBool>,
 }
 
 impl LocalSaveFiles for MockTrackedSync {
@@ -335,6 +344,9 @@ impl LocalSaveFiles for MockTrackedSync {
         _folder: &str,
         _remote_name: &str,
     ) -> Result<Decision, Self::Error> {
+        if self.fail_plan.load(Ordering::SeqCst) {
+            return Err("history read failed".into());
+        }
         let lock = self.planned_decisions.lock().unwrap();
         Ok(lock.get(local).cloned().unwrap_or(Decision::InSync))
     }
@@ -474,6 +486,76 @@ fn sample_native_game(name: &str, save_path: &str) -> SyncGame {
         effective_title: name.to_string(),
         save_targets: vec![target],
     }
+}
+
+#[tokio::test]
+async fn status_reports_errors_instead_of_claiming_unverified_saves_are_in_sync() {
+    let files = MockFs::default();
+    files.add_file("/saves/game.sav", 1000);
+    let drive = MockDrive::default();
+    drive.add_folder(&["Game".into()], "folder");
+    let tracked = MockTrackedSync::default();
+    let auth = MockAuth::default();
+    *auth.token.lock().unwrap() = Some("synthetic-token".into());
+    let config = AppConfig {
+        credentials: Some(Credentials {
+            client_id: "client".into(),
+            client_secret: "secret".into(),
+            refresh_token: Some("refresh".into()),
+        }),
+        entries: vec![],
+    };
+    let factory = SyncOrchestratorFactory::new(SyncServices {
+        files,
+        search: drive.clone(),
+        folders: drive.clone(),
+        tracked_sync: tracked.clone(),
+        authorization: auth,
+        runner: MockLauncher::default(),
+    });
+    let sync = factory.create(config.clone(), |_| {});
+    let entry = sample_native_game("Game", "/saves/game.sav").entry;
+    assert_eq!(sync.check_entry(&entry).await, Ok(EntrySyncStatus::InSync));
+
+    drive.fail_find.store(true, Ordering::SeqCst);
+    assert_eq!(sync.check_entry(&entry).await, Ok(EntrySyncStatus::Error));
+    drive.fail_find.store(false, Ordering::SeqCst);
+    drive.fail_list.store(true, Ordering::SeqCst);
+    assert_eq!(sync.check_entry(&entry).await, Ok(EntrySyncStatus::Error));
+    drive.fail_list.store(false, Ordering::SeqCst);
+    tracked.fail_plan.store(true, Ordering::SeqCst);
+    assert_eq!(sync.check_entry(&entry).await, Ok(EntrySyncStatus::Error));
+    tracked.fail_plan.store(false, Ordering::SeqCst);
+
+    let duplicate = RemoteFile {
+        id: "first".into(),
+        name: "game.sav".into(),
+        modified: 0,
+        is_folder: false,
+        sha256: None,
+        version: None,
+    };
+    drive.add_file("folder", duplicate.clone());
+    drive.add_file(
+        "folder",
+        RemoteFile {
+            id: "second".into(),
+            ..duplicate
+        },
+    );
+    assert_eq!(sync.check_entry(&entry).await, Ok(EntrySyncStatus::Error));
+
+    let blank = AppConfig {
+        credentials: Some(Credentials {
+            refresh_token: Some("  ".into()),
+            ..config.credentials.unwrap()
+        }),
+        entries: vec![],
+    };
+    assert_eq!(
+        factory.create(blank, |_| {}).check_entry(&entry).await,
+        Ok(EntrySyncStatus::NotConfigured)
+    );
 }
 
 #[tokio::test]

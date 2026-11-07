@@ -732,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "emusync-desktop-app"
-version = "0.1.0"
+version = "1.2.0"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -749,6 +749,7 @@ dependencies = [
  "reqwest",
  "serde_json",
  "tempfile",
+ "time",
  "tokio",
  "tokio-util",
  "winit",
@@ -773,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "emusync-presentation"
-version = "0.1.0"
+version = "1.2.0"
 dependencies = [
  "egui",
  "emusync-application",

@@ -37,6 +37,15 @@ jobs:
           toolchain: 1.99.1
           components: rustfmt, clippy
 
+      - name: Verify coordinated version bumps
+        shell: bash
+        run: bash scripts/tests/bump-version-test.sh
+
+      - name: Verify AppImage library selection
+        if: matrix.platform == 'Linux'
+        shell: bash
+        run: bash scripts/tests/appimage-fallback-test.sh
+
       - name: Check Rust architecture, quality and tests
         shell: bash
         run: |

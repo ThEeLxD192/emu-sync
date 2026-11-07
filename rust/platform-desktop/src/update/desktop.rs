@@ -1,7 +1,6 @@
 use crate::{update::installer::AppImageInstaller, util::AppImageEnvironment};
 use emusync_domain::update::UpdateInstaller;
 use std::{
-    collections::HashMap,
     fs::File,
     io,
     path::{Path, PathBuf},
@@ -60,9 +59,7 @@ fn default_linux_launcher(path: &str) -> io::Result<()> {
     cmd.stdout(std::process::Stdio::null());
     cmd.stderr(std::process::Stdio::null());
 
-    let mut env_map: HashMap<String, String> = std::env::vars().collect();
-    AppImageEnvironment::clean(&mut env_map);
-    cmd.envs(env_map);
+    AppImageEnvironment::clean_command(&mut cmd);
 
     cmd.spawn()?;
     Ok(())

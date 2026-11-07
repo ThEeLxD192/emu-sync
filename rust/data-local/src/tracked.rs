@@ -4,7 +4,8 @@ use crate::{
 };
 use emusync_domain::config::{AppConfig, CredentialSnapshot, CredentialTransaction};
 use emusync_domain::sync::{
-    Checkpoint, CloudSaveTransfer, Decision, LocalSaveFiles, RemoteState, plan_tracked,
+    Checkpoint, CloudSaveTransfer, Decision, DirectoryDownload, LocalSaveFiles, RemoteState,
+    plan_tracked,
 };
 use std::{
     fmt, fs, io,
@@ -123,6 +124,7 @@ pub struct UploadRequest<'a> {
 }
 
 /// The operation owner must await each future through completion, including cancellation cleanup.
+#[derive(Clone)]
 pub struct TrackedFileSync<T> {
     transfer: T,
     history: Arc<SyncHistoryStore>,
@@ -141,6 +143,47 @@ impl<T> TrackedFileSync<T> {
     pub fn with_recovery(mut self, recovery: Arc<RecoveryStore>) -> Self {
         self.recovery = Some(recovery);
         self
+    }
+
+    /// Record an in-sync observation only while the authorizing connection is current.
+    pub async fn remember_guarded<S>(
+        &self,
+        local: &str,
+        remote: &RemoteState,
+        folder: &str,
+        remote_name: &str,
+        credentials: RecoveryCredentials<S>,
+    ) -> io::Result<()>
+    where
+        S: CredentialTransaction<Error = io::Error> + Send + Sync + 'static,
+    {
+        let path = PathBuf::from(local);
+        let history = self.history.clone();
+        let folder = folder.to_owned();
+        let name = remote_name.to_owned();
+        let remote = remote.clone();
+        blocking(move || {
+            credentials
+                .store
+                .while_current(&credentials.expected, &credentials.fallback, || {
+                    let digest = file_sha256(&path)?;
+                    let key = history.key(&path, &folder, &name)?;
+                    let previous = history.get(&key)?.map(as_checkpoint).transpose()?;
+                    if plan_tracked(Some(&digest), Some(&remote), previous.as_ref())
+                        != Decision::InSync
+                    {
+                        return Err(io::Error::other("save changed during synchronization"));
+                    }
+                    history.record(&key, history_checkpoint(digest, &remote)?)
+                })?
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "Drive connection changed during synchronization",
+                    )
+                })?
+        })
+        .await
     }
     /// Remove a persistent recovery entry once its outcome is reconciled and recorded.
     pub async fn resolve_recovery(&self, id: Option<&str>) -> io::Result<()> {
@@ -203,6 +246,63 @@ where
     T: CloudSaveTransfer + Sync,
     T::Error: Send,
 {
+    /// Stage a download and commit it only under the original connection revision.
+    /// Callers must retain operation exclusion and await the future to completion.
+    pub async fn download_guarded<S>(
+        &self,
+        token: &str,
+        remote: &RemoteState,
+        local: &str,
+        folder: &str,
+        remote_name: &str,
+        credentials: RecoveryCredentials<S>,
+    ) -> Result<(), TrackedError<T::Error>>
+    where
+        S: CredentialTransaction<Error = io::Error> + Send + Sync + 'static,
+    {
+        let check = credentials.clone();
+        blocking(move || check.ensure_current()).await?;
+        let path = PathBuf::from(local);
+        let stage = blocking({
+            let path = path.clone();
+            move || StagedRestore::prepare(&path)
+        })
+        .await?;
+        self.transfer
+            .download(
+                token,
+                &remote.id,
+                text_path(stage.path())?,
+                Some(remote.modified),
+                path.file_name().and_then(|s| s.to_str()).unwrap_or(""),
+            )
+            .await
+            .map_err(TrackedError::Transfer)?;
+        let history = self.history.clone();
+        let folder = folder.to_owned();
+        let name = remote_name.to_owned();
+        let remote = remote.clone();
+        blocking(move || {
+            let result = credentials.store.while_current(
+                &credentials.expected,
+                &credentials.fallback,
+                || {
+                    let key = history.key(&path, &folder, &name)?;
+                    let digest = stage.commit(remote.sha256.as_deref(), &history, &key)?;
+                    history.record(&key, history_checkpoint(digest, &remote)?)
+                },
+            )?;
+            result.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "Drive connection changed during download",
+                )
+            })?
+        })
+        .await?;
+        Ok(())
+    }
+
     /// Upload with the original OAuth revision guarding the history commit.
     /// The supervisor must retain and await this future through cleanup and recovery.
     /// Every failure keeps its persistent recovery entry; see `upload_guarded_classified`.
@@ -402,10 +502,52 @@ where
     where
         S: CredentialTransaction<Error = io::Error> + Send + Sync + 'static,
     {
+        let local = Path::new(root).join(remote_name);
+        self.download_directory_guarded(
+            DirectoryDownload {
+                token,
+                remote,
+                local: text_path(&local)?,
+                root,
+                relative: remote_name,
+                folder,
+                remote_name,
+            },
+            credentials,
+        )
+        .await
+    }
+
+    /// Commit a remote-derived relative path beneath the selected pinned root.
+    pub async fn download_directory_guarded<S>(
+        &self,
+        request: DirectoryDownload<'_>,
+        credentials: RecoveryCredentials<S>,
+    ) -> Result<(), TrackedError<T::Error>>
+    where
+        S: CredentialTransaction<Error = io::Error> + Send + Sync + 'static,
+    {
+        let DirectoryDownload {
+            token,
+            remote,
+            local,
+            root,
+            relative,
+            folder,
+            remote_name,
+        } = request;
+        if crate::storage::absolute(&Path::new(root).join(relative))?
+            != crate::storage::absolute(Path::new(local))?
+        {
+            return Err(TrackedError::Local(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "directory destination does not match the selected root",
+            )));
+        }
         let check = credentials.clone();
         blocking(move || check.ensure_current()).await?;
         let root = PathBuf::from(root);
-        let name = remote_name.to_owned();
+        let name = relative.to_owned();
         let stage = blocking(move || {
             StagedRestore::prepare_pinned(&root, &name)?
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid remote path"))

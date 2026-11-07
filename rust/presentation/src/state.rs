@@ -41,7 +41,7 @@ impl Default for AppUiState {
             update_state: UpdateState::Idle,
             show_update_dialog: false,
             toast_message: None,
-            current_version: "1.2.0".to_string(),
+            current_version: env!("CARGO_PKG_VERSION").to_string(),
             config_path: String::new(),
         }
     }

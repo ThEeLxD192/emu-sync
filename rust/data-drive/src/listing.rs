@@ -73,6 +73,7 @@ struct Page {
     next_page_token: Option<String>,
 }
 /// Drive v3 listing, with an injectable files endpoint for isolated testing.
+#[derive(Clone)]
 pub struct DriveListing {
     client: Client,
     files_url: Url,

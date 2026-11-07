@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Draft only: compile and validate in an isolated Windows environment. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="EmuSync" Manufacturer="EmuSync" Version="$(var.Version)"
+           UpgradeCode="a7b3c291-5f4e-4b28-98e1-d63f5e824c90" Scope="perMachine">
+    <MajorUpgrade Schedule="afterInstallInitialize" AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of EmuSync is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="EmuSyncIcon" SourceFile="$(var.IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="EmuSyncIcon" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="EmuSync">
+        <Component Id="ApplicationFiles">
+          <File Id="EmuSyncExecutable" Source="$(var.Executable)" Name="EmuSync.exe" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="EmuSyncMenuFolder" Name="EmuSync">
+        <Component Id="StartMenuShortcut">
+          <Shortcut Id="EmuSyncStartMenu" Name="EmuSync" Target="[INSTALLFOLDER]EmuSync.exe"
+                    WorkingDirectory="INSTALLFOLDER" Icon="EmuSyncIcon" />
+          <RemoveFolder Id="RemoveEmuSyncMenuFolder" On="uninstall" />
+          <RegistryValue Root="HKLM" Key="Software\EmuSync\Installer" Name="StartMenu"
+                         Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="MainFeature" Title="EmuSync" Level="1">
+      <ComponentRef Id="ApplicationFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>

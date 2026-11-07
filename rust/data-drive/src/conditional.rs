@@ -107,6 +107,7 @@ async fn finish_or_retain_unknown<T>(
 }
 
 /// A v2 conditional update; endpoint injection allows isolated transport tests.
+#[derive(Clone)]
 pub struct ConditionalUpdate {
     metadata: Client,
     transfer: Client,

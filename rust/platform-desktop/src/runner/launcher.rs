@@ -13,7 +13,7 @@ use emusync_domain::{
     library::{Emulator, GameEntry},
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     future::Future,
     io,
     path::{Path, PathBuf},
@@ -30,6 +30,7 @@ pub struct SteamLaunchOutcome {
 
 pub type SteamUriLauncherFn = Arc<dyn Fn(&str) -> Option<SteamLaunchOutcome> + Send + Sync>;
 
+#[derive(Clone)]
 pub struct GameRunner<S> {
     steam_launches: Arc<S>,
     tracker: ExternalProcessTracker,
@@ -91,9 +92,7 @@ where
             cmd.current_dir(parent);
         }
 
-        let mut env_map: HashMap<String, String> = std::env::vars().collect();
-        AppImageEnvironment::clean(&mut env_map);
-        cmd.envs(env_map);
+        AppImageEnvironment::clean_command(cmd.as_std_mut());
 
         cmd.stdout(std::process::Stdio::null());
         cmd.stderr(std::process::Stdio::null());
@@ -191,9 +190,7 @@ where
         cmd.current_dir(working_dir);
 
         if matches!(entry, GameEntry::Emulator(_)) {
-            let mut env_map: HashMap<String, String> = std::env::vars().collect();
-            AppImageEnvironment::clean(&mut env_map);
-            cmd.envs(env_map);
+            AppImageEnvironment::clean_command(cmd.as_std_mut());
         }
 
         let mut child = cmd.spawn()?;
@@ -270,6 +267,7 @@ fn default_steam_uri_launcher(uri: &str) -> Option<SteamLaunchOutcome> {
     } else {
         let mut cmd = std::process::Command::new("steam");
         cmd.arg(uri);
+        AppImageEnvironment::clean_command(&mut cmd);
         if let Ok(mut child) = cmd.spawn() {
             let status = child.wait().ok();
             return Some(SteamLaunchOutcome {
@@ -280,6 +278,7 @@ fn default_steam_uri_launcher(uri: &str) -> Option<SteamLaunchOutcome> {
         }
         let mut xdg = std::process::Command::new("xdg-open");
         xdg.arg(uri);
+        AppImageEnvironment::clean_command(&mut xdg);
         if let Ok(mut child) = xdg.spawn() {
             let status = child.wait().ok();
             return Some(SteamLaunchOutcome {

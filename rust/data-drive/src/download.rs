@@ -43,6 +43,7 @@ pub struct DownloadOptions<'a> {
     pub on_progress: &'a (dyn Fn(TransferProgress) + Send + Sync),
 }
 
+#[derive(Clone)]
 pub struct DriveDownload {
     client: Client,
     files_url: Url,

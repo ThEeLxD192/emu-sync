@@ -7,11 +7,61 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.junit.jupiter.api.condition.EnabledOnOs
 import org.junit.jupiter.api.condition.OS
 import org.junit.jupiter.api.io.TempDir
 
 class UpdateRestartTest {
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    @EnabledIfEnvironmentVariable(named = "EMUSYNC_R8_TRANSITION", matches = "1")
+    fun `Kotlin installer replaces isolated Kotlin AppImage with Rust and launches it`(
+        @TempDir directory: File
+    ) {
+        val kotlinArtifact = File(requireNotNull(System.getenv("EMUSYNC_R8_KOTLIN_IMAGE")))
+        val rustArtifact = File(requireNotNull(System.getenv("EMUSYNC_R8_RUST_IMAGE")))
+        val ready = File(requireNotNull(System.getenv("EMUSYNC_R8_LAUNCH_READY")))
+        val finished = File(requireNotNull(System.getenv("EMUSYNC_R8_LAUNCH_FINISHED")))
+        val config = File(requireNotNull(System.getenv("EMUSYNC_CONFIG")))
+        assertEquals(ready.canonicalFile.parentFile, finished.canonicalFile.parentFile)
+        assertEquals(ready.canonicalFile.parentFile, config.canonicalFile.parentFile)
+        assertEquals("{}", config.readText())
+        assertFalse(ready.exists())
+        assertFalse(finished.exists())
+        val target = File(directory, "EmuSync-x86_64.AppImage")
+        val download = File(directory, "download.AppImage")
+        kotlinArtifact.copyTo(target)
+        rustArtifact.copyTo(download)
+        val expected = rustArtifact.readBytes()
+        val exits = mutableListOf<Int>()
+        val manager =
+            object : DesktopUpdateInstaller(exitApplication = { exits += it }) {
+                override fun isWindows() = false
+
+                override fun isSteamGameMode() = false
+
+                override fun getCurrentAppImagePath() = target.absolutePath
+
+                override fun defaultLinuxLauncher(path: String) {
+                    super.defaultLinuxLauncher(path)
+                    ready.writeText("${ProcessHandle.current().pid()}\n$path\n")
+                    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+                    while (!finished.exists() && System.nanoTime() < deadline) Thread.sleep(10)
+                    if (!finished.exists())
+                        throw IOException("Timed out waiting for the isolated launch")
+                }
+            }
+
+        assertTrue(manager.applyUpdateAndRestart(download))
+        assertEquals(listOf(0), exits)
+        assertTrue(expected.contentEquals(target.readBytes()))
+        assertTrue(target.canExecute())
+        assertFalse(download.exists())
+        assertEquals(listOf(target.name), directory.list()!!.toList())
+        assertEquals("{}", config.readText())
+    }
+
     @Test
     @EnabledOnOs(OS.LINUX)
     fun `real Linux launcher starts the updated file before exiting`(@TempDir directory: File) {

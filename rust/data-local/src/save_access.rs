@@ -9,6 +9,7 @@ use std::{
     time::UNIX_EPOCH,
 };
 
+#[derive(Clone, Copy, Debug, Default)]
 pub struct DesktopSaveAccess;
 #[derive(Clone, Debug)]
 pub struct DesktopSavePath {

@@ -1,3 +1,4 @@
+use crate::util::AppImageEnvironment;
 use emusync_domain::execution::{PathPicker, PickerType};
 use std::{
     io,
@@ -121,7 +122,10 @@ pub fn run_external_choosers(commands: &[Vec<String>]) -> ExternalChooserResult 
 }
 
 fn run_single_chooser(binary: &str, args: &[String]) -> ExternalChooserResult {
-    let output = match Command::new(binary).args(args).output() {
+    let mut command = Command::new(binary);
+    command.args(args);
+    AppImageEnvironment::clean_command(&mut command);
+    let output = match command.output() {
         Ok(out) => out,
         Err(_) => return ExternalChooserResult::NotAvailable,
     };

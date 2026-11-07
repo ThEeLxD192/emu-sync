@@ -60,6 +60,7 @@ struct FolderPage {
     files: Vec<Folder>,
 }
 /// Drive v3 folder operations. No cache is shared across OAuth connections.
+#[derive(Clone)]
 pub struct DriveFolders {
     client: Client,
     files_url: Url,

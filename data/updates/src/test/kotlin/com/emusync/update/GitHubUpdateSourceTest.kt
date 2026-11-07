@@ -21,6 +21,33 @@ import org.junit.jupiter.api.Test
 
 class GitHubUpdateSourceTest {
     @Test
+    fun `migration release must be newer than installed Kotlin to select the AppImage`() = runTest {
+        suspend fun check(tag: String): UpdateInfo? {
+            val engine = MockEngine {
+                respond(
+                    content =
+                        """{"tag_name":"$tag","assets":[{"name":"EmuSync-x86_64.AppImage","browser_download_url":"https://updates.example/EmuSync-x86_64.AppImage","size":123}]}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+            }
+            return HttpClient(engine) {
+                    install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                }
+                .use { client ->
+                    GitHubUpdateSource(client, "owner", "repo", "1.2.0", false).check()
+                }
+        }
+
+        assertNull(check("v1.2.0"))
+        val update = check("v1.2.1")
+        assertNotNull(update)
+        assertEquals("1.2.1", update!!.version)
+        assertEquals("EmuSync-x86_64.AppImage", update.assetName)
+        assertEquals("https://updates.example/EmuSync-x86_64.AppImage", update.downloadUrl)
+    }
+
+    @Test
     fun `correctly compares semantic versions`() {
         assertTrue(GitHubUpdateSource.isNewerVersion("0.1.0", "0.1.1"))
         assertTrue(GitHubUpdateSource.isNewerVersion("0.1.0", "0.2.0"))

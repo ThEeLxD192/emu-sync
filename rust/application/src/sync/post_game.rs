@@ -154,6 +154,7 @@ where
                     .find(|f| f.name == drive_name),
                 folder_id,
                 drive_name,
+                directory: None,
             };
             Ok(self
                 .upload_file(token, planned, &entry.common().name, all_reserved_names)
@@ -224,6 +225,7 @@ where
                         remote: cloud_files.iter().find(|f| f.name == relative).cloned(),
                         folder_id: folder_id.to_string(),
                         drive_name: directory_cloud_name(prefix, &relative),
+                        directory: Some((root.path().to_owned(), relative)),
                     };
                     let res = self
                         .upload_file(token, planned, display_name, all_reserved.clone())

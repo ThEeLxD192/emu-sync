@@ -1,3 +1,4 @@
+use crate::util::AppImageEnvironment;
 use std::{collections::HashSet, fs, path::Path, process::Command};
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -130,7 +131,10 @@ impl ProcessMonitor {
     }
 
     fn fallback_pgrep(target_stem: &str) -> HashSet<u64> {
-        let output = match Command::new("pgrep").args(["-x", target_stem]).output() {
+        let mut command = Command::new("pgrep");
+        command.args(["-x", target_stem]);
+        AppImageEnvironment::clean_command(&mut command);
+        let output = match command.output() {
             Ok(out) => out,
             Err(_) => return HashSet::new(),
         };

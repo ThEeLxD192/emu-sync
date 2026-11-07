@@ -4,6 +4,33 @@ use std::collections::HashMap;
 pub struct AppImageEnvironment;
 
 impl AppImageEnvironment {
+    pub(crate) fn clean_command(command: &mut std::process::Command) {
+        let app_dir = std::env::var_os("APPDIR")
+            .filter(|value| !value.is_empty() && value != "/" && value != "\\")
+            .map(std::path::PathBuf::from);
+        for name in ["APPDIR", "ARGV0", "OWD"] {
+            command.env_remove(name);
+        }
+        if let Some(library_path) = std::env::var_os("LD_LIBRARY_PATH") {
+            let retained: Vec<_> = std::env::split_paths(&library_path)
+                .filter(|path| {
+                    let in_app_dir = app_dir.as_ref().is_some_and(|root| path.starts_with(root));
+                    let in_mount = path
+                        .to_string_lossy()
+                        .split(['/', '\\'])
+                        .any(|segment| segment.starts_with(".mount_"));
+                    !in_app_dir && !in_mount
+                })
+                .collect();
+            command.env_remove("LD_LIBRARY_PATH");
+            if !retained.is_empty()
+                && let Ok(joined) = std::env::join_paths(retained)
+            {
+                command.env("LD_LIBRARY_PATH", joined);
+            }
+        }
+    }
+
     pub fn clean(environment: &mut HashMap<String, String>) {
         let app_dir = environment
             .get("APPDIR")

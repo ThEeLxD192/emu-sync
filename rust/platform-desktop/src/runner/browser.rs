@@ -1,3 +1,4 @@
+use crate::util::AppImageEnvironment;
 use emusync_domain::execution::BrowserLauncher;
 use std::{io, process::Command};
 
@@ -29,6 +30,9 @@ pub fn open_browser(url: &str) -> io::Result<()> {
     } else if cfg!(target_os = "macos") {
         Command::new("open").arg(url).spawn().map(|_| ())
     } else {
-        Command::new("xdg-open").arg(url).spawn().map(|_| ())
+        let mut command = Command::new("xdg-open");
+        command.arg(url);
+        AppImageEnvironment::clean_command(&mut command);
+        command.spawn().map(|_| ())
     }
 }

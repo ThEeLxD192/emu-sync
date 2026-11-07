@@ -77,6 +77,7 @@ impl TryFrom<CreatedFile> for RemoteState {
 
 /// An operation-scoped adapter. The owner must await it and retain exclusion on an
 /// unknown upload outcome until it has been reconciled; cancellation is cooperative.
+#[derive(Clone)]
 pub struct DriveTransfer {
     download: DriveDownload,
     upload: ResumableUpload,

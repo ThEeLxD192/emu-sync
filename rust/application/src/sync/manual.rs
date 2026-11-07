@@ -4,8 +4,8 @@ use super::context::SyncContext;
 use super::target_mapping::{directory_cloud_name, project_directory_files};
 use emusync_domain::library::GameEntry;
 use emusync_domain::sync::{
-    CloudFileListing, CloudFolderStore, Decision, LocalSaveAccess, LocalSaveFiles, LocalSavePath,
-    RemoteFile, RemoteState, SyncEvent, canonical_cloud_files,
+    CloudFileListing, CloudFolderStore, Decision, DirectoryDownload, LocalSaveAccess,
+    LocalSaveFiles, LocalSavePath, RemoteFile, RemoteState, SyncEvent, canonical_cloud_files,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -14,6 +14,8 @@ pub struct PlannedSave<P> {
     pub remote: Option<RemoteFile>,
     pub folder_id: String,
     pub drive_name: String,
+    /// User-selected root and the relative name derived from the directory listing.
+    pub directory: Option<(String, String)>,
 }
 
 pub struct ManualFileSync<'a, A, L, F, T, Auth, R>
@@ -144,6 +146,7 @@ where
                     remote,
                     folder_id: folder_id.to_string(),
                     drive_name,
+                    directory: Some((root.path().to_owned(), name)),
                 },
                 decision,
             });
@@ -256,6 +259,7 @@ where
                 remote,
                 folder_id: folder_id.to_string(),
                 drive_name: drive_name.to_string(),
+                directory: None,
             };
             self.apply_file_decision(token, &planned, choice).await?;
         }
@@ -276,12 +280,26 @@ where
         match decision {
             Decision::DownloadCloud => {
                 if let Some(r) = &remote_state {
-                    self.context
-                        .services
-                        .tracked_sync
-                        .download(token, r, local_path, folder_id, drive_name)
-                        .await
-                        .map_err(|e| format!("{e:?}"))?;
+                    let tracked = &self.context.services.tracked_sync;
+                    if let Some((root, relative)) = &file.directory {
+                        tracked
+                            .download_in_directory(DirectoryDownload {
+                                token,
+                                remote: r,
+                                local: local_path,
+                                root,
+                                relative,
+                                folder: folder_id,
+                                remote_name: drive_name,
+                            })
+                            .await
+                            .map_err(|e| format!("{e:?}"))?;
+                    } else {
+                        tracked
+                            .download(token, r, local_path, folder_id, drive_name)
+                            .await
+                            .map_err(|e| format!("{e:?}"))?;
+                    }
                 }
             }
             Decision::UploadLocal => {

@@ -8,6 +8,7 @@ use std::{fmt, net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
 
 /// Composition of OAuth, loopback and a platform browser launcher.
+#[derive(Clone)]
 pub struct InteractiveOAuth<S, B> {
     oauth: OAuth<S>,
     browser: Arc<B>,

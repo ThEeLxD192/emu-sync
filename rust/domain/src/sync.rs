@@ -452,6 +452,17 @@ pub trait LocalSaveAccess {
         rom: &str,
     ) -> Result<Vec<crate::library::SaveTarget>, Self::Error>;
 }
+/// A remote file projected beneath a user-selected local directory.
+pub struct DirectoryDownload<'a> {
+    pub token: &'a str,
+    pub remote: &'a RemoteState,
+    pub local: &'a str,
+    pub root: &'a str,
+    pub relative: &'a str,
+    pub folder: &'a str,
+    pub remote_name: &'a str,
+}
+
 /// Local history, snapshots and backup handling around transfers.
 pub trait LocalSaveFiles {
     type Error;
@@ -477,6 +488,25 @@ pub trait LocalSaveFiles {
         folder: &str,
         remote_name: &str,
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
+    /// Carries the selected root separately from the remote-derived relative path.
+    fn download_in_directory(
+        &self,
+        request: DirectoryDownload<'_>,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send
+    where
+        Self: Sync,
+    {
+        async move {
+            self.download(
+                request.token,
+                request.remote,
+                request.local,
+                request.folder,
+                request.remote_name,
+            )
+            .await
+        }
+    }
     fn upload(
         &self,
         token: &str,

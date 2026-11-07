@@ -2,6 +2,12 @@
 mod supervisor;
 pub use supervisor::{OperationFailure, OperationSupervisor, StartError};
 
+mod retained_files;
+pub use retained_files::{RetainedFiles, RetainedFilesError};
+
+mod guarded_files;
+pub use guarded_files::GuardedFiles;
+
 mod drive_recovery;
 pub use drive_recovery::{
     AuthorizedTransferFailure, PersistedRecoveryStatus, RecoveryError, RecoveryStatus,

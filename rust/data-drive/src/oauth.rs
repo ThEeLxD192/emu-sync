@@ -45,6 +45,7 @@ struct ProviderError {
 }
 
 /// OAuth token exchange and revision-checked persistence; browser interaction is injected.
+#[derive(Clone)]
 pub struct OAuth<S> {
     client: Client,
     store: S,
