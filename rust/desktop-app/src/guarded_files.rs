@@ -120,16 +120,11 @@ where
         }
         #[cfg(not(target_os = "linux"))]
         {
-            self.tracked
-                .download_guarded(
-                    request.token,
-                    request.remote,
-                    request.local,
-                    request.folder,
-                    request.remote_name,
-                    self.credentials.clone(),
-                )
-                .await
+            let _ = request;
+            Err(TrackedError::Local(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "confined directory downloads are currently supported only on Linux",
+            )))
         }
     }
 }

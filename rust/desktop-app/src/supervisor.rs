@@ -104,6 +104,19 @@ impl<E: Send + 'static> OperationSupervisor<E> {
             cancel.cancel();
         }
     }
+    /// Retain a failure externally with an acquired permit.
+    pub fn retain_failure(&mut self, failure: OperationFailure<E>) -> bool {
+        let permit = match self.gate.clone().try_acquire_owned() {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+        let mut guard = self.retained.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some(Retained {
+            failure: Arc::new(Mutex::new(failure)),
+            _permit: permit,
+        });
+        true
+    }
     /// Wait for cooperative cleanup; a failure remains retained after this returns.
     pub async fn shutdown(&mut self) {
         self.cancel();

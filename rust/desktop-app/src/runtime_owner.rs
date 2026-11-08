@@ -54,6 +54,9 @@ impl<E: Send + 'static> RuntimeOwner<E> {
     pub fn handle(&self) -> &tokio::runtime::Handle {
         self.runtime.handle()
     }
+    pub fn supervisor(&self) -> Arc<Mutex<OperationSupervisor<E>>> {
+        self.supervisor.clone()
+    }
     fn reap_recovery(&mut self) {
         if self
             .recovery

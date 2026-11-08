@@ -1,7 +1,7 @@
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{
     AppEvent, AuthorizedTransferFailure, CloseState, DesktopCoordinator, RuntimeOwner,
-    scan_entry_games,
+    apply_entry_games_scanned,
 };
 use emusync_domain::config::ConfigurationStore;
 use emusync_presentation::{
@@ -39,6 +39,7 @@ struct App {
     operations: RuntimeOwner<AuthorizedTransferFailure<ConfigManager>>,
     closing: bool,
     close_notice: bool,
+    current_scan_revision: u64,
 }
 
 impl ApplicationHandler for App {
@@ -83,7 +84,8 @@ impl ApplicationHandler for App {
                 self.event_tx.clone(),
                 redraw,
                 self.operations.handle().clone(),
-            );
+            )
+            .with_supervisor(self.operations.supervisor());
             coordinator.initialize();
 
             Ok((window, state, painter, coordinator))
@@ -104,9 +106,23 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if !self.closing {
+            event_loop.set_control_flow(ControlFlow::Wait);
             return;
         }
-        match self.operations.poll_close() {
+        let coord_close = self
+            .coordinator
+            .as_ref()
+            .map(|c| c.poll_close())
+            .unwrap_or(CloseState::Ready);
+        let ops_close = self.operations.poll_close();
+        let close_state = match (coord_close, ops_close) {
+            (CloseState::RecoveryRequired, _) | (_, CloseState::RecoveryRequired) => {
+                CloseState::RecoveryRequired
+            }
+            (CloseState::Pending, _) | (_, CloseState::Pending) => CloseState::Pending,
+            (CloseState::Ready, CloseState::Ready) => CloseState::Ready,
+        };
+        match close_state {
             CloseState::Pending => event_loop.set_control_flow(ControlFlow::WaitUntil(
                 Instant::now() + Duration::from_millis(50),
             )),
@@ -142,6 +158,9 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => {
                 self.close_notice = false;
                 self.closing = true;
+                if let Some(coordinator) = &self.coordinator {
+                    coordinator.begin_close();
+                }
                 self.operations.begin_close();
             }
             WindowEvent::Resized(size) => {
@@ -170,20 +189,53 @@ impl ApplicationHandler for App {
                                     .cloned()
                                     .or_else(|| cfg.entries.first().cloned());
                             }
-                            if let Some(selected) = &self.emusync_app.state.selected_entry {
-                                self.emusync_app.state.game_items = scan_entry_games(selected);
+                            if self.emusync_app.state.selected_entry.is_none() {
+                                self.emusync_app.state.game_items.clear();
+                            }
+                            let current_names: std::collections::HashSet<_> = cfg
+                                .entries
+                                .iter()
+                                .map(|e| e.common().name.clone())
+                                .collect();
+                            self.emusync_app
+                                .state
+                                .entry_sync_status
+                                .retain(|k, _| current_names.contains(k));
+                            self.emusync_app
+                                .state
+                                .steam_registered_entries
+                                .retain(|k| current_names.contains(k));
+
+                            if let Some(selected) = &self.emusync_app.state.selected_entry
+                                && let Some(coordinator) = &self.coordinator
+                            {
+                                coordinator
+                                    .handle_action(UiAction::SelectEntry(Some(selected.clone())));
                             }
                         }
-                        AppEvent::EntryGamesScanned { entry_name, games } => {
-                            if self
+                        AppEvent::EntryGamesScanned {
+                            entry_name,
+                            games,
+                            revision,
+                        } => {
+                            let selected_name = self
                                 .emusync_app
                                 .state
                                 .selected_entry
                                 .as_ref()
-                                .is_some_and(|e| e.common().name == entry_name)
-                            {
-                                self.emusync_app.state.game_items = games;
-                            }
+                                .map(|e| e.common().name.as_str());
+                            apply_entry_games_scanned(
+                                &mut self.current_scan_revision,
+                                &mut self.emusync_app.state.game_items,
+                                selected_name,
+                                &entry_name,
+                                games,
+                                revision,
+                            );
+                        }
+                        AppEvent::SaveSetupRequested { request } => {
+                            self.emusync_app.open_save_setup(&request);
+                            window.request_redraw();
                         }
                         AppEvent::SyncStatusUpdated { entry_name, status } => {
                             self.emusync_app
@@ -263,9 +315,7 @@ impl ApplicationHandler for App {
                 for action in actions {
                     if let UiAction::SelectEntry(ref entry) = action {
                         self.emusync_app.state.selected_entry = entry.clone();
-                        if let Some(entry) = entry {
-                            self.emusync_app.state.game_items = scan_entry_games(entry);
-                        } else {
+                        if entry.is_none() {
                             self.emusync_app.state.game_items.clear();
                         }
                         window.request_redraw();
@@ -273,6 +323,9 @@ impl ApplicationHandler for App {
                     if matches!(action, UiAction::Exit) {
                         self.close_notice = false;
                         self.closing = true;
+                        if let Some(coordinator) = &self.coordinator {
+                            coordinator.begin_close();
+                        }
                         self.operations.begin_close();
                     } else if let Some(coordinator) = &self.coordinator {
                         coordinator.handle_action(action);
@@ -340,6 +393,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         operations: RuntimeOwner::new()?,
         closing: false,
         close_notice: false,
+        current_scan_revision: 0,
     };
     event_loop.run_app(&mut app)?;
     if let Some(error) = app.error {

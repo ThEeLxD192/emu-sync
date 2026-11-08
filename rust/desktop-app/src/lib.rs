@@ -19,10 +19,10 @@ mod runtime_owner;
 pub use runtime_owner::{CloseState, Closing, RecoveryPanicked, RecoveryStartError, RuntimeOwner};
 
 pub mod coordinator;
-pub use coordinator::DesktopCoordinator;
+pub use coordinator::{DesktopCoordinator, DriveEndpoints, resolve_effective_targets};
 
 pub mod events;
-pub use events::AppEvent;
+pub use events::{AppEvent, apply_entry_games_scanned};
 
 pub mod scanner_helper;
 pub use scanner_helper::scan_entry_games;
