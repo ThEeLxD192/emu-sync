@@ -149,12 +149,8 @@ fn literal_config_preserves_all_nondefault_fields_and_ordered_titles() {
 }
 
 #[test]
-fn read_only_operations_do_not_rewrite_config_and_blank_paths_do_not_block_stem_fallback() {
-    use emusync_data_local::LocalSaveTargets;
-    use emusync_domain::{
-        config::CredentialTransaction,
-        library::{Emulator, SaveTarget, SaveTargetAccess},
-    };
+fn read_only_operations_do_not_rewrite_config() {
+    use emusync_domain::config::CredentialTransaction;
 
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config.json");
@@ -202,32 +198,150 @@ fn read_only_operations_do_not_rewrite_config_and_blank_paths_do_not_block_stem_
     let called = store.while_current(&snapshot, &fallback, || 123).unwrap();
     assert_eq!(called, Some(123));
     assert_eq!(fs::read(&config_path).unwrap(), before_bytes);
+}
 
-    // Verify LocalSaveTargets::for_rom with blank-only paths does not block stem fallback
-    let emulator = Emulator {
-        save_paths_by_rom: vec![
-            ("game.iso".into(), vec!["   ".into(), "".into()]),
-            ("game".into(), vec!["/saves/fallback.srm".into()]),
-        ],
-        save_targets_by_rom: vec![
-            ("other.iso".into(), vec![]),
-            (
-                "other".into(),
-                vec![SaveTarget {
-                    path: "/saves/stem_target.srm".into(),
-                    kind: emusync_domain::library::SaveTargetType::File,
-                    cloud_path: None,
-                }],
-            ),
-        ],
-        ..Emulator::default()
+#[test]
+fn empty_zero_byte_config_file_is_treated_as_error_not_silently_overwritten_on_read_raw_while_missing_file_auto_creates()
+ {
+    use emusync_domain::config::AppConfig;
+
+    let dir = tempfile::tempdir().unwrap();
+    let missing_path = dir.path().join("missing/config.json");
+    let missing_store = ConfigManager::new(&missing_path).unwrap();
+
+    // Missing file auto-creates default config on load()
+    let loaded_default = missing_store.load().unwrap();
+    assert_eq!(loaded_default, AppConfig::default());
+    assert!(missing_path.exists());
+    let created_bytes = fs::read(&missing_path).unwrap();
+    assert!(!created_bytes.is_empty());
+    assert!(serde_json::from_slice::<serde_json::Value>(&created_bytes).is_ok());
+
+    // Existing zero-byte file must fail with "empty configuration" and must NOT be overwritten
+    let empty_dir = dir.path().join("empty");
+    fs::create_dir_all(&empty_dir).unwrap();
+    let empty_path = empty_dir.join("config.json");
+    fs::write(&empty_path, b"").unwrap();
+    assert_eq!(fs::metadata(&empty_path).unwrap().len(), 0);
+
+    let empty_store = ConfigManager::new(&empty_path).unwrap();
+    let load_err = empty_store.load().unwrap_err();
+    assert_eq!(load_err.kind(), std::io::ErrorKind::NotFound);
+    assert!(load_err.to_string().contains("empty configuration"));
+
+    let snapshot_err = empty_store.snapshot(&AppConfig::default()).unwrap_err();
+    assert!(snapshot_err.to_string().contains("empty configuration"));
+
+    let update_err = empty_store.update(|c| c).unwrap_err();
+    assert!(update_err.to_string().contains("empty configuration"));
+
+    // Verify empty file still has exactly 0 bytes (not overwritten with `{}`)
+    assert_eq!(fs::metadata(&empty_path).unwrap().len(), 0);
+}
+
+#[test]
+fn library_store_and_emulator_rom_migration_populate_only_empty_rom_targets() {
+    use emusync_domain::library::{
+        EntryCommon, GameEntry, LibraryStore, NativeGame, SaveTargetType,
     };
 
-    let rom_result = LocalSaveTargets.for_rom(&emulator, "game.iso").unwrap();
-    assert_eq!(rom_result.len(), 1);
-    assert_eq!(rom_result[0].path, "/saves/fallback.srm");
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
 
-    let target_result = LocalSaveTargets.for_rom(&emulator, "other.iso").unwrap();
-    assert_eq!(target_result.len(), 1);
-    assert_eq!(target_result[0].path, "/saves/stem_target.srm");
+    let file_path = dir.path().join("real_save.sav");
+    fs::write(&file_path, b"bytes").unwrap();
+    let file_path_str = file_path.to_str().unwrap();
+
+    let other_path = dir.path().join("other_save.sav");
+    fs::write(&other_path, b"other").unwrap();
+    let other_path_str = other_path.to_str().unwrap();
+
+    let custom_path = "/synthetic/custom.sav";
+
+    let initial_json = serde_json::json!({
+        "entries": [
+            {
+                "type": "emulator",
+                "name": "Emu",
+                "executablePath": "emu",
+                "romsDirectory": "roms",
+                "extensions": ["iso"],
+                "savePathsByRom": {
+                    "rom_new.iso": [file_path_str],
+                    "rom_existing.iso": [other_path_str],
+                    "rom_blank.iso": ["  ", ""]
+                },
+                "saveTargetsByRom": {
+                    "rom_existing.iso": [
+                        {
+                            "path": custom_path,
+                            "type": "file",
+                            "cloudPath": "kept.sav"
+                        }
+                    ]
+                }
+            }
+        ]
+    });
+
+    fs::write(
+        &config_path,
+        serde_json::to_vec_pretty(&initial_json).unwrap(),
+    )
+    .unwrap();
+
+    let store = ConfigManager::new(&config_path).unwrap();
+    let entries = store.load_entries().unwrap();
+    assert_eq!(entries.len(), 1);
+
+    let GameEntry::Emulator(emu) = &entries[0] else {
+        panic!("Expected emulator entry");
+    };
+
+    // 1. rom_new.iso was migrated to save_targets_by_rom with SaveTargetType::File
+    let new_target = emu
+        .save_targets_by_rom
+        .iter()
+        .find(|(k, _)| k == "rom_new.iso")
+        .expect("rom_new.iso should be migrated");
+    assert_eq!(new_target.1.len(), 1);
+    assert_eq!(new_target.1[0].path, file_path_str);
+    assert_eq!(new_target.1[0].kind, SaveTargetType::File);
+
+    // 2. rom_existing.iso preserves custom_path and cloudPath: Some("kept.sav") intact
+    let existing_target = emu
+        .save_targets_by_rom
+        .iter()
+        .find(|(k, _)| k == "rom_existing.iso")
+        .expect("rom_existing.iso should be present");
+    assert_eq!(existing_target.1.len(), 1);
+    assert_eq!(existing_target.1[0].path, custom_path);
+    assert_eq!(existing_target.1[0].cloud_path.as_deref(), Some("kept.sav"));
+
+    // 3. rom_blank.iso was not added to save_targets_by_rom
+    assert!(
+        !emu.save_targets_by_rom
+            .iter()
+            .any(|(k, _)| k == "rom_blank.iso"),
+        "rom_blank.iso must not be added to save_targets_by_rom"
+    );
+
+    // 4. update_entries persists new entries to disk
+    let updated = store
+        .update_entries(|mut list| {
+            list.push(GameEntry::Native(NativeGame {
+                common: EntryCommon {
+                    name: "NativeAdded".into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }));
+            list
+        })
+        .unwrap();
+    assert_eq!(updated.len(), 2);
+
+    let reloaded = store.load_entries().unwrap();
+    assert_eq!(reloaded.len(), 2);
+    assert_eq!(reloaded[1].common().name, "NativeAdded");
 }

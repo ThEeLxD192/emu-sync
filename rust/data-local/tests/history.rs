@@ -147,3 +147,95 @@ fn history_checkpoint_round_trip_serialization() {
     let deserialized: HistoryCheckpoint = serde_json::from_str(&json).unwrap();
     assert_eq!(cp, deserialized);
 }
+
+#[test]
+fn backup_rejects_non_regular_existing_copy_and_maintains_strict_permissions() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    let store = SyncHistoryStore::new(&config_path).unwrap();
+
+    let save = dir.path().join("save.dat");
+    fs::write(&save, b"data").unwrap();
+    let hash = file_sha256(&save).unwrap();
+    let key = store.key(&save, "folder", "save.dat").unwrap();
+
+    // 1. Initial backup succeeds
+    store.backup(&key, &save, &hash).unwrap();
+
+    // 2. Second backup with identical content is idempotent and succeeds
+    store.backup(&key, &save, &hash).unwrap();
+
+    let destination = store
+        .backup_directory()
+        .join(&key)
+        .join(&hash)
+        .join("save.dat");
+    assert_eq!(fs::read(&destination).unwrap(), b"data");
+
+    // 3. Strict permissions on Unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let backup_dir = store.backup_directory();
+        let key_dir = backup_dir.join(&key);
+        let version_dir = key_dir.join(&hash);
+        let source_json = key_dir.join("source.json");
+
+        assert_eq!(
+            fs::metadata(backup_dir).unwrap().permissions().mode() & 0o777,
+            0o700,
+            "backup directory must have 0o700 mode"
+        );
+        assert_eq!(
+            fs::metadata(&key_dir).unwrap().permissions().mode() & 0o777,
+            0o700,
+            "key directory must have 0o700 mode"
+        );
+        assert_eq!(
+            fs::metadata(&version_dir).unwrap().permissions().mode() & 0o777,
+            0o700,
+            "version directory must have 0o700 mode"
+        );
+        assert_eq!(
+            fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "backup file must have 0o600 mode"
+        );
+        assert_eq!(
+            fs::metadata(&source_json).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "source.json must have 0o600 mode"
+        );
+    }
+
+    // 4. Replacing destination with a directory causes backup to fail
+    fs::remove_file(&destination).unwrap();
+    fs::create_dir(&destination).unwrap();
+    let err_dir = store.backup(&key, &save, &hash).unwrap_err();
+    assert!(
+        err_dir
+            .to_string()
+            .contains("existing recovery copy is not a regular file"),
+        "Expected 'existing recovery copy is not a regular file', got: {err_dir}"
+    );
+
+    // 5. On Unix, replacing destination with a symlink to an external file (even with same content) fails
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        fs::remove_dir(&destination).unwrap();
+        let external_file = dir.path().join("external_match.dat");
+        fs::write(&external_file, b"data").unwrap();
+        symlink(&external_file, &destination).unwrap();
+
+        let err_symlink = store.backup(&key, &save, &hash).unwrap_err();
+        assert!(
+            err_symlink
+                .to_string()
+                .contains("existing recovery copy is not a regular file"),
+            "Expected 'existing recovery copy is not a regular file', got: {err_symlink}"
+        );
+        // Ensure external file was not altered or overwritten
+        assert_eq!(fs::read(&external_file).unwrap(), b"data");
+    }
+}

@@ -70,90 +70,41 @@ fn rejects_intermediate_and_final_symlinks_without_touching_saves() {
 }
 
 #[test]
-fn target_resolution_preserves_remote_names_and_skips_invalid_entries() {
-    use emusync_data_local::LocalSaveTargets;
-    use emusync_domain::library::{SaveTargetAccess, SaveTargetType};
-    let fixture = Fixture::new();
-    let destination = fixture.0.to_str().unwrap();
-    let targets = LocalSaveTargets
-        .for_restore(
-            destination,
-            &[
-                "slot/save.dat".into(),
-                "slot\\save.dat".into(),
-                "../outside".into(),
-            ],
-        )
-        .unwrap();
-    assert_eq!(targets.len(), 2);
-    assert_eq!(targets[0].path, targets[1].path);
-    assert_eq!(targets[0].cloud_path.as_deref(), Some("slot/save.dat"));
-    assert_eq!(targets[1].cloud_path.as_deref(), Some("slot\\save.dat"));
-    assert_eq!(targets[0].kind, SaveTargetType::File);
-    assert!(
-        LocalSaveTargets
-            .for_restore(" ", &["save".into()])
-            .unwrap()
-            .is_empty()
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn walking_local_targets_follows_directory_links_but_rejects_cycles() {
-    use emusync_data_local::DesktopSaveAccess;
-    use emusync_domain::sync::{LocalSaveAccess, LocalSavePath};
-    use std::os::unix::fs::symlink;
+fn rejects_intermediate_regular_file_and_resolves_under_nonexistent_root_unless_symlinked_outside()
+{
     let fixture = Fixture::new();
     let root = fixture.0.join("root");
-    let external = fixture.0.join("external");
     fs::create_dir(&root).unwrap();
-    fs::create_dir(&external).unwrap();
-    fs::write(external.join("save"), b"save").unwrap();
-    symlink(&external, root.join("linked")).unwrap();
-    let access = DesktopSaveAccess;
-    let path = access.path(root.to_str().unwrap());
-    let listed = path.walk_top_down().unwrap();
-    assert!(listed.iter().any(|p| p.path().ends_with("linked/save")));
-    symlink(&root, external.join("cycle")).unwrap();
-    assert!(path.walk_top_down().is_err());
+
+    let slot_file = root.join("slot_file");
+    fs::write(&slot_file, b"i am a regular file").unwrap();
+
+    let missing_root = fixture.0.join("nonexistent/saves");
+
+    // Case 1: intermediate component is a regular file
+    assert_eq!(
+        resolve_remote_file(&root, "slot_file/save.dat").unwrap(),
+        None
+    );
+
+    // Case 2: grandfather/ancestor is a regular file (triggers NotADirectory in deeper lookups)
+    assert_eq!(
+        resolve_remote_file(&root, "slot_file/sub/save.dat").unwrap(),
+        None
+    );
+
+    // Case 3: root does not yet exist on disk
+    let resolved = resolve_remote_file(&missing_root, "slot/save.dat").unwrap();
+    assert_eq!(
+        resolved,
+        Some(crate::storage_absolute(&missing_root.join("slot/save.dat")))
+    );
 }
 
-#[test]
-fn rom_targets_prefer_exact_then_stem_then_legacy_and_resolve_types() {
-    use emusync_data_local::LocalSaveTargets;
-    use emusync_domain::library::{Emulator, SaveTarget, SaveTargetAccess, SaveTargetType};
-    let fixture = Fixture::new();
-    let dir = fixture.0.join("saves");
-    fs::create_dir(&dir).unwrap();
-    let typed = SaveTarget {
-        path: dir.to_str().unwrap().into(),
-        kind: SaveTargetType::Unknown,
-        cloud_path: Some("  ".into()),
-    };
-    let emulator = Emulator {
-        save_targets_by_rom: vec![
-            ("game.iso".into(), vec![typed]),
-            (
-                "game".into(),
-                vec![SaveTarget {
-                    path: "stem".into(),
-                    kind: SaveTargetType::File,
-                    cloud_path: None,
-                }],
-            ),
-        ],
-        save_paths_by_rom: vec![("other".into(), vec!["missing".into()])],
-        ..Emulator::default()
-    };
-    let exact = LocalSaveTargets.for_rom(&emulator, "game.iso").unwrap();
-    assert_eq!(exact[0].kind, SaveTargetType::Directory);
-    assert!(exact[0].cloud_path.is_none());
-    assert_eq!(
-        LocalSaveTargets.for_rom(&emulator, "game.bin").unwrap()[0].path,
-        "stem"
-    );
-    let legacy = LocalSaveTargets.for_rom(&emulator, "other.iso").unwrap();
-    assert_eq!(legacy[0].path, "missing");
-    assert_eq!(legacy[0].kind, SaveTargetType::Unknown);
+fn storage_absolute(path: &std::path::Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap().join(path)
+    }
 }

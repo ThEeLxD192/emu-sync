@@ -92,3 +92,40 @@ fn staged_restore_rejects_existing_directory_and_rejects_concurrent_new_file() {
     assert!(stage.commit(None, &store, &key).is_err());
     assert_eq!(fs::read(&save).unwrap(), b"concurrently created");
 }
+
+#[test]
+fn upload_snapshot_verifies_remote_checksum_case_insensitively_and_staged_restore_skips_redundant_backup()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let save = dir.path().join("save.dat");
+    fs::write(&save, b"same content").unwrap();
+
+    let store = SyncHistoryStore::new(&dir.path().join("config.json")).unwrap();
+    let key = store.key(&save, "folder", "save.dat").unwrap();
+
+    let snapshot = UploadSnapshot::prepare(&save).unwrap();
+
+    // 1. Accepts uppercase hex checksum if matching digest
+    let upper = snapshot.digest().to_uppercase();
+    assert!(snapshot.verify_uploaded(Some(&upper), &save).is_ok());
+
+    // 2. Fails if remote checksum differs
+    let wrong = "f".repeat(64);
+    let err = snapshot.verify_uploaded(Some(&wrong), &save).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("uploaded content could not be verified"),
+        "Expected 'uploaded content could not be verified', got: {err}"
+    );
+
+    // 3. StagedRestore does not create redundant backup when content is identical
+    let stage = StagedRestore::prepare(&save).unwrap();
+    fs::write(stage.path(), b"same content").unwrap();
+    let committed_digest = stage.commit(Some(&upper), &store, &key).unwrap();
+    assert_eq!(committed_digest, snapshot.digest());
+    assert_eq!(fs::read(&save).unwrap(), b"same content");
+    assert!(
+        !store.backup_directory().exists(),
+        "Backup directory must not be created for identical content replacement"
+    );
+}

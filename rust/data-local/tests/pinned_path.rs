@@ -264,3 +264,110 @@ fn pinned_restore_rejects_descendant_directory_swapped_to_symlink_pointing_to_mo
     );
     assert!(!history.backup_directory().exists());
 }
+
+#[test]
+fn pinned_restore_rejects_grandparent_ancestor_swapped_to_symlink_pointing_to_moved_parent() {
+    use emusync_data_local::{StagedRestore, SyncHistoryStore};
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    fs::create_dir_all(root.join("a/b")).unwrap();
+    fs::write(root.join("a/b/save.dat"), b"original").unwrap();
+
+    let history = SyncHistoryStore::new(&temp.path().join("config.json")).unwrap();
+    let logical = root.join("a/b/save.dat");
+    let key = history.key(&logical, "folder", "a/b/save.dat").unwrap();
+
+    let stage = StagedRestore::prepare_pinned(&root, "a/b/save.dat")
+        .unwrap()
+        .unwrap();
+    fs::write(stage.path(), b"restored").unwrap();
+
+    // Adversarial injection: rename ancestor `a` to `a_moved` and create symlink `a -> a_moved`
+    fs::rename(root.join("a"), root.join("a_moved")).unwrap();
+    symlink(root.join("a_moved"), root.join("a")).unwrap();
+
+    let err = stage.commit(None, &history, &key).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("save directory changed during restore"),
+        "Expected 'save directory changed during restore', got: {err}"
+    );
+
+    assert_eq!(
+        fs::read(root.join("a_moved/b/save.dat")).unwrap(),
+        b"original",
+        "Original save must remain intact"
+    );
+    assert!(!history.backup_directory().exists());
+}
+
+#[test]
+fn pinned_restore_rejects_in_place_modification_and_hash_mismatch_and_non_regular_target() {
+    use emusync_data_local::{StagedRestore, SyncHistoryStore};
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    fs::create_dir(&root).unwrap();
+
+    let history = SyncHistoryStore::new(&temp.path().join("config.json")).unwrap();
+
+    // 1. Destination is a directory
+    let dir_as_save = root.join("dir_as_save");
+    fs::create_dir(&dir_as_save).unwrap();
+    let err_dir = match StagedRestore::prepare_pinned(&root, "dir_as_save") {
+        Err(e) => e,
+        Ok(_) => panic!("Expected error for directory destination"),
+    };
+    assert!(
+        err_dir.to_string().contains("save is not a regular file"),
+        "Expected 'save is not a regular file', got: {err_dir}"
+    );
+
+    // 2. Hash mismatch
+    let save_file = root.join("save.dat");
+    fs::write(&save_file, b"initial").unwrap();
+    let key = history.key(&save_file, "folder", "save.dat").unwrap();
+
+    let stage_mismatch = StagedRestore::prepare_pinned(&root, "save.dat")
+        .unwrap()
+        .unwrap();
+    fs::write(stage_mismatch.path(), b"downloaded").unwrap();
+    let wrong_hash = "0".repeat(64);
+    let err_mismatch = stage_mismatch
+        .commit(Some(&wrong_hash), &history, &key)
+        .unwrap_err();
+    assert!(
+        err_mismatch
+            .to_string()
+            .contains("downloaded content could not be verified"),
+        "Expected 'downloaded content could not be verified', got: {err_mismatch}"
+    );
+    assert_eq!(fs::read(&save_file).unwrap(), b"initial");
+
+    // 3. In-place modification between prepare_pinned and commit
+    let stage_concurrent = StagedRestore::prepare_pinned(&root, "save.dat")
+        .unwrap()
+        .unwrap();
+    fs::write(stage_concurrent.path(), b"downloaded").unwrap();
+    // Simulate concurrent modification in place
+    fs::write(&save_file, b"concurrent edit").unwrap();
+
+    let err_concurrent = stage_concurrent.commit(None, &history, &key).unwrap_err();
+    assert!(
+        err_concurrent
+            .to_string()
+            .contains("save changed during download"),
+        "Expected 'save changed during download', got: {err_concurrent}"
+    );
+    assert_eq!(fs::read(&save_file).unwrap(), b"concurrent edit");
+
+    // Ensure no orphan .restore files remain in root
+    let remaining_restore_files = fs::read_dir(&root)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".restore"))
+        .count();
+    assert_eq!(
+        remaining_restore_files, 0,
+        "No orphan .restore files should remain"
+    );
+}
