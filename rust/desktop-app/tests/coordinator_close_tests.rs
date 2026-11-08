@@ -1,3 +1,5 @@
+mod common;
+
 use emusync_data_local::{ConfigManager, RecoveryCredentials, TrackedError};
 use emusync_desktop_app::{
     AuthorizedTransferFailure, CloseState, DesktopCoordinator, OperationFailure,
@@ -139,7 +141,7 @@ async fn begin_close_blocks_new_operations_and_waits_for_barrier_cleanup() {
 
     // Release the barrier to let cleanup finish
     barrier.wait().await;
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    common::wait_for_active_tasks(&coordinator).await;
 
     // After cleanup has finished and admission released, poll_close returns Ready
     assert_eq!(coordinator.poll_close(), CloseState::Ready);

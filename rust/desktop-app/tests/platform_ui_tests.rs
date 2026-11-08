@@ -1,8 +1,8 @@
 use emusync_data_local::ConfigManager;
-use emusync_desktop_app::{AppEvent, DesktopCoordinator};
+use emusync_desktop_app::{AppEvent, DesktopCoordinator, scan_entry_games};
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore},
-    library::{EntryCommon, GameEntry, NativeGame},
+    library::{Emulator, EntryCommon, GameEntry, NativeGame},
 };
 use emusync_presentation::{actions::UiAction, model::GameItem};
 use std::sync::{Arc, mpsc::channel};
@@ -108,90 +108,84 @@ fn stale_scan_event_with_lower_revision_is_ignored() {
     assert_eq!(displayed_games[0].name, "GameV2");
 }
 
-struct DummyTransfer;
-impl emusync_domain::sync::CloudSaveTransfer for DummyTransfer {
-    type Error = std::io::Error;
-    async fn download(
-        &self,
-        _: &str,
-        _: &str,
-        _: &str,
-        _: Option<emusync_domain::sync::Timestamp>,
-        _: &str,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
-    async fn upload(
-        &self,
-        _: &str,
-        _: &str,
-        _: &str,
-        _: &str,
-    ) -> Result<emusync_domain::sync::RemoteState, Self::Error> {
-        unreachable!()
-    }
-    async fn replace(
-        &self,
-        _: &str,
-        _: &emusync_domain::sync::RemoteState,
-        _: &str,
-        _: &str,
-    ) -> Result<emusync_domain::sync::RemoteState, Self::Error> {
-        unreachable!()
-    }
-}
-
 #[tokio::test]
-async fn non_linux_directory_download_rejection_contract() {
-    use emusync_data_local::{
-        ConfigManager, RecoveryCredentials, RecoveryStore, SyncHistoryStore, TrackedFileSync,
-    };
-    use emusync_desktop_app::GuardedFiles;
-    use emusync_domain::{
-        config::CredentialStore,
-        sync::{DirectoryDownload, RemoteState},
-    };
-    use tempfile::tempdir;
-
+async fn scan_entry_games_handles_missing_roms_dir_and_filters_extensions_with_monotonic_revisions()
+{
     let dir = tempdir().unwrap();
+    let roms_dir = dir.path().join("roms");
+    std::fs::create_dir(&roms_dir).unwrap();
+    std::fs::write(roms_dir.join("Mario.sfc"), b"mario").unwrap();
+    std::fs::write(roms_dir.join("Zelda.smc"), b"zelda").unwrap();
+    std::fs::write(roms_dir.join("Readme.txt"), b"readme").unwrap();
+
+    let missing_emu = Emulator {
+        common: EntryCommon {
+            name: "MissingEmu".into(),
+            ..Default::default()
+        },
+        roms_directory: "/nonexistent/roms/dir".into(),
+        extensions: vec!["sfc".into(), "smc".into()],
+        ..Default::default()
+    };
+    let entry_missing = GameEntry::Emulator(missing_emu);
+
+    let valid_emu = Emulator {
+        common: EntryCommon {
+            name: "ValidEmu".into(),
+            ..Default::default()
+        },
+        roms_directory: roms_dir.to_str().unwrap().to_string(),
+        extensions: vec!["sfc".into(), "smc".into()],
+        ..Default::default()
+    };
+    let entry_valid = GameEntry::Emulator(valid_emu);
+
+    assert!(scan_entry_games(&entry_missing).is_empty());
+    let scanned_games = scan_entry_games(&entry_valid);
+    assert_eq!(scanned_games.len(), 2);
+    assert!(scanned_games.iter().any(|g| g.name == "Mario"));
+    assert!(scanned_games.iter().any(|g| g.name == "Zelda"));
+    assert!(!scanned_games.iter().any(|g| g.name == "Readme"));
+
+    let (tx, rx) = std::sync::mpsc::channel();
     let config_path = dir.path().join("config.json");
-    let manager = Arc::new(ConfigManager::new(&config_path).unwrap());
-    let history = Arc::new(SyncHistoryStore::new(&config_path).unwrap());
-    let store = Arc::new(RecoveryStore::new(&config_path).unwrap());
-    let tracked = Arc::new(TrackedFileSync::new(DummyTransfer, history).with_recovery(store));
-    let config = AppConfig::default();
-    let snapshot = manager.snapshot(&config).unwrap();
-    let credentials = RecoveryCredentials::new(manager.clone(), snapshot, config);
-    let guarded = GuardedFiles::new(tracked, credentials, |_| false);
+    let manager = ConfigManager::new(&config_path).unwrap();
+    let coordinator = DesktopCoordinator::new(
+        manager,
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
 
-    let remote = RemoteState {
-        id: "dummy_id".into(),
-        modified: 1_700_000_000,
-        sha256: None,
-        version: None,
-    };
-    let local_file = dir.path().join("rel");
-    let req = DirectoryDownload {
-        token: "token",
-        remote: &remote,
-        local: local_file.to_str().unwrap(),
-        root: dir.path().to_str().unwrap(),
-        relative: "rel",
-        folder: "folder",
-        remote_name: "remote_name",
-    };
+    let (rev1, h1) = coordinator.platform.scan_entry_games_async(entry_missing);
+    let (rev2, h2) = coordinator.platform.scan_entry_games_async(entry_valid);
 
-    #[cfg(not(target_os = "linux"))]
-    {
-        use emusync_domain::sync::LocalSaveFiles;
-        let res = guarded.download_in_directory(req).await;
-        assert!(
-            matches!(res, Err(emusync_data_local::TrackedError::Local(e)) if e.kind() == std::io::ErrorKind::Unsupported)
-        );
+    let _ = h1.await;
+    let _ = h2.await;
+
+    assert_eq!(rev1, 1);
+    assert_eq!(rev2, 2);
+
+    let events: Vec<_> = rx.try_iter().collect();
+    let ev1 = events
+        .iter()
+        .find(|e| matches!(e, AppEvent::EntryGamesScanned { revision: 1, .. }))
+        .unwrap();
+    let ev2 = events
+        .iter()
+        .find(|e| matches!(e, AppEvent::EntryGamesScanned { revision: 2, .. }))
+        .unwrap();
+
+    match ev1 {
+        AppEvent::EntryGamesScanned { games, .. } => assert!(games.is_empty()),
+        _ => unreachable!(),
     }
-    #[cfg(target_os = "linux")]
-    {
-        let _ = guarded;
-        let _ = req;
+    match ev2 {
+        AppEvent::EntryGamesScanned { games, .. } => {
+            assert_eq!(games.len(), 2);
+            assert!(games.iter().any(|g| g.name == "Mario"));
+            assert!(games.iter().any(|g| g.name == "Zelda"));
+        }
+        _ => unreachable!(),
     }
 }

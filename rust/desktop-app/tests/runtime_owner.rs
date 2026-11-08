@@ -126,3 +126,60 @@ fn panicking_recovery_keeps_close_blocked_until_acknowledged() {
     owner.begin_close();
     assert_eq!(finish(&mut owner), CloseState::Ready);
 }
+
+#[test]
+fn start_recovery_enforces_closing_busy_and_no_failure_preconditions() {
+    use emusync_desktop_app::{OperationFailure, RecoveryStartError};
+
+    let mut owner = RuntimeOwner::<&'static str>::new().unwrap();
+
+    // 1. Clean state without failure -> NoFailure
+    let err1 = owner.start_recovery(|_| Box::pin(async {}));
+    assert!(matches!(err1, Err(RecoveryStartError::NoFailure)));
+
+    // Retain a failure in supervisor
+    owner
+        .with_supervisor(|s| {
+            assert!(s.retain_failure(OperationFailure::Operation("err")));
+        })
+        .unwrap();
+
+    // 2. Start recovery blocked on channel
+    let (release_tx, release_rx) = oneshot::channel::<()>();
+    let (started_tx, started_rx) = mpsc::channel();
+    let _rx = owner
+        .start_recovery(move |_| {
+            Box::pin(async move {
+                let _ = started_tx.send(());
+                let _ = release_rx.await;
+            })
+        })
+        .unwrap();
+
+    started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+    // While recovery is busy, subsequent start_recovery returns Busy
+    let err2 = owner.start_recovery(|_| Box::pin(async {}));
+    assert!(matches!(err2, Err(RecoveryStartError::Busy)));
+
+    // acknowledge_recovery_panic returns Err(Closing) while recovery is busy
+    assert_eq!(owner.acknowledge_recovery_panic(), Err(Closing));
+
+    // Release the first recovery
+    let _ = release_tx.send(());
+
+    // Wait until recovery finishes in the runtime
+    while let Err(RecoveryStartError::Busy) = owner.start_recovery(|_| Box::pin(async {})) {
+        thread::yield_now();
+    }
+
+    // Now call begin_close
+    owner.begin_close();
+
+    // 3. After begin_close, start_recovery returns Closing
+    let err3 = owner.start_recovery(|_| Box::pin(async {}));
+    assert!(matches!(err3, Err(RecoveryStartError::Closing)));
+
+    // acknowledge_recovery_panic also returns Err(Closing) when closing is true
+    assert_eq!(owner.acknowledge_recovery_panic(), Err(Closing));
+}

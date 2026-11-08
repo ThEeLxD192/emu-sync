@@ -369,3 +369,135 @@ async fn entries_follow_the_remote_outcome_of_each_upload() {
         assert_eq!(entries(dir.path()).len(), left, "{reply:?}");
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reconcile_persisted_uploads_preserves_unverifiable_and_unconfirmed_entries_in_mixed_batch()
+{
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    let creds = credentials(dir.path());
+    let store = Arc::new(RecoveryStore::new(&config_path).unwrap());
+    let history = Arc::new(SyncHistoryStore::new(&config_path).unwrap());
+
+    // Prepare 3 save files
+    let save_corrupt = dir.path().join("corrupt.dat");
+    let save_folder = dir.path().join("folder.dat");
+    let save_valid = dir.path().join("valid.dat");
+    std::fs::write(&save_corrupt, b"corrupt bytes").unwrap();
+    std::fs::write(&save_folder, b"folder bytes").unwrap();
+    std::fs::write(&save_valid, b"valid bytes").unwrap();
+
+    let snap_corrupt = UploadSnapshot::prepare(&save_corrupt).unwrap();
+    let snap_folder = UploadSnapshot::prepare(&save_folder).unwrap();
+    let snap_valid = UploadSnapshot::prepare(&save_valid).unwrap();
+
+    let hash_valid = snap_valid.digest().to_string();
+
+    let rec_corrupt = RecoveryRecord {
+        remote_id: Some("corrupt-id".into()),
+        local: save_corrupt.to_str().unwrap().into(),
+        folder: "parent_folder".into(),
+        remote_name: "corrupt.dat".into(),
+        digest: snap_corrupt.digest().into(),
+        connection: creds.fingerprint(),
+        observed: None,
+    };
+    let rec_folder = RecoveryRecord {
+        remote_id: Some("folder-id".into()),
+        local: save_folder.to_str().unwrap().into(),
+        folder: "parent_folder".into(),
+        remote_name: "folder.dat".into(),
+        digest: snap_folder.digest().into(),
+        connection: creds.fingerprint(),
+        observed: None,
+    };
+    let rec_valid = RecoveryRecord {
+        remote_id: Some("valid-id".into()),
+        local: save_valid.to_str().unwrap().into(),
+        folder: "parent_folder".into(),
+        remote_name: "valid.dat".into(),
+        digest: snap_valid.digest().into(),
+        connection: creds.fingerprint(),
+        observed: None,
+    };
+
+    let id_corrupt = store.stage(&snap_corrupt, rec_corrupt).unwrap();
+    let id_folder = store.stage(&snap_folder, rec_folder).unwrap();
+    let id_valid = store.stage(&snap_valid, rec_valid).unwrap();
+
+    // Corrupt the snapshot file of id_corrupt on disk
+    let recovery_root = config_path.with_file_name("config.json.sync-recovery");
+    std::fs::write(
+        recovery_root.join(&id_corrupt).join("snapshot"),
+        b"tampered content",
+    )
+    .unwrap();
+
+    // Loopback server handling folder-id and valid-id queries
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
+    let hash_valid_clone = hash_valid.clone();
+
+    let server = thread::spawn(move || {
+        // Receives queries for the 2 verified records (corrupt is Unverifiable so no network query)
+        for _ in 0..2 {
+            let (mut s, _) = listener.accept().unwrap();
+            let (headers, _) = request(&mut s);
+            if headers.contains("/files/folder-id?") {
+                let body = r#"{"id":"folder-id","name":"folder.dat","mimeType":"application/vnd.google-apps.folder","parents":["parent_folder"],"modifiedTime":"2026-01-01T00:00:00Z","version":"1"}"#;
+                respond(&mut s, "200 OK", body);
+            } else if headers.contains("/files/valid-id?") {
+                let body = format!(
+                    r#"{{"id":"valid-id","name":"valid.dat","parents":["parent_folder"],"modifiedTime":"2026-01-01T00:00:00Z","sha256Checksum":"{hash_valid_clone}","version":"1"}}"#
+                );
+                respond(&mut s, "200 OK", &body);
+            } else {
+                panic!("unexpected query: {headers}");
+            }
+        }
+    });
+
+    let listing = DriveListing::new(Client::new(), base);
+    let tracked = TrackedFileSync::new((), history.clone()).with_recovery(store.clone());
+
+    let results =
+        reconcile_persisted_uploads(store.clone(), &listing, &tracked, "synthetic", creds)
+            .await
+            .unwrap();
+
+    // 1. Verify 3 exact statuses returned
+    assert_eq!(results.len(), 3);
+    assert!(
+        results
+            .iter()
+            .any(|(id, s)| id == &id_corrupt
+                && matches!(s, PersistedRecoveryStatus::Unverifiable(_)))
+    );
+    assert!(
+        results
+            .iter()
+            .any(|(id, s)| id == &id_folder
+                && matches!(s, PersistedRecoveryStatus::RemoteUnconfirmed))
+    );
+    assert!(
+        results
+            .iter()
+            .any(|(id, s)| id == &id_valid && matches!(s, PersistedRecoveryStatus::Recovered))
+    );
+
+    // 2. store.list() preserves id_corrupt and id_folder, while id_valid is removed
+    let remaining = store.list().unwrap();
+    let remaining_ids: Vec<_> = remaining.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(remaining_ids.len(), 2);
+    assert!(remaining_ids.contains(&id_corrupt.as_str()));
+    assert!(remaining_ids.contains(&id_folder.as_str()));
+    assert!(!remaining_ids.contains(&id_valid.as_str()));
+
+    // id_valid is recorded in SyncHistoryStore
+    let key = history
+        .key(&save_valid, "parent_folder", "valid.dat")
+        .unwrap();
+    assert_eq!(history.get(&key).unwrap().unwrap().remote_id, "valid-id");
+
+    server.join().unwrap();
+}

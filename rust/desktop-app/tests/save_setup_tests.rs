@@ -1,3 +1,5 @@
+mod common;
+
 use emusync_desktop_app::{
     AppEvent,
     coordinator::interaction::{AsyncSaveSetupBridge, InteractionControls},
@@ -35,7 +37,15 @@ fn test_game(name: &str) -> SyncGame {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bridge_emits_requested_event_and_resolves_on_confirmation() {
     let (tx, rx) = channel();
-    let controls = InteractionControls::new(tx, Arc::new(|| {}));
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let notify_clone = notify.clone();
+    let controls = InteractionControls::new(
+        tx,
+        Arc::new(move || {
+            notify_clone.notify_waiters();
+            notify_clone.notify_one();
+        }),
+    );
     let bridge = AsyncSaveSetupBridge {
         controls: controls.clone(),
     };
@@ -48,18 +58,10 @@ async fn bridge_emits_requested_event_and_resolves_on_confirmation() {
 
     let bridge_task = tokio::spawn(async move { bridge.request(req).await });
 
-    // Poll rx without blocking the executor
-    let mut received_event = None;
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
-    while tokio::time::Instant::now() < deadline {
-        if let Ok(event) = rx.try_recv() {
-            received_event = Some(event);
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-
-    let event = received_event.expect("Expected SaveSetupRequested event");
+    let event = common::recv_event_matching(&rx, &notify, |e| {
+        matches!(e, AppEvent::SaveSetupRequested { .. })
+    })
+    .await;
     match event {
         AppEvent::SaveSetupRequested { request } => {
             assert_eq!(request.item.name, "Zelda");

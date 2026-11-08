@@ -96,3 +96,40 @@ async fn interrupted_shutdown_can_be_awaited_again_without_losing_worker() {
     assert!(supervisor.start(|_| async { Ok::<_, ()>(()) }).is_ok());
     supervisor.shutdown().await;
 }
+
+#[tokio::test]
+async fn retain_failure_acquires_permit_when_idle_and_refuses_to_overwrite_when_busy() {
+    let mut supervisor = OperationSupervisor::<&'static str>::new();
+
+    // 1. Initial idle state: retain_failure acquires permit and returns true
+    assert!(supervisor.retain_failure(OperationFailure::Operation("first_failure")));
+
+    // 2. While first failure is retained, retain_failure returns false and does NOT overwrite
+    assert!(!supervisor.retain_failure(OperationFailure::Operation("second_failure")));
+
+    // Failure remains the first one
+    let failure = supervisor.failure().unwrap();
+    assert!(matches!(
+        *failure.lock().unwrap(),
+        OperationFailure::Operation("first_failure")
+    ));
+
+    // start() is blocked with Busy
+    assert!(matches!(
+        supervisor.start(|_| async { Ok::<_, &'static str>(()) }),
+        Err(StartError::Busy)
+    ));
+
+    // Resolve releases permit
+    drop(failure);
+    assert!(supervisor.resolve());
+    assert!(supervisor.failure().is_none());
+
+    // Now start() succeeds
+    assert!(
+        supervisor
+            .start(|_| async { Ok::<_, &'static str>(()) })
+            .is_ok()
+    );
+    supervisor.shutdown().await;
+}

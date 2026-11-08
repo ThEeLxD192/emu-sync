@@ -145,3 +145,123 @@ async fn supervised_operation_retains_snapshot_and_exclusion_until_recovered() {
     assert!(supervisor.start(|_| async { Ok(()) }).is_ok());
     supervisor.shutdown().await;
 }
+
+struct InFlightMockTransfer {
+    download_pause: Arc<tokio::sync::Notify>,
+    download_resume: Arc<tokio::sync::Notify>,
+    calls: Arc<AtomicUsize>,
+}
+
+impl LocalSaveFiles for InFlightMockTransfer {
+    type Error = &'static str;
+    async fn plan(
+        &self,
+        _: &str,
+        _: Option<&RemoteState>,
+        _: &str,
+        _: &str,
+    ) -> Result<Decision, Self::Error> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(Decision::InSync)
+    }
+    async fn remember(
+        &self,
+        _: &str,
+        _: &RemoteState,
+        _: &str,
+        _: &str,
+    ) -> Result<(), Self::Error> {
+        unreachable!()
+    }
+    async fn download(
+        &self,
+        _: &str,
+        _: &RemoteState,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<(), Self::Error> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.download_pause.notify_one();
+        self.download_resume.notified().await;
+        Err("second_error")
+    }
+    async fn upload(
+        &self,
+        _: &str,
+        _: &str,
+        _: Option<&RemoteState>,
+        _: &str,
+        _: &str,
+    ) -> Result<(), Self::Error> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err("first_error")
+    }
+}
+
+#[tokio::test]
+async fn quarantine_and_take_error_waits_for_in_flight_operations_and_preserves_first_error() {
+    let download_pause = Arc::new(tokio::sync::Notify::new());
+    let download_resume = Arc::new(tokio::sync::Notify::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    let mock = InFlightMockTransfer {
+        download_pause: download_pause.clone(),
+        download_resume: download_resume.clone(),
+        calls: calls.clone(),
+    };
+    let files = RetainedFiles::new(mock);
+
+    let dl_files = files.clone();
+    let remote = RemoteState {
+        id: "r1".into(),
+        modified: 100,
+        sha256: None,
+        version: None,
+    };
+    let dl_remote = remote.clone();
+    let dl_handle = tokio::spawn(async move {
+        dl_files
+            .download("token", &dl_remote, "local", "root", "rel")
+            .await
+    });
+
+    // Wait until download has entered the mock (in_flight == 1)
+    download_pause.notified().await;
+
+    // Fail upload with first_error
+    let up_res = files.upload("token", "local", None, "folder", "save").await;
+    assert_eq!(up_res, Err(RetainedFilesError::TransferFailed));
+    assert!(files.has_error());
+
+    // Spawn quarantine_and_take_error in a task
+    let q_files = files.clone();
+    let q_handle = tokio::spawn(async move { q_files.quarantine_and_take_error().await });
+
+    // Verify q_handle is still pending because download is in_flight
+    tokio::task::yield_now().await;
+    assert!(!q_handle.is_finished());
+
+    // Resume download, which fails with "second_error"
+    download_resume.notify_one();
+    let dl_res = dl_handle.await.unwrap();
+    assert_eq!(dl_res, Err(RetainedFilesError::TransferFailed));
+
+    // Now quarantine_and_take_error completes and returns "first_error"
+    let taken_error = q_handle.await.unwrap();
+    assert_eq!(taken_error, Some("first_error"));
+
+    // Any new call on any clone immediately fails with RecoveryRequired
+    let plan_res = files.plan("local", None, "folder", "save").await;
+    assert_eq!(plan_res, Err(RetainedFilesError::RecoveryRequired));
+
+    let up_res2 = files.upload("token", "local", None, "folder", "save").await;
+    assert_eq!(up_res2, Err(RetainedFilesError::RecoveryRequired));
+
+    let dl_res2 = files
+        .download("token", &remote, "local", "root", "rel")
+        .await;
+    assert_eq!(dl_res2, Err(RetainedFilesError::RecoveryRequired));
+
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}

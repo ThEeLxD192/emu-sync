@@ -402,3 +402,128 @@ async fn directory_download_rejects_parent_replacement_and_preserves_both_saves(
     assert!(history.get(&key).unwrap().is_none());
     assert!(matches!(files.finish(), Ok(Some(TrackedError::Local(_)))));
 }
+
+struct DefinitiveTransfer;
+impl CloudSaveTransfer for DefinitiveTransfer {
+    type Error = io::Error;
+    async fn download(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: Option<Timestamp>,
+        _: &str,
+    ) -> Result<(), Self::Error> {
+        unreachable!()
+    }
+    async fn upload(&self, _: &str, _: &str, _: &str, _: &str) -> Result<RemoteState, Self::Error> {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "definitive upload failure",
+        ))
+    }
+    async fn replace(
+        &self,
+        _: &str,
+        _: &RemoteState,
+        _: &str,
+        _: &str,
+    ) -> Result<RemoteState, Self::Error> {
+        unreachable!()
+    }
+}
+
+#[tokio::test]
+async fn definitive_failure_classifier_removes_recovery_record_while_uncertain_keeps_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    let store = Arc::new(ConfigManager::new(&config_path).unwrap());
+    let config = AppConfig {
+        credentials: Some(Credentials {
+            client_id: "id".into(),
+            client_secret: "secret".into(),
+            refresh_token: Some("token".into()),
+        }),
+        entries: vec![],
+    };
+    store.update(|_| config.clone()).unwrap();
+    let guard = RecoveryCredentials::new(store.clone(), store.snapshot(&config).unwrap(), config);
+    let recovery = Arc::new(RecoveryStore::new(&config_path).unwrap());
+    let history = Arc::new(SyncHistoryStore::new(&config_path).unwrap());
+    let tracked =
+        Arc::new(TrackedFileSync::new(DefinitiveTransfer, history).with_recovery(recovery.clone()));
+    let files = RetainedFiles::new(GuardedFiles::new(
+        tracked.clone(),
+        guard.clone(),
+        |e: &io::Error| e.kind() == io::ErrorKind::InvalidData,
+    ));
+    let path = dir.path().join("save.dat");
+    std::fs::write(&path, b"data").unwrap();
+
+    let res = files
+        .upload("token", path.to_str().unwrap(), None, "folder", "save.dat")
+        .await;
+    assert_eq!(res, Err(RetainedFilesError::TransferFailed));
+
+    // Recovery list is empty (0 records) because the failure was definitive
+    assert_eq!(recovery.list().unwrap().len(), 0);
+
+    // A second upload with a fresh GuardedFiles is not blocked with ResourceBusy
+    let files2 = RetainedFiles::new(GuardedFiles::new(tracked, guard, |e: &io::Error| {
+        e.kind() == io::ErrorKind::InvalidData
+    }));
+    let res2 = files2
+        .upload("token", path.to_str().unwrap(), None, "folder", "save.dat")
+        .await;
+    assert_eq!(res2, Err(RetainedFilesError::TransferFailed));
+}
+
+#[tokio::test]
+async fn non_linux_directory_download_rejection_contract() {
+    use emusync_domain::sync::DirectoryDownload;
+
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    let manager = Arc::new(ConfigManager::new(&config_path).unwrap());
+    let history = Arc::new(SyncHistoryStore::new(&config_path).unwrap());
+    let store = Arc::new(RecoveryStore::new(&config_path).unwrap());
+    let tracked = Arc::new(
+        TrackedFileSync::new(UncertainTransfer(Arc::new(AtomicUsize::new(0))), history)
+            .with_recovery(store),
+    );
+    let config = AppConfig::default();
+    let snapshot = manager.snapshot(&config).unwrap();
+    let credentials = RecoveryCredentials::new(manager.clone(), snapshot, config);
+    let guarded = GuardedFiles::new(tracked, credentials, |_| false);
+
+    let remote = RemoteState {
+        id: "dummy_id".into(),
+        modified: 1_700_000_000,
+        sha256: None,
+        version: None,
+    };
+    let local_file = dir.path().join("rel");
+    let req = DirectoryDownload {
+        token: "token",
+        remote: &remote,
+        local: local_file.to_str().unwrap(),
+        root: dir.path().to_str().unwrap(),
+        relative: "rel",
+        folder: "folder",
+        remote_name: "remote_name",
+    };
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        use emusync_domain::sync::LocalSaveFiles;
+        let res = guarded.download_in_directory(req).await;
+        assert!(
+            matches!(res, Err(emusync_data_local::TrackedError::Local(e)) if e.kind() == std::io::ErrorKind::Unsupported)
+        );
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = guarded;
+        let _ = req;
+    }
+}

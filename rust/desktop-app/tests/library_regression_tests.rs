@@ -1,3 +1,6 @@
+mod common;
+
+use common::{test_emulator_entry, test_native_entry};
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{AppEvent, DesktopCoordinator};
 use emusync_domain::{
@@ -75,7 +78,6 @@ async fn renaming_b_to_existing_a_is_rejected_with_toast() {
         tokio::runtime::Handle::current(),
     );
 
-    // Try renaming B as A
     coordinator.handle_action(UiAction::EditEntry {
         old: Box::new(entry_b.clone()),
         new: Box::new(test_native("CategoryA")),
@@ -89,7 +91,6 @@ async fn renaming_b_to_existing_a_is_rejected_with_toast() {
         "Expected toast rejecting duplicate name"
     );
 
-    // Config entries must retain original names
     let loaded = manager.load().unwrap();
     assert_eq!(loaded.entries.len(), 2);
     assert!(
@@ -116,7 +117,6 @@ async fn old_game_item_does_not_wipe_other_rom_overrides() {
         _ => unreachable!(),
     };
 
-    // Pre-install an override for RomTwo
     emu.title_by_rom
         .push(("RomTwo.sfc".to_string(), "Rom Two Preserved".to_string()));
     emu.save_targets_by_rom.push((
@@ -144,7 +144,6 @@ async fn old_game_item_does_not_wipe_other_rom_overrides() {
         tokio::runtime::Handle::current(),
     );
 
-    // Stale GameItem from before RomTwo had an override (empty game_overrides)
     let stale_entry = test_emulator("SNES");
     let stale_item = GameItem::new(
         "RomOne",
@@ -152,7 +151,6 @@ async fn old_game_item_does_not_wipe_other_rom_overrides() {
         Some(PathBuf::from("/tmp/roms/RomOne.sfc")),
     );
 
-    // Edit RomOne's override
     coordinator.handle_action(UiAction::EditGameOverride {
         item: stale_item,
         title: Some("Rom One Custom".into()),
@@ -173,7 +171,6 @@ async fn old_game_item_does_not_wipe_other_rom_overrides() {
     }
     assert!(saved, "Expected ConfigReloaded after saving override");
 
-    // Check that RomTwo's override was NOT wiped
     let loaded = manager.load().unwrap();
     let loaded_emu = match &loaded.entries[0] {
         GameEntry::Emulator(e) => e,
@@ -270,4 +267,183 @@ async fn renaming_native_game_override_to_existing_entry_is_rejected_with_toast(
     assert_eq!(loaded.entries.len(), 2);
     assert_eq!(loaded.entries[0].common().name, "GameA");
     assert_eq!(loaded.entries[1].common().name, "GameB");
+}
+
+#[tokio::test]
+async fn coordinator_add_and_delete_entry() {
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    let manager = ConfigManager::new(&config_path).unwrap();
+
+    let (tx, rx) = channel();
+    let redraw = Arc::new(|| {});
+    let coordinator =
+        DesktopCoordinator::new(manager, tx, redraw, tokio::runtime::Handle::current());
+
+    let new_entry = test_native_entry("Celeste");
+    coordinator.handle_action(UiAction::AddEntry(new_entry.clone()));
+
+    let mut added = false;
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::ConfigReloaded(cfg) = &event
+            && cfg.entries.iter().any(|e| e.common().name == "Celeste")
+        {
+            added = true;
+        }
+    }
+    assert!(added);
+
+    coordinator.handle_action(UiAction::DeleteEntry(new_entry));
+    let mut deleted = false;
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::ConfigReloaded(cfg) = &event
+            && !cfg.entries.iter().any(|e| e.common().name == "Celeste")
+        {
+            deleted = true;
+        }
+    }
+    assert!(deleted);
+}
+
+#[tokio::test]
+async fn coordinator_reorder_entries() {
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    let manager = ConfigManager::new(&config_path).unwrap();
+
+    let e1 = test_emulator_entry("GBA");
+    let e2 = test_emulator_entry("N64");
+    manager
+        .update(|_| AppConfig {
+            credentials: None,
+            entries: vec![e1.clone(), e2.clone()],
+        })
+        .unwrap();
+
+    let (tx, rx) = channel();
+    let redraw = Arc::new(|| {});
+    let coordinator =
+        DesktopCoordinator::new(manager, tx, redraw, tokio::runtime::Handle::current());
+
+    coordinator.handle_action(UiAction::ReorderEntries(vec![e2.clone(), e1.clone()]));
+
+    let mut reordered = false;
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::ConfigReloaded(cfg) = &event
+            && cfg.entries.len() == 2
+            && cfg.entries[0].common().name == "N64"
+            && cfg.entries[1].common().name == "GBA"
+        {
+            reordered = true;
+        }
+    }
+    assert!(reordered);
+}
+
+#[tokio::test]
+async fn coordinator_edit_game_override() {
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    let manager = ConfigManager::new(&config_path).unwrap();
+
+    let native = test_native_entry("MyGame");
+    manager
+        .update(|_| AppConfig {
+            credentials: None,
+            entries: vec![native.clone()],
+        })
+        .unwrap();
+
+    let (tx, rx) = channel();
+    let redraw = Arc::new(|| {});
+    let coordinator =
+        DesktopCoordinator::new(manager, tx, redraw, tokio::runtime::Handle::current());
+
+    let item = GameItem::new("MyGame", native, None);
+    coordinator.handle_action(UiAction::EditGameOverride {
+        item,
+        title: Some("My Game Remastered".into()),
+        targets: vec![SaveTarget {
+            path: "/new_save.dat".into(),
+            cloud_path: Some("new_save.dat".into()),
+            kind: SaveTargetType::File,
+        }],
+        cover_path: Some("/custom_cover.png".into()),
+    });
+
+    let mut override_saved = false;
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::ConfigReloaded(cfg) = &event
+            && let Some(GameEntry::Native(nat)) = cfg
+                .entries
+                .iter()
+                .find(|e| e.common().name == "My Game Remastered")
+            && nat.cover_path.as_deref() == Some("/custom_cover.png")
+            && nat.common.save_targets.len() == 1
+        {
+            override_saved = true;
+        }
+    }
+    assert!(override_saved);
+}
+
+#[tokio::test]
+async fn reorder_entries_deduplicates_payload_and_appends_concurrently_added_categories() {
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    let manager = ConfigManager::new(&config_path).unwrap();
+
+    let ea = test_native("A");
+    let eb = test_native("B");
+    let ec = test_native("C");
+    manager
+        .update(|_| AppConfig {
+            credentials: None,
+            entries: vec![ea.clone(), eb.clone(), ec.clone()],
+        })
+        .unwrap();
+
+    let (tx, rx) = channel();
+    let redraw = Arc::new(|| {});
+    let coordinator = DesktopCoordinator::new(
+        manager.clone(),
+        tx,
+        redraw,
+        tokio::runtime::Handle::current(),
+    );
+
+    let ghost = test_native("Ghost");
+    // Payload with duplicate "B", non-existent "Ghost", and missing "C"
+    coordinator.handle_action(UiAction::ReorderEntries(vec![
+        eb.clone(),
+        eb.clone(),
+        ghost,
+        ea.clone(),
+    ]));
+
+    let mut reordered = false;
+    while let Ok(event) = rx.try_recv() {
+        if let AppEvent::ConfigReloaded(cfg) = &event {
+            let names: Vec<_> = cfg
+                .entries
+                .iter()
+                .map(|e| e.common().name.as_str())
+                .collect();
+            if names == ["B", "A", "C"] {
+                reordered = true;
+            }
+        }
+    }
+    assert!(
+        reordered,
+        "Expected reorder to deduplicate and preserve missing entries at the end"
+    );
+
+    let loaded = manager.load().unwrap();
+    let loaded_names: Vec<_> = loaded
+        .entries
+        .iter()
+        .map(|e| e.common().name.as_str())
+        .collect();
+    assert_eq!(loaded_names, vec!["B", "A", "C"]);
 }
