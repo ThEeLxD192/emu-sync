@@ -162,17 +162,23 @@ impl EmuSyncApp {
         let mut delete_category = None;
 
         // Top Panel: Header
-        Panel::top("top_header").show(ui, |ui| {
-            ui.add_enabled_ui(!is_modal_active, |ui| {
-                render_header(
-                    ui,
-                    &self.state,
-                    &mut |action| actions.push(action),
-                    &mut || open_drive = true,
-                    &mut || open_update = true,
-                );
+        Panel::top("top_header")
+            .frame(
+                Frame::new()
+                    .fill(BACKGROUND)
+                    .inner_margin(Margin::symmetric(20, 14)),
+            )
+            .show(ui, |ui| {
+                ui.add_enabled_ui(!is_modal_active, |ui| {
+                    render_header(
+                        ui,
+                        &self.state,
+                        &mut |action| actions.push(action),
+                        &mut || open_drive = true,
+                        &mut || open_update = true,
+                    );
+                });
             });
-        });
 
         // Left Panel: Sidebar
         Panel::left("left_sidebar")

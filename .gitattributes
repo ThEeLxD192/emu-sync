@@ -8,3 +8,4 @@ gradlew.bat text eol=crlf
 *.toml text eol=lf
 Cargo.lock text eol=lf
 *.ps1 text eol=lf
+*.ttf binary

@@ -140,3 +140,35 @@ fn app_ui_state_sync_status_lookup() {
         .insert("Portal 2".to_string(), CloudSyncStatus::InSync);
     assert_eq!(state.sync_status_for_selected(), CloudSyncStatus::InSync);
 }
+
+#[test]
+fn connect_drive_uses_stored_credentials_and_falls_back_to_setup_when_blank() {
+    use emusync_presentation::{UiAction, components::header::connect_drive_action};
+
+    let with_credentials = |client_id: &str, client_secret: &str| AppUiState {
+        config: Some(AppConfig {
+            credentials: Some(Credentials {
+                client_id: client_id.to_string(),
+                client_secret: client_secret.to_string(),
+                refresh_token: None,
+            }),
+            entries: Vec::new(),
+        }),
+        ..AppUiState::default()
+    };
+
+    assert_eq!(
+        connect_drive_action(&with_credentials("id", "secret")),
+        Some(UiAction::ConnectDrive {
+            client_id: "id".to_string(),
+            client_secret: "secret".to_string(),
+        })
+    );
+    // Kotlin `isBlank`: whitespace-only values open the setup dialog instead.
+    assert_eq!(connect_drive_action(&with_credentials("id", "  ")), None);
+    assert_eq!(
+        connect_drive_action(&with_credentials("\t", "secret")),
+        None
+    );
+    assert_eq!(connect_drive_action(&AppUiState::default()), None);
+}
