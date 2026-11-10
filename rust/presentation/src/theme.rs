@@ -49,6 +49,14 @@ pub mod glyph {
     pub const CHEVRON_DOWN: &str = "\u{F0140}";
     pub const CHEVRON_RIGHT: &str = "\u{F0142}";
     pub const WIDGETS: &str = "\u{F072C}";
+    pub const PLAY: &str = "\u{F040A}";
+    pub const PENCIL: &str = "\u{F03EB}";
+    pub const DELETE: &str = "\u{F01B4}";
+    pub const COG: &str = "\u{F0493}";
+    pub const CLOUD_CHECK: &str = "\u{F0160}";
+    pub const CLOUD_DOWNLOAD: &str = "\u{F0162}";
+    pub const ALERT: &str = "\u{F0026}";
+    pub const REFRESH: &str = "\u{F0450}";
 }
 
 /// Font family rendering the bold weight of the application font.

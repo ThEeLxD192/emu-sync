@@ -1,23 +1,39 @@
-//! Game grid component displaying scanned games and cards.
+//! Category toolbar and adaptive game grid, laid out like Kotlin's `GameGrid`.
 
 use crate::{
     actions::UiAction,
-    components::icons::{paint_pencil_icon, paint_play_triangle, render_cover_placeholder},
+    components::{
+        icons::{glyph_button, paint_glyph},
+        pill::{LABEL_SIZE, Pill},
+    },
     cover_cache::CoverCache,
-    model::GameItem,
+    model::{CloudSyncStatus, GameItem},
     state::AppUiState,
     theme::{
         CARD_HOVER, DIVIDER, ON_BACKGROUND, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, PRIMARY_CONTAINER,
-        SURFACE, SURFACE_VARIANT, bold,
+        SURFACE, SURFACE_VARIANT, WARNING, bold, glyph,
     },
 };
 use egui::{
-    Align, Button, Color32, CornerRadius, Frame, Label, Layout, Margin, Pos2, Rect, RichText,
-    ScrollArea, Sense, Stroke, StrokeKind, Ui, Vec2,
+    Align, Color32, CursorIcon, FontId, Frame, Label, Layout, Margin, Rect, RichText, ScrollArea,
+    Sense, Spinner, Stroke, StrokeKind, Ui, pos2, text::LayoutJob, vec2,
 };
 use emusync_domain::library::GameEntry;
 
-/// Renders the main content area with category controls and the game card grid.
+const MIN_CARD_WIDTH: f32 = 160.0;
+const CARD_GAP: f32 = 12.0;
+const CARD_HEIGHT: f32 = 205.0;
+const COVER_HEIGHT: f32 = 140.0;
+
+/// Number of columns and card width for an adaptive grid, as Compose's
+/// `GridCells.Adaptive(minSize)`: as many columns as fit, stretched to fill the width.
+pub fn adaptive_columns(available_width: f32, min_width: f32, gap: f32) -> (usize, f32) {
+    let columns = (((available_width + gap) / (min_width + gap)).floor() as usize).max(1);
+    let width = ((available_width - gap * (columns - 1) as f32) / columns as f32).max(0.0);
+    (columns, width)
+}
+
+/// Renders the category toolbar and the game grid for the selected entry.
 pub fn render_game_grid(
     ui: &mut Ui,
     state: &AppUiState,
@@ -28,320 +44,359 @@ pub fn render_game_grid(
     on_delete_category: &mut impl FnMut(GameEntry),
 ) {
     let Some(selected) = &state.selected_entry else {
-        ui.centered_and_justified(|ui| {
-            ui.label(
-                RichText::new("Select a category from the sidebar or click \"+ Add\" to begin.")
-                    .size(14.0)
-                    .color(ON_SURFACE_DIM),
-            );
-        });
+        empty_state(ui, "Select a category", None);
         return;
     };
 
-    let selected_name = selected.common().name.clone();
+    render_category_toolbar(
+        ui,
+        state,
+        selected,
+        on_action,
+        on_edit_category,
+        on_delete_category,
+    );
+    ui.add_space(12.0);
 
-    // Category Header Toolbar
-    Frame::new()
-        .fill(SURFACE)
-        .inner_margin(Margin::symmetric(16, 12))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                // Actions are laid out first so the title only takes the remaining width.
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    // Games count chip
-                    let count = state.game_items.len();
-                    let count_label = format!("{count} game{}", if count == 1 { "" } else { "s" });
-                    Frame::new()
-                        .fill(PRIMARY_CONTAINER)
-                        .corner_radius(CornerRadius::same(10))
-                        .inner_margin(Margin::symmetric(10, 4))
-                        .show(ui, |ui| {
-                            ui.label(RichText::new(count_label).size(11.0).color(PRIMARY));
-                        });
-
-                    ui.add_space(8.0);
-
-                    // Delete category
-                    if ui
-                        .add(
-                            Button::new(RichText::new("Delete").size(11.0).color(ON_SURFACE_DIM))
-                                .min_size(Vec2::new(54.0, 24.0)),
-                        )
-                        .clicked()
-                    {
-                        on_delete_category(selected.clone());
-                    }
-
-                    // Edit category
-                    if ui
-                        .add(
-                            Button::new(RichText::new("Edit").size(11.0).color(ON_SURFACE))
-                                .min_size(Vec2::new(48.0, 24.0)),
-                        )
-                        .clicked()
-                    {
-                        on_edit_category(selected.clone());
-                    }
-
-                    ui.add_space(8.0);
-
-                    // Sync button & Check sync
-                    let sync_status = state.sync_status_for_selected();
-                    let status_color = sync_status.color();
-
-                    if ui
-                        .add(
-                            Button::new(
-                                RichText::new(format!("Sync: {}", sync_status.label()))
-                                    .size(11.0)
-                                    .color(status_color),
-                            )
-                            .min_size(Vec2::new(90.0, 24.0)),
-                        )
-                        .clicked()
-                    {
-                        on_action(UiAction::SyncEntry(selected.clone()));
-                    }
-
-                    if ui
-                        .add(
-                            Button::new(RichText::new("Check").size(11.0).color(ON_SURFACE))
-                                .min_size(Vec2::new(48.0, 24.0)),
-                        )
-                        .clicked()
-                    {
-                        on_action(UiAction::CheckSyncEntry(selected.clone()));
-                    }
-
-                    // Open Emulator button (if emulator)
-                    if let GameEntry::Emulator(emu) = selected {
-                        ui.add_space(8.0);
-                        if ui
-                            .add(
-                                Button::new(
-                                    RichText::new("Open Emulator").size(11.0).color(PRIMARY),
-                                )
-                                .min_size(Vec2::new(95.0, 24.0)),
-                            )
-                            .clicked()
-                        {
-                            on_action(UiAction::OpenEmulator(emu.clone()));
-                        }
-                    }
-
-                    ui.add_space(12.0);
-                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        ui.add(
-                            Label::new(
-                                RichText::new(&selected_name)
-                                    .font(bold(18.0))
-                                    .color(ON_BACKGROUND),
-                            )
-                            .truncate(),
-                        )
-                        .on_hover_text(&selected_name);
-                    });
-                });
-            });
-        });
-
-    ui.add_space(8.0);
-
-    // Main game grid / loading / empty state
     if state.is_loading {
         ui.centered_and_justified(|ui| {
-            ui.label(RichText::new("Loading games...").size(14.0).color(PRIMARY));
+            ui.add(Spinner::new().size(32.0).color(PRIMARY));
         });
         return;
     }
 
     if state.game_items.is_empty() {
-        ui.centered_and_justified(|ui| {
-            ui.vertical_centered(|ui| {
-                ui.label(RichText::new("No games found").size(15.0).color(ON_SURFACE));
-                ui.add_space(4.0);
-                if let GameEntry::Emulator(emu) = selected {
-                    ui.label(
-                        RichText::new(format!("Place ROMs in: {}", emu.roms_directory))
-                            .size(12.0)
-                            .color(ON_SURFACE_DIM),
-                    );
-                }
-            });
-        });
+        match selected {
+            GameEntry::Emulator(emulator) => empty_state(
+                ui,
+                "No ROMs found",
+                Some(&format!("Add ROMs to: {}", emulator.roms_directory)),
+            ),
+            GameEntry::Native(_) => empty_state(ui, "Select a category", None),
+        }
         return;
     }
 
-    ScrollArea::vertical().show(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            for item in &state.game_items {
-                render_game_card(ui, item, cover_cache, on_action, on_edit_game);
+    ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let (columns, card_width) =
+                adaptive_columns(ui.available_width(), MIN_CARD_WIDTH, CARD_GAP);
+            ui.spacing_mut().item_spacing = vec2(CARD_GAP, CARD_GAP);
+            for row in state.game_items.chunks(columns) {
+                ui.horizontal(|ui| {
+                    for item in row {
+                        render_game_card(
+                            ui,
+                            item,
+                            card_width,
+                            cover_cache,
+                            on_action,
+                            on_edit_game,
+                        );
+                    }
+                });
+            }
+            ui.add_space(8.0);
+        });
+}
+
+fn empty_state(ui: &mut Ui, title: &str, detail: Option<&str>) {
+    ui.centered_and_justified(|ui| {
+        ui.vertical_centered(|ui| {
+            ui.label(RichText::new(title).size(15.0).color(ON_SURFACE_DIM));
+            if let Some(detail) = detail {
+                ui.add_space(4.0);
+                ui.label(RichText::new(detail).size(12.0).color(ON_SURFACE_DIM));
             }
         });
     });
 }
 
+fn render_category_toolbar(
+    ui: &mut Ui,
+    state: &AppUiState,
+    selected: &GameEntry,
+    on_action: &mut impl FnMut(UiAction),
+    on_edit_category: &mut impl FnMut(GameEntry),
+    on_delete_category: &mut impl FnMut(GameEntry),
+) {
+    let name = &selected.common().name;
+    // Fixed row height so every item is centered on the same line.
+    let row = vec2(ui.available_width(), 40.0);
+    ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
+        ui.set_min_height(40.0);
+        ui.spacing_mut().item_spacing.x = 0.0;
+        // Actions are laid out first (from the right) so the title only takes what is left.
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let count = state.game_items.len();
+            Pill {
+                text: &format!("{count} game{}", if count == 1 { "" } else { "s" }),
+                text_color: PRIMARY,
+                font: FontId::proportional(12.0),
+                fill: PRIMARY_CONTAINER,
+                padding: vec2(12.0, 4.0),
+                corner_radius: 12,
+                interactive: false,
+                ..Pill::default()
+            }
+            .show(ui);
+            ui.add_space(8.0);
+
+            if toolbar_icon(ui, "category_delete", glyph::DELETE, "Delete Category").clicked() {
+                on_delete_category(selected.clone());
+            }
+            if toolbar_icon(ui, "category_edit", glyph::PENCIL, "Edit Category").clicked() {
+                on_edit_category(selected.clone());
+            }
+            ui.add_space(8.0);
+
+            match sync_chip(ui, state.sync_status_for_selected()) {
+                Some(SyncChipAction::Sync) => on_action(UiAction::SyncEntry(selected.clone())),
+                Some(SyncChipAction::Check) => {
+                    on_action(UiAction::CheckSyncEntry(selected.clone()))
+                }
+                None => {}
+            }
+
+            if let GameEntry::Emulator(emulator) = selected {
+                ui.add_space(8.0);
+                let open = Pill {
+                    icon: Some((glyph::COG, PRIMARY)),
+                    text: "Open Emulator",
+                    text_color: PRIMARY,
+                    font: FontId::proportional(13.0),
+                    fill: Color32::TRANSPARENT,
+                    stroke: Stroke::new(1.0, DIVIDER),
+                    padding: vec2(16.0, 8.0),
+                    min_height: 36.0,
+                    corner_radius: 18,
+                    ..Pill::default()
+                };
+                if open.show(ui).clicked() {
+                    on_action(UiAction::OpenEmulator(emulator.clone()));
+                }
+            }
+
+            ui.add_space(12.0);
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                ui.add(
+                    Label::new(RichText::new(name).font(bold(20.0)).color(ON_BACKGROUND))
+                        .truncate(),
+                )
+                .on_hover_text(name);
+            });
+        });
+    });
+}
+
+fn toolbar_icon(ui: &mut Ui, id: &str, icon: &str, label: &str) -> egui::Response {
+    let (rect, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
+    let id = ui.make_persistent_id(id);
+    glyph_button(ui, id, rect, icon, 20.0, ON_SURFACE_DIM).on_hover_text(label)
+}
+
+enum SyncChipAction {
+    Sync,
+    Check,
+}
+
+/// Cloud status chip with Kotlin's per-state presentation.
+fn sync_chip(ui: &mut Ui, status: CloudSyncStatus) -> Option<SyncChipAction> {
+    let button = |icon, color, text, fill, stroke| Pill {
+        icon: Some((icon, color)),
+        text,
+        text_color: color,
+        fill,
+        stroke,
+        ..Pill::default()
+    };
+    match status {
+        CloudSyncStatus::InSync => {
+            let mut check = false;
+            status_frame(ui, |ui| {
+                icon_slot(ui, glyph::CLOUD_CHECK, crate::theme::SUCCESS);
+                ui.label(RichText::new("In Sync").size(LABEL_SIZE).color(ON_SURFACE));
+                ui.add_space(4.0);
+                let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                let id = ui.make_persistent_id("sync_check");
+                check = glyph_button(ui, id, rect, glyph::REFRESH, 13.0, ON_SURFACE_DIM)
+                    .on_hover_text("Check sync")
+                    .clicked();
+            });
+            check.then_some(SyncChipAction::Check)
+        }
+        CloudSyncStatus::OutOfSync => button(
+            glyph::CLOUD_DOWNLOAD,
+            PRIMARY,
+            "Out of sync • Sync All",
+            PRIMARY_CONTAINER,
+            Stroke::NONE,
+        )
+        .show(ui)
+        .clicked()
+        .then_some(SyncChipAction::Sync),
+        CloudSyncStatus::Conflict => button(
+            glyph::ALERT,
+            WARNING,
+            "Conflict • Sync",
+            WARNING.gamma_multiply(0.2),
+            Stroke::NONE,
+        )
+        .show(ui)
+        .clicked()
+        .then_some(SyncChipAction::Sync),
+        CloudSyncStatus::Checking | CloudSyncStatus::Syncing => {
+            let text = if status == CloudSyncStatus::Syncing {
+                "Syncing..."
+            } else {
+                "Checking..."
+            };
+            status_frame(ui, |ui| {
+                ui.add(Spinner::new().size(14.0).color(PRIMARY));
+                ui.add_space(6.0);
+                ui.label(RichText::new(text).size(LABEL_SIZE).color(ON_SURFACE));
+            });
+            None
+        }
+        CloudSyncStatus::Idle | CloudSyncStatus::Error => button(
+            glyph::CLOUD_SYNC,
+            PRIMARY,
+            "Sync All",
+            Color32::TRANSPARENT,
+            Stroke::new(1.0, DIVIDER),
+        )
+        .show(ui)
+        .clicked()
+        .then_some(SyncChipAction::Sync),
+        CloudSyncStatus::NotConfigured => None,
+    }
+}
+
+fn status_frame(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
+    Frame::new()
+        .fill(SURFACE_VARIANT)
+        .corner_radius(8)
+        .inner_margin(Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                add_contents(ui);
+            });
+        });
+}
+
+fn icon_slot(ui: &mut Ui, icon: &str, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+    paint_glyph(ui, rect.center(), icon, 16.0, color);
+    ui.add_space(6.0);
+}
+
 fn render_game_card(
     ui: &mut Ui,
     item: &GameItem,
+    card_width: f32,
     cover_cache: &mut CoverCache,
     on_action: &mut impl FnMut(UiAction),
     on_edit_game: &mut impl FnMut(GameItem),
 ) {
-    let card_width = 168.0;
-    let card_height = 205.0;
-
-    let mut play_clicked = false;
-    let mut edit_clicked = false;
-
     let is_enabled = ui.is_enabled();
-    let (card_rect, card_response) = ui.allocate_exact_size(
-        Vec2::new(card_width, card_height),
-        if is_enabled {
-            Sense::click()
-        } else {
-            Sense::hover()
-        },
+    let (card_rect, card_response) =
+        ui.allocate_exact_size(vec2(card_width, CARD_HEIGHT), Sense::click());
+    if !ui.is_rect_visible(card_rect) {
+        return;
+    }
+    let card_response = card_response.on_hover_cursor(CursorIcon::PointingHand);
+    let hovered = is_enabled && ui.rect_contains_pointer(card_rect);
+    let painter = ui.painter();
+
+    let (fill, border) = if hovered {
+        (CARD_HOVER, PRIMARY)
+    } else {
+        (SURFACE_VARIANT, DIVIDER)
+    };
+    painter.rect(
+        card_rect,
+        12,
+        fill,
+        Stroke::new(1.0, border),
+        StrokeKind::Inside,
     );
 
-    let pointer_pos = ui.input(|i| i.pointer.hover_pos());
-    let is_hovered = is_enabled && pointer_pos.is_some_and(|pos| card_rect.contains(pos));
+    let inner = card_rect.shrink(8.0);
+    let cover_rect = Rect::from_min_size(inner.min, vec2(inner.width(), COVER_HEIGHT));
+    let texture = item
+        .effective_cover_path()
+        .as_deref()
+        .and_then(|path| cover_cache.get_or_load(ui.ctx(), path));
 
-    if is_hovered {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-
-    if is_enabled && card_response.clicked() {
-        play_clicked = true;
-    }
-
-    if ui.is_rect_visible(card_rect) {
-        let fill = if is_hovered {
-            CARD_HOVER
-        } else {
-            SURFACE_VARIANT
-        };
-        let stroke = if is_hovered {
-            Stroke::new(1.5, PRIMARY)
-        } else {
-            Stroke::new(1.0, DIVIDER)
-        };
-
-        ui.painter()
-            .rect_filled(card_rect, CornerRadius::same(12), fill);
-        ui.painter().rect_stroke(
-            card_rect,
-            CornerRadius::same(12),
-            stroke,
-            StrokeKind::Inside,
+    if let Some(texture) = texture {
+        // ContentScale.Fit: keep the aspect ratio inside the cover slot.
+        let size = texture.size_vec2();
+        let scale = (cover_rect.width() / size.x).min(cover_rect.height() / size.y.max(1.0));
+        let image_rect = Rect::from_center_size(cover_rect.center(), size * scale);
+        ui.painter().image(
+            texture.id(),
+            image_rect,
+            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+            Color32::WHITE,
         );
-
-        let inner_rect = card_rect.shrink(8.0);
-
-        // 1. Cover Art area (top 140px)
-        let cover_height = 140.0;
-        let cover_rect =
-            Rect::from_min_size(inner_rect.min, Vec2::new(inner_rect.width(), cover_height));
-
-        let cover_path = item.effective_cover_path();
-        let cover_tex = cover_path
-            .as_deref()
-            .and_then(|p| cover_cache.get_or_load(ui.ctx(), p));
-
-        if let Some(texture) = cover_tex {
-            // Paint the image fitted inside cover_rect
-            let tex_size = texture.size_vec2();
-            let aspect = tex_size.x / tex_size.y.max(1.0);
-            let target_w = (cover_height * aspect).min(cover_rect.width());
-            let target_h = (target_w / aspect).min(cover_height);
-            let image_rect =
-                Rect::from_center_size(cover_rect.center(), Vec2::new(target_w, target_h));
-
-            ui.painter().image(
-                texture.id(),
-                image_rect,
-                Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
-            );
-
-            // Play overlay on hover
-            if is_hovered {
-                ui.painter().rect_filled(
-                    cover_rect,
-                    CornerRadius::same(8),
-                    Color32::from_black_alpha(115),
-                );
-                paint_play_triangle(ui, cover_rect, Color32::WHITE, 1.4);
-            }
-        } else {
-            // Fallback: rounded container with play icon matching Compose Desktop
-            render_cover_placeholder(ui, cover_rect);
-        }
-
-        // 2. Title area below cover
-        let title_rect = Rect::from_min_size(
-            Pos2::new(inner_rect.min.x, inner_rect.min.y + cover_height + 6.0),
-            Vec2::new(inner_rect.width(), inner_rect.height() - cover_height - 6.0),
-        );
-
-        let title = item.effective_title();
-        let mut title_ui = ui.new_child(egui::UiBuilder::new().max_rect(title_rect));
-        title_ui.vertical_centered(|ui| {
-            ui.add(
-                Label::new(
-                    RichText::new(&title)
-                        .size(12.0)
-                        .strong()
-                        .color(if is_hovered {
-                            ON_BACKGROUND
-                        } else {
-                            ON_SURFACE
-                        }),
-                )
-                .truncate(),
-            );
-        });
-
-        // 3. Top-right Edit button shown on hover
-        if is_hovered {
-            let edit_btn_size = 24.0;
-            let edit_rect = Rect::from_min_size(
-                Pos2::new(card_rect.max.x - edit_btn_size - 6.0, card_rect.min.y + 6.0),
-                Vec2::new(edit_btn_size, edit_btn_size),
-            );
-
-            let edit_id = ui.make_persistent_id(format!("edit_btn_{}", item.name));
-            let edit_resp = ui.interact(
-                edit_rect,
-                edit_id,
-                if is_enabled {
-                    Sense::click()
-                } else {
-                    Sense::hover()
-                },
-            );
-
-            let bg_color = if edit_resp.hovered() && is_enabled {
-                Color32::from_black_alpha(210)
-            } else {
-                Color32::from_black_alpha(150)
-            };
+        if hovered {
             ui.painter()
-                .circle_filled(edit_rect.center(), edit_btn_size * 0.5, bg_color);
-            paint_pencil_icon(ui, edit_rect, Color32::WHITE);
-
-            if is_enabled && edit_resp.clicked() {
-                edit_clicked = true;
-                play_clicked = false;
-            }
+                .rect_filled(cover_rect, 8, Color32::from_black_alpha(115));
+            paint_glyph(ui, cover_rect.center(), glyph::PLAY, 36.0, Color32::WHITE);
         }
+    } else {
+        ui.painter()
+            .rect_filled(cover_rect, 8, SURFACE.gamma_multiply(0.5));
+        let play_box = Rect::from_center_size(cover_rect.center(), vec2(56.0, 56.0));
+        ui.painter().rect_filled(play_box, 14, PRIMARY_CONTAINER);
+        paint_glyph(ui, play_box.center(), glyph::PLAY, 32.0, PRIMARY);
     }
 
-    if is_enabled {
-        if edit_clicked {
-            on_edit_game(item.clone());
-        } else if play_clicked {
-            on_action(UiAction::LaunchGame(item.clone()));
-        }
+    // Title: centered, up to two lines with an ellipsis.
+    let title = item.effective_title();
+    let mut job = LayoutJob::simple(title, bold(13.0), ON_BACKGROUND, inner.width() - 8.0);
+    job.wrap.max_rows = 2;
+    job.halign = Align::Center;
+    let galley = ui.painter().layout_job(job);
+    ui.painter().galley(
+        pos2(inner.center().x, cover_rect.bottom() + 8.0),
+        galley,
+        ON_BACKGROUND,
+    );
+
+    // Edit button on hover, registered after the card so it receives the click.
+    let mut edit_clicked = false;
+    if hovered {
+        let edit_rect = Rect::from_min_size(
+            pos2(inner.right() - 4.0 - 22.0, inner.top() + 4.0),
+            vec2(22.0, 22.0),
+        );
+        let edit_id = ui.make_persistent_id(("edit_game", &item.name, &item.rom_file));
+        let edit = ui
+            .interact(edit_rect, edit_id, Sense::click())
+            .on_hover_cursor(CursorIcon::PointingHand)
+            .on_hover_text("Edit Saves");
+        let alpha = if edit.hovered() { 200 } else { 140 };
+        ui.painter()
+            .circle_filled(edit_rect.center(), 11.0, Color32::from_black_alpha(alpha));
+        paint_glyph(
+            ui,
+            edit_rect.center(),
+            glyph::PENCIL,
+            12.0,
+            Color32::WHITE.gamma_multiply(0.9),
+        );
+        edit_clicked = edit.clicked();
+    }
+
+    if !is_enabled {
+        return;
+    }
+    if edit_clicked {
+        on_edit_game(item.clone());
+    } else if card_response.clicked() {
+        on_action(UiAction::LaunchGame(item.clone()));
     }
 }

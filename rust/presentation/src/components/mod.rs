@@ -3,6 +3,7 @@
 pub mod game_grid;
 pub mod header;
 pub mod icons;
+pub(crate) mod pill;
 pub mod sidebar;
 pub mod sidebar_order;
 pub mod toast;

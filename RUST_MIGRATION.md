@@ -1342,6 +1342,14 @@ Continuación de descargas (Linux, 2026-11-06): el adaptador usa ahora confirmac
 | Entrada eliminada durante el arrastre no reordena | `entry_removed_during_drag_cannot_reorder_remaining_library`; nuevo `drag_without_matching_key_never_reorders` | Pasó | Pendiente |
 | Movimientos de hijo inválidos conservan el orden | `invalid_sibling_moves_preserve_original_order`; el índice negativo de Kotlin no es representable con `usize` | Pasó | Pendiente |
 
+#### Continuación R7 — paridad visual de la cuadrícula de juegos (2026-11-10, Linux)
+
+- Barra de categoría como `GameGrid` Kotlin: título truncado sin caja, "Open Emulator" con contorno, chip de sincronización por estado (In Sync con comprobación, Out of sync/Conflict con acción de sincronizar, Checking/Syncing con indicador, Idle/Error "Sync All", nada si no está configurado), editar y borrar como iconos y contador. El botón "Check" permanente de Rust se retira por decisión del usuario para igualar Kotlin.
+- Cuadrícula adaptativa equivalente a `GridCells.Adaptive(160)` con separación 12; tarjeta con portada ajustada, título centrado de hasta dos líneas, botón de edición al pasar el puntero, indicador de carga y estados vacíos de Kotlin. Los iconos vectoriales sin uso se retiran en favor de glifos de la fuente.
+- Extra Rust por decisión del usuario: borrar una categoría pide confirmación (Kotlin borra al primer clic, fácil de activar por error en pantalla táctil). El texto refleja lo que hace el borrado: retira la categoría y, si está registrada, su acceso de Steam; no borra partidas, ROMs ni archivos de Drive.
+- Pruebas en `presentation/tests/ui_view_tests.rs`: `adaptive_grid_fills_width_with_cards_of_at_least_min_width` y `deleting_a_category_waits_for_confirmation_and_escape_cancels`. La confirmación mediante clic no se ejercitó en pruebas headless.
+- Capturas Linux con un emulador sintético de ocho ROM, cuatro portadas generadas y títulos largos. `cargo xtask quality` y pruebas de `presentation` y `desktop-app` (140 aprobadas, cero fallos). Gradle no se repitió. Windows y Steam Deck pendientes.
+
 ### R8 — Empaquetado y cierre
 
 - [x] Generar AppImage independiente (Linux) y borradores WiX (Windows diferido); comprobar arranque, transición desde Kotlin y compatibilidad gráfica/FUSE en Linux.

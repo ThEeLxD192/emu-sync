@@ -216,3 +216,66 @@ fn app_toast_message_set_and_clear() {
     app.clear_toast();
     assert_eq!(app.state.toast_message, None);
 }
+
+#[test]
+fn adaptive_grid_fills_width_with_cards_of_at_least_min_width() {
+    use emusync_presentation::components::game_grid::adaptive_columns;
+
+    // Steam Deck: 1280 wide minus the 240 sidebar, its divider and 2×20 margins.
+    let (columns, width) = adaptive_columns(999.0, 160.0, 12.0);
+    assert_eq!(columns, 5);
+    assert!(width >= 160.0);
+    assert!((columns as f32 * width + 4.0 * 12.0 - 999.0).abs() < 0.01);
+
+    // Narrower than one card: a single column taking the whole width.
+    assert_eq!(adaptive_columns(120.0, 160.0, 12.0), (1, 120.0));
+    // Exactly two cards and a gap.
+    assert_eq!(adaptive_columns(332.0, 160.0, 12.0), (2, 160.0));
+}
+
+#[test]
+fn deleting_a_category_waits_for_confirmation_and_escape_cancels() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    let entry = GameEntry::Native(NativeGame {
+        common: EntryCommon {
+            name: "Hollow Knight".to_string(),
+            ..EntryCommon::default()
+        },
+        ..NativeGame::default()
+    });
+    app.state.config = Some(AppConfig {
+        credentials: None,
+        entries: vec![entry.clone()],
+    });
+    app.state.selected_entry = Some(entry.clone());
+
+    app.request_delete_entry(entry);
+    let output = ctx.run_ui(RawInput::default(), |ui| app.update(ui));
+    output.drop_without_applying_deltas();
+    assert!(matches!(app.active_dialog, ActiveDialog::ConfirmDelete(_)));
+    assert!(
+        app.take_actions().is_empty(),
+        "nothing is deleted before confirming"
+    );
+
+    let escape = RawInput {
+        events: vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        ..RawInput::default()
+    };
+    let output = ctx.run_ui(escape, |ui| app.update(ui));
+    output.drop_without_applying_deltas();
+
+    assert!(matches!(app.active_dialog, ActiveDialog::None));
+    assert!(
+        !app.take_actions()
+            .iter()
+            .any(|a| matches!(a, UiAction::DeleteEntry(_)))
+    );
+}

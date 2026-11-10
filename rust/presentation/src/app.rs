@@ -8,8 +8,9 @@ use crate::{
     },
     cover_cache::CoverCache,
     dialogs::{
-        DriveSetupDialogState, render_drive_setup_dialog, render_entry_dialog,
-        render_game_edit_dialog, render_status_overlay, render_update_dialog,
+        ConfirmDeleteOutcome, DriveSetupDialogState, render_confirm_delete_dialog,
+        render_drive_setup_dialog, render_entry_dialog, render_game_edit_dialog,
+        render_status_overlay, render_update_dialog,
     },
     forms::{EntryFormState, GameEditFormState},
     model::{AppStatus, GameItem, SaveSetupRequest},
@@ -32,6 +33,8 @@ pub enum ActiveDialog {
     },
     DriveSetup(DriveSetupDialogState),
     Update,
+    /// Rust-only confirmation before a category is deleted.
+    ConfirmDelete(Box<GameEntry>),
 }
 
 /// The top-level presentation coordinator for EmuSync.
@@ -115,6 +118,11 @@ impl EmuSyncApp {
             client_secret,
             is_linked,
         ));
+    }
+
+    /// Asks for confirmation; nothing is deleted until the user confirms.
+    pub fn request_delete_entry(&mut self, entry: GameEntry) {
+        self.active_dialog = ActiveDialog::ConfirmDelete(Box::new(entry));
     }
 
     pub fn open_update_dialog(&mut self) {
@@ -216,7 +224,7 @@ impl EmuSyncApp {
 
         // Center Panel: Game Grid
         CentralPanel::default()
-            .frame(Frame::new().fill(BACKGROUND).inner_margin(Margin::same(16)))
+            .frame(Frame::new().fill(BACKGROUND).inner_margin(Margin::same(20)))
             .show(ui, |ui| {
                 ui.add_enabled_ui(!is_modal_active, |ui| {
                     render_game_grid(
@@ -251,7 +259,7 @@ impl EmuSyncApp {
                 self.open_edit_entry(&entry);
             }
             if let Some(entry) = delete_category {
-                actions.push(UiAction::DeleteEntry(entry));
+                self.request_delete_entry(entry);
             }
         }
 
@@ -376,6 +384,17 @@ impl EmuSyncApp {
                 }
                 if let Some(path) = restart_path {
                     actions.push(UiAction::RestartApp(path));
+                }
+            }
+            ActiveDialog::ConfirmDelete(entry) => {
+                let steam_registered = self.state.is_steam_registered(entry);
+                match render_confirm_delete_dialog(&ctx, &entry.common().name, steam_registered) {
+                    ConfirmDeleteOutcome::Confirmed => {
+                        actions.push(UiAction::DeleteEntry((**entry).clone()));
+                        close_dialog = true;
+                    }
+                    ConfirmDeleteOutcome::Cancelled => close_dialog = true,
+                    ConfirmDeleteOutcome::Pending => {}
                 }
             }
         }
