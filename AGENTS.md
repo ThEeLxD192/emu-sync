@@ -31,6 +31,8 @@ Las skills externas proceden de [full-stack-skills/rust-skills](https://github.c
 
 Durante la coexistencia se conservan `./gradlew qualityCheck --no-daemon` y `./gradlew check --no-daemon`. Para Rust: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked`, agregados con el verificador de arquitectura mediante `cargo xtask quality` y `cargo xtask check`.
 
+Al ejecutar localmente pruebas, Clippy o `cargo xtask` en Rust, limitar la CPU: anteponer `nice -n 19` (y `ionice -c3` si el disco se satura) y usar `CARGO_BUILD_JOBS=2`; para pruebas, `-- --test-threads=2`. Ejemplo: `CARGO_BUILD_JOBS=2 nice -n 19 cargo test --workspace --locked -- --test-threads=2`. Esto aplica también a agentes y subagentes; no es requisito de CI.
+
 Mantener CI y resultados por módulo/plataforma, distinguir ejecución nueva de caché o informes históricos. Ejecutar pruebas y análisis afectados; ejecutar el check completo al cerrar integraciones. No agregar pruebas por movimientos mecánicos o documentación. Las pruebas deben proteger contratos y riesgos, no reflejar implementación ni cumplir cuotas.
 
 El hook valida una exportación aislada del índice y no formatea, prepara archivos ni ejecuta pruebas. No usar stash ni reset para hacerlo pasar. Durante la coexistencia disparar calidad Kotlin y Rust según archivos preparados. Mantener Gradle, scripts y distribución Kotlin funcionales hasta R8.

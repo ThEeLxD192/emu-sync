@@ -119,7 +119,10 @@ Windows resolves `bash.exe` to WSL. CI configures this automatically.
 The Rust migration workspace is under `rust/`; its current status and platform
 validation are recorded in [RUST_MIGRATION.md](RUST_MIGRATION.md). With the pinned
 Rust toolchain installed, run `cargo xtask quality` for formatting, Clippy and
-architecture checks, or `cargo xtask check` to include Rust tests. The Rust
+architecture checks, or `cargo xtask check` to include Rust tests. To keep the
+machine responsive, run them as
+`CARGO_BUILD_JOBS=2 nice -n 19 cargo test --workspace --locked -- --test-threads=2`
+(add `ionice -c3` if the disk is saturated). The Rust
 preview does not implement synchronization.
 
 For a Linux x86-64 development package built on Debian Bookworm, provide an
