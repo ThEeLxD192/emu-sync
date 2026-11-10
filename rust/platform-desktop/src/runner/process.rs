@@ -56,25 +56,37 @@ impl ProcessMonitor {
     }
 
     pub fn is_process_alive(pid: u64) -> bool {
-        #[cfg(unix)]
+        #[cfg(target_os = "linux")]
+        {
+            // Un zombi (`Z`) o proceso muerto (`X`) ya no cuenta como vivo.
+            match fs::read_to_string(format!("/proc/{pid}/status")) {
+                Ok(status) => status
+                    .lines()
+                    .find_map(|line| line.strip_prefix("State:"))
+                    .and_then(|state| state.trim().chars().next())
+                    .is_some_and(|c| c != 'Z' && c != 'X'),
+                Err(_) => false,
+            }
+        }
+        #[cfg(all(unix, not(target_os = "linux")))]
         {
             Path::new(&format!("/proc/{pid}")).exists()
         }
         #[cfg(windows)]
         {
-            let output = Command::new("tasklist")
-                .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-                .output();
-            match output {
-                Ok(out) => {
-                    let text = String::from_utf8_lossy(&out.stdout);
-                    text.contains(&pid.to_string())
-                }
+            let mut command = Command::new("tasklist");
+            command.args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]);
+            hide_console_window(&mut command);
+            match command.output() {
+                Ok(out) => String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .any(|line| csv_pid(line) == Some(pid)),
                 Err(_) => false,
             }
         }
         #[cfg(not(any(unix, windows)))]
         {
+            let _ = pid;
             false
         }
     }
@@ -157,16 +169,16 @@ impl ProcessMonitor {
             format!("{clean_name}.exe")
         };
 
-        let output = match Command::new("tasklist")
-            .args([
-                "/FI",
-                &format!("IMAGENAME eq {target_exe}"),
-                "/NH",
-                "/FO",
-                "CSV",
-            ])
-            .output()
-        {
+        let mut command = Command::new("tasklist");
+        command.args([
+            "/FI",
+            &format!("IMAGENAME eq {target_exe}"),
+            "/NH",
+            "/FO",
+            "CSV",
+        ]);
+        hide_console_window(&mut command);
+        let output = match command.output() {
             Ok(out) => out,
             Err(_) => return HashSet::new(),
         };
@@ -187,4 +199,19 @@ impl ProcessMonitor {
         }
         pids
     }
+}
+
+/// Evita que `tasklist` abra una ventana de consola (CREATE_NO_WINDOW).
+#[cfg(windows)]
+fn hide_console_window(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(0x0800_0000);
+}
+
+/// Segundo campo CSV (`"Image Name","PID",...`) interpretado como PID exacto.
+#[cfg(windows)]
+fn csv_pid(line: &str) -> Option<u64> {
+    line.split(',')
+        .nth(1)
+        .and_then(|field| field.trim().trim_matches('"').parse::<u64>().ok())
 }

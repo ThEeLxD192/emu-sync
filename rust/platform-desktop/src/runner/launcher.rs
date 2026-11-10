@@ -18,7 +18,7 @@ use std::{
     io,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::process::Command;
 
@@ -26,6 +26,27 @@ pub struct SteamLaunchOutcome {
     pub exit_code: Option<i32>,
     pub is_alive: bool,
     pub handoff_succeeded: bool,
+}
+
+/// Tiempo máximo que el lanzador por defecto espera al comando que abre la URI de Steam.
+const STEAM_HANDOFF_TIMEOUT: Duration = Duration::from_secs(10);
+const STEAM_HANDOFF_POLL: Duration = Duration::from_millis(50);
+
+fn missing_rom_error(emu: &Emulator) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!(
+            "A ROM file must be provided to launch an Emulator ('{}')",
+            emu.common.name
+        ),
+    )
+}
+
+async fn matching_process_ids_blocking(name: &str) -> HashSet<u64> {
+    let name = name.to_string();
+    tokio::task::spawn_blocking(move || ProcessMonitor::matching_process_ids(&name))
+        .await
+        .unwrap_or_default()
 }
 
 pub type SteamUriLauncherFn = Arc<dyn Fn(&str) -> Option<SteamLaunchOutcome> + Send + Sync>;
@@ -41,6 +62,7 @@ pub struct GameRunner<S> {
 impl<S> GameRunner<S>
 where
     S: SteamLaunchPreparation + Send + Sync + 'static,
+    S::Error: std::fmt::Display,
 {
     pub fn new(steam_launches: Arc<S>) -> Self {
         let tracker = ExternalProcessTracker::new(
@@ -125,15 +147,7 @@ where
     ) -> io::Result<(String, Vec<String>, PathBuf)> {
         match entry {
             GameEntry::Emulator(emu) => {
-                let rom = rom_path.ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!(
-                            "A ROM file must be provided to launch an Emulator ('{}')",
-                            emu.common.name
-                        ),
-                    )
-                })?;
+                let rom = rom_path.ok_or_else(|| missing_rom_error(emu))?;
 
                 let mut args = Vec::new();
                 let fs_args = SteamShortcutManager::resolve_fullscreen_args(emu);
@@ -181,9 +195,10 @@ where
             _ => None,
         };
 
-        let existing_matches: HashSet<u64> = wait_for_process
-            .map(ProcessMonitor::matching_process_ids)
-            .unwrap_or_default();
+        let existing_matches: HashSet<u64> = match wait_for_process {
+            Some(name) => matching_process_ids_blocking(name).await,
+            None => HashSet::new(),
+        };
 
         let mut cmd = Command::new(&exe);
         cmd.args(args);
@@ -196,6 +211,11 @@ where
         let mut child = cmd.spawn()?;
 
         if let Some(proc_name) = wait_for_process {
+            // El hijo directo suele ser un intermediario (launcher/wrapper) cuyo resultado no
+            // decide el éxito: se recoge en segundo plano para que no quede zombi.
+            tokio::spawn(async move {
+                let _ = child.wait().await;
+            });
             let launch = ProcessLaunch {
                 name: proc_name.to_string(),
                 existing_ids: existing_matches,
@@ -217,10 +237,11 @@ where
         rom_path: Option<&str>,
         app_id: i32,
     ) -> io::Result<bool> {
-        if let GameEntry::Emulator(emu) = entry
-            && let Some(rom) = rom_path
-        {
-            let _ = self.steam_launches.prepare(emu, rom);
+        if let GameEntry::Emulator(emu) = entry {
+            let rom = rom_path.ok_or_else(|| missing_rom_error(emu))?;
+            self.steam_launches
+                .prepare(emu, rom)
+                .map_err(|e| io::Error::other(format!("Could not prepare Steam launch: {e}")))?;
         }
 
         let unsigned_app_id = app_id as u32 as u64;
@@ -228,20 +249,24 @@ where
         let uri = format!("steam://rungameid/{game_id}");
 
         let process_name = Self::resolve_process_name(entry);
-        let existing_matches = process_name
-            .as_deref()
-            .map(ProcessMonitor::matching_process_ids)
-            .unwrap_or_default();
+        let existing_matches = match process_name.as_deref() {
+            Some(name) => matching_process_ids_blocking(name).await,
+            None => HashSet::new(),
+        };
 
-        let handoff = (self.steam_uri_launcher)(&uri);
+        let launcher = Arc::clone(&self.steam_uri_launcher);
+        let handoff = tokio::task::spawn_blocking(move || launcher(&uri))
+            .await
+            .map_err(|e| io::Error::other(format!("Steam launch task failed: {e}")))?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Steam could not be opened"))?;
 
         if let Some(name) = process_name {
             let launch = ProcessLaunch {
                 name,
                 existing_ids: existing_matches,
-                request_exit_code: handoff.as_ref().and_then(|h| h.exit_code),
-                request_is_alive: handoff.as_ref().is_some_and(|h| h.is_alive),
-                desktop_handoff_succeeded: handoff.as_ref().is_some_and(|h| h.handoff_succeeded),
+                request_exit_code: handoff.exit_code,
+                request_is_alive: handoff.is_alive,
+                desktop_handoff_succeeded: handoff.handoff_succeeded,
             };
             let success = self.tracker.wait_for_process(launch, self.polling).await;
             Ok(success)
@@ -252,6 +277,42 @@ where
     }
 }
 
+/// Espera al comando de traspaso hasta `STEAM_HANDOFF_TIMEOUT`. Si sigue vivo (p. ej. `steam`
+/// arrancó Steam y permanece en ejecución) lo da por traspasado y lo recoge en un hilo aparte.
+fn await_handoff(mut child: std::process::Child) -> Option<SteamLaunchOutcome> {
+    let deadline = Instant::now() + STEAM_HANDOFF_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return Some(SteamLaunchOutcome {
+                    exit_code: status.code(),
+                    is_alive: false,
+                    handoff_succeeded: status.success(),
+                });
+            }
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(STEAM_HANDOFF_POLL),
+            Ok(None) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                return Some(SteamLaunchOutcome {
+                    exit_code: None,
+                    is_alive: true,
+                    handoff_succeeded: true,
+                });
+            }
+            Err(_) => {
+                return Some(SteamLaunchOutcome {
+                    exit_code: None,
+                    is_alive: false,
+                    handoff_succeeded: false,
+                });
+            }
+        }
+    }
+}
+
+/// Bloqueante: debe invocarse desde `spawn_blocking`.
 fn default_steam_uri_launcher(uri: &str) -> Option<SteamLaunchOutcome> {
     if cfg!(windows) {
         let mut cmd = std::process::Command::new("cmd");
@@ -268,24 +329,14 @@ fn default_steam_uri_launcher(uri: &str) -> Option<SteamLaunchOutcome> {
         let mut cmd = std::process::Command::new("steam");
         cmd.arg(uri);
         AppImageEnvironment::clean_command(&mut cmd);
-        if let Ok(mut child) = cmd.spawn() {
-            let status = child.wait().ok();
-            return Some(SteamLaunchOutcome {
-                exit_code: status.and_then(|s| s.code()),
-                is_alive: false,
-                handoff_succeeded: status.is_some_and(|s| s.success()),
-            });
+        if let Ok(child) = cmd.spawn() {
+            return await_handoff(child);
         }
         let mut xdg = std::process::Command::new("xdg-open");
         xdg.arg(uri);
         AppImageEnvironment::clean_command(&mut xdg);
-        if let Ok(mut child) = xdg.spawn() {
-            let status = child.wait().ok();
-            return Some(SteamLaunchOutcome {
-                exit_code: status.and_then(|s| s.code()),
-                is_alive: false,
-                handoff_succeeded: status.is_some_and(|s| s.success()),
-            });
+        if let Ok(child) = xdg.spawn() {
+            return await_handoff(child);
         }
     }
     None
@@ -294,6 +345,7 @@ fn default_steam_uri_launcher(uri: &str) -> Option<SteamLaunchOutcome> {
 impl<S> GameLauncher for GameRunner<S>
 where
     S: SteamLaunchPreparation + Send + Sync + 'static,
+    S::Error: std::fmt::Display,
 {
     type Error = io::Error;
 

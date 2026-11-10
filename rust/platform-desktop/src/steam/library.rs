@@ -28,7 +28,7 @@ impl SteamLibrary for DesktopSteamLibrary {
     }
 
     fn is_registered(&self, entry: &GameEntry) -> Result<bool, Self::Error> {
-        Ok(self.manager.is_registered(entry))
+        self.manager.is_registered(entry)
     }
 
     fn migrate_launchers(&self, entries: &[GameEntry]) -> Result<Vec<(String, i32)>, Self::Error> {

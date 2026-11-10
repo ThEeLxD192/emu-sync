@@ -21,7 +21,7 @@ struct DirectoryScan {
 /// Scans a directory for ROM files matching the given extensions.
 /// Avoids symlink loops by resolving real canonical paths.
 pub fn scan_roms(directory: &Path, extensions: &[String]) -> Vec<RomFile> {
-    if !directory.exists() || !directory.is_dir() {
+    if !directory.is_dir() {
         return Vec::new();
     }
 
@@ -69,7 +69,7 @@ pub fn scan_roms(directory: &Path, extensions: &[String]) -> Vec<RomFile> {
         }
     }
 
-    unique_roms.sort_by_key(|a| a.name.to_lowercase());
+    unique_roms.sort_by_cached_key(|a| a.name.to_lowercase());
     unique_roms
 }
 

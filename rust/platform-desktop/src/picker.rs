@@ -45,14 +45,46 @@ impl PathPicker for FilePicker {
         };
 
         match kind {
-            PickerType::File => Ok(pick_file(label, &parent_dir, &start_path)),
-            PickerType::Directory => Ok(pick_directory(label, &parent_dir)),
+            PickerType::File => pick_file(label, &parent_dir, &start_path),
+            PickerType::Directory => pick_directory(label, &parent_dir),
             PickerType::Any => Ok(None),
         }
     }
 }
 
-fn pick_file(label: &str, parent_dir: &Path, start_file: &Path) -> Option<String> {
+#[cfg(windows)]
+fn pick_file(label: &str, parent_dir: &Path, _start_file: &Path) -> io::Result<Option<String>> {
+    Ok(rfd::FileDialog::new()
+        .set_title(format!("Select {label}"))
+        .set_directory(parent_dir)
+        .pick_file()
+        .map(|p| p.to_string_lossy().into_owned()))
+}
+
+#[cfg(windows)]
+fn pick_directory(label: &str, parent_dir: &Path) -> io::Result<Option<String>> {
+    Ok(rfd::FileDialog::new()
+        .set_title(format!("Select {label}"))
+        .set_directory(parent_dir)
+        .pick_folder()
+        .map(|p| p.to_string_lossy().into_owned()))
+}
+
+/// Resultado de los selectores externos; `NotAvailable` es un error observable.
+#[cfg(not(windows))]
+fn chooser_outcome(result: ExternalChooserResult) -> io::Result<Option<String>> {
+    match result {
+        ExternalChooserResult::Selected(path) => Ok(Some(path)),
+        ExternalChooserResult::Cancelled => Ok(None),
+        ExternalChooserResult::NotAvailable => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "No file chooser available (install kdialog or zenity)",
+        )),
+    }
+}
+
+#[cfg(not(windows))]
+fn pick_file(label: &str, parent_dir: &Path, start_file: &Path) -> io::Result<Option<String>> {
     let initial_path = if start_file.is_file() {
         start_file.to_string_lossy().to_string()
     } else {
@@ -76,13 +108,11 @@ fn pick_file(label: &str, parent_dir: &Path, start_file: &Path) -> Option<String
         ],
     ];
 
-    match run_external_choosers(&commands) {
-        ExternalChooserResult::Selected(path) => Some(path),
-        ExternalChooserResult::Cancelled | ExternalChooserResult::NotAvailable => None,
-    }
+    chooser_outcome(run_external_choosers(&commands))
 }
 
-fn pick_directory(label: &str, parent_dir: &Path) -> Option<String> {
+#[cfg(not(windows))]
+fn pick_directory(label: &str, parent_dir: &Path) -> io::Result<Option<String>> {
     let parent_str = parent_dir.to_string_lossy().to_string();
     let commands = [
         vec![
@@ -102,10 +132,7 @@ fn pick_directory(label: &str, parent_dir: &Path) -> Option<String> {
         ],
     ];
 
-    match run_external_choosers(&commands) {
-        ExternalChooserResult::Selected(path) => Some(path),
-        ExternalChooserResult::Cancelled | ExternalChooserResult::NotAvailable => None,
-    }
+    chooser_outcome(run_external_choosers(&commands))
 }
 
 pub fn run_external_choosers(commands: &[Vec<String>]) -> ExternalChooserResult {
@@ -132,7 +159,9 @@ fn run_single_chooser(binary: &str, args: &[String]) -> ExternalChooserResult {
 
     match output.status.code() {
         Some(0) => {
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout)
+                .trim_end_matches(['\n', '\r'])
+                .to_string();
             if !stdout.is_empty() {
                 ExternalChooserResult::Selected(stdout)
             } else {

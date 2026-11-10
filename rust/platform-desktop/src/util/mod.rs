@@ -1,3 +1,4 @@
+pub(crate) mod atomic;
 pub mod env;
 pub mod shell;
 

@@ -269,3 +269,146 @@ fn native_re_registration_updates_launch_paths_while_preserving_steam_id_and_pre
         Some("Favourites")
     );
 }
+
+fn linux_manager(dir: &std::path::Path) -> SteamShortcutManager {
+    SteamShortcutManager::new()
+        .with_custom_shortcuts_file(dir.join("config/shortcuts.vdf"))
+        .with_custom_launcher_dir(dir.join("launchers"))
+        .with_simulate_windows(false)
+}
+
+#[test]
+fn linux_wrapper_rejects_nul_argument_without_writing_script() {
+    let dir = tempdir().unwrap();
+    let manager = linux_manager(dir.path());
+    let mut emu = Emulator::new("Nul", "/usr/bin/emu", "/roms", vec![]);
+    emu.common.arguments = vec!["bad\0arg".into()];
+
+    let err = manager.create_linux_wrapper_script(&emu).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    let script = manager
+        .get_launcher_dir()
+        .join(format!("launch_{}.sh", manager.launcher_key("Nul")));
+    assert!(!script.exists());
+}
+
+#[test]
+fn unmatched_fullscreen_quotes_are_rejected_and_nothing_is_registered() {
+    let dir = tempdir().unwrap();
+    let manager = linux_manager(dir.path());
+    let mut emu = Emulator::new("Quotes", "/usr/bin/emu", "/roms", vec![]);
+    emu.fullscreen_args = Some("\"unterminated".into());
+
+    let err = manager.create_linux_wrapper_script(&emu).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(
+        err.to_string(),
+        "Fullscreen arguments contain unmatched quotes"
+    );
+    assert!(manager.create_windows_wrapper_script(&emu).is_err());
+    assert!(manager.register_entry(&GameEntry::Emulator(emu)).is_err());
+    assert!(manager.load_shortcuts().unwrap().is_empty());
+}
+
+#[test]
+fn re_registration_replaces_by_position_and_keeps_foreign_shortcut_with_same_app_id() {
+    let dir = tempdir().unwrap();
+    let manager = linux_manager(dir.path());
+    let vdf_file = dir.path().join("config/shortcuts.vdf");
+    let foreign = SteamShortcut {
+        app_id: 777,
+        app_name: "Foreign".into(),
+        exe: "\"/opt/foreign\"".into(),
+        ..SteamShortcut::default()
+    };
+    let ours = SteamShortcut {
+        app_id: 777,
+        app_name: "[EmuSync] Mine".into(),
+        exe: "\"/old/launcher\"".into(),
+        ..SteamShortcut::default()
+    };
+    BinaryVdf::write(&vdf_file, &[foreign.clone(), ours]).unwrap();
+
+    let entry = GameEntry::Emulator(Emulator::new("Mine", "/usr/bin/emu", "/roms", vec![]));
+    let updated = manager.register_entry(&entry).unwrap();
+    assert_eq!(updated.app_id, 777);
+
+    let loaded = manager.load_shortcuts().unwrap();
+    assert_eq!(loaded.len(), 2);
+    assert_eq!(loaded[0], foreign);
+    assert_eq!(loaded[1].app_name, "[EmuSync] Mine");
+    assert_ne!(loaded[1].exe, "\"/old/launcher\"");
+}
+
+#[cfg(unix)]
+#[test]
+fn linux_wrapper_script_is_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempdir().unwrap();
+    let manager = linux_manager(dir.path());
+    let emu = Emulator::new("Exec", "/usr/bin/emu", "/roms", vec![]);
+    let script = manager.create_linux_wrapper_script(&emu).unwrap();
+    let mode = fs::metadata(script).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o755);
+}
+
+#[test]
+fn is_registered_propagates_corrupt_vdf_errors() {
+    let dir = tempdir().unwrap();
+    let manager = linux_manager(dir.path());
+    let vdf_file = dir.path().join("config/shortcuts.vdf");
+    fs::create_dir_all(vdf_file.parent().unwrap()).unwrap();
+    fs::write(&vdf_file, b"not a vdf").unwrap();
+    let entry = GameEntry::Emulator(Emulator::new("Any", "/usr/bin/emu", "/roms", vec![]));
+    assert!(manager.is_registered(&entry).is_err());
+}
+
+#[test]
+fn windows_launcher_script_bytes_are_stable() {
+    use sha2::{Digest, Sha256};
+    let dir = tempdir().unwrap();
+    let manager = SteamShortcutManager::new()
+        .with_custom_launcher_dir(dir.path().join("launchers"))
+        .with_simulate_windows(true);
+    let emu = Emulator::new("Win", "C:\\emu\\emu.exe", "C:\\roms", vec![]);
+    manager.create_windows_wrapper_script(&emu).unwrap();
+    let bytes = fs::read(dir.path().join("launchers/windows-launcher-v1.ps1")).unwrap();
+    let digest: String = Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(
+        digest,
+        "bd6a54261feb86108cccb7fce4156de1907752cb1ff54b534e30d5917c5fe742"
+    );
+}
+
+#[test]
+fn invalid_emulator_arguments_do_not_disturb_other_entries_during_migration() {
+    let dir = tempdir().unwrap();
+    let manager = linux_manager(dir.path());
+    let vdf_file = dir.path().join("config/shortcuts.vdf");
+    let shortcut = |id: i32, name: &str| SteamShortcut {
+        app_id: id,
+        app_name: format!("[EmuSync] {name}"),
+        exe: "\"/old/launcher\"".into(),
+        ..SteamShortcut::default()
+    };
+    BinaryVdf::write(&vdf_file, &[shortcut(11, "Broken"), shortcut(22, "Good")]).unwrap();
+
+    let mut broken = Emulator::new("Broken", "/usr/bin/emu", "/roms", vec![]);
+    broken.fullscreen_args = Some("\"unterminated".into());
+    let good = Emulator::new("Good", "/usr/bin/emu", "/roms", vec![]);
+    let entries = [GameEntry::Emulator(broken), GameEntry::Emulator(good)];
+
+    let migrated = manager.migrate_legacy_launchers(&entries).unwrap();
+
+    assert_eq!(migrated.len(), 2);
+    assert_eq!(migrated[0].app_id, 11);
+    assert_eq!(migrated[0].exe, "\"/old/launcher\"");
+    assert_eq!(migrated[1].app_id, 22);
+    assert_ne!(migrated[1].exe, "\"/old/launcher\"");
+    let persisted = manager.load_shortcuts().unwrap();
+    assert_eq!(persisted[0].exe, "\"/old/launcher\"");
+    assert_eq!(persisted[1].app_id, 22);
+}

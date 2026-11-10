@@ -1,5 +1,6 @@
+use crate::util::atomic::staged_path;
 use std::{
-    fs::{self, File},
+    fs::{self, OpenOptions},
     io,
     path::Path,
 };
@@ -74,26 +75,11 @@ impl AppImageInstaller {
             ));
         }
 
-        let parent = target.parent().unwrap_or_else(|| Path::new("."));
-        let target_name = target
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("appimage");
-
-        let random: u64 = {
-            use std::time::SystemTime;
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(111)
-        };
-
-        let staged = parent.join(format!(".{target_name}.update.{random}.tmp"));
-        let backup = parent.join(format!(".{target_name}.old.{random}.bak"));
+        let staged = staged_path(target, "update", "tmp");
+        let backup = staged_path(target, "old", "bak");
 
         let mut staged_exists = false;
         let mut original_backed_up = false;
-        let mut completed = false;
 
         let result = (|| -> io::Result<()> {
             (self.copy_fn)(source, &staged)?;
@@ -102,10 +88,11 @@ impl AppImageInstaller {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(&staged, fs::Permissions::from_mode(0o755));
+                // Un AppImage sin bit de ejecución no debe instalarse nunca.
+                fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
             }
 
-            let file = File::open(&staged)?;
+            let file = OpenOptions::new().write(true).open(&staged)?;
             file.sync_all()?;
             drop(file);
 
@@ -115,9 +102,7 @@ impl AppImageInstaller {
             (self.move_fn)(&staged, target)?;
             staged_exists = false;
 
-            on_installed()?;
-            completed = true;
-            Ok(())
+            on_installed()
         })();
 
         if let Err(err) = result {
@@ -141,11 +126,9 @@ impl AppImageInstaller {
         if staged_exists {
             let _ = fs::remove_file(&staged);
         }
-        if completed {
-            let _ = fs::remove_file(source);
-            if original_backed_up {
-                let _ = fs::remove_file(&backup);
-            }
+        let _ = fs::remove_file(source);
+        if original_backed_up {
+            let _ = fs::remove_file(&backup);
         }
 
         Ok(())

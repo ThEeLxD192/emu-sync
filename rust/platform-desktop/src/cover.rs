@@ -130,7 +130,9 @@ fn find_adjacent_cover(
     if let Some(rn) = rom_name_str {
         names.push(rn);
     }
-    names.dedup();
+    // Deduplica manteniendo el orden de primera aparición.
+    let mut seen = std::collections::HashSet::new();
+    names.retain(|n| seen.insert(*n));
 
     for candidate in &names {
         for ext in IMAGE_EXTENSIONS {

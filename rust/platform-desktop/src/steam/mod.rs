@@ -1,5 +1,8 @@
+mod bridge;
 pub mod library;
 pub mod manager;
+pub(crate) mod paths;
+pub(crate) mod scripts;
 pub mod shortcut;
 pub mod vdf;
 

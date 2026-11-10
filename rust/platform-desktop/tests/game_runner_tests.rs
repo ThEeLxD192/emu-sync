@@ -2,10 +2,16 @@ use emusync_domain::{
     execution::{GameLaunchRequest, GameLauncher, SteamLaunchPreparation},
     library::{Emulator, GameEntry},
 };
-use emusync_platform_desktop::{ExternalProcessTracker, GameRunner, SteamLaunchOutcome};
+use emusync_platform_desktop::{
+    ExternalProcessTracker, GameRunner, ProcessPolling, SteamLaunchOutcome, SteamUriLauncherFn,
+};
 use std::{
     collections::HashSet,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::{Duration, Instant},
 };
 use tempfile::tempdir;
 
@@ -194,4 +200,101 @@ async fn appimage_child_process_probe() {
         emusync_platform_desktop::run_external_choosers(&[chooser]),
         emusync_platform_desktop::ExternalChooserResult::Selected("/synthetic/selected".into())
     );
+}
+
+struct FailingPreparation;
+
+impl SteamLaunchPreparation for FailingPreparation {
+    type Error = std::io::Error;
+
+    fn prepare(&self, _entry: &Emulator, _rom_path: &str) -> Result<(), Self::Error> {
+        Err(std::io::Error::other("disk full"))
+    }
+}
+
+fn steam_emulator_request(rom_path: Option<String>) -> GameLaunchRequest {
+    GameLaunchRequest {
+        entry: GameEntry::Emulator(Emulator::new("SteamEmu", "/bin/true", "/roms", vec![])),
+        rom_path,
+        steam_app_id: Some(123456),
+    }
+}
+
+fn counting_launcher(
+    calls: &Arc<AtomicUsize>,
+    outcome: Option<SteamLaunchOutcome>,
+) -> SteamUriLauncherFn {
+    let calls = Arc::clone(calls);
+    let outcome = Mutex::new(outcome);
+    Arc::new(move |_| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        outcome.lock().unwrap().take()
+    })
+}
+
+fn slow_polling() -> ProcessPolling {
+    ProcessPolling {
+        appearance_timeout: Duration::from_secs(60),
+        appearance_interval: Duration::from_secs(1),
+        exit_interval: Duration::from_secs(1),
+        reuse_confirmation_delay: Duration::from_secs(1),
+    }
+}
+
+#[tokio::test]
+async fn steam_launch_does_not_open_steam_when_prepare_fails() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let runner =
+        GameRunner::new(Arc::new(FailingPreparation)).with_steam_uri_launcher(counting_launcher(
+            &calls,
+            Some(SteamLaunchOutcome {
+                exit_code: Some(0),
+                is_alive: false,
+                handoff_succeeded: true,
+            }),
+        ));
+    let err = runner
+        .launch(steam_emulator_request(Some("/roms/game.rom".into())))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("Could not prepare Steam launch"));
+    assert!(err.to_string().contains("disk full"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn steam_launch_of_emulator_without_rom_is_invalid_input() {
+    let prepared = Arc::new(Mutex::new(None));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let runner = GameRunner::new(Arc::new(MockSteamPreparation {
+        prepared_rom: prepared.clone(),
+    }))
+    .with_steam_uri_launcher(counting_launcher(&calls, None));
+    let err = runner
+        .launch(steam_emulator_request(None))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(err.to_string().contains("A ROM file must be provided"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(prepared.lock().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn steam_launch_fails_fast_when_steam_cannot_be_opened() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let runner = GameRunner::new(Arc::new(MockSteamPreparation {
+        prepared_rom: Arc::new(Mutex::new(None)),
+    }))
+    .with_steam_uri_launcher(counting_launcher(&calls, None))
+    .with_polling(slow_polling());
+    let started = Instant::now();
+    let err = runner
+        .launch(steam_emulator_request(Some("/roms/game.rom".into())))
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(err.to_string(), "Steam could not be opened");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }

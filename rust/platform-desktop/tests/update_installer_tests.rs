@@ -120,7 +120,9 @@ fn apply_windows_update_and_restart_launches_msiexec_for_msi() {
             Ok(())
         });
 
-    let success = installer.apply_windows_update_and_restart(&msi_file);
+    let success = installer
+        .apply_windows_update_and_restart(&msi_file)
+        .unwrap();
     assert!(success);
 
     let recorded = executed_command.lock().unwrap().clone();
@@ -143,7 +145,9 @@ fn apply_windows_update_and_restart_launches_exe_directly() {
             Ok(())
         });
 
-    let success = installer.apply_windows_update_and_restart(&exe_file);
+    let success = installer
+        .apply_windows_update_and_restart(&exe_file)
+        .unwrap();
     assert!(success);
 
     let recorded = executed_command.lock().unwrap().clone();
@@ -157,7 +161,9 @@ fn apply_windows_update_and_restart_returns_false_for_non_installer_files() {
     fs::write(&txt_file, b"").unwrap();
 
     let installer = DesktopUpdateInstaller::new().with_is_windows(true);
-    let success = installer.apply_windows_update_and_restart(&txt_file);
+    let success = installer
+        .apply_windows_update_and_restart(&txt_file)
+        .unwrap();
     assert!(!success);
 }
 
@@ -182,7 +188,9 @@ fn apply_linux_update_and_restart_replaces_appimage_and_calls_launcher() {
             Ok(())
         });
 
-    let success = installer.apply_linux_update_and_restart(&downloaded_update);
+    let success = installer
+        .apply_linux_update_and_restart(&downloaded_update)
+        .unwrap();
     assert!(success);
     assert_eq!(
         *launched_path.lock().unwrap(),
@@ -216,7 +224,9 @@ fn apply_linux_update_in_steam_game_mode_does_not_spawn_separate_process() {
             Ok(())
         });
 
-    let success = installer.apply_linux_update_and_restart(&downloaded_update);
+    let success = installer
+        .apply_linux_update_and_restart(&downloaded_update)
+        .unwrap();
     assert!(success);
     // In Steam Game Mode, separate launcher process is NOT spawned!
     assert!(!*spawned.lock().unwrap());
@@ -224,4 +234,64 @@ fn apply_linux_update_in_steam_game_mode_does_not_spawn_separate_process() {
         fs::read_to_string(&current_appimage).unwrap(),
         "NEW_VERSION"
     );
+}
+
+#[test]
+fn apply_update_propagates_launcher_and_replace_errors() {
+    let dir = tempdir().unwrap();
+    let exe_file = dir.path().join("EmuSync-Setup.exe");
+    fs::write(&exe_file, b"").unwrap();
+    let installer = DesktopUpdateInstaller::new()
+        .with_is_windows(true)
+        .with_exit_application(|_| panic!("must not exit on failure"))
+        .with_windows_launcher(|_| Err(io::Error::other("launcher failed")));
+    let err = installer.apply_update_and_restart(&exe_file).unwrap_err();
+    assert_eq!(err.to_string(), "launcher failed");
+
+    // Un fallo de instalación en Linux no es "no aplica".
+    let current = dir.path().join("EmuSync.AppImage");
+    let update = dir.path().join("update.AppImage");
+    fs::write(&current, b"OLD").unwrap();
+    fs::write(&update, b"NEW").unwrap();
+    let installer = DesktopUpdateInstaller::new()
+        .with_is_windows(false)
+        .with_steam_game_mode(false)
+        .with_current_app_image_path(Some(current.clone()))
+        .with_exit_application(|_| panic!("must not exit on failure"))
+        .with_linux_launcher(|_| Err(io::Error::other("spawn failed")));
+    assert!(installer.apply_linux_update_and_restart(&update).is_err());
+    assert_eq!(fs::read_to_string(&current).unwrap(), "OLD");
+}
+
+#[test]
+fn apply_update_reports_not_applicable_as_ok_false() {
+    let dir = tempdir().unwrap();
+    let missing = dir.path().join("missing.AppImage");
+    let installer = DesktopUpdateInstaller::new();
+    assert!(!installer.apply_update_and_restart(&missing).unwrap());
+
+    let update = dir.path().join("update.AppImage");
+    fs::write(&update, b"NEW").unwrap();
+    let installer = DesktopUpdateInstaller::new()
+        .with_is_windows(false)
+        .with_current_app_image_path(None);
+    assert!(!installer.apply_linux_update_and_restart(&update).unwrap());
+}
+
+#[cfg(unix)]
+#[test]
+fn replaced_appimage_is_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempdir().unwrap();
+    let target = dir.path().join("EmuSync.AppImage");
+    let source = dir.path().join("download.AppImage");
+    fs::write(&target, b"ORIGINAL").unwrap();
+    fs::write(&source, b"UPDATE").unwrap();
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o644)).unwrap();
+
+    AppImageInstaller::new()
+        .replace(&source, &target, || Ok(()))
+        .unwrap();
+    let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o755);
 }

@@ -35,6 +35,8 @@ impl Default for DesktopUpdateInstaller {
             is_windows,
             current_app_image_path,
             steam_game_mode_override: None,
+            // Salida abrupta: `desktop-app` debe inyectar una salida ordenada con
+            // `with_exit_application` (cierre de recursos y tareas).
             exit_application: Arc::new(|code| std::process::exit(code)),
             windows_launcher: Arc::new(default_windows_launcher),
             linux_launcher: Arc::new(default_linux_launcher),
@@ -111,24 +113,29 @@ impl DesktopUpdateInstaller {
         self
     }
 
-    pub fn apply_update_and_restart(&self, downloaded_file: &Path) -> bool {
+    /// `Ok(false)` solo significa "no aplica" (archivo inexistente, extensión no instalable o
+    /// sin `APPIMAGE`); los fallos de instalación o relanzamiento se propagan.
+    ///
+    /// Tras aplicar la actualización invoca `exit_application`; por defecto termina el proceso
+    /// de forma abrupta, así que `desktop-app` debe inyectar una salida ordenada.
+    pub fn apply_update_and_restart(&self, downloaded_file: &Path) -> io::Result<bool> {
         if !downloaded_file.exists() {
-            return false;
+            return Ok(false);
         }
 
         let applied = if self.is_windows {
-            self.apply_windows_update_and_restart(downloaded_file)
+            self.apply_windows_update_and_restart(downloaded_file)?
         } else {
-            self.apply_linux_update_and_restart(downloaded_file)
+            self.apply_linux_update_and_restart(downloaded_file)?
         };
 
         if applied {
             (self.exit_application)(0);
         }
-        applied
+        Ok(applied)
     }
 
-    pub fn apply_windows_update_and_restart(&self, downloaded_file: &Path) -> bool {
+    pub fn apply_windows_update_and_restart(&self, downloaded_file: &Path) -> io::Result<bool> {
         let name = downloaded_file
             .file_name()
             .and_then(|n| n.to_str())
@@ -136,41 +143,37 @@ impl DesktopUpdateInstaller {
             .to_lowercase();
         let path_str = downloaded_file.to_string_lossy();
 
-        let launched = if name.ends_with(".msi") {
-            (self.windows_launcher)(&["msiexec", "/i", &path_str])
+        if name.ends_with(".msi") {
+            (self.windows_launcher)(&["msiexec", "/i", &path_str])?;
         } else if name.ends_with(".exe") {
-            (self.windows_launcher)(&[&path_str])
+            (self.windows_launcher)(&[&path_str])?;
         } else {
-            return false;
-        };
-
-        launched.is_ok()
+            return Ok(false);
+        }
+        Ok(true)
     }
 
-    pub fn apply_linux_update_and_restart(&self, downloaded_file: &Path) -> bool {
-        let current_path = match self.current_app_image_path.as_deref() {
-            Some(p) => p,
-            None => return false,
+    pub fn apply_linux_update_and_restart(&self, downloaded_file: &Path) -> io::Result<bool> {
+        let Some(current_path) = self.current_app_image_path.as_deref() else {
+            return Ok(false);
         };
 
         if !current_path.exists() || !downloaded_file.exists() {
-            return false;
+            return Ok(false);
         }
 
         let in_game_mode = self.is_steam_game_mode().unwrap_or(false);
         let launcher = self.linux_launcher.clone();
         let current_path_str = current_path.to_string_lossy().to_string();
 
-        let result = self
-            .app_image_installer
+        self.app_image_installer
             .replace(downloaded_file, current_path, move || {
                 if !in_game_mode {
                     launcher(&current_path_str)?;
                 }
                 Ok(())
-            });
-
-        result.is_ok()
+            })?;
+        Ok(true)
     }
 }
 
@@ -190,6 +193,6 @@ impl UpdateInstaller for DesktopUpdateInstaller {
     }
 
     fn restart(&self, path: &str) -> Result<bool, Self::Error> {
-        Ok(self.apply_update_and_restart(Path::new(path)))
+        self.apply_update_and_restart(Path::new(path))
     }
 }

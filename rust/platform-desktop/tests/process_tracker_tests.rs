@@ -122,3 +122,47 @@ async fn failed_launch_request_aborts_without_waiting_for_existing_processes() {
     // Should abort immediately without waiting the full 5 second timeout
     assert!(start.elapsed() < Duration::from_millis(200));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn exited_unreaped_child_is_not_alive() {
+    use emusync_platform_desktop::ProcessMonitor;
+    let mut child = std::process::Command::new("sh")
+        .args(["-c", "exit 0"])
+        .spawn()
+        .unwrap();
+    let pid = u64::from(child.id());
+    // `try_wait` no se usa: se espera a que `/proc` muestre el zombi sin recogerlo.
+    let state_path = format!("/proc/{pid}/status");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = std::fs::read_to_string(&state_path).unwrap_or_default();
+        if status
+            .lines()
+            .any(|l| l.starts_with("State:") && l.contains('Z'))
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "child never became a zombie"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!ProcessMonitor::is_process_alive(pid));
+    child.wait().unwrap();
+    assert!(!ProcessMonitor::is_process_alive(pid));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn running_process_is_alive() {
+    use emusync_platform_desktop::ProcessMonitor;
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    assert!(ProcessMonitor::is_process_alive(u64::from(child.id())));
+    child.kill().unwrap();
+    child.wait().unwrap();
+}

@@ -1,8 +1,11 @@
-use crate::steam::shortcut::{SteamShortcut, VdfValue};
+use crate::{
+    steam::shortcut::{SteamShortcut, VdfValue},
+    util::atomic::write_atomic,
+};
 use std::{
     collections::BTreeMap,
-    fs::{self, File},
-    io::{self, Cursor, Read, Write},
+    fs,
+    io::{self, Cursor, Read},
     path::Path,
 };
 
@@ -11,30 +14,6 @@ const TYPE_STRING: u8 = 0x01;
 const TYPE_INT32: u8 = 0x02;
 const TYPE_END: u8 = 0x08;
 const MAX_OBJECT_DEPTH: usize = 64;
-
-const KNOWN_FIELDS: &[&str] = &[
-    "appid",
-    "AppName",
-    "appname",
-    "Exe",
-    "exe",
-    "StartDir",
-    "startdir",
-    "icon",
-    "ShortcutPath",
-    "LaunchOptions",
-    "IsHidden",
-    "AllowDesktopConfig",
-    "AllowOverlay",
-    "OpenVR",
-    "Devkit",
-    "DevkitGameID",
-    "DevkitOverrideAppID",
-    "LastPlayTime",
-    "FlatpakAppID",
-    "sortas",
-    "tags",
-];
 
 pub struct BinaryVdf;
 
@@ -128,56 +107,25 @@ impl BinaryVdf {
         buf.push(TYPE_END);
         buf.push(TYPE_END);
 
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(parent)?;
-
-        let random_suffix: u64 = {
-            use std::time::SystemTime;
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(54321)
-        };
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("shortcuts.vdf");
-        let staged = parent.join(format!(".{file_name}.{random_suffix}.tmp"));
-
-        struct StagedGuard<'a>(&'a Path);
-        impl Drop for StagedGuard<'_> {
-            fn drop(&mut self) {
-                let _ = fs::remove_file(self.0);
-            }
-        }
-        let guard = StagedGuard(&staged);
-
-        let mut file = File::create(&staged)?;
-        file.write_all(&buf)?;
-        file.sync_all()?;
-        drop(file);
-
-        before_replace(&staged)?;
-
-        fs::rename(&staged, path)?;
-        std::mem::forget(guard);
-
-        Ok(())
+        write_atomic(path, &buf, None, before_replace)
     }
 }
 
 fn read_null_term_string(cursor: &mut Cursor<&[u8]>) -> io::Result<String> {
-    let mut bytes = Vec::new();
-    let mut buf = [0u8; 1];
-    loop {
-        cursor.read_exact(&mut buf)?;
-        if buf[0] == 0 {
-            break;
-        }
-        bytes.push(buf[0]);
-    }
-    String::from_utf8(bytes)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Invalid UTF-8: {e}")))
+    let data: &[u8] = cursor.get_ref();
+    let start = usize::try_from(cursor.position())
+        .unwrap_or(usize::MAX)
+        .min(data.len());
+    let rest = &data[start..];
+    let len = rest
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "Unterminated VDF string"))?;
+    let text = std::str::from_utf8(&rest[..len])
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Invalid UTF-8: {e}")))?
+        .to_string();
+    cursor.set_position((start + len + 1) as u64);
+    Ok(text)
 }
 
 fn read_int32_le(cursor: &mut Cursor<&[u8]>) -> io::Result<i32> {
@@ -309,62 +257,79 @@ fn write_extra_field(buf: &mut Vec<u8>, key: &str, val: &VdfValue) -> io::Result
     }
 }
 
-fn build_shortcut(fields: BTreeMap<String, VdfValue>) -> SteamShortcut {
-    let string_field = |name: &str, alias: Option<&str>| -> String {
-        if let Some(VdfValue::String(val)) = fields.get(name) {
-            return val.clone();
+/// Los valores de `tags` que no son cadenas se descartan (comportamiento histórico;
+/// conservarlos exigiría cambiar el formato escrito).
+fn build_shortcut(mut fields: BTreeMap<String, VdfValue>) -> SteamShortcut {
+    fn string_field(
+        fields: &mut BTreeMap<String, VdfValue>,
+        name: &str,
+        alias: Option<&str>,
+    ) -> String {
+        // Ambas claves se retiran para que ninguna quede como campo extra.
+        let primary = fields.remove(name);
+        let secondary = alias.and_then(|a| fields.remove(a));
+        match (primary, secondary) {
+            (Some(VdfValue::String(v)), _) | (_, Some(VdfValue::String(v))) => v,
+            _ => String::new(),
         }
-        if let Some(alias_name) = alias
-            && let Some(VdfValue::String(val)) = fields.get(alias_name)
-        {
-            return val.clone();
-        }
-        String::new()
-    };
+    }
 
-    let int_field = |name: &str, default: i32| -> i32 {
-        match fields.get(name) {
-            Some(VdfValue::Int(val)) => *val,
+    fn int_field(fields: &mut BTreeMap<String, VdfValue>, name: &str, default: i32) -> i32 {
+        match fields.remove(name) {
+            Some(VdfValue::Int(val)) => val,
             _ => default,
         }
-    };
+    }
 
-    let tags = match fields.get("tags") {
+    let tags = match fields.remove("tags") {
         Some(VdfValue::Object(map)) => map
-            .iter()
+            .into_iter()
             .filter_map(|(k, v)| match v {
-                VdfValue::String(s) => Some((k.clone(), s.clone())),
+                VdfValue::String(s) => Some((k, s)),
                 _ => None,
             })
             .collect(),
         _ => BTreeMap::new(),
     };
 
-    let extra_fields: BTreeMap<String, VdfValue> = fields
-        .iter()
-        .filter(|(k, _)| !KNOWN_FIELDS.contains(&k.as_str()))
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
+    let f = &mut fields;
+    let app_id = int_field(f, "appid", 0);
+    let app_name = string_field(f, "AppName", Some("appname"));
+    let exe = string_field(f, "Exe", Some("exe"));
+    let start_dir = string_field(f, "StartDir", Some("startdir"));
+    let icon = string_field(f, "icon", None);
+    let shortcut_path = string_field(f, "ShortcutPath", None);
+    let launch_options = string_field(f, "LaunchOptions", None);
+    let is_hidden = int_field(f, "IsHidden", 0) != 0;
+    let allow_desktop_config = int_field(f, "AllowDesktopConfig", 1) != 0;
+    let allow_overlay = int_field(f, "AllowOverlay", 1) != 0;
+    let open_vr = int_field(f, "OpenVR", 0) != 0;
+    let devkit = int_field(f, "Devkit", 0) != 0;
+    let devkit_game_id = string_field(f, "DevkitGameID", None);
+    let devkit_override_app_id = int_field(f, "DevkitOverrideAppID", 0);
+    let last_play_time = int_field(f, "LastPlayTime", 0);
+    let flatpak_app_id = string_field(f, "FlatpakAppID", None);
+    let sort_as = string_field(f, "sortas", None);
 
     SteamShortcut {
-        app_id: int_field("appid", 0),
-        app_name: string_field("AppName", Some("appname")),
-        exe: string_field("Exe", Some("exe")),
-        start_dir: string_field("StartDir", Some("startdir")),
-        icon: string_field("icon", None),
-        shortcut_path: string_field("ShortcutPath", None),
-        launch_options: string_field("LaunchOptions", None),
-        is_hidden: int_field("IsHidden", 0) != 0,
-        allow_desktop_config: int_field("AllowDesktopConfig", 1) != 0,
-        allow_overlay: int_field("AllowOverlay", 1) != 0,
-        open_vr: int_field("OpenVR", 0) != 0,
-        devkit: int_field("Devkit", 0) != 0,
-        devkit_game_id: string_field("DevkitGameID", None),
-        devkit_override_app_id: int_field("DevkitOverrideAppID", 0),
-        last_play_time: int_field("LastPlayTime", 0),
-        flatpak_app_id: string_field("FlatpakAppID", None),
-        sort_as: string_field("sortas", None),
+        app_id,
+        app_name,
+        exe,
+        start_dir,
+        icon,
+        shortcut_path,
+        launch_options,
+        is_hidden,
+        allow_desktop_config,
+        allow_overlay,
+        open_vr,
+        devkit,
+        devkit_game_id,
+        devkit_override_app_id,
+        last_play_time,
+        flatpak_app_id,
+        sort_as,
         tags,
-        extra_fields,
+        extra_fields: fields,
     }
 }

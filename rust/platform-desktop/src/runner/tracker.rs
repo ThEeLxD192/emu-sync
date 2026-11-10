@@ -49,6 +49,30 @@ struct AppearanceState {
 }
 
 impl ExternalProcessTracker {
+    // Los sondeos del sistema bloquean (lectura de /proc, procesos externos): se ejecutan
+    // fuera del executor. Un `JoinError` se trata como "sin coincidencias"/"no vivo".
+    async fn matching(&self, name: &str) -> HashSet<u64> {
+        let probe = Arc::clone(&self.matching_process_ids);
+        let name = name.to_string();
+        tokio::task::spawn_blocking(move || probe(&name))
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn shader_compiling(&self) -> bool {
+        let probe = Arc::clone(&self.is_steam_shader_compiling);
+        tokio::task::spawn_blocking(move || probe())
+            .await
+            .unwrap_or(false)
+    }
+
+    async fn retain_alive(&self, pids: HashSet<u64>) -> HashSet<u64> {
+        let probe = Arc::clone(&self.is_process_alive);
+        tokio::task::spawn_blocking(move || pids.into_iter().filter(|pid| probe(*pid)).collect())
+            .await
+            .unwrap_or_default()
+    }
+
     pub fn new(
         matching_process_ids: MatchingProcessIdsFn,
         is_steam_shader_compiling: IsShaderCompilingFn,
@@ -83,9 +107,11 @@ impl ExternalProcessTracker {
         let mut outcome: Option<HashSet<u64>> = None;
 
         while outcome.is_none() && state.started_at.elapsed() < polling.appearance_timeout {
-            outcome = self.observe_appearance(launch, &mut state, polling.reuse_confirmation_delay);
+            outcome = self
+                .observe_appearance(launch, &mut state, polling.reuse_confirmation_delay)
+                .await;
             if outcome.is_none() {
-                if (self.is_steam_shader_compiling)() {
+                if self.shader_compiling().await {
                     state.started_at = Instant::now();
                 }
                 tokio::time::sleep(polling.appearance_interval).await;
@@ -95,13 +121,13 @@ impl ExternalProcessTracker {
         outcome.unwrap_or_default()
     }
 
-    fn observe_appearance(
+    async fn observe_appearance(
         &self,
         launch: &ProcessLaunch,
         state: &mut AppearanceState,
         confirmation_delay: Duration,
     ) -> Option<HashSet<u64>> {
-        let current_matches = (self.matching_process_ids)(&launch.name);
+        let current_matches = self.matching(&launch.name).await;
         let new_matches: HashSet<u64> = current_matches
             .difference(&launch.existing_ids)
             .copied()
@@ -124,9 +150,10 @@ impl ExternalProcessTracker {
         }
 
         self.confirmed_reuse(launch, state, confirmation_delay, exit_code)
+            .await
     }
 
-    fn confirmed_reuse(
+    async fn confirmed_reuse(
         &self,
         launch: &ProcessLaunch,
         state: &mut AppearanceState,
@@ -150,7 +177,7 @@ impl ExternalProcessTracker {
         if now.duration_since(confirmed_at) < confirmation_delay {
             None
         } else {
-            let current_matches = (self.matching_process_ids)(&launch.name);
+            let current_matches = self.matching(&launch.name).await;
             let reused: HashSet<u64> = current_matches
                 .intersection(&launch.existing_ids)
                 .copied()
@@ -170,14 +197,15 @@ impl ExternalProcessTracker {
         interval: Duration,
     ) {
         while !tracked.is_empty() {
-            let current_matches = (self.matching_process_ids)(&launch.name);
+            let current_matches = self.matching(&launch.name).await;
             let active_matches: HashSet<u64> = current_matches
                 .into_iter()
                 .filter(|pid| !launch.existing_ids.contains(pid) || tracked.contains(pid))
                 .collect();
 
             tracked.extend(active_matches);
-            tracked.retain(|pid| (self.is_process_alive)(*pid));
+            let candidates = std::mem::take(tracked);
+            *tracked = self.retain_alive(candidates).await;
 
             if !tracked.is_empty() {
                 tokio::time::sleep(interval).await;
