@@ -160,3 +160,28 @@ fn duplicate_remote_files_require_verified_equal_content() {
         })
     );
 }
+
+#[test]
+fn canonical_cloud_files_keep_first_appearance_order_and_break_ties_by_utf16_id() {
+    let remote = |id: &str, name: &str| RemoteFile {
+        id: id.into(),
+        name: name.into(),
+        modified: 7,
+        is_folder: false,
+        sha256: Some("aa".into()),
+        version: None,
+    };
+    // U+FF5E sorts before U+1F600 by code point but after it in UTF-16 (0xFF5E > surrogate 0xD83D).
+    let files = [
+        remote("\u{1F600}", "b"),
+        remote("x", "a"),
+        remote("\u{FF5E}", "b"),
+        remote("y", "c"),
+    ];
+    let ids: Vec<_> = canonical_cloud_files(&files)
+        .unwrap()
+        .into_iter()
+        .map(|f| f.id)
+        .collect();
+    assert_eq!(ids, ["\u{FF5E}", "x", "y"]);
+}

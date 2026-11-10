@@ -110,6 +110,7 @@ impl Emulator {
             ..Self::default()
         }
     }
+    /// Preserves ordered title overrides, including the first matching normalized title.
     pub fn effective_title(&self, rom: &str, fallback: &str) -> String {
         let stem = rom.rsplit_once('.').map_or(rom, |(s, _)| s);
         for key in [rom, stem] {
@@ -136,7 +137,9 @@ impl Emulator {
     }
 }
 
-/// Preserves ordered title overrides, including the first matching normalized title.
+/// Removes a 1-5 character ASCII alphanumeric extension, turns `_` into spaces, drops `[...]` and
+/// `(...)` blocks except `disc|cd|part` followed by a digit, and collapses whitespace; an empty
+/// result falls back to `raw.trim()`.
 pub fn clean_game_title(raw: &str) -> String {
     let base = raw
         .rsplit_once('.')
@@ -228,11 +231,7 @@ pub fn scope_new_targets(targets: &[SaveTarget]) -> Vec<SaveTarget> {
                 loop {
                     let candidate = format!("save-target-{next}");
                     next += 1;
-                    if !used.iter().any(|p| {
-                        p == &candidate
-                            || p.starts_with(&format!("{candidate}/"))
-                            || candidate.starts_with(&format!("{p}/"))
-                    }) {
+                    if !used.iter().any(|p| cloud_paths_overlap(p, &candidate)) {
                         used.push(candidate.clone());
                         target.cloud_path = Some(candidate);
                         break;
@@ -242,6 +241,12 @@ pub fn scope_new_targets(targets: &[SaveTarget]) -> Vec<SaveTarget> {
             target
         })
         .collect()
+}
+
+fn cloud_paths_overlap(a: &str, b: &str) -> bool {
+    a == b
+        || a.strip_prefix(b).is_some_and(|rest| rest.starts_with('/'))
+        || b.strip_prefix(a).is_some_and(|rest| rest.starts_with('/'))
 }
 
 pub trait LibraryStore {
