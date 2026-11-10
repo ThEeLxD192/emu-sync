@@ -83,6 +83,7 @@ impl DesktopCoordinator {
             redraw: redraw.clone(),
             tokio_handle: tokio_handle.clone(),
             scan_revision,
+            steam_revision: Arc::new(AtomicU64::new(0)),
         };
 
         let interaction = InteractionControls::new(event_tx.clone(), redraw.clone());

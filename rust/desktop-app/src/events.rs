@@ -5,6 +5,7 @@ use emusync_domain::config::AppConfig;
 use emusync_presentation::model::{
     AppStatus, CloudSyncStatus, GameItem, PathTarget, SaveSetupRequest,
 };
+use std::collections::HashSet;
 
 /// Typed events dispatched from background tasks to update the UI single source of truth.
 #[derive(Clone, Debug, PartialEq)]
@@ -22,6 +23,13 @@ pub enum AppEvent {
     SteamRegistrationUpdated {
         entry_name: String,
         registered: bool,
+    },
+    /// Whether Steam shortcuts can be managed and which entries are registered,
+    /// as Kotlin's `refreshSteamState`.
+    SteamStateRefreshed {
+        available: bool,
+        registered: HashSet<String>,
+        revision: u64,
     },
     StatusChanged(AppStatus),
     Toast(String),
@@ -53,4 +61,22 @@ pub fn apply_entry_games_scanned(
     } else {
         false
     }
+}
+
+/// Applies a `SteamStateRefreshed` event unless a newer refresh was already applied.
+pub fn apply_steam_state_refreshed(
+    current_revision: &mut u64,
+    steam_available: &mut bool,
+    registered_entries: &mut HashSet<String>,
+    available: bool,
+    registered: HashSet<String>,
+    revision: u64,
+) -> bool {
+    if revision < *current_revision {
+        return false;
+    }
+    *current_revision = revision;
+    *steam_available = available;
+    *registered_entries = registered;
+    true
 }

@@ -8,7 +8,7 @@ use crate::{
     state::AppUiState,
     theme::{
         CARD_HOVER, DIVIDER, ON_BACKGROUND, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, PRIMARY_CONTAINER,
-        SURFACE, SURFACE_VARIANT,
+        SURFACE, SURFACE_VARIANT, bold,
     },
 };
 use egui::{
@@ -46,13 +46,7 @@ pub fn render_game_grid(
         .inner_margin(Margin::symmetric(16, 12))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(&selected_name)
-                        .size(18.0)
-                        .strong()
-                        .color(ON_BACKGROUND),
-                );
-
+                // Actions are laid out first so the title only takes the remaining width.
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     // Games count chip
                     let count = state.game_items.len();
@@ -134,6 +128,19 @@ pub fn render_game_grid(
                             on_action(UiAction::OpenEmulator(emu.clone()));
                         }
                     }
+
+                    ui.add_space(12.0);
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        ui.add(
+                            Label::new(
+                                RichText::new(&selected_name)
+                                    .font(bold(18.0))
+                                    .color(ON_BACKGROUND),
+                            )
+                            .truncate(),
+                        )
+                        .on_hover_text(&selected_name);
+                    });
                 });
             });
         });

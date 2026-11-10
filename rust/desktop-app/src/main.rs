@@ -1,7 +1,7 @@
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{
     AppEvent, AuthorizedTransferFailure, CloseState, DesktopCoordinator, RuntimeOwner,
-    apply_entry_games_scanned,
+    apply_entry_games_scanned, apply_steam_state_refreshed,
 };
 use emusync_domain::config::ConfigurationStore;
 use emusync_presentation::{
@@ -40,6 +40,7 @@ struct App {
     closing: bool,
     close_notice: bool,
     current_scan_revision: u64,
+    current_steam_revision: u64,
 }
 
 impl ApplicationHandler for App {
@@ -205,6 +206,13 @@ impl ApplicationHandler for App {
                                 .state
                                 .steam_registered_entries
                                 .retain(|k| current_names.contains(k));
+                            if let Some(coordinator) = &self.coordinator {
+                                coordinator.track_task(
+                                    coordinator
+                                        .platform
+                                        .refresh_steam_state_async(cfg.entries.clone()),
+                                );
+                            }
 
                             if let Some(selected) = &self.emusync_app.state.selected_entry
                                 && let Some(coordinator) = &self.coordinator
@@ -258,6 +266,21 @@ impl ApplicationHandler for App {
                                     .steam_registered_entries
                                     .remove(&entry_name);
                             }
+                        }
+                        AppEvent::SteamStateRefreshed {
+                            available,
+                            registered,
+                            revision,
+                        } => {
+                            let state = &mut self.emusync_app.state;
+                            apply_steam_state_refreshed(
+                                &mut self.current_steam_revision,
+                                &mut state.steam_available,
+                                &mut state.steam_registered_entries,
+                                available,
+                                registered,
+                                revision,
+                            );
                         }
                         AppEvent::StatusChanged(status) => {
                             self.emusync_app.state.status = status;
@@ -394,6 +417,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         closing: false,
         close_notice: false,
         current_scan_revision: 0,
+        current_steam_revision: 0,
     };
     event_loop.run_app(&mut app)?;
     if let Some(error) = app.error {

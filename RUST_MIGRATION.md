@@ -1319,6 +1319,29 @@ Continuación de descargas (Linux, 2026-11-06): el adaptador usa ahora confirmac
 - Pruebas en `rust/desktop-app/tests/desktop_composition_tests.rs`: 10 pruebas aprobadas en Linux que verifican inicialización, altas/bajas/reordenación, overrides, ciclo completo con sincronización real, rechazo de credenciales vacías, lanzamiento asíncrono y rechazo de edición de rutas si la migración remota falla.
 - `cargo xtask check` pasó completamente en Linux (arquitectura, formato, Clippy sin advertencias y pruebas del workspace).
 
+#### Continuación R7 — paridad visual de cabecera y barra lateral (2026-11-10, Linux)
+
+- Cabecera (commit `39e5889`): distribución de `AppHeader` Kotlin, fuente JetBrainsMono Nerd Font (OFL 1.1) incluida en el binario e iconos tomados de sus glifos. "Connect Drive" conecta con las credenciales guardadas y abre el diálogo solo si alguna está en blanco, como Kotlin. "Check Updates" se conserva como extra Rust por decisión del usuario.
+- Barra lateral: el orden anterior intercambiaba posiciones en la lista plana y podía separar las entradas de un grupo. `sidebar_order` porta la partición en unidades, el movimiento de carpetas e hijos, las filas visibles, el plegado y el arrastre acumulado de Kotlin; la vista añade carpetas, plegado, asa de arrastre y flechas visibles al pasar el puntero. Ancho fijo de 240 como Kotlin: un panel redimensionable se arrastra con facilidad por error en la pantalla táctil de Steam Deck.
+- Steam: `AppUiState::steam_available` nunca se actualizaba, por lo que el control de registro no aparecía aunque Steam estuviera instalado. Como `refreshSteamState` de Kotlin, cada `ConfigReloaded` (incluida la carga inicial) lanza un refresco fuera del hilo visual con disponibilidad y entradas registradas; `SteamStateRefreshed` lleva revisión y no se aplica sobre uno más reciente. Pruebas en `desktop-app/tests/platform_ui_tests.rs` con Steam sintético: `steam_refresh_reports_unavailable_without_steam_userdata`, `steam_refresh_reports_available_and_only_registered_entries` y `stale_steam_refresh_does_not_overwrite_newer_state`.
+- Cuadrícula: el título de la categoría se dibujaba antes de las acciones sin límite de ancho y se superponía con ellas; ahora ocupa el espacio restante, truncado y con el nombre completo al pasar el puntero.
+- Capturas Linux (Hyprland, Wayland) con configuraciones sintéticas aisladas: Drive vinculado y sin vincular, y biblioteca con dos grupos, entradas sueltas y un nombre largo truncado en la barra lateral y en la cabecera de la cuadrícula. La detección de Steam leyó el `shortcuts.vdf` real del equipo sin modificarlo; no se pulsó el control de registro. El arrastre y las flechas no se ejercitaron con entrada real del puntero; tampoco se validó en Windows ni en Steam Deck.
+- `CARGO_BUILD_JOBS=2 nice -n 19 cargo test -p emusync-presentation -p emusync-desktop-app --locked -- --test-threads=2`: 138 aprobadas, cero fallos; `cargo xtask quality` y Clippy sin advertencias. Gradle no se repitió: solo cambia Rust y documentación.
+
+| Garantía Kotlin (`SidebarTest`, `SidebarInteractionStateTest`) | Prueba Rust (`presentation/tests/sidebar_order_tests.rs`) | Linux | Windows |
+|---|---|---|---|
+| Filas con carpeta e hijos al desplegar | `expanded_group_lists_header_then_children_then_standalone` | Pasó | Pendiente |
+| Carpeta plegada conserva cabecera y oculta hijos; plegar y desplegar no la elimina | `collapsed_group_keeps_header_and_hides_children`, `header_survives_collapse_and_reexpand` | Pasó | Pendiente |
+| Agrupación y plegado sin distinguir mayúsculas | `grouping_and_collapse_ignore_case`, `expanding_folder_removes_collapsed_names_regardless_of_case` | Pasó | Pendiente |
+| Carpeta marca hijo seleccionado | `header_marks_selected_child_by_name` | Pasó | Pendiente |
+| Mezcla de grupos y entradas en orden de primera aparición | `mixed_groups_and_standalone_rows_follow_first_appearance` | Pasó | Pendiente |
+| Partición y aplanado agrupan miembros dispersos | `partition_gathers_scattered_group_members_and_flatten_makes_them_contiguous`; nuevo `blank_group_is_standalone` | Pasó | Pendiente |
+| Mover carpetas completas y mover hijos dentro de su carpeta | `folders_move_as_whole_units_past_entries_and_folders`, `children_move_within_their_folder` | Pasó | Pendiente |
+| Activar carpeta selecciona el primer hijo o pliega y despliega alrededor de la selección | `activating_folder_selects_first_child_then_toggles_collapse_around_selection`, `opening_collapsed_unselected_folder_expands_and_selects_first_child` | Pasó | Pendiente |
+| Arrastre acumulado de carpeta, hijo limitado a su grupo, entrada suelta cruza un grupo entero | `folder_drag_accumulates_partial_movement_and_moves_whole_group`, `child_drag_stays_within_group_beyond_last_sibling`, `standalone_drag_crosses_whole_group_without_splitting_it` | Pasó | Pendiente |
+| Entrada eliminada durante el arrastre no reordena | `entry_removed_during_drag_cannot_reorder_remaining_library`; nuevo `drag_without_matching_key_never_reorders` | Pasó | Pendiente |
+| Movimientos de hijo inválidos conservan el orden | `invalid_sibling_moves_preserve_original_order`; el índice negativo de Kotlin no es representable con `usize` | Pasó | Pendiente |
+
 ### R8 — Empaquetado y cierre
 
 - [x] Generar AppImage independiente (Linux) y borradores WiX (Windows diferido); comprobar arranque, transición desde Kotlin y compatibilidad gráfica/FUSE en Linux.

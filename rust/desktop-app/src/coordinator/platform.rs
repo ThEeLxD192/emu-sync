@@ -27,6 +27,7 @@ pub struct PlatformServices {
     pub redraw: Arc<dyn Fn() + Send + Sync>,
     pub tokio_handle: Handle,
     pub scan_revision: Arc<AtomicU64>,
+    pub steam_revision: Arc<AtomicU64>,
 }
 
 impl PlatformServices {
@@ -117,5 +118,35 @@ impl PlatformServices {
         });
 
         (revision, handle)
+    }
+
+    /// Re-reads Steam availability and registrations off the UI thread.
+    pub fn refresh_steam_state_async(
+        &self,
+        entries: Vec<GameEntry>,
+    ) -> tokio::task::JoinHandle<()> {
+        let revision = self.steam_revision.fetch_add(1, Ordering::SeqCst) + 1;
+        let steam = self.steam.clone();
+        let tx = self.event_tx.clone();
+        let redraw = self.redraw.clone();
+
+        self.tokio_handle.spawn_blocking(move || {
+            let available = steam.is_available().unwrap_or(false);
+            let registered = entries
+                .iter()
+                .filter(|entry| {
+                    steam
+                        .is_registered(entry)
+                        .unwrap_or(entry.common().steam_app_id.is_some())
+                })
+                .map(|entry| entry.common().name.clone())
+                .collect();
+            let _ = tx.send(AppEvent::SteamStateRefreshed {
+                available,
+                registered,
+                revision,
+            });
+            (redraw)();
+        })
     }
 }

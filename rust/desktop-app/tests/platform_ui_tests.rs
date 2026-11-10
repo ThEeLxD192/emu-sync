@@ -1,10 +1,14 @@
 use emusync_data_local::ConfigManager;
-use emusync_desktop_app::{AppEvent, DesktopCoordinator, scan_entry_games};
+use emusync_desktop_app::{
+    AppEvent, DesktopCoordinator, apply_steam_state_refreshed, scan_entry_games,
+};
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore},
     library::{Emulator, EntryCommon, GameEntry, NativeGame},
 };
+use emusync_platform_desktop::{DesktopSteamLibrary, SteamShortcutManager};
 use emusync_presentation::{actions::UiAction, model::GameItem};
+use std::collections::HashSet;
 use std::sync::{Arc, mpsc::channel};
 use tempfile::tempdir;
 
@@ -188,4 +192,99 @@ async fn scan_entry_games_handles_missing_roms_dir_and_filters_extensions_with_m
         }
         _ => unreachable!(),
     }
+}
+
+async fn refreshed_steam_state(
+    steam: DesktopSteamLibrary,
+    entries: Vec<GameEntry>,
+) -> (bool, HashSet<String>) {
+    let dir = tempdir().unwrap();
+    let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
+    let (tx, rx) = channel();
+    let mut coordinator = DesktopCoordinator::new(
+        manager,
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
+    coordinator.platform.steam = steam;
+
+    coordinator
+        .platform
+        .refresh_steam_state_async(entries)
+        .await
+        .unwrap();
+
+    rx.try_iter()
+        .find_map(|event| match event {
+            AppEvent::SteamStateRefreshed {
+                available,
+                registered,
+                ..
+            } => Some((available, registered)),
+            _ => None,
+        })
+        .expect("refresh must report the Steam state")
+}
+
+#[tokio::test]
+async fn steam_refresh_reports_unavailable_without_steam_userdata() {
+    let dir = tempdir().unwrap();
+    let steam = DesktopSteamLibrary::new(
+        SteamShortcutManager::new()
+            .with_custom_userdata_dir(dir.path().join("missing"))
+            .with_simulate_windows(false),
+    );
+
+    let (available, registered) =
+        refreshed_steam_state(steam, vec![test_native("Hollow Knight")]).await;
+
+    assert!(!available);
+    assert!(registered.is_empty());
+}
+
+#[tokio::test]
+async fn steam_refresh_reports_available_and_only_registered_entries() {
+    let dir = tempdir().unwrap();
+    let manager = SteamShortcutManager::new()
+        .with_custom_shortcuts_file(dir.path().join("config/shortcuts.vdf"))
+        .with_custom_launcher_dir(dir.path().join("launchers"))
+        .with_simulate_windows(false);
+    let registered_entry = test_native("Hollow Knight");
+    manager.register_entry(&registered_entry).unwrap();
+    let steam = DesktopSteamLibrary::new(manager);
+
+    let (available, registered) =
+        refreshed_steam_state(steam, vec![registered_entry, test_native("Celeste")]).await;
+
+    assert!(available);
+    assert_eq!(registered, HashSet::from(["Hollow Knight".to_string()]));
+}
+
+#[test]
+fn stale_steam_refresh_does_not_overwrite_newer_state() {
+    let mut revision = 0;
+    let mut available = false;
+    let mut registered = HashSet::new();
+
+    assert!(apply_steam_state_refreshed(
+        &mut revision,
+        &mut available,
+        &mut registered,
+        true,
+        HashSet::from(["New".to_string()]),
+        2,
+    ));
+    assert!(!apply_steam_state_refreshed(
+        &mut revision,
+        &mut available,
+        &mut registered,
+        false,
+        HashSet::new(),
+        1,
+    ));
+
+    assert!(available);
+    assert_eq!(registered, HashSet::from(["New".to_string()]));
+    assert_eq!(revision, 2);
 }

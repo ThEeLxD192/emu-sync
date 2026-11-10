@@ -40,6 +40,15 @@ pub mod glyph {
     pub const UPDATE: &str = "\u{F06B0}";
     pub const RESTART: &str = "\u{F0709}";
     pub const DOWNLOAD: &str = "\u{F01DA}";
+    pub const PLUS: &str = "\u{F0415}";
+    pub const FOLDER_OPEN: &str = "\u{F0770}";
+    pub const CONTROLLER: &str = "\u{F0B82}";
+    pub const GAMEPAD: &str = "\u{F0296}";
+    pub const DRAG: &str = "\u{F01DD}";
+    pub const CHEVRON_UP: &str = "\u{F0143}";
+    pub const CHEVRON_DOWN: &str = "\u{F0140}";
+    pub const CHEVRON_RIGHT: &str = "\u{F0142}";
+    pub const WIDGETS: &str = "\u{F072C}";
 }
 
 /// Font family rendering the bold weight of the application font.

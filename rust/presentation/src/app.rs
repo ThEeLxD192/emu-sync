@@ -2,7 +2,10 @@
 
 use crate::{
     actions::UiAction,
-    components::{render_game_grid, render_header, render_sidebar, render_toast},
+    components::{
+        render_game_grid, render_header, render_sidebar, render_toast,
+        sidebar_order::SidebarInteraction,
+    },
     cover_cache::CoverCache,
     dialogs::{
         DriveSetupDialogState, render_drive_setup_dialog, render_entry_dialog,
@@ -37,6 +40,7 @@ pub struct EmuSyncApp {
     pub cover_cache: CoverCache,
     pub active_dialog: ActiveDialog,
     pub pending_actions: Vec<UiAction>,
+    pub sidebar: SidebarInteraction,
 }
 
 impl Default for EmuSyncApp {
@@ -52,6 +56,7 @@ impl EmuSyncApp {
             cover_cache: CoverCache::new(),
             active_dialog: ActiveDialog::None,
             pending_actions: Vec::new(),
+            sidebar: SidebarInteraction::default(),
         }
     }
 
@@ -61,6 +66,7 @@ impl EmuSyncApp {
             cover_cache: CoverCache::new(),
             active_dialog: ActiveDialog::None,
             pending_actions: Vec::new(),
+            sidebar: SidebarInteraction::default(),
         }
     }
 
@@ -181,16 +187,21 @@ impl EmuSyncApp {
             });
 
         // Left Panel: Sidebar
+        // Fixed width as in Kotlin; a resize handle is easy to drag by accident on touch screens.
         Panel::left("left_sidebar")
-            .resizable(true)
-            .default_size(260.0)
-            .min_size(220.0)
-            .max_size(400.0)
+            .resizable(false)
+            .exact_size(240.0)
+            .frame(
+                Frame::new()
+                    .fill(BACKGROUND)
+                    .inner_margin(Margin::symmetric(0, 4)),
+            )
             .show(ui, |ui| {
                 ui.add_enabled_ui(!is_modal_active, |ui| {
                     render_sidebar(
                         ui,
                         &self.state,
+                        &mut self.sidebar,
                         &mut |action| actions.push(action),
                         &mut || open_add = true,
                     );
