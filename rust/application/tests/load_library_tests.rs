@@ -214,7 +214,34 @@ fn steam_error_is_handled_gracefully() {
     let loader = LoadLibrary::new(store.clone(), steam);
     let loaded = loader.load().expect("load should not fail on steam error");
 
-    // Defaults gracefully without crashing
-    assert_eq!(loaded.entries[0].common().steam_app_id, None);
-    assert_eq!(store.update_calls.load(Ordering::SeqCst), 1);
+    // A Steam failure must not erase persisted IDs: the config comes back untouched.
+    assert_eq!(loaded.entries[0].common().steam_app_id, Some(999));
+    assert_eq!(store.update_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn steam_migration_error_keeps_persisted_steam_app_ids() {
+    let store = SpyStore {
+        config: Arc::new(Mutex::new(AppConfig {
+            credentials: None,
+            entries: vec![
+                sample_native("Hollow Knight", Some(1001)),
+                sample_emulator("PCSX2", Some(1002)),
+            ],
+        })),
+        update_calls: Arc::new(AtomicUsize::new(0)),
+    };
+    let steam = MockSteam {
+        shortcuts: Arc::new(Mutex::new(Err("shortcuts.vdf is corrupt".into()))),
+    };
+
+    let loaded = LoadLibrary::new(store.clone(), steam).load().unwrap();
+
+    assert_eq!(loaded.entries[0].common().steam_app_id, Some(1001));
+    assert_eq!(loaded.entries[1].common().steam_app_id, Some(1002));
+    assert_eq!(store.update_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        store.load().unwrap().entries[0].common().steam_app_id,
+        Some(1001)
+    );
 }

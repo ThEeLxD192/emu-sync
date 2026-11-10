@@ -78,12 +78,20 @@ impl PlatformServices {
             PickMode::Directory => PickerType::Directory,
         };
 
-        self.tokio_handle.spawn_blocking(move || {
-            if let Ok(Some(path)) = picker.pick("Select path", "", kind) {
-                let _ = tx.send(AppEvent::PathPicked { target, path });
-                (redraw)();
-            }
-        })
+        self.tokio_handle
+            .spawn_blocking(move || match picker.pick("Select path", "", kind) {
+                Ok(Some(path)) => {
+                    let _ = tx.send(AppEvent::PathPicked { target, path });
+                    (redraw)();
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    let _ = tx.send(AppEvent::Toast(format!(
+                        "Could not open file chooser: {err}"
+                    )));
+                    (redraw)();
+                }
+            })
     }
 
     pub fn open_config_dir(&self) {

@@ -16,10 +16,11 @@ impl<S: ConfigurationStore, St: SteamLibrary> LoadLibrary<S, St> {
 
     pub fn load(&self) -> Result<AppConfig, S::Error> {
         let config = self.store.load()?;
-        let shortcuts = self
-            .steam
-            .migrate_launchers(&config.entries)
-            .unwrap_or_default();
+        // Si Steam no responde, la configuración se devuelve intacta: tratar el error como
+        // "sin atajos" borraría los `steam_app_id` persistidos.
+        let Ok(shortcuts) = self.steam.migrate_launchers(&config.entries) else {
+            return Ok(config);
+        };
 
         if shortcuts.is_empty()
             && config
