@@ -26,13 +26,13 @@ pub struct GitHubRelease {
 /// Compares semantic versions (e.g. 0.1.0 vs 0.1.1, 1.2 vs 1.2.0, etc.).
 /// Missing trailing version components are treated as 0.
 pub fn is_newer_version(current: &str, remote: &str) -> bool {
-    let curr_parts: Vec<i64> = current
+    let curr_parts: Vec<i32> = current
         .split('.')
-        .filter_map(|s| s.trim().parse::<i64>().ok())
+        .filter_map(|s| s.trim().parse::<i32>().ok())
         .collect();
-    let remote_parts: Vec<i64> = remote
+    let remote_parts: Vec<i32> = remote
         .split('.')
-        .filter_map(|s| s.trim().parse::<i64>().ok())
+        .filter_map(|s| s.trim().parse::<i32>().ok())
         .collect();
 
     let max_len = curr_parts.len().max(remote_parts.len());

@@ -71,7 +71,7 @@ impl UpdateSource for GitHubUpdateSource {
                 Err(_) => return Ok(None),
             };
 
-            if !response.status().is_success() {
+            if response.status() != reqwest::StatusCode::OK {
                 return Ok(None);
             }
 
@@ -80,11 +80,12 @@ impl UpdateSource for GitHubUpdateSource {
                 Err(_) => return Ok(None),
             };
 
-            let remote_version = release
-                .tag_name
-                .trim_start_matches(['v', 'V'])
-                .trim()
-                .to_string();
+            // Paridad con Kotlin: `removePrefix("v").removePrefix("V")` quita como máximo
+            // un prefijo de cada tipo, en ese orden.
+            let tag = release.tag_name.as_str();
+            let tag = tag.strip_prefix('v').unwrap_or(tag);
+            let tag = tag.strip_prefix('V').unwrap_or(tag);
+            let remote_version = tag.trim().to_string();
 
             if !is_newer_version(&current_version, &remote_version) {
                 return Ok(None);
