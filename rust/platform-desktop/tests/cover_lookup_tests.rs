@@ -222,3 +222,91 @@ fn resolves_fallback_subfolder_when_no_individual_cover_and_no_same_folder_image
     // Priority 3 wins: fallback in covers/ with region stripped
     assert_eq!(found, Some(fallback_cover.to_str().unwrap().to_string()));
 }
+
+#[test]
+fn custom_cover_pointing_to_directory_or_missing_file_falls_back_to_adjacent() {
+    let temp = tempdir().unwrap();
+    let rom_dir = temp.path().join("roms");
+    let directory_cover = temp.path().join("not_a_file.png");
+    fs::create_dir_all(&rom_dir).unwrap();
+    fs::create_dir_all(&directory_cover).unwrap();
+    let missing_cover = temp.path().join("missing.png");
+    let rom_file = rom_dir.join("Game.iso");
+    fs::write(&rom_file, b"dummy").unwrap();
+    let adjacent = rom_dir.join("Game.png");
+    fs::write(&adjacent, b"img").unwrap();
+    let finder = DesktopCoverFiles;
+
+    for broken_custom in [&directory_cover, &missing_cover] {
+        let mut emu = Emulator::new("PS1", "/bin/true", rom_dir.to_str().unwrap(), vec![]);
+        emu.cover_path_by_rom
+            .push(("Game.iso".into(), broken_custom.to_str().unwrap().into()));
+        let found = finder
+            .find(
+                "Game",
+                &GameEntry::Emulator(emu),
+                Some(rom_file.to_str().unwrap()),
+            )
+            .unwrap();
+        assert_eq!(found, Some(adjacent.to_str().unwrap().to_string()));
+    }
+
+    let game_dir = temp.path().join("native");
+    fs::create_dir_all(&game_dir).unwrap();
+    let native_adjacent = game_dir.join("Hero.png");
+    fs::write(&native_adjacent, b"img").unwrap();
+    for broken_custom in [&directory_cover, &missing_cover] {
+        let mut native = NativeGame::default();
+        native.common.name = "Hero".into();
+        native.common.executable_path = game_dir.join("Hero.exe").to_str().unwrap().into();
+        native.cover_path = Some(broken_custom.to_str().unwrap().into());
+        let found = finder
+            .find("Hero", &GameEntry::Native(native), None)
+            .unwrap();
+        assert_eq!(found, Some(native_adjacent.to_str().unwrap().to_string()));
+    }
+}
+
+#[test]
+fn native_custom_cover_path_is_trimmed() {
+    let temp = tempdir().unwrap();
+    let cover = temp.path().join("c.png");
+    fs::write(&cover, b"img").unwrap();
+    let mut native = NativeGame::default();
+    native.common.name = "Trimmed".into();
+    native.common.executable_path = temp
+        .path()
+        .join("elsewhere/Trimmed.exe")
+        .to_str()
+        .unwrap()
+        .into();
+    native.cover_path = Some(format!("  {}  ", cover.display()));
+
+    let found = DesktopCoverFiles
+        .find("Trimmed", &GameEntry::Native(native), None)
+        .unwrap();
+
+    assert_eq!(found, Some(cover.to_str().unwrap().to_string()));
+}
+
+#[test]
+fn uppercase_extension_and_case_insensitive_stem_are_found_adjacent() {
+    let temp = tempdir().unwrap();
+    let rom_dir = temp.path().join("roms");
+    fs::create_dir_all(&rom_dir).unwrap();
+    let rom_file = rom_dir.join("game.iso");
+    fs::write(&rom_file, b"dummy").unwrap();
+    let cover = rom_dir.join("GAME.PNG");
+    fs::write(&cover, b"img").unwrap();
+    let emu = Emulator::new("PS1", "/bin/true", rom_dir.to_str().unwrap(), vec![]);
+
+    let found = DesktopCoverFiles
+        .find(
+            "game",
+            &GameEntry::Emulator(emu),
+            Some(rom_file.to_str().unwrap()),
+        )
+        .unwrap();
+
+    assert_eq!(found, Some(cover.to_str().unwrap().to_string()));
+}

@@ -1,107 +1,55 @@
-use emusync_platform_desktop::{AppImageInstaller, DesktopUpdateInstaller};
-use std::{fs, io, sync::Arc, sync::Mutex};
+//! `DesktopUpdateInstaller`: instalación por plataforma, relanzamiento y salida ordenada.
+
+use emusync_domain::update::UpdateInstaller;
+use emusync_platform_desktop::DesktopUpdateInstaller;
+use std::{
+    fs, io,
+    path::Path,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 use tempfile::tempdir;
 
-#[test]
-fn appimage_installer_replaces_target_atomically_and_cleans_up() {
-    let dir = tempdir().unwrap();
-    let target = dir.path().join("EmuSync.AppImage");
-    let source = dir.path().join("download.AppImage");
+type Log = Arc<Mutex<Vec<String>>>;
 
-    fs::write(&target, b"ORIGINAL").unwrap();
-    fs::write(&source, b"UPDATE").unwrap();
+fn log() -> Log {
+    Arc::new(Mutex::new(Vec::new()))
+}
 
-    let mut launched = false;
-    let installer = AppImageInstaller::new();
-    installer
-        .replace(&source, &target, || {
-            assert_eq!(fs::read_to_string(&target).unwrap(), "UPDATE");
-            launched = true;
+fn entries(log: &Log) -> Vec<String> {
+    log.lock().unwrap().clone()
+}
+
+/// Instalador Linux cuyo relanzamiento y salida se anotan en `log`; el contenido del
+/// AppImage en el momento del relanzamiento se guarda en `seen_at_launch`.
+fn linux_installer(
+    current: &Path,
+    log: &Log,
+    seen_at_launch: &Arc<Mutex<Option<String>>>,
+    game_mode: bool,
+) -> DesktopUpdateInstaller {
+    let (launch_log, exit_log) = (Arc::clone(log), Arc::clone(log));
+    let (seen, current_for_launch) = (Arc::clone(seen_at_launch), current.to_path_buf());
+    DesktopUpdateInstaller::new()
+        .with_is_windows(false)
+        .with_steam_game_mode(game_mode)
+        .with_current_app_image_path(Some(current.to_path_buf()))
+        .with_linux_launcher(move |_| {
+            *seen.lock().unwrap() = fs::read_to_string(&current_for_launch).ok();
+            launch_log.lock().unwrap().push("launch".into());
             Ok(())
         })
-        .unwrap();
-
-    assert!(launched);
-    assert_eq!(fs::read_to_string(&target).unwrap(), "UPDATE");
-    assert!(!source.exists());
-
-    // Only target should remain in directory
-    let files: Vec<String> = fs::read_dir(dir.path())
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
-        .collect();
-    assert_eq!(files, vec!["EmuSync.AppImage"]);
+        .with_exit_application(move |code| exit_log.lock().unwrap().push(format!("exit:{code}")))
 }
 
-#[test]
-fn appimage_installer_restores_original_when_launch_fails() {
-    let dir = tempdir().unwrap();
-    let target = dir.path().join("EmuSync.AppImage");
-    let source = dir.path().join("download.AppImage");
-
-    fs::write(&target, b"ORIGINAL").unwrap();
-    fs::write(&source, b"UPDATE").unwrap();
-
-    let installer = AppImageInstaller::new();
-    let result = installer.replace(&source, &target, || Err(io::Error::other("Launch failed")));
-
-    assert!(result.is_err());
-    assert_eq!(fs::read_to_string(&target).unwrap(), "ORIGINAL");
-    assert_eq!(fs::read_to_string(&source).unwrap(), "UPDATE");
-}
-
-#[test]
-fn appimage_installer_failed_rollback_keeps_backup_available_for_recovery() {
-    let dir = tempdir().unwrap();
-    let target = dir.path().join("EmuSync.AppImage");
-    let source = dir.path().join("download.AppImage");
-
-    fs::write(&target, b"ORIGINAL").unwrap();
-    fs::write(&source, b"UPDATE").unwrap();
-
-    // Hook move_fn to fail when moving backup back to target
-    let target_clone = target.clone();
-    let installer = AppImageInstaller::with_hooks(
-        |src, dst| {
-            fs::copy(src, dst)?;
-            Ok(())
-        },
-        move |src, dst| {
-            if src.to_string_lossy().contains(".old.") && dst == target_clone.as_path() {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "Filesystem locked",
-                ));
-            }
-            fs::rename(src, dst)
-        },
-    );
-
-    let result = installer.replace(&source, &target, || {
-        Err(io::Error::other("Installation error"))
-    });
-
-    assert!(result.is_err());
-    assert_eq!(fs::read_to_string(&source).unwrap(), "UPDATE");
-
-    // The backup must still exist for manual recovery!
-    let backup_exists = fs::read_dir(dir.path())
-        .unwrap()
-        .flatten()
-        .any(|e| e.file_name().to_string_lossy().ends_with(".bak"));
-    assert!(backup_exists);
-}
-
-#[test]
-fn appimage_installer_rejects_replacing_file_with_itself() {
-    let dir = tempdir().unwrap();
-    let target = dir.path().join("EmuSync.AppImage");
-    fs::write(&target, b"ORIGINAL").unwrap();
-
-    let installer = AppImageInstaller::new();
-    let result = installer.replace(&target, &target, || Ok(()));
-    assert!(result.is_err());
-    assert_eq!(fs::read_to_string(&target).unwrap(), "ORIGINAL");
+fn linux_files(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let current = dir.join("EmuSync.AppImage");
+    let update = dir.join("update.AppImage");
+    fs::write(&current, b"OLD").unwrap();
+    fs::write(&update, b"NEW").unwrap();
+    (current, update)
 }
 
 #[test]
@@ -278,20 +226,120 @@ fn apply_update_reports_not_applicable_as_ok_false() {
     assert!(!installer.apply_linux_update_and_restart(&update).unwrap());
 }
 
-#[cfg(unix)]
 #[test]
-fn replaced_appimage_is_executable() {
-    use std::os::unix::fs::PermissionsExt;
+fn successful_linux_update_exits_once_with_zero_after_replace_and_relaunch() {
     let dir = tempdir().unwrap();
-    let target = dir.path().join("EmuSync.AppImage");
-    let source = dir.path().join("download.AppImage");
-    fs::write(&target, b"ORIGINAL").unwrap();
-    fs::write(&source, b"UPDATE").unwrap();
-    fs::set_permissions(&source, fs::Permissions::from_mode(0o644)).unwrap();
+    let (current, update) = linux_files(dir.path());
+    let (log, seen) = (log(), Arc::new(Mutex::new(None)));
+    let installer = linux_installer(&current, &log, &seen, false);
 
-    AppImageInstaller::new()
-        .replace(&source, &target, || Ok(()))
-        .unwrap();
-    let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode, 0o755);
+    assert!(installer.apply_update_and_restart(&update).unwrap());
+
+    assert_eq!(entries(&log), ["launch", "exit:0"]);
+    assert_eq!(seen.lock().unwrap().as_deref(), Some("NEW"));
+    assert_eq!(fs::read_to_string(&current).unwrap(), "NEW");
+    assert!(!update.exists());
+}
+
+#[test]
+fn game_mode_update_exits_without_relaunching() {
+    let dir = tempdir().unwrap();
+    let (current, update) = linux_files(dir.path());
+    let (log, seen) = (log(), Arc::new(Mutex::new(None)));
+    let installer = linux_installer(&current, &log, &seen, true);
+
+    assert!(installer.apply_update_and_restart(&update).unwrap());
+
+    assert_eq!(entries(&log), ["exit:0"]);
+    assert_eq!(*seen.lock().unwrap(), None);
+    assert_eq!(fs::read_to_string(&current).unwrap(), "NEW");
+}
+
+#[test]
+fn windows_installer_exit_follows_launcher_and_uppercase_extensions_are_recognized() {
+    let dir = tempdir().unwrap();
+    let msi = dir.path().join("SETUP.MSI");
+    let exe = dir.path().join("SETUP.EXE");
+    fs::write(&msi, b"").unwrap();
+    fs::write(&exe, b"").unwrap();
+
+    for (file, expected_launch) in [
+        (&msi, format!("launch:msiexec /i {}", msi.display())),
+        (&exe, format!("launch:{}", exe.display())),
+    ] {
+        let log = log();
+        let (launch_log, exit_log) = (Arc::clone(&log), Arc::clone(&log));
+        let installer = DesktopUpdateInstaller::new()
+            .with_is_windows(true)
+            .with_windows_launcher(move |cmd| {
+                launch_log
+                    .lock()
+                    .unwrap()
+                    .push(format!("launch:{}", cmd.join(" ")));
+                Ok(())
+            })
+            .with_exit_application(move |code| {
+                exit_log.lock().unwrap().push(format!("exit:{code}"))
+            });
+
+        assert!(installer.apply_update_and_restart(file).unwrap());
+
+        assert_eq!(entries(&log), [expected_launch, "exit:0".to_string()]);
+    }
+}
+
+#[test]
+fn not_applicable_updates_never_exit() {
+    let dir = tempdir().unwrap();
+    let exits = Arc::new(AtomicUsize::new(0));
+    let counting = |installer: DesktopUpdateInstaller| {
+        let exits = Arc::clone(&exits);
+        installer.with_exit_application(move |_| {
+            exits.fetch_add(1, Ordering::SeqCst);
+        })
+    };
+
+    let txt = dir.path().join("readme.txt");
+    fs::write(&txt, b"text").unwrap();
+    let windows = counting(DesktopUpdateInstaller::new().with_is_windows(true));
+    assert!(!windows.apply_update_and_restart(&txt).unwrap());
+    assert!(txt.exists());
+
+    let missing = dir.path().join("missing.AppImage");
+    assert!(!windows.apply_update_and_restart(&missing).unwrap());
+
+    let update = dir.path().join("update.AppImage");
+    fs::write(&update, b"NEW").unwrap();
+    let no_appimage = counting(
+        DesktopUpdateInstaller::new()
+            .with_is_windows(false)
+            .with_current_app_image_path(None),
+    );
+    assert!(!no_appimage.apply_update_and_restart(&update).unwrap());
+    assert!(update.exists());
+
+    let gone = dir.path().join("gone/EmuSync.AppImage");
+    let stale_path = counting(
+        DesktopUpdateInstaller::new()
+            .with_is_windows(false)
+            .with_current_app_image_path(Some(gone)),
+    );
+    assert!(!stale_path.apply_update_and_restart(&update).unwrap());
+
+    assert_eq!(exits.load(Ordering::SeqCst), 0);
+    assert_eq!(fs::read(&update).unwrap(), b"NEW");
+    assert_eq!(fs::read(&txt).unwrap(), b"text");
+}
+
+#[test]
+fn restart_trait_method_delegates_to_apply_update() {
+    let dir = tempdir().unwrap();
+    let (current, update) = linux_files(dir.path());
+    let (log, seen) = (log(), Arc::new(Mutex::new(None)));
+    let installer = linux_installer(&current, &log, &seen, false);
+
+    assert!(installer.restart(update.to_str().unwrap()).unwrap());
+
+    assert_eq!(entries(&log), ["launch", "exit:0"]);
+    assert_eq!(fs::read_to_string(&current).unwrap(), "NEW");
 }

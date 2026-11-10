@@ -1,3 +1,5 @@
+mod common;
+
 use emusync_platform_desktop::scan_roms;
 use std::fs;
 use tempfile::tempdir;
@@ -108,5 +110,82 @@ fn symlink_cycles_and_aliases_do_not_duplicate_games_or_loop() {
 
     let roms = scan_roms(root, &["gba".into()]);
     assert_eq!(roms.len(), 1);
+    assert_eq!(roms[0].name, "game");
+}
+
+#[test]
+fn directory_with_rom_extension_is_descended_not_listed() {
+    let temp = tempdir().unwrap();
+    let pack = temp.path().join("Pack.gba");
+    fs::create_dir_all(&pack).unwrap();
+    fs::write(pack.join("inner.gba"), b"ROM").unwrap();
+
+    let roms = scan_roms(temp.path(), &["gba".into()]);
+
+    assert_eq!(roms.len(), 1, "{roms:?}");
+    assert_eq!(roms[0].name, "inner");
+    assert_eq!(roms[0].file, pack.join("inner.gba"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_subdirectory_is_skipped_without_losing_other_results() {
+    use std::os::unix::fs::PermissionsExt;
+    if common::permissions_are_not_enforced() {
+        eprintln!("skipped: the test process ignores directory permissions (root?)");
+        return;
+    }
+    struct Restore<'a>(&'a std::path::Path);
+    impl Drop for Restore<'_> {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(self.0, fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    fs::write(root.join("visible.gba"), b"ROM").unwrap();
+    fs::create_dir_all(root.join("open")).unwrap();
+    fs::write(root.join("open/also_visible.gba"), b"ROM").unwrap();
+    let locked = root.join("locked");
+    fs::create_dir_all(&locked).unwrap();
+    fs::write(locked.join("secret.gba"), b"ROM").unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    let _restore = Restore(&locked);
+
+    let names: Vec<String> = scan_roms(root, &["gba".into()])
+        .into_iter()
+        .map(|r| r.name)
+        .collect();
+
+    assert_eq!(names, ["also_visible", "visible"]);
+}
+
+#[test]
+fn signature_in_root_returns_root_as_single_game() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    fs::write(root.join("EBOOT.BIN"), b"Signature").unwrap();
+    fs::write(root.join("ordinary.bin"), b"ROM").unwrap();
+
+    let roms = scan_roms(root, &["bin".into()]);
+
+    assert_eq!(roms.len(), 1, "{roms:?}");
+    assert_eq!(roms[0].file, root);
+    assert_eq!(
+        roms[0].name,
+        root.file_name().unwrap().to_string_lossy().as_ref()
+    );
+    assert_eq!(roms[0].extension, "bin");
+}
+
+#[test]
+fn duplicate_extension_spellings_do_not_duplicate_results() {
+    let temp = tempdir().unwrap();
+    fs::write(temp.path().join("game.gba"), b"ROM").unwrap();
+
+    let roms = scan_roms(temp.path(), &["gba".into(), ".GBA".into(), " gba ".into()]);
+
+    assert_eq!(roms.len(), 1, "{roms:?}");
     assert_eq!(roms[0].name, "game");
 }
