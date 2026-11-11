@@ -5,14 +5,14 @@ use crate::{
     file_sha256,
 };
 use emusync_domain::config::{AppConfig, CredentialSnapshot, CredentialTransaction};
+#[cfg(target_os = "linux")]
+use emusync_domain::sync::DirectoryDownload;
 use emusync_domain::sync::{
-    CloudSaveTransfer, Decision, DirectoryDownload, LocalSaveFiles, RemoteState, plan_tracked,
+    CloudSaveTransfer, Decision, LocalSaveFiles, RemoteState, plan_tracked,
 };
-use std::{
-    fmt, io,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+#[cfg(target_os = "linux")]
+use std::path::Path;
+use std::{fmt, io, path::PathBuf, sync::Arc};
 
 /// Original inputs retained with an uncertain or locally incomplete upload.
 #[derive(Clone, Debug)]
