@@ -29,6 +29,7 @@ use emusync_data_local::{
 };
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
+    execution::PathPicker,
     library::{GameEntry, SaveTarget, SteamLibrary},
     sync::{
         Decision, PostSyncFailure, SaveConflict, SaveSetupResult, SaveSynchronizer, SyncEvent,
@@ -77,7 +78,7 @@ impl DesktopCoordinator {
     ) -> Self {
         let steam = DesktopSteamLibrary::new(SteamShortcutManager::new());
         let browser = Arc::new(DesktopBrowserLauncher);
-        let picker = FilePicker;
+        let picker = Arc::new(FilePicker);
         let scan_revision = Arc::new(AtomicU64::new(0));
 
         let platform = PlatformServices {
@@ -112,6 +113,15 @@ impl DesktopCoordinator {
 
     pub fn with_endpoints(mut self, endpoints: DriveEndpoints) -> Self {
         self.endpoints = endpoints;
+        self
+    }
+
+    /// Replaces the native file chooser, so tests can script its answers.
+    pub fn with_path_picker(
+        mut self,
+        picker: Arc<dyn PathPicker<Error = std::io::Error> + Send + Sync>,
+    ) -> Self {
+        self.platform.picker = picker;
         self
     }
 

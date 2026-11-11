@@ -6,7 +6,7 @@ use emusync_domain::{
     execution::{BrowserLauncher, PathPicker, PickerType},
     library::{GameEntry, SaveTarget, SaveTargetAccess, SaveTargetType, SteamLibrary},
 };
-use emusync_platform_desktop::{DesktopBrowserLauncher, DesktopSteamLibrary, FilePicker};
+use emusync_platform_desktop::{DesktopBrowserLauncher, DesktopSteamLibrary};
 use emusync_presentation::model::{GameItem, PathTarget, PickMode};
 use std::{
     path::Path,
@@ -23,7 +23,7 @@ pub struct PlatformServices {
     pub config_manager: ConfigManager,
     pub steam: DesktopSteamLibrary,
     pub browser: Arc<DesktopBrowserLauncher>,
-    pub picker: FilePicker,
+    pub picker: Arc<dyn PathPicker<Error = std::io::Error> + Send + Sync>,
     pub event_tx: Sender<AppEvent>,
     pub redraw: Arc<dyn Fn() + Send + Sync>,
     pub tokio_handle: Handle,
@@ -76,7 +76,7 @@ impl PlatformServices {
         target: PathTarget,
         mode: PickMode,
     ) -> tokio::task::JoinHandle<()> {
-        let picker = self.picker;
+        let picker = self.picker.clone();
         let tx = self.event_tx.clone();
         let redraw = self.redraw.clone();
 

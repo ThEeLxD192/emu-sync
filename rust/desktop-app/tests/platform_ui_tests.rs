@@ -1,15 +1,26 @@
+mod common;
+
+use common::wait_for_active_tasks;
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{
     AppEvent, DesktopCoordinator, apply_steam_state_refreshed, scan_entry_games,
 };
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore},
+    execution::{PathPicker, PickerType},
     library::{Emulator, EntryCommon, GameEntry, NativeGame},
 };
 use emusync_platform_desktop::{DesktopSteamLibrary, SteamShortcutManager};
-use emusync_presentation::{actions::UiAction, model::GameItem};
+use emusync_presentation::{
+    actions::UiAction,
+    model::{GameItem, PathTarget, PickMode},
+};
 use std::collections::HashSet;
-use std::sync::{Arc, mpsc::channel};
+use std::sync::{
+    Arc,
+    mpsc::{TryRecvError, channel},
+};
+use std::time::Duration;
 use tempfile::tempdir;
 
 fn test_native(name: &str) -> GameEntry {
@@ -289,9 +300,96 @@ fn stale_steam_refresh_does_not_overwrite_newer_state() {
     assert_eq!(revision, 2);
 }
 
-// `picked_path_event_echoes_the_request_id` is not written: `PlatformServices` holds the
-// concrete native `FilePicker`, so no fake picker can be injected without opening a
-// real dialog.
+/// Picker that answers every request with a scripted result and reports each call.
+struct ScriptedPicker {
+    answer: fn() -> std::io::Result<Option<String>>,
+}
+
+impl PathPicker for ScriptedPicker {
+    type Error = std::io::Error;
+
+    fn pick(
+        &self,
+        _label: &str,
+        _initial_path: &str,
+        _kind: PickerType,
+    ) -> Result<Option<String>, Self::Error> {
+        (self.answer)()
+    }
+}
+
+fn coordinator_with_picker(
+    answer: fn() -> std::io::Result<Option<String>>,
+) -> (DesktopCoordinator, std::sync::mpsc::Receiver<AppEvent>) {
+    let dir = tempdir().unwrap();
+    let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
+    let (tx, rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager,
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    )
+    .with_path_picker(Arc::new(ScriptedPicker { answer }));
+    (coordinator, rx)
+}
+
+fn pick_cover_file(request_id: u64) -> UiAction {
+    UiAction::PickPath {
+        request_id,
+        target: PathTarget::CoverPath,
+        mode: PickMode::File,
+    }
+}
+
+#[tokio::test]
+async fn picked_path_event_echoes_the_request_id() {
+    let (coordinator, rx) = coordinator_with_picker(|| Ok(Some("/x".to_string())));
+
+    coordinator.handle_action(pick_cover_file(42));
+
+    let event = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("path picked");
+    assert_eq!(
+        event,
+        AppEvent::PathPicked {
+            request_id: 42,
+            target: PathTarget::CoverPath,
+            mode: PickMode::File,
+            path: "/x".to_string(),
+        }
+    );
+}
+
+#[tokio::test]
+async fn cancelled_picker_sends_no_event() {
+    let (coordinator, rx) = coordinator_with_picker(|| Ok(None));
+
+    coordinator.handle_action(pick_cover_file(7));
+    wait_for_active_tasks(&coordinator).await;
+
+    assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+}
+
+#[tokio::test]
+async fn failing_picker_reports_a_toast() {
+    let (coordinator, rx) = coordinator_with_picker(|| Err(std::io::Error::other("no portal")));
+
+    coordinator.handle_action(pick_cover_file(7));
+    wait_for_active_tasks(&coordinator).await;
+
+    match rx.try_recv() {
+        Ok(AppEvent::Toast(message)) => {
+            assert!(
+                message.starts_with("Could not open file chooser:"),
+                "{message}"
+            );
+        }
+        other => panic!("expected a toast, got {other:?}"),
+    }
+    assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+}
 
 #[tokio::test]
 async fn restore_preview_event_echoes_the_request_id() {
