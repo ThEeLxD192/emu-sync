@@ -1378,6 +1378,12 @@ Continuación de descargas (Linux, 2026-11-06): el adaptador usa ahora confirmac
 - Extra Rust por decisión del usuario: Client Secret oculto por defecto con un botón para mostrarlo; Kotlin lo muestra en claro. No cambia credenciales, OAuth ni lo que se guarda.
 - Pruebas en `presentation/tests/ui_view_tests.rs`: `drive_setup_sends_trimmed_credentials_and_flags_blank_ones` y `drive_setup_opens_with_stored_credentials_and_closes_on_escape`; se retira `app_opens_drive_setup_and_emits_connect_action`, que insertaba la acción a mano y no ejercitaba el diálogo. `cargo xtask quality` y pruebas de `presentation`, `desktop-app` y `application` (268 aprobadas, cero fallos). Revisión visual del estado sin vincular a cargo del usuario; el estado vinculado no se abrió con credenciales reales. Gradle no se repitió. Windows y Steam Deck pendientes.
 
+#### Continuación R7 — diálogo de actualización (2026-11-10, Linux)
+
+- Estructura y textos de `UpdateDialog` Kotlin: Update Available con notas desplazables, Later / Update Now; descarga con barra y porcentaje; Update Complete! con textos y botones propios de Steam Deck Game Mode (Close to Apply) o escritorio (Restart Now / Restart Later); Update Error con Close. Como en Kotlin, no se cierra con Escape ni clic fuera durante la descarga y Restart Now solo solicita el reinicio. Idle y Checking se mantienen como extra Rust del botón Check Updates.
+- Las acciones de actualización siguen desactivadas en la composición de desarrollo. Para revisar el diálogo, solo en compilaciones debug, `--preview-update=<available|downloading|ready|ready-steam|error>` abre la aplicación con un estado sintético; en release el argumento sigue rechazándose (Clippy release sin advertencias).
+- Pruebas: `update_dialog_cannot_be_dismissed_while_downloading` y, en `main.rs`, `preview_update_is_taken_out_before_parsing_config`. `cargo xtask quality` y pruebas de `presentation`, `desktop-app` y `application` (270 aprobadas, cero fallos). Capturas Linux de available, downloading y ready-steam. Gradle no se repitió. Windows y Steam Deck pendientes; no se descargó ni instaló ninguna actualización.
+
 ### R8 — Empaquetado y cierre
 
 - [x] Generar AppImage independiente (Linux) y borradores WiX (Windows diferido); comprobar arranque, transición desde Kotlin y compatibilidad gráfica/FUSE en Linux.

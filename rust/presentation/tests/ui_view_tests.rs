@@ -525,3 +525,41 @@ fn drive_setup_opens_with_stored_credentials_and_closes_on_escape() {
         "closing must not connect or unlink"
     );
 }
+
+#[test]
+fn update_dialog_cannot_be_dismissed_while_downloading() {
+    use emusync_application::UpdateState;
+
+    let info = UpdateInfo {
+        version: "9.9.9".into(),
+        tag_name: "v9.9.9".into(),
+        release_notes: "Notes".into(),
+        download_url: String::new(),
+        asset_size: 0,
+        asset_name: "asset".into(),
+    };
+    for (state, closes) in [
+        (
+            UpdateState::Downloading {
+                progress: 0.5,
+                info: info.clone(),
+            },
+            false,
+        ),
+        (UpdateState::Available(info), true),
+    ] {
+        let ctx = Context::default();
+        let mut app = EmuSyncApp::new();
+        app.state.update_state = state.clone();
+        app.open_update_dialog();
+
+        run_frames(&ctx, &mut app, vec![Vec::new(), escape()]);
+
+        assert_eq!(
+            matches!(app.active_dialog, ActiveDialog::None),
+            closes,
+            "Escape with {state:?}"
+        );
+        assert!(app.take_actions().is_empty());
+    }
+}

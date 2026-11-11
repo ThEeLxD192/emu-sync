@@ -9,9 +9,9 @@ use crate::{
     cover_cache::CoverCache,
     dialogs::{
         ConfirmDeleteOutcome, DriveSetupDialogState, DriveSetupEvents, EntryDialogEvents,
-        GameEditDialogEvents, StatusOverlayEvents, render_confirm_delete_dialog,
-        render_drive_setup_dialog, render_entry_dialog, render_game_edit_dialog,
-        render_status_overlay, render_update_dialog,
+        GameEditDialogEvents, StatusOverlayEvents, UpdateDialogEvents,
+        render_confirm_delete_dialog, render_drive_setup_dialog, render_entry_dialog,
+        render_game_edit_dialog, render_status_overlay, render_update_dialog,
     },
     forms::{EntryFormState, GameEditFormState, entry_form::existing_groups},
     model::{AppStatus, GameItem, PathTarget, PickMode, SaveSetupRequest},
@@ -471,9 +471,11 @@ impl EmuSyncApp {
                     &ctx,
                     &self.state.update_state,
                     &self.state.current_version,
-                    &mut |info| download_info = Some(info),
-                    &mut |path| restart_path = Some(path),
-                    &mut || close_dialog = true,
+                    UpdateDialogEvents {
+                        on_download: &mut |info| download_info = Some(info),
+                        on_restart: &mut |path| restart_path = Some(path),
+                        on_close: &mut || close_dialog = true,
+                    },
                 );
 
                 if let Some(info) = download_info {

@@ -1,232 +1,188 @@
-//! Dialog showing update details, progress bar, and restart confirmation.
+//! Update dialog, laid out like Kotlin's `UpdateDialog`.
 
-use crate::theme::{
-    DIVIDER, ERROR, ON_BACKGROUND, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, SUCCESS, SURFACE,
+use crate::{
+    components::{icons::paint_glyph, pill::Pill},
+    dialogs::form_fields::{primary_button, text_button},
+    theme::{
+        DIVIDER, ERROR, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, PRIMARY_CONTAINER, SURFACE,
+        SURFACE_VARIANT, bold, glyph,
+    },
 };
 use egui::{
-    Button, Color32, CornerRadius, Frame, Id, Margin, Modal, ProgressBar, RichText, ScrollArea,
-    Stroke, Vec2,
+    Align, Color32, FontId, Frame, Id, Label, Layout, Margin, Modal, RichText, ScrollArea, Sense,
+    Stroke, Ui, vec2,
 };
 use emusync_application::UpdateState;
 use emusync_domain::update::UpdateInfo;
 use std::path::PathBuf;
 
-/// Renders the Software Update dialog.
+/// Callbacks the update dialog reports to the application.
+pub struct UpdateDialogEvents<'a> {
+    pub on_download: &'a mut dyn FnMut(UpdateInfo),
+    pub on_restart: &'a mut dyn FnMut(PathBuf),
+    pub on_close: &'a mut dyn FnMut(),
+}
+
+/// Whether Escape or a click outside may close the dialog: never while downloading,
+/// as Kotlin's `onDismissRequest`.
+pub fn update_dialog_dismissible(state: &UpdateState) -> bool {
+    !matches!(state, UpdateState::Downloading { .. })
+}
+
+/// Renders the update dialog for `state`.
 pub fn render_update_dialog(
     ctx: &egui::Context,
     state: &UpdateState,
     current_version: &str,
-    on_download: &mut impl FnMut(UpdateInfo),
-    on_restart: &mut impl FnMut(PathBuf),
-    on_close: &mut impl FnMut(),
+    events: UpdateDialogEvents<'_>,
 ) {
-    Modal::new(Id::unique("update_dialog_modal"))
+    let UpdateDialogEvents {
+        on_download,
+        on_restart,
+        on_close,
+    } = events;
+    let modal = Modal::new(Id::unique("update_dialog_modal"))
         .backdrop_color(Color32::from_black_alpha(160))
         .frame(
             Frame::new()
                 .fill(SURFACE)
                 .stroke(Stroke::new(1.0, DIVIDER))
-                .corner_radius(CornerRadius::same(12))
+                .corner_radius(16)
                 .inner_margin(Margin::same(24)),
         )
         .show(ctx, |ui| {
             ui.set_width(460.0);
-
-            ui.vertical(|ui| match state {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            match state {
                 UpdateState::Available(info) => {
-                    ui.label(
-                        RichText::new("A new version of EmuSync is available!")
-                            .size(15.0)
-                            .strong()
-                            .color(ON_BACKGROUND),
+                    icon_header(
+                        ui,
+                        glyph::UPDATE,
+                        "Update Available",
+                        &format!("Version {} (current: {current_version})", info.version),
                     );
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(format!(
-                            "Version: {} (Current: {})",
-                            info.version, current_version
-                        ))
-                        .size(12.0)
-                        .color(PRIMARY),
-                    );
-
-                    ui.add_space(12.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-
-                    ui.label(
-                        RichText::new("Release Notes:")
-                            .size(12.0)
-                            .strong()
-                            .color(ON_SURFACE),
-                    );
-                    ui.add_space(4.0);
-
-                    ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
-                        let body = if info.release_notes.trim().is_empty() {
-                            "No release notes provided."
-                        } else {
-                            &info.release_notes
-                        };
-                        ui.label(RichText::new(body).size(11.0).color(ON_SURFACE_DIM));
-                    });
-
                     ui.add_space(16.0);
-                    ui.separator();
-                    ui.add_space(12.0);
-
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let info_clone = info.clone();
-                            if ui
-                                .add(
-                                    Button::new(
-                                        RichText::new("Download and Update")
+                    ui.label(RichText::new("Release Notes:").font(bold(12.0)).color(ON_SURFACE));
+                    ui.add_space(6.0);
+                    Frame::new()
+                        .fill(SURFACE_VARIANT)
+                        .corner_radius(8)
+                        .inner_margin(Margin::same(12))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                                ui.add(
+                                    Label::new(
+                                        RichText::new(&info.release_notes)
                                             .size(12.0)
-                                            .strong()
-                                            .color(Color32::WHITE),
+                                            .color(ON_SURFACE),
                                     )
-                                    .fill(PRIMARY)
-                                    .min_size(Vec2::new(160.0, 28.0)),
-                                )
-                                .clicked()
-                            {
-                                on_download(info_clone);
-                            }
-
-                            if ui
-                                .add(
-                                    Button::new(
-                                        RichText::new("Later").size(12.0).color(ON_SURFACE),
-                                    )
-                                    .min_size(Vec2::new(70.0, 28.0)),
-                                )
-                                .clicked()
-                            {
-                                on_close();
-                            }
+                                    .wrap(),
+                                );
+                            });
                         });
+                    ui.add_space(20.0);
+                    button_row(ui, |ui| {
+                        let update_now = Pill {
+                            icon: Some((glyph::DOWNLOAD, Color32::WHITE)),
+                            text: "Update Now",
+                            text_color: Color32::WHITE,
+                            font: FontId::proportional(13.0),
+                            fill: PRIMARY,
+                            padding: vec2(20.0, 0.0),
+                            min_height: 40.0,
+                            corner_radius: 20,
+                            ..Pill::default()
+                        };
+                        if update_now.show(ui).clicked() {
+                            on_download(info.clone());
+                        }
+                        if text_button(ui, "Later", PRIMARY).clicked() {
+                            on_close();
+                        }
                     });
                 }
                 UpdateState::Downloading { progress, info } => {
                     ui.label(
-                        RichText::new("Downloading Update...")
-                            .size(15.0)
-                            .strong()
-                            .color(ON_BACKGROUND),
+                        RichText::new("Downloading update...")
+                            .font(bold(15.0))
+                            .color(ON_SURFACE),
                     );
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
                     ui.label(
-                        RichText::new(format!("Downloading version {}", info.version))
+                        RichText::new(format!("Downloading version {} from GitHub", info.version))
                             .size(12.0)
                             .color(ON_SURFACE_DIM),
                     );
-
                     ui.add_space(16.0);
-                    ui.add(ProgressBar::new(*progress).show_percentage().animate(true));
-
-                    ui.add_space(16.0);
-                    ui.label(
-                        RichText::new("Please wait while the update is safely downloaded.")
-                            .size(11.0)
-                            .color(ON_SURFACE_DIM),
-                    );
+                    progress_bar(ui, *progress);
+                    ui.add_space(8.0);
+                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        ui.label(
+                            RichText::new(format!("{}%", (progress * 100.0) as u32))
+                                .size(11.0)
+                                .color(ON_SURFACE_DIM),
+                        );
+                    });
                 }
                 UpdateState::ReadyToRestart {
                     downloaded_path,
                     is_steam_game_mode,
                 } => {
-                    ui.label(
-                        RichText::new("Update Ready to Install!")
-                            .size(15.0)
-                            .strong()
-                            .color(SUCCESS),
+                    let steam = *is_steam_game_mode;
+                    icon_header(
+                        ui,
+                        glyph::RESTART,
+                        "Update Complete!",
+                        if steam {
+                            "The new version is ready to apply."
+                        } else {
+                            "The new version is ready to install."
+                        },
                     );
-                    ui.add_space(4.0);
-
-                    if *is_steam_game_mode {
-                        ui.label(
-                            RichText::new(
-                                "Update applied. SteamOS will launch the new version when closed.",
-                            )
-                            .size(12.0)
-                            .color(ON_SURFACE),
-                        );
-                    } else {
-                        ui.label(
-                            RichText::new(
-                                "Click restart to apply the update and relaunch EmuSync.",
-                            )
-                            .size(12.0)
-                            .color(ON_SURFACE),
-                        );
-                    }
-
                     ui.add_space(16.0);
-                    ui.separator();
-                    ui.add_space(12.0);
-
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let path = PathBuf::from(downloaded_path);
-                            if ui
-                                .add(
-                                    Button::new(
-                                        RichText::new("Restart Now")
-                                            .size(12.0)
-                                            .strong()
-                                            .color(Color32::WHITE),
-                                    )
-                                    .fill(SUCCESS)
-                                    .min_size(Vec2::new(120.0, 28.0)),
-                                )
-                                .clicked()
-                            {
-                                on_restart(path);
-                                on_close();
-                            }
-
-                            if ui
-                                .add(
-                                    Button::new(
-                                        RichText::new("Later").size(12.0).color(ON_SURFACE),
-                                    )
-                                    .min_size(Vec2::new(70.0, 28.0)),
-                                )
-                                .clicked()
-                            {
-                                on_close();
-                            }
-                        });
-                    });
-                }
-                UpdateState::Error(err) => {
-                    ui.label(
-                        RichText::new("Update Check Failed")
-                            .size(15.0)
-                            .strong()
-                            .color(ERROR),
+                    ui.add(
+                        Label::new(
+                            RichText::new(if steam {
+                                "In Steam Deck Game Mode, closing EmuSync applies the update. You can then relaunch it from Steam to start the new version."
+                            } else {
+                                "To apply changes and enjoy the new version, restart EmuSync."
+                            })
+                            .size(13.0)
+                            .color(ON_SURFACE),
+                        )
+                        .wrap(),
                     );
-                    ui.add_space(8.0);
-                    ui.label(RichText::new(err).size(12.0).color(ON_SURFACE));
-
-                    ui.add_space(16.0);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(
-                                Button::new(RichText::new("Close").size(12.0).color(ON_SURFACE))
-                                    .min_size(Vec2::new(70.0, 28.0)),
-                            )
+                    ui.add_space(20.0);
+                    button_row(ui, |ui| {
+                        if primary_button(ui, if steam { "Close to Apply" } else { "Restart Now" })
+                            .clicked()
+                        {
+                            on_restart(PathBuf::from(downloaded_path));
+                        }
+                        if text_button(ui, if steam { "Later" } else { "Restart Later" }, PRIMARY)
                             .clicked()
                         {
                             on_close();
                         }
                     });
                 }
+                UpdateState::Error(message) => {
+                    ui.label(RichText::new("Update Error").font(bold(15.0)).color(ERROR));
+                    ui.add_space(8.0);
+                    ui.add(Label::new(RichText::new(message).size(13.0).color(ON_SURFACE)).wrap());
+                    ui.add_space(16.0);
+                    button_row(ui, |ui| {
+                        if primary_button(ui, "Close").clicked() {
+                            on_close();
+                        }
+                    });
+                }
+                // Rust-only states, reached from the "Check Updates" extra.
                 UpdateState::Checking => {
                     ui.label(
                         RichText::new("Checking for updates...")
-                            .size(14.0)
+                            .size(13.0)
                             .color(PRIMARY),
                     );
                 }
@@ -236,19 +192,50 @@ pub fn render_update_dialog(
                             .size(13.0)
                             .color(ON_SURFACE),
                     );
-                    ui.add_space(12.0);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(
-                                Button::new(RichText::new("Close").size(12.0).color(ON_SURFACE))
-                                    .min_size(Vec2::new(70.0, 28.0)),
-                            )
-                            .clicked()
-                        {
+                    ui.add_space(16.0);
+                    button_row(ui, |ui| {
+                        if primary_button(ui, "Close").clicked() {
                             on_close();
                         }
                     });
                 }
-            });
+            }
         });
+    if modal.should_close() && update_dialog_dismissible(state) {
+        on_close();
+    }
+}
+
+fn icon_header(ui: &mut Ui, icon: &str, title: &str, subtitle: &str) {
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+        ui.painter().rect_filled(rect, 10, PRIMARY_CONTAINER);
+        paint_glyph(ui, rect.center(), icon, 24.0, PRIMARY);
+        ui.add_space(12.0);
+        ui.vertical(|ui| {
+            ui.label(RichText::new(title).font(bold(20.0)).color(ON_SURFACE));
+            ui.label(RichText::new(subtitle).size(12.0).color(ON_SURFACE_DIM));
+        });
+    });
+}
+
+fn button_row(ui: &mut Ui, add_buttons: impl FnOnce(&mut Ui)) {
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), 40.0),
+        Layout::right_to_left(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            add_buttons(ui);
+        },
+    );
+}
+
+fn progress_bar(ui: &mut Ui, progress: f32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 8.0), Sense::hover());
+    ui.painter().rect_filled(rect, 4, SURFACE_VARIANT);
+    let filled = egui::Rect::from_min_size(
+        rect.min,
+        vec2(rect.width() * progress.clamp(0.0, 1.0), rect.height()),
+    );
+    ui.painter().rect_filled(filled, 4, PRIMARY);
 }

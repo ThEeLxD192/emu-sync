@@ -380,8 +380,68 @@ fn config_argument(
     Ok(config)
 }
 
+/// Debug builds only: `--preview-update=<state>` opens the update dialog with a
+/// synthetic update so it can be reviewed. Downloads and restarts stay disabled in
+/// this build, so the preview cannot change the installation.
+#[cfg(debug_assertions)]
+fn take_preview_update(
+    args: Vec<OsString>,
+) -> Result<(Vec<OsString>, Option<emusync_application::UpdateState>), &'static str> {
+    let mut rest = Vec::new();
+    let mut preview = None;
+    for arg in args {
+        match arg
+            .to_str()
+            .and_then(|a| a.strip_prefix("--preview-update="))
+        {
+            Some(name) => {
+                if preview.is_some() {
+                    return Err("--preview-update may only be specified once");
+                }
+                preview = Some(preview_update_state(name).ok_or(
+                    "--preview-update expects available, downloading, ready, ready-steam or error",
+                )?);
+            }
+            None => rest.push(arg),
+        }
+    }
+    Ok((rest, preview))
+}
+
+#[cfg(debug_assertions)]
+fn preview_update_state(name: &str) -> Option<emusync_application::UpdateState> {
+    use emusync_application::UpdateState;
+    let info = emusync_domain::update::UpdateInfo {
+        version: "9.9.9".to_string(),
+        tag_name: "v9.9.9".to_string(),
+        release_notes: "Preview release notes.\n\n- First change\n- Second change\n- A longer line that wraps inside the release notes box to check the layout."
+            .to_string(),
+        download_url: String::new(),
+        asset_size: 0,
+        asset_name: "EmuSync-preview".to_string(),
+    };
+    let ready = |is_steam_game_mode| UpdateState::ReadyToRestart {
+        downloaded_path: "/nonexistent/emusync-preview-update".to_string(),
+        is_steam_game_mode,
+    };
+    Some(match name {
+        "available" => UpdateState::Available(info),
+        "downloading" => UpdateState::Downloading {
+            progress: 0.42,
+            info,
+        },
+        "ready" => ready(false),
+        "ready-steam" => ready(true),
+        "error" => UpdateState::Error("Preview: the download could not be verified.".to_string()),
+        _ => return None,
+    })
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let explicit = config_argument(std::env::args_os().skip(1))?;
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    #[cfg(debug_assertions)]
+    let (args, preview_update) = take_preview_update(args)?;
+    let explicit = config_argument(args)?;
     let path = emusync_data_local::resolve_config_location(explicit.as_deref())?;
     let configuration = emusync_data_local::ConfigManager::new(&path)?;
     configuration.load()?;
@@ -392,6 +452,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut emusync_app = EmuSyncApp::new();
     emusync_app.fullscreen_detector = SteamShortcutManager::detect_fullscreen_args;
     emusync_app.state.config_path = path.display().to_string();
+    #[cfg(debug_assertions)]
+    if let Some(state) = preview_update {
+        emusync_app.state.update_state = state;
+        emusync_app.state.show_update_dialog = true;
+    }
     let mut app = App {
         window: None,
         state: None,
@@ -428,6 +493,39 @@ mod tests {
         );
         assert!(config_argument([OsString::from("--config")]).is_err());
         assert!(config_argument([OsString::from("--other")]).is_err());
+    }
+    #[test]
+    fn preview_update_is_taken_out_before_parsing_config() {
+        use super::{config_argument, take_preview_update};
+        use std::ffi::OsString;
+
+        let (rest, preview) = take_preview_update(vec![
+            OsString::from("--config"),
+            OsString::from("c.json"),
+            OsString::from("--preview-update=ready-steam"),
+        ])
+        .unwrap();
+        assert!(matches!(
+            preview,
+            Some(emusync_application::UpdateState::ReadyToRestart {
+                is_steam_game_mode: true,
+                ..
+            })
+        ));
+        assert_eq!(
+            config_argument(rest).unwrap(),
+            Some(OsString::from("c.json"))
+        );
+        assert!(take_preview_update(vec![OsString::from("--preview-update=nope")]).is_err());
+        assert!(
+            take_preview_update(vec![
+                OsString::from("--preview-update=error"),
+                OsString::from("--preview-update=ready"),
+            ])
+            .is_err()
+        );
+        // Without the debug-only prefix the argument is still rejected.
+        assert!(config_argument([OsString::from("--preview-update")]).is_err());
     }
     #[test]
     fn default_fonts_render_the_preview_text() {

@@ -15,4 +15,4 @@ pub use game_edit_dialog::{GameEditDialogEvents, render_game_edit_dialog};
 pub use status_overlay::{
     StatusOverlayEvents, conflict_card_id, post_sync_failed_message, render_status_overlay,
 };
-pub use update_dialog::render_update_dialog;
+pub use update_dialog::{UpdateDialogEvents, render_update_dialog, update_dialog_dismissible};
