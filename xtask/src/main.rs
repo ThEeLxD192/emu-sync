@@ -68,7 +68,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         "warnings",
     ])?;
     if command == "check" {
-        run(&["test", "--workspace", "--locked"])?;
+        // Run every test binary so one failure does not hide the others.
+        run(&["test", "--workspace", "--locked", "--no-fail-fast"])?;
     }
     Ok(())
 }
