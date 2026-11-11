@@ -9,8 +9,8 @@ use crate::{
     cover_cache::CoverCache,
     dialogs::{
         ConfirmDeleteOutcome, DriveSetupDialogState, EntryDialogEvents, GameEditDialogEvents,
-        render_confirm_delete_dialog, render_drive_setup_dialog, render_entry_dialog,
-        render_game_edit_dialog, render_status_overlay, render_update_dialog,
+        StatusOverlayEvents, render_confirm_delete_dialog, render_drive_setup_dialog,
+        render_entry_dialog, render_game_edit_dialog, render_status_overlay, render_update_dialog,
     },
     forms::{EntryFormState, GameEditFormState, entry_form::existing_groups},
     model::{AppStatus, GameItem, PathTarget, PickMode, SaveSetupRequest},
@@ -44,6 +44,8 @@ pub struct EmuSyncApp {
     pub active_dialog: ActiveDialog,
     pub pending_actions: Vec<UiAction>,
     pub sidebar: SidebarInteraction,
+    /// The conflict already answered, shown as syncing until the status changes.
+    answered_conflict: Option<AppStatus>,
     /// Fullscreen flags auto-detected from an emulator executable, injected by the
     /// composition (Kotlin's `LibraryFormActions.detectFullscreenArgs`).
     pub fullscreen_detector: fn(&str) -> String,
@@ -67,6 +69,7 @@ impl EmuSyncApp {
             active_dialog: ActiveDialog::None,
             pending_actions: Vec::new(),
             sidebar: SidebarInteraction::default(),
+            answered_conflict: None,
             fullscreen_detector: no_fullscreen_flags,
         }
     }
@@ -78,6 +81,7 @@ impl EmuSyncApp {
             active_dialog: ActiveDialog::None,
             pending_actions: Vec::new(),
             sidebar: SidebarInteraction::default(),
+            answered_conflict: None,
             fullscreen_detector: no_fullscreen_flags,
         }
     }
@@ -497,16 +501,25 @@ impl EmuSyncApp {
         let mut retry_post_sync = false;
         let mut dismiss_status = false;
 
+        // A choice is remembered only for the conflict it answered, like Kotlin's
+        // `remember(gameName, localDate, cloudDate)`; any other status forgets it.
+        if self.answered_conflict.as_ref() != Some(&self.state.status) {
+            self.answered_conflict = None;
+        }
         render_status_overlay(
             &ctx,
             &self.state.status,
-            &mut |decision| resolve_conflict = Some(decision),
-            &mut || retry_post_sync = true,
-            &mut || dismiss_status = true,
+            self.answered_conflict.is_some(),
+            StatusOverlayEvents {
+                on_resolve_conflict: &mut |decision| resolve_conflict = Some(decision),
+                on_retry_post_sync: &mut || retry_post_sync = true,
+                on_dismiss: &mut || dismiss_status = true,
+            },
         );
 
         if let Some(decision) = resolve_conflict {
             actions.push(UiAction::ResolveConflict(decision));
+            self.answered_conflict = Some(self.state.status.clone());
         }
         if retry_post_sync {
             actions.push(UiAction::RetryPostSync);

@@ -33,3 +33,20 @@ pub fn glyph_button(
     paint_glyph(ui, rect.center(), glyph, size, color);
     response
 }
+
+/// Paints a glyph rotated `angle` radians clockwise around its painted center.
+pub fn paint_glyph_rotated(
+    ui: &Ui,
+    center: Pos2,
+    glyph: &str,
+    size: f32,
+    color: Color32,
+    angle: f32,
+) {
+    let galley =
+        ui.painter()
+            .layout_no_wrap(glyph.to_owned(), egui::FontId::proportional(size), color);
+    let offset = egui::emath::Rot2::from_angle(angle) * galley.mesh_bounds.center().to_vec2();
+    ui.painter()
+        .add(egui::epaint::TextShape::new(center - offset, galley, color).with_angle(angle));
+}

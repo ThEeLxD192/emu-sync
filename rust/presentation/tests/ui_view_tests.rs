@@ -340,50 +340,156 @@ fn entry_dialog_renders_both_entry_types_headless() {
     assert!(app.take_actions().is_empty());
 }
 
-#[test]
-fn running_game_overlay_ignores_escape_and_clicks_outside() {
-    let ctx = Context::default();
-    let mut app = EmuSyncApp::new();
-    app.state.status = AppStatus::Playing;
+fn screen() -> egui::Rect {
+    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))
+}
 
-    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
-    let corner = egui::pos2(5.0, 5.0);
-    let frames = [
-        vec![egui::Event::Key {
-            key: egui::Key::Escape,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::NONE,
-        }],
-        vec![egui::Event::PointerMoved(corner)],
-        vec![egui::Event::PointerButton {
-            pos: corner,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        }],
-        vec![egui::Event::PointerButton {
-            pos: corner,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        }],
+fn escape() -> Vec<egui::Event> {
+    vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]
+}
+
+/// Frames that move the pointer to `pos`, press and release the primary button.
+fn click_at(pos: egui::Pos2) -> Vec<Vec<egui::Event>> {
+    let button = |pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    vec![
+        vec![egui::Event::PointerMoved(pos)],
+        vec![button(true)],
+        vec![button(false)],
         Vec::new(),
-    ];
+    ]
+}
+
+fn run_frames(ctx: &Context, app: &mut EmuSyncApp, frames: Vec<Vec<egui::Event>>) {
     for events in frames {
         let input = RawInput {
-            screen_rect: Some(screen),
+            screen_rect: Some(screen()),
             events,
             ..RawInput::default()
         };
         let output = ctx.run_ui(input, |ui| app.update(ui));
         output.drop_without_applying_deltas();
     }
+}
 
-    assert_eq!(app.state.status, AppStatus::Playing);
+#[test]
+fn operation_overlays_ignore_escape_and_clicks_outside() {
+    let statuses = [
+        AppStatus::Playing,
+        AppStatus::Loading,
+        AppStatus::Syncing {
+            message: "Downloading saves...".to_string(),
+        },
+        AppStatus::Conflict {
+            local_date: "today".to_string(),
+            cloud_date: "yesterday".to_string(),
+            game_name: "Celeste".to_string(),
+        },
+        AppStatus::PostSyncFailed {
+            game_name: "Celeste".to_string(),
+            reason: "Network unavailable".to_string(),
+            completed_save_count: 0,
+            pending_save_count: 1,
+        },
+    ];
+    for status in statuses {
+        let ctx = Context::default();
+        let mut app = EmuSyncApp::new();
+        app.state.status = status.clone();
+
+        let mut frames = vec![escape()];
+        frames.extend(click_at(egui::pos2(5.0, 5.0)));
+        run_frames(&ctx, &mut app, frames);
+
+        assert_eq!(app.state.status, status);
+        assert!(
+            app.take_actions().is_empty(),
+            "{status:?} must not be dismissed by Escape or a click outside"
+        );
+    }
+}
+
+#[test]
+fn conflict_accepts_one_choice_and_then_shows_syncing() {
+    use emusync_presentation::dialogs::conflict_card_id;
+
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    app.state.status = AppStatus::Conflict {
+        local_date: "today".to_string(),
+        cloud_date: "yesterday".to_string(),
+        game_name: "Celeste".to_string(),
+    };
+    run_frames(&ctx, &mut app, vec![Vec::new()]);
+    let local = ctx
+        .read_response(conflict_card_id("Local Save"))
+        .expect("local card is shown")
+        .rect
+        .center();
+    let cloud = ctx
+        .read_response(conflict_card_id("Cloud Save"))
+        .expect("cloud card is shown")
+        .rect
+        .center();
+
+    run_frames(&ctx, &mut app, click_at(local));
+    assert_eq!(
+        app.take_actions(),
+        vec![UiAction::ResolveConflict(Decision::UploadLocal)]
+    );
+
+    // While the coordinator has not changed the status, the other option is gone.
+    run_frames(&ctx, &mut app, click_at(cloud));
     assert!(
         app.take_actions().is_empty(),
-        "no action may end or dismiss a running game"
+        "a second choice must not be sent"
+    );
+    assert!(ctx.read_response(conflict_card_id("Cloud Save")).is_none());
+
+    // A new conflict is asked again.
+    app.state.status = AppStatus::Conflict {
+        local_date: "now".to_string(),
+        cloud_date: "today".to_string(),
+        game_name: "Hollow Knight".to_string(),
+    };
+    run_frames(&ctx, &mut app, vec![Vec::new(), Vec::new()]);
+    assert!(ctx.read_response(conflict_card_id("Cloud Save")).is_some());
+}
+
+#[test]
+fn error_notice_closes_on_escape_like_kotlin() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    app.state.status = AppStatus::Error {
+        message: "Drive quota exceeded".to_string(),
+    };
+
+    run_frames(&ctx, &mut app, vec![Vec::new(), escape()]);
+
+    assert_eq!(app.state.status, AppStatus::Idle);
+    assert_eq!(app.take_actions(), vec![UiAction::ClearStatus]);
+}
+
+#[test]
+fn post_sync_failure_message_reports_partial_progress() {
+    use emusync_presentation::dialogs::post_sync_failed_message;
+
+    assert_eq!(
+        post_sync_failed_message("Celeste", "Network unavailable", 0, 2),
+        "Celeste closed normally. Google Drive was not updated.\n\nNetwork unavailable"
+    );
+    assert_eq!(
+        post_sync_failed_message("Celeste", "Quota", 1, 2),
+        "Celeste closed normally. 1 save(s) synced successfully; 2 save(s) still need to be uploaded.\n\nQuota"
     );
 }
