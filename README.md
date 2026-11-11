@@ -1,6 +1,6 @@
 # EmuSync
 
-A modern, offline-first save synchronization manager and universal launcher for emulators and native PC games, built with **Compose Multiplatform (Kotlin Desktop)**, **Google Drive API**, and **Steam Deck / Steam Shortcut** integration.
+A modern, offline-first save synchronization manager and universal launcher for emulators and native PC games, built natively in **Rust** (egui/wgpu), **Google Drive API**, and **Steam Deck / Steam Shortcut** integration.
 
 ---
 
@@ -13,17 +13,17 @@ A modern, offline-first save synchronization manager and universal launcher for 
 - ⚔️ **Conflict Resolution and Recovery**: Asks which progress to keep when both copies changed and preserves a local recovery copy before restoring cloud content.
 - 🚀 **In-App Auto-Updater**: Built-in update detector against GitHub Releases with background download and in-place restart for AppImage builds.
 - 🕹️ **Steam Deck & Controller Layouts**: One-click registration as Non-Steam games into `shortcuts.vdf` for Steam Big Picture / Game Mode and custom controller profiles.
-- 🐳 **Hermetic Docker Build**: Package reproducible, standalone `.AppImage` binaries without requiring local toolchains.
+- 🐳 **Container Build**: Package the Linux `.AppImage` on a Debian Bookworm baseline with Docker.
 
 ---
 
 ## Architecture
 
-- **UI Framework**: Jetpack Compose Multiplatform (Desktop JVM) with Kotlin Coroutines and StateFlow.
-- **HTTP Engine**: Ktor Client with CIO engine, OAuth 2.0 loopback flow, and resilient timeout handling.
+- **UI**: egui on winit and wgpu, with no JVM or WebView.
+- **Runtime & HTTP**: Tokio for background coordination; reqwest with Rustls for Google Drive (OAuth 2.0 loopback flow) and GitHub Releases.
 - **Auto-Update Engine**: GitHub Releases API integration with atomic AppImage swap and restart.
-- **Steam Integration**: Binary VDF parser/serializer for Steam's `shortcuts.vdf` and launcher shell scripts.
-- **Build System**: Gradle 9.8.2 with Java 25 LTS runtime and AppImage packaging toolchain.
+- **Steam Integration**: Binary VDF parser/serializer for Steam's `shortcuts.vdf` and launcher scripts.
+- **Workspace**: a Cargo workspace under `rust/`, split by capability: `domain` (models, sync rules and contracts), `application` (use cases), `data-local`, `data-drive`, `data-updates`, `platform-desktop` (adapters), `presentation` (UI) and `desktop-app` (startup and composition). `cargo xtask` verifies the dependency direction between layers.
 
 ---
 
@@ -31,7 +31,7 @@ A modern, offline-first save synchronization manager and universal launcher for 
 
 ### Prerequisites
 
-- **JDK 25** (Eclipse Temurin recommended) or **Docker**. Compilation, tests and packaging use the Java 25 toolchain; set `JAVA_HOME` to your JDK 25 installation for local builds.
+- **Rust** with the toolchain pinned in `rust-toolchain.toml` (installed automatically by `rustup`), or **Docker** to build the Linux AppImage.
 - **Linux x86_64** (SteamOS, Ubuntu, Arch, Fedora, Debian) or **Windows 10/11 x86_64**
 
 ---
@@ -80,87 +80,28 @@ You can configure Google Drive credentials directly inside the app by clicking *
 
 ### Code Quality
 
-Use JDK 25 and Git Bash on Windows. The pinned Spotless/ktfmt formatter applies to
-application code, tests, fixtures and Gradle Kotlin scripts. Detekt analyzes each
-JVM compilation with type resolution, with settings adapted to Compose and tests.
-Versions live in `gradle/libs.versions.toml`; shared configuration lives in
-[`build-logic`](build-logic/README.md). The `domain` module owns neutral models, sync rules and capability contracts.
-`data:local` owns configuration, history and recovery; `data:drive` owns OAuth and
-Drive protocol/transfers. `application` coordinates workflows through domain contracts; `data:updates` queries
-and downloads updates, and `platform:desktop` owns desktop integration. `presentation`
-contains Compose and UI controllers; `desktopApp` owns startup, dependency composition,
-resources and packaging. Root commands aggregate or delegate to these modules.
-Final Linux validation and its test/analysis results are recorded in the migration roadmap. Native Windows validation remains pending. See
-[the migration roadmap](AGENTS.md).
-
-In Git Bash on Windows, run `export EMUSYNC_BASH="$(cygpath -w "$BASH")"`
-before the Gradle commands below. This selects Git Bash for script tasks even when
-Windows resolves `bash.exe` to WSL. CI configures this automatically.
-
 ```bash
 # Install the versioned pre-commit hook once per clone
-./gradlew installGitHooks
+./scripts/install-git-hooks.sh
 
-# Apply formatting explicitly, then stage the formatted changes
-./gradlew spotlessApply
+# Formatting, Clippy and architecture checks, without tests
+cargo xtask quality
 
-# Run the extracted sync planner tests
-./gradlew :domain:test --tests 'com.emusync.domain.sync.SyncPlannerTest'
-./gradlew :data:drive:test --tests 'com.emusync.drive.DriveTransferTest'
-./gradlew :data:local:test --tests 'com.emusync.config.ConfigManagerTest'
-
-# Check formatting, module boundaries and static analysis without running tests
-./gradlew qualityCheck
-
-# Run quality checks and the unit tests (also required by CI)
-./gradlew check
+# The same checks plus the full test suite (also required by CI)
+cargo xtask check
 ```
 
-The Rust migration workspace is under `rust/`; its current status and platform
-validation are recorded in [RUST_MIGRATION.md](RUST_MIGRATION.md). With the pinned
-Rust toolchain installed, run `cargo xtask quality` for formatting, Clippy and
-architecture checks, or `cargo xtask check` to include Rust tests. To keep the
-machine responsive, run them as
+To keep the machine responsive, limit parallelism locally, for example
 `CARGO_BUILD_JOBS=2 nice -n 19 cargo test --workspace --locked -- --test-threads=2`
-(add `ionice -c3` if the disk is saturated). The Rust
-preview does not implement synchronization.
+(add `ionice -c3` if the disk is saturated).
 
-For a Linux x86-64 development package built on Debian Bookworm, provide an
-existing `appimagetool` executable and a new output path:
-
-```bash
-APPIMAGETOOL=/path/to/appimagetool \
-  ./scripts/build-rust-container-dev.sh /tmp/EmuSync-rust-dev-x86_64.AppImage
-/tmp/EmuSync-rust-dev-x86_64.AppImage --config /tmp/emusync-rust-dev-config.json
-```
-
-This experimental package includes window-system libraries but still requires
-host graphics drivers and system libraries; it is not a release. Use a
-synthetic configuration and isolated save data while the migration is incomplete.
-The Docker and Gradle commands below continue to build the Kotlin application.
-
-The hook checks an isolated copy of the staged commit when Kotlin, Rust, Gradle or
-quality configuration changes, running the checks relevant to the staged files. Unstaged edits remain untouched. Documentation-only
-and image-only commits skip these checks. The hook never formats or stages files
-and does not run tests. Gradle may download dependencies on the first run.
-
-During adoption, Detekt reports existing and new findings without blocking commits
-or CI. Formatting violations still block both. No baseline is generated. To enforce
-Detekt after the cleanup, set `ignoreFailures` to `false` in the Gradle configuration.
-A legitimate exception may use a suppression on the smallest declaration with an
-adjacent comment explaining why that rule does not apply. The target policy for
-production code is to handle nullable values explicitly instead of using `!!`;
-existing violations will be resolved incrementally. Document important contracts
-and design decisions with KDoc.
-Reports are written to each project's `build/reports/detekt/` and uploaded by CI
-even when analysis findings do not fail the build. Root `test`, `qualityCheck` and
-`check` aggregate the modules. `check` also verifies conventions in a disposable
-project, including test fixtures, failure propagation and configuration cache reuse.
-
-Git hooks can be bypassed and must be installed in each clone. Configure GitHub
-branch protection to require the Linux and Windows validation jobs before merging.
-The installer refuses to replace existing custom hook settings or active hooks.
-To uninstall this repository's hook, run `git config --local --unset core.hooksPath`.
+The hook checks an isolated copy of the staged commit with `cargo xtask quality` when
+Rust sources, manifests or quality configuration change. Unstaged edits remain untouched.
+Documentation-only and image-only commits skip the check. The hook never formats or
+stages files and does not run tests. Git hooks can be bypassed and must be installed in
+each clone; configure GitHub branch protection to require the Linux and Windows CI jobs.
+The installer refuses to replace existing custom hook settings or active hooks. To
+uninstall it, run `git config --local --unset core.hooksPath`.
 
 ---
 
@@ -239,8 +180,6 @@ Windows emulator shortcuts now use Windows PowerShell and a JSON launch manifest
 Arguments, including empty strings, quotes, backslashes and shell metacharacters, are
 passed to the native process as data. Legacy batch wrappers remain as encoded loaders.
 The emulator target must be a native executable; `.bat` and `.cmd` targets are rejected.
-PowerShell launcher integration tests run with Windows PowerShell on Windows, or `pwsh`
-on Linux. Set `EMUSYNC_TEST_PWSH` to test with another PowerShell installation.
 
 When a cloud rename would merge two existing folders, EmuSync checks for duplicate file
 and folder names before moving anything. Duplicates block the rename and preserve both
@@ -295,53 +234,46 @@ outside the UI thread; cached covers are keyed by path, size and modification ti
 
 ### Building & Running
 
-#### 1. Quick Build via Docker (Linux AppImage)
-
-Generate a standalone `EmuSync-x86_64.AppImage` directly in the project root:
+#### Run in development
 
 ```bash
-docker compose build && docker compose run --rm build
+cargo run -p emusync-desktop-app -- --config /tmp/emusync-dev/config.json
 ```
 
-Then run the AppImage:
+Use `--config` with a synthetic configuration and isolated save data while developing.
+
+#### Linux AppImage (Docker)
+
+Provide an `appimagetool` executable and a new output path:
 
 ```bash
+APPIMAGETOOL=/path/to/appimagetool \
+  ./scripts/build-appimage-container.sh ./EmuSync-x86_64.AppImage
 ./EmuSync-x86_64.AppImage
 ```
 
-#### 2. Local Gradle Build (Cross-Platform)
+The binary is built on Debian Bookworm. The AppImage carries window-system libraries
+that the host may lack and uses the host's graphics drivers. `scripts/build-appimage.sh`
+packages a binary built on the host instead.
 
-```bash
-# Run unit tests
-./gradlew test
+#### Windows installers
 
-# Run app directly in development mode
-./gradlew run
-
-# Package for Windows (MSI installer & EXE bootstrapper)
-./gradlew packageReleaseMsi packageReleaseExe
-
-# Prepare the Linux application directory with its bundled runtime
-./gradlew packageReleaseAppImage
-```
-
-The Gradle Linux task prepares `desktopApp/build/compose/binaries/main-release/app/`.
-Use the Docker command above to generate the standalone `EmuSync-x86_64.AppImage`.
-Windows packaging requires a native Windows host; its final migration validation
-is still pending.
+`scripts/build-windows-installers.sh` builds an MSI and an EXE bootstrapper with WiX 4
+on native Windows (Git Bash). These installers have not been validated natively yet and
+are not published in releases.
 
 ---
 
 ## CI/CD & Automated Releases
 
-EmuSync utilizes GitHub Actions for continuous integration and automated release packaging:
-
-- **CI Validation (`.github/workflows/ci.yml`)**: Runs on pushes to `main`/`develop` and pull requests, verifying quality and tests (`./gradlew check`), Linux application staging, and native Windows MSI/EXE packaging.
-- **Publish Release (`.github/workflows/release.yml`)**: Interactive manual trigger (`workflow_dispatch`) that:
+- **CI Validation (`.github/workflows/ci.yml`)**: On Linux and Windows, runs `cargo xtask check` and the script tests; on Linux it also builds the AppImage.
+- **Publish Release (`.github/workflows/release.yml`)**: Manual trigger (`workflow_dispatch`) on `main` that:
   1. Prompts for the SemVer release type (`patch`, `minor`, `major`).
-  2. Bumps the application version and creates the git tag (`vX.Y.Z`).
-  3. Builds `EmuSync-x86_64.AppImage` (Linux), `EmuSync-x86_64.msi`, and `EmuSync-x86_64.exe` (Windows) in parallel.
-  4. Creates the GitHub Release with automated changelogs and attaches all platform installers as release assets.
+  2. Bumps the Cargo workspace version and creates the git tag (`vX.Y.Z`).
+  3. Builds `EmuSync-x86_64.AppImage`.
+  4. Creates the GitHub Release with automated changelogs and attaches the AppImage.
+
+Windows installers will be added to releases once they are validated natively.
 
 ---
 

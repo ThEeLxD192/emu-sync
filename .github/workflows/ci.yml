@@ -22,15 +22,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      - name: Set up Java 25
-        uses: actions/setup-java@v6
-        with:
-          distribution: 'temurin'
-          java-version: '25'
-
-      - name: Setup Gradle Cache
-        uses: gradle/actions/setup-gradle@v6
-
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@master
         with:
@@ -40,6 +31,10 @@ jobs:
       - name: Verify coordinated version bumps
         shell: bash
         run: bash scripts/tests/bump-version-test.sh
+
+      - name: Verify pre-commit hook
+        shell: bash
+        run: bash scripts/tests/git-hooks-test.sh
 
       - name: Verify AppImage library selection
         if: matrix.platform == 'Linux'
@@ -52,40 +47,21 @@ jobs:
           set -o pipefail
           cargo xtask check 2>&1 | tee rust-check.log
 
-      - name: Check Quality and Run Unit Tests
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            export EMUSYNC_BASH="$(cygpath -w "$BASH")"
-          else
-            export EMUSYNC_BASH="$BASH"
-          fi
-          ./gradlew check --no-daemon
-
-      - name: Upload Quality and Test Reports
+      - name: Upload Quality and Test Log
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: test-reports-${{ matrix.platform }}
-          path: |
-            rust-check.log
-            **/build/test-results/
-            **/build/reports/tests/
-            **/build/reports/detekt/
-            **/build/reports/plugin-development/
+          path: rust-check.log
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Verify Linux Packaging (AppImage)
         if: matrix.platform == 'Linux'
-        run: ./gradlew packageReleaseAppImage --no-daemon
-
-      - name: Verify Windows Packaging (MSI & EXE)
-        if: matrix.platform == 'Windows'
-        run: ./gradlew packageReleaseMsi packageReleaseExe --no-daemon --info
-
-      - name: Print jpackage diagnostic logs on failure
-        if: failure() && matrix.platform == 'Windows'
         shell: bash
         run: |
-          find desktopApp/build/compose/logs -type f -exec echo "=== {} ===" \; -exec cat {} \; || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends appstream
+          bash scripts/ci/install-appimagetool.sh "$RUNNER_TEMP/appimagetool"
+          APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGETOOL="$RUNNER_TEMP/appimagetool/AppRun" \
+            bash scripts/build-appimage-container.sh "$RUNNER_TEMP/EmuSync-x86_64.AppImage"

@@ -6,7 +6,7 @@ use emusync_domain::{
 
 #[test]
 fn shared_reference_examples_match_independent_expected_values() {
-    for line in include_str!("../../../domain/src/test/resources/r2/comparison.tsv")
+    for line in include_str!("fixtures/comparison.tsv")
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
     {

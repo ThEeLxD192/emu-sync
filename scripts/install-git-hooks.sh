@@ -18,4 +18,4 @@ if [[ -z "$configured" ]]; then
 fi
 chmod +x .githooks/pre-commit
 git config --local core.hooksPath .githooks
-echo "Installed EmuSync hooks. Commits with Kotlin or Rust changes now run the corresponding quality checks."
+echo "Installed EmuSync hooks. Commits with Rust or quality configuration changes now run cargo xtask quality."

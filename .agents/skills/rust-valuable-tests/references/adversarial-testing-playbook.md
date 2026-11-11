@@ -77,9 +77,9 @@ Usar siempre sockets reales sobre `127.0.0.1:0` (`TcpListener`) para probar el c
 
 ### D. Dominio y Reglas Puras (`emusync-domain`)
 
-- **Paridad diferencial Kotlin ↔ Rust**:
+- **Esperados independientes y compatibilidad**:
   - *Ataque*: Nombres con caracteres fuera del BMP (pares subrogados UTF-16 frente a escalares UTF-8), rutas con barras mezcladas (`\` y `/`), segmentos `.` o `..`, duplicados remotos donde uno carece de hash o fecha, y timestamps en los límites de tolerancia temporal.
-  - *Contrato exigido*: El resultado debe coincidir exactamente con los esperados literales de `domain/src/test/resources/r2/comparison.tsv` y las reglas de `SyncPlanner`.
+  - *Contrato exigido*: El resultado debe coincidir exactamente con los esperados literales de `rust/domain/tests/fixtures/comparison.tsv` y las reglas de `SyncPlanner`.
 
 ### E. Plataforma, Steam y Actualizaciones (`emusync-platform-desktop` + `emusync-data-updates`)
 
@@ -113,4 +113,4 @@ No damos por válida una prueba adversarial solo porque compile y pase en verde.
 - [ ] ¿Se comprueba tanto el retorno como los efectos colaterales (bytes del save en disco, ausencia de temporales, estado de `.sync-state.json`, liberación o retención deliberada del lock)?
 - [ ] ¿La sincronización entre hilos/tareas usa barreras o canales deterministas en lugar de `sleep` arbitrarios?
 - [ ] ¿Todos los recursos (`TempDir`, `TcpListener`, procesos hijos, `RuntimeOwner`) se limpian al terminar la prueba aunque falle una aserción?
-- [ ] ¿Está registrada la trazabilidad en `RUST_MIGRATION.md` indicando qué se probó en Linux y qué sigue pendiente en Windows nativo?
+- [ ] ¿Está registrado en la sección «Pendientes Windows» de `AGENTS.md` lo que sigue pendiente en Windows nativo?

@@ -24,9 +24,8 @@ Esta skill define el modo de trabajo de **Auditor Principal de Código Rust** pa
      - Grafo de dependencias por capacidad verificado por `cargo xtask` (`domain`; `application -> domain`; `data-local`, `data-drive`, `data-updates`, `platform-desktop -> domain`; `presentation -> application + domain`; `desktop-app -> todas las capas`).
      - No cambiar identidad, formatos persistidos (`config.json`, `.sync-state.json`, `.sync-recovery`, `.sync-backups`, `shortcuts.vdf`), rutas, OAuth, Steam ni semántica de conflictos y cancelación.
      - No introducir frameworks pesados ni inyección de dependencias mágica.
-3. **Regla de Transición (Coexistencia vs Post-Migración R8)**:
-   - Audita siempre tomando como fuente primaria los **contratos del dominio Rust, las invariantes de seguridad de datos y los formatos persistidos**.
-   - *Solo si aún existe código Kotlin en el repositorio (antes del cierre de R8)* y surge una duda sobre compatibilidad de formatos o mensajes de interfaz, consúltalo como referencia secundaria. Una vez retirado Kotlin (R8+), esta auditoría opera 100% sobre Rust nativo sin depender de referencias externas.
+3. **Fuente de verdad**:
+   - Audita tomando como fuente primaria los **contratos del dominio Rust, las invariantes de seguridad de datos y los formatos persistidos**.
 
 ---
 

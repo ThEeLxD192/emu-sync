@@ -1,11 +1,11 @@
 ---
 name: rust-valuable-tests
-description: Diseña, revisa, implementa y audita pruebas Rust de EmuSync —incluidas pruebas adversariales, de inyección de fallos, cancelación/rollback y paridad diferencial Kotlin→Rust— según contratos observables y riesgos reales de producción. No usar para cambios triviales o solo documentación.
+description: Diseña, revisa, implementa y audita pruebas Rust de EmuSync —incluidas pruebas adversariales, de inyección de fallos, cancelación/rollback y compatibilidad de formatos persistidos— según contratos observables y riesgos reales de producción. No usar para cambios triviales o solo documentación.
 ---
 
 # Pruebas Rust con Valor y Testing Adversarial en EmuSync
 
-Proteger los contratos observables y las invariantes críticas de EmuSync durante y después de la migración desde Kotlin a Rust nativo. El valor de una prueba no se mide por cobertura porcentual ni cantidad de casos, sino por su capacidad de **detectar un fallo plausible o un estado hostil que causaría pérdida de partidas, corrupción de configuración/historial, bloqueo colgado o divergencia silenciosa frente a Kotlin**.
+Proteger los contratos observables y las invariantes críticas de EmuSync  El valor de una prueba no se mide por cobertura porcentual ni cantidad de casos, sino por su capacidad de **detectar un fallo plausible o un estado hostil que causaría pérdida de partidas, corrupción de configuración/historial, bloqueo colgado o incompatibilidad silenciosa con datos existentes**.
 
 ---
 
@@ -23,15 +23,15 @@ Antes de escribir o modificar una prueba, definir tres elementos:
 4. **Google Drive condicional, sesiones reanudables y dos escritores**: precondición `If-Match` con ETag fuerte v2 sin fallback incondicional; pérdida de respuesta tras `PUT` tratada como resultado incierto (nunca reenviar ciegamente creando duplicados); validación de rangos `308`, checksums SHA-256 e identidad remota.
 5. **OAuth, CAS y problemas ABA**: preservar ediciones concurrentes de biblioteca durante intercambios OAuth; invalidar tokens o commits si las credenciales cambiaron o se desvincularon mientras la transferencia estaba en vuelo (`CredentialTransaction`).
 6. **Seguridad de rutas, TOCTOU y compatibilidad multiplataforma**: rechazo de traversal (`..`), bytes `NUL`, enlaces simbólicos no confiables y sustitución de directorios tras staging (`PinnedRemoteDestination`); manejo de nombres reservados de Windows y rutas 8.3.
-7. **Paridad diferencial Kotlin ↔ Rust**: ordenación UTF-16 frente a UTF-8, esquemas JSON legacy y campos desconocidos en `config.json` y `shortcuts.vdf`, seguimiento de procesos reales, zombies y renovación de timeout durante compilación de shaders en Steam.
+7. **Compatibilidad con datos existentes**: ordenación UTF-16 frente a UTF-8, esquemas JSON legacy y campos desconocidos en `config.json` y `shortcuts.vdf`, seguimiento de procesos reales, zombies y renovación de timeout durante compilación de shaders en Steam.
 
 No añadir pruebas por mover código mecánicamente, cambiar comentarios o declarar structs/getters sin lógica contractual propia.
 
 ---
 
-## 2. Taxonomía de pruebas adversariales para la migración
+## 2. Taxonomía de pruebas adversariales
 
-Al diseñar pruebas para un hito (`R1`–`R8`), aplicar sistemáticamente estas cinco dimensiones (detalladas con patrones e implementación en el [playbook de pruebas adversariales](references/adversarial-testing-playbook.md)):
+Al diseñar pruebas, aplicar sistemáticamente estas cinco dimensiones (detalladas con patrones e implementación en el [playbook de pruebas adversariales](references/adversarial-testing-playbook.md)):
 
 1. **Sabotaje de costuras de integración (Seam & Composition Adversary)**:
    - Atacar la unión real entre capas (por ejemplo, `DesktopCoordinator` ejecutando `SyncOrchestrator` sobre `RetainedFiles<GuardedFiles<...>>` bajo `RuntimeOwner`), verificando que los errores enriquecidos, snapshots y bloqueos de cierre no se pierden al traducirse a eventos de UI.
@@ -41,8 +41,8 @@ Al diseñar pruebas para un hito (`R1`–`R8`), aplicar sistemáticamente estas 
    - Sincronizar mediante barreras o notificaciones (`Barrier`, `Notify`, canales) el momento exacto en que una operación tiene recursos abiertos o bytes parciales escritos, y disparar entonces: cancelación del usuario, segundo escritor concurrente, rotación de credenciales OAuth, solicitud de cierre de ventana o `SIGKILL` sobre un subproceso real.
 4. **Entorno hostil y ataques de frontera (Boundary & TOCTOU)**:
    - Intercambiar un subdirectorio por un symlink apuntando fuera de la raíz entre la validación y la escritura; inyectar manifiestos corruptos o de otra cuenta en `.sync-recovery`; pasar metacaracteres de shell, rutas no canónicas o VDF truncados.
-5. **Oráculo diferencial Kotlin ↔ Rust**:
-   - Contrastar entradas extremas y ambiguas contra esperados literales independientes (`domain/src/test/resources/r2/comparison.tsv`, fixtures JSON v1–v3 e intercambio de archivos persistidos entre Kotlin y Rust).
+5. **Oráculo con esperados independientes**:
+   - Contrastar entradas extremas y ambiguas contra esperados literales independientes (`rust/domain/tests/fixtures/comparison.tsv`, fixtures JSON v1–v3 y archivos persistidos por versiones anteriores).
 
 ---
 
@@ -72,13 +72,12 @@ Respetar estrictamente el grafo de dependencias verificado por `cargo xtask`:
 
 1. **Prueba del saboteador (mutación manual dirigida)**:
    - Para confirmar que una prueba adversarial no es un falso positivo, verificar qué cambio concreto en el código de producción (invertir una condición, omitir la comprobación de revisión OAuth, descartar `RetainedFiles` o saltarse el rollback) la hace fallar inmediatamente.
-2. **Trazabilidad con el catálogo Kotlin**:
-   - Antes de sustituir o consolidar una garantía, consultar `RUST_MIGRATION.md` y el [catálogo histórico Kotlin](../kotlin-valuable-tests/references/test-audit.md) ([casos detallados](../kotlin-valuable-tests/references/test-audit-cases.md)).
-   - Se pueden combinar o reescribir pruebas si la garantía observable queda explícitamente trazada y justificada.
+2. **Conservación de garantías**:
+   - Se pueden combinar o reescribir pruebas si la garantía observable se conserva y el cambio queda justificado.
 3. **Separación estricta por plataforma y evidencia honesta**:
-   - Ejecutar las suites afectadas durante el desarrollo (`cargo test --locked -p <crate>`) y validar el cierre con `cargo xtask check` (y `./gradlew check --no-daemon` cuando aplique según `AGENTS.md`).
+   - Ejecutar las suites afectadas durante el desarrollo (`cargo test --locked -p <crate>`) y validar el cierre con `cargo xtask check`.
    - Distinguir siempre ejecuciones nuevas de resultados en caché.
-   - **Una prueba aprobada en Linux o mediante simulación no valida Windows nativo** (nombres cortos 8.3, dispositivos reservados `CON`/`PRN`/`NUL`, bloqueos de archivos de Windows, PowerShell/WiX). Registrar explícitamente cualquier pendiente de plataforma en `RUST_MIGRATION.md`.
+   - **Una prueba aprobada en Linux o mediante simulación no valida Windows nativo** (nombres cortos 8.3, dispositivos reservados `CON`/`PRN`/`NUL`, bloqueos de archivos de Windows, PowerShell/WiX). Registrar explícitamente cualquier pendiente de plataforma en la sección «Pendientes Windows» de `AGENTS.md`.
 
 ---
 
@@ -87,5 +86,4 @@ Respetar estrictamente el grafo de dependencias verificado por `cargo xtask`:
 - [Playbook de pruebas adversariales para EmuSync](references/adversarial-testing-playbook.md): anatomía de ataques, patrones por crate, servidores loopback de caos, TOCTOU y checklist de auditoría.
 - `rust-testing`: mecánicas generales de `#[test]`, pruebas de integración e infraestructura de `cargo test`.
 - `rust-concurrency`: patrones de cancelación cooperativa en Tokio, canales, exclusión mutua y prevención de deadlocks.
-- `kotlin-valuable-tests`: criterios de la suite de referencia Kotlin y su [matriz de auditoría](../kotlin-valuable-tests/references/test-audit.md).
-- `AGENTS.md` y `RUST_MIGRATION.md` en la raíz del repositorio prevalecen siempre sobre cualquier guía genérica.
+- `AGENTS.md` en la raíz del repositorio prevalece siempre sobre cualquier guía genérica.
