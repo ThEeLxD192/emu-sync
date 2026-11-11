@@ -340,6 +340,76 @@ async fn coordinator_reorder_entries() {
     assert!(reordered);
 }
 
+/// Names in the order of the `ConfigReloaded` event at the head of the queue, if any.
+fn next_reloaded_names(rx: &std::sync::mpsc::Receiver<AppEvent>) -> Option<Vec<String>> {
+    match rx.try_recv() {
+        Ok(AppEvent::ConfigReloaded(cfg)) => Some(
+            cfg.entries
+                .iter()
+                .map(|entry| entry.common().name.clone())
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+fn names(list: &[&str]) -> Vec<String> {
+    list.iter().map(|name| name.to_string()).collect()
+}
+
+/// The UI computes each drag step from the entries it holds, so the reorder must be
+/// reloaded before `handle_action` returns (the next frame drains the queue first).
+#[tokio::test]
+async fn reorder_is_reloaded_before_handle_action_returns() {
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    let manager = ConfigManager::new(&config_path).unwrap();
+    let (a, b, c) = (
+        test_native_entry("A"),
+        test_native_entry("B"),
+        test_native_entry("C"),
+    );
+    manager
+        .update(|_| AppConfig {
+            credentials: None,
+            entries: vec![a.clone(), b.clone(), c.clone()],
+        })
+        .unwrap();
+    let (tx, rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager,
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
+    let on_disk = || -> Vec<String> {
+        let text = std::fs::read_to_string(&config_path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        json["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    coordinator.handle_action(UiAction::ReorderEntries(vec![
+        b.clone(),
+        a.clone(),
+        c.clone(),
+    ]));
+    assert_eq!(next_reloaded_names(&rx), Some(names(&["B", "A", "C"])));
+    assert_eq!(on_disk(), names(&["B", "A", "C"]));
+
+    coordinator.handle_action(UiAction::ReorderEntries(vec![b, c, a]));
+    assert_eq!(next_reloaded_names(&rx), Some(names(&["B", "C", "A"])));
+    assert_eq!(on_disk(), names(&["B", "C", "A"]));
+    assert!(
+        rx.try_recv().is_err(),
+        "no toast such as `Cannot reorder` is queued"
+    );
+}
+
 #[tokio::test]
 async fn coordinator_edit_game_override() {
     let dir = tempdir().unwrap();
