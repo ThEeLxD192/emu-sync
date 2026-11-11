@@ -30,8 +30,5 @@ shortcuts.vdf.bak
 *.sync-backups/
 *.sync-recovery/
 
-# Local audit notes
-/AUDIT_STATUS.md
-
 # Rust build outputs
 /target/
