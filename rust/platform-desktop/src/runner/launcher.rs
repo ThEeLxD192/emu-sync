@@ -165,18 +165,12 @@ where
                     args.push(arg.replace("{ROM}", rom));
                 }
 
-                let working_dir = Path::new(rom)
-                    .parent()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| PathBuf::from("."));
+                let working_dir = working_directory_of(Path::new(rom));
 
                 Ok((emu.common.executable_path.clone(), args, working_dir))
             }
             GameEntry::Native(nat) => {
-                let working_dir = Path::new(&nat.common.executable_path)
-                    .parent()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| PathBuf::from("."));
+                let working_dir = working_directory_of(Path::new(&nat.common.executable_path));
 
                 Ok((
                     nat.common.executable_path.clone(),
@@ -375,4 +369,13 @@ where
             })
         }
     }
+}
+
+/// Directory containing `path`, or the current directory for a bare name such as a
+/// command resolved through `PATH` (`Path::parent` returns an empty path for it, which
+/// cannot be a working directory). Matches Kotlin's `parentFile ?: File(".")`.
+fn working_directory_of(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }

@@ -58,6 +58,29 @@ async fn direct_launch_executes_process_and_returns_exit_code_and_duration() {
 }
 
 #[tokio::test]
+async fn native_game_with_a_bare_command_name_starts_in_the_current_directory() {
+    // A command found through PATH has an empty parent, which cannot be a working directory.
+    let runner = GameRunner::new(Arc::new(MockSteamPreparation::new()));
+    let mut native = NativeGame::default();
+    native.common.name = "PathCommand".into();
+    (native.common.executable_path, native.common.arguments) = if cfg!(windows) {
+        ("cmd".into(), vec!["/C".into(), "exit 0".into()])
+    } else {
+        ("sh".into(), vec!["-c".into(), "exit 0".into()])
+    };
+
+    let result = guard(runner.launch(GameLaunchRequest {
+        entry: GameEntry::Native(native),
+        rom_path: None,
+        steam_app_id: None,
+    }))
+    .await
+    .unwrap();
+
+    assert_eq!(result.exit_code, 0);
+}
+
+#[tokio::test]
 async fn launch_via_steam_prepares_launch_and_tracks_process() {
     let prep = Arc::new(MockSteamPreparation::new());
     let prepared = prep.prepared_rom.clone();
