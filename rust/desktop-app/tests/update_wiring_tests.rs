@@ -18,28 +18,37 @@ use tokio::{io::AsyncWriteExt, net::TcpListener};
 
 const ASSET: &[u8] = b"new EmuSync AppImage bytes";
 
-/// Serves GitHub's latest-release API with one newer AppImage, and the asset itself.
+/// The asset this platform installs from a release that publishes both packages.
+const PLATFORM_ASSET: &str = if cfg!(windows) {
+    "EmuSync-x64.msi"
+} else {
+    "EmuSync-x86_64.AppImage"
+};
+
+/// Serves GitHub's latest-release API with the Linux and Windows packages, and the assets.
 async fn release_server(latest_tag: &'static str) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let asset_url = format!("{base}/download/EmuSync-x86_64.AppImage");
+    let download = format!("{base}/download");
     tokio::spawn(async move {
         loop {
             let Ok((mut stream, _)) = listener.accept().await else {
                 return;
             };
-            let asset_url = asset_url.clone();
+            let download = download.clone();
             tokio::spawn(async move {
                 let Ok((headers, _)) = read_http_request_async(&mut stream).await else {
                     return;
                 };
                 if headers.starts_with("GET /repos/ThEeLxD192/emu-sync/releases/latest ") {
                     let body = format!(
-                        r#"{{"tag_name":"{latest_tag}","name":"EmuSync {latest_tag}","body":"Fixes","assets":[{{"name":"EmuSync-x86_64.AppImage","browser_download_url":"{asset_url}","size":{}}}]}}"#,
-                        ASSET.len()
+                        r#"{{"tag_name":"{latest_tag}","name":"EmuSync {latest_tag}","body":"Fixes","assets":[{{"name":"EmuSync-x86_64.AppImage","browser_download_url":"{download}/EmuSync-x86_64.AppImage","size":{size}}},{{"name":"EmuSync-x64.msi","browser_download_url":"{download}/EmuSync-x64.msi","size":{size}}}]}}"#,
+                        size = ASSET.len()
                     );
                     let _ = write_http_json_async(&mut stream, 200, "OK", &body).await;
-                } else if headers.starts_with("GET /download/EmuSync-x86_64.AppImage ") {
+                } else if headers.starts_with("GET /download/EmuSync-x86_64.AppImage ")
+                    || headers.starts_with("GET /download/EmuSync-x64.msi ")
+                {
                     let head = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                         ASSET.len()
@@ -104,7 +113,8 @@ async fn check_finds_the_newer_release_and_downloads_it_ready_to_restart() {
         unreachable!()
     };
     assert_eq!(info.version, "99.0.0");
-    assert_eq!(info.asset_name, "EmuSync-x86_64.AppImage");
+    // Each platform picks its own package from the same release.
+    assert_eq!(info.asset_name, PLATFORM_ASSET);
 
     coordinator.handle_action(UiAction::DownloadUpdate(info));
     let AppEvent::UpdateStateChanged(UpdateState::ReadyToRestart {
