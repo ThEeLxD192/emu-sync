@@ -679,3 +679,58 @@ fn an_unavailable_legacy_folder_still_blocks_instead_of_offering_placement() {
         "got {result:?}"
     );
 }
+
+#[test]
+fn folders_without_cloud_paths_refuse_files_another_device_stored_per_folder() {
+    // The other device names its folders `savedata` and `trophies`; offering to place
+    // `savedata/...` here would nest it inside the folder one level too deep.
+    let fs = MockFs::new();
+    fs.add_dir("/sd/Saves/savedata/1/X");
+    fs.add_dir("/sd/Saves/trophies/X");
+    let targets = [
+        legacy_dir("/sd/Saves/savedata/1/X"),
+        legacy_dir("/sd/Saves/trophies/X"),
+    ];
+    let mapping = SaveTargetMapping::new(fs);
+
+    for cloud in [
+        cloud_file("savedata/savedata1/SYS-DATA.sav"),
+        cloud_file("save-target-2/TROP.SFM"),
+    ] {
+        let result = mapping.validate_save_target_mappings(&targets, &[cloud]);
+        assert!(
+            matches!(&result, Err(SaveTargetMappingError::AmbiguousLegacyDirectories(msg)) if msg.contains("set the same cloud path")),
+            "got {result:?}"
+        );
+    }
+}
+
+#[test]
+fn a_root_folder_and_a_new_scoped_folder_never_take_each_others_files() {
+    let fs = MockFs::new();
+    fs.add_file("/saves/savedata/slot.sav", 1000);
+    fs.add_dir("/saves/trophies");
+    let root = legacy_dir("/saves/savedata");
+    let scoped = SaveTarget {
+        cloud_path: Some("trophies".into()),
+        ..legacy_dir("/saves/trophies")
+    };
+    let targets = [root.clone(), scoped.clone()];
+    let cloud = [cloud_file("slot.sav"), cloud_file("trophies/TROP.SFM")];
+    let mapping = SaveTargetMapping::new(fs);
+
+    assert_eq!(
+        mapping.validate_save_target_mappings(&targets, &cloud),
+        Ok(())
+    );
+    let root_reserved = mapping
+        .reserved_cloud_names(&root, &targets, &cloud)
+        .unwrap();
+    assert!(root_reserved.contains("trophies/TROP.SFM"));
+    let projected: Vec<_> =
+        emusync_application::sync::project_directory_files(&cloud, scoped.cloud_path.as_deref())
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
+    assert_eq!(projected, vec!["TROP.SFM"]);
+}

@@ -1,6 +1,6 @@
 //! Validation and mapping between local save targets and remote cloud structures.
 
-use emusync_domain::library::{SaveTarget, SaveTargetType};
+use emusync_domain::library::{SaveTarget, SaveTargetType, folder_cloud_names};
 use emusync_domain::sync::{
     LocalSaveAccess, LocalSavePath, RemoteFile, SavePlacementGroup, remote_path_segments,
 };
@@ -577,6 +577,29 @@ where
                 })
                 .map(|f| f.name.clone())
                 .collect();
+
+            // Another device keeping these folders under their own cloud paths uploads
+            // `savedata/...`; placing those files here would nest them one level too deep.
+            let legacy_paths: Vec<&str> = legacy.iter().map(|t| t.path.as_str()).collect();
+            let folder_names = folder_cloud_names(&legacy_paths);
+            let mut scoped_elsewhere: Vec<String> = unassigned_names
+                .iter()
+                .filter_map(|name| name.split_once('/').map(|(first, _)| first))
+                .filter(|first| {
+                    folder_names.iter().any(|f| f == first) || first.starts_with("save-target-")
+                })
+                .map(str::to_owned)
+                .collect();
+            scoped_elsewhere.sort();
+            scoped_elsewhere.dedup();
+            if !scoped_elsewhere.is_empty() {
+                let configured_paths: Vec<_> = legacy.iter().map(|t| t.path.clone()).collect();
+                return Err(SaveTargetMappingError::AmbiguousLegacyDirectories(format!(
+                    "Another device stores these save folders under their own cloud paths, but on this device they have none.\n\n{}\n\n{}\n\nIn Edit Game on this device, set the same cloud path for each folder as on the other device. These folders were not synchronized.",
+                    mapping_details("Configured save folders", &configured_paths),
+                    mapping_details("Cloud paths found", &scoped_elsewhere),
+                )));
+            }
 
             let mut problems = Vec::new();
             if !unavailable_roots.is_empty() && !legacy_files.is_empty() {

@@ -199,6 +199,7 @@ pub(crate) fn cloud_path_field(
     id_salt: impl egui::AsIdSalt,
     value: &mut String,
     kind: &SaveTargetType,
+    automatic: Option<&str>,
 ) -> Response {
     let invalid = !cloud_path_is_valid(value);
     let placeholder = if *kind == SaveTargetType::Directory {
@@ -217,6 +218,14 @@ pub(crate) fn cloud_path_field(
     );
     if invalid {
         field_hint(ui, "Use a relative path without '..'.", ERROR);
+    } else if let Some(automatic) = automatic {
+        field_hint(
+            ui,
+            &format!(
+                "Saved in the cloud as \u{201c}{automatic}\u{201d} so this folder's files stay apart. Use the same cloud path on each device."
+            ),
+            ON_SURFACE_DIM,
+        );
     } else {
         field_hint(
             ui,
@@ -254,6 +263,7 @@ pub(crate) fn save_target_rows(
     on_save_path_edited: &mut dyn FnMut(usize, String),
 ) {
     let removable = saves.rows.len() > 1;
+    let automatic = saves.automatic_cloud_paths();
     let mut remove = None;
     for index in 0..saves.rows.len() {
         let mut toggle = false;
@@ -295,6 +305,7 @@ pub(crate) fn save_target_rows(
             (id_prefix, "cloud", index),
             &mut row.cloud_path,
             &row.target_type,
+            automatic.get(index).cloned().flatten().as_deref(),
         );
         ui.add_space(12.0);
     }

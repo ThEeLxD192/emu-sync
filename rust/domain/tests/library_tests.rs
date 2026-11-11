@@ -1,6 +1,6 @@
 use emusync_domain::library::{
     Emulator, EntryCommon, NativeGame, SaveTarget, SaveTargetType, clean_game_title,
-    normalize_game_key, scope_new_targets,
+    folder_cloud_names, normalize_game_key, scope_new_targets,
 };
 
 fn target(path: &str, kind: SaveTargetType, cloud: Option<&str>) -> SaveTarget {
@@ -55,34 +55,6 @@ fn titles_follow_kotlin_fixtures_and_priority() {
     assert_eq!(
         emulator.effective_title("!!!.sfc", "Fallback (USA).sfc"),
         "Fallback"
-    );
-}
-
-#[test]
-fn scoping_directories_avoids_existing_prefixes_and_is_stable() {
-    let input = vec![
-        target("a", SaveTargetType::Directory, Some("save-target-1/sub")),
-        target("b", SaveTargetType::Directory, None),
-        target("c", SaveTargetType::Directory, None),
-        target("d", SaveTargetType::File, None),
-    ];
-    let result = scope_new_targets(&input);
-    assert_eq!(
-        result
-            .iter()
-            .map(|t| t.cloud_path.as_deref())
-            .collect::<Vec<_>>(),
-        vec![
-            Some("save-target-1/sub"),
-            Some("save-target-2"),
-            Some("save-target-3"),
-            None
-        ]
-    );
-    assert_eq!(scope_new_targets(&result), result);
-    assert_eq!(
-        scope_new_targets(&[target("a", SaveTargetType::Directory, None)]),
-        vec![target("a", SaveTargetType::Directory, None)]
     );
 }
 
@@ -160,61 +132,6 @@ fn normalized_title_lookup_skips_blank_matches_and_never_matches_empty_keys() {
 }
 
 #[test]
-fn scoping_reserves_explicit_paths_of_any_kind_and_only_blocks_true_prefixes() {
-    use SaveTargetType::{Directory, File, Unknown};
-    let with = |input: &[SaveTarget], clouds: &[Option<&str>]| -> Vec<SaveTarget> {
-        input
-            .iter()
-            .zip(clouds)
-            .map(|(t, c)| SaveTarget {
-                cloud_path: c.map(str::to_owned),
-                ..t.clone()
-            })
-            .collect()
-    };
-    let case1 = vec![
-        target("a", Directory, Some("save-target-10")),
-        target("b", File, Some("save-target-1")),
-        target("c", Directory, Some("  ")),
-        target("d", Directory, None),
-        target("e", Unknown, None),
-        target("f", Directory, Some("save-target-3/x/y")),
-    ];
-    assert_eq!(
-        scope_new_targets(&case1),
-        with(
-            &case1,
-            &[
-                Some("save-target-10"),
-                Some("save-target-1"),
-                Some("save-target-2"),
-                Some("save-target-4"),
-                None,
-                Some("save-target-3/x/y"),
-            ]
-        )
-    );
-    let case2 = vec![
-        target("a", Directory, Some("save-target-1x")),
-        target("b", Directory, None),
-        target("c", Directory, Some("save-target-2")),
-    ];
-    assert_eq!(
-        scope_new_targets(&case2),
-        with(
-            &case2,
-            &[
-                Some("save-target-1x"),
-                Some("save-target-1"),
-                Some("save-target-2"),
-            ]
-        )
-    );
-    let case3 = vec![target("a", Directory, Some(" ")), target("b", File, None)];
-    assert_eq!(scope_new_targets(&case3), case3);
-}
-
-#[test]
 fn emulator_constructor_keeps_rom_placeholder_argument() {
     let emulator = Emulator::new("GBA", "/bin/mgba", "/roms/gba", vec!["gba".into()]);
     assert_eq!(emulator.common.name, "GBA");
@@ -257,4 +174,109 @@ fn clean_title_matches_kotlin_for_interleaved_tags_and_unicode_spaces() {
         }
     }
     assert!(failures.is_empty(), "divergences:\n{}", failures.join("\n"));
+}
+
+fn cloud_paths(targets: &[SaveTarget]) -> Vec<Option<&str>> {
+    targets.iter().map(|t| t.cloud_path.as_deref()).collect()
+}
+
+#[test]
+fn new_directories_are_named_after_where_their_paths_differ() {
+    use SaveTargetType::{Directory, File};
+    let input = vec![
+        target(
+            "/run/media/deck/sd/Saves/savedata/1/CUSA13795",
+            Directory,
+            None,
+        ),
+        target(
+            "/run/media/deck/sd/Saves/trophies/CUSA13795/",
+            Directory,
+            None,
+        ),
+        target("/run/media/deck/sd/Saves/config.ini", File, None),
+    ];
+
+    let scoped = scope_new_targets(&input, &[true, true, true]);
+
+    assert_eq!(
+        cloud_paths(&scoped),
+        vec![Some("savedata"), Some("trophies"), None]
+    );
+    // Reapplying changes nothing, and Windows paths give the same names.
+    assert_eq!(scope_new_targets(&scoped, &[true, true, true]), scoped);
+    assert_eq!(
+        folder_cloud_names(&[
+            r"D:\Games\Saves\savedata\1\CUSA13795",
+            r"D:\Games\Saves\trophies\CUSA13795"
+        ]),
+        vec!["savedata", "trophies"]
+    );
+}
+
+#[test]
+fn names_do_not_depend_on_the_order_folders_were_added() {
+    use SaveTargetType::Directory;
+    let savedata = target("/saves/savedata/1/X", Directory, None);
+    let trophies = target("/saves/trophies/X", Directory, None);
+
+    let forward = scope_new_targets(&[savedata.clone(), trophies.clone()], &[]);
+    let backward = scope_new_targets(&[trophies, savedata], &[]);
+
+    assert_eq!(
+        cloud_paths(&forward),
+        vec![Some("savedata"), Some("trophies")]
+    );
+    assert_eq!(
+        cloud_paths(&backward),
+        vec![Some("trophies"), Some("savedata")]
+    );
+}
+
+#[test]
+fn saved_directories_keep_their_cloud_layout_and_only_new_ones_are_scoped() {
+    use SaveTargetType::Directory;
+    // A folder already synced at the cloud root keeps it; the one added next does not
+    // share it.
+    let input = vec![
+        target("/saves/savedata/1/X", Directory, None),
+        target("/saves/trophies/X", Directory, None),
+    ];
+
+    assert_eq!(
+        cloud_paths(&scope_new_targets(&input, &[false, true])),
+        vec![None, Some("trophies")]
+    );
+    assert_eq!(scope_new_targets(&input, &[false, false]), input);
+    // A single directory stays at the cloud root.
+    assert_eq!(scope_new_targets(&input[..1], &[true]), input[..1].to_vec());
+}
+
+#[test]
+fn scoped_names_never_overlap_paths_already_in_use() {
+    use SaveTargetType::{Directory, File, Unknown};
+    let input = vec![
+        target("/s/savedata", Directory, None),
+        target("/s/savedata/savedata", Directory, None),
+        target("/s/trophies", Directory, None),
+        target("/s/other", Directory, Some("trophies/x")),
+        target("/s/slot.sav", File, Some("savedata-2")),
+        target("/s/unknown", Unknown, None),
+        target("/s/blank", Directory, Some("  ")),
+    ];
+
+    let scoped = scope_new_targets(&input, &[]);
+
+    assert_eq!(
+        cloud_paths(&scoped),
+        vec![
+            Some("savedata"),
+            Some("savedata-3"),
+            Some("trophies-2"),
+            Some("trophies/x"),
+            Some("savedata-2"),
+            None,
+            Some("blank"),
+        ]
+    );
 }

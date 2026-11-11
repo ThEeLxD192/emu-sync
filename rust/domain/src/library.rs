@@ -204,41 +204,89 @@ pub fn normalize_game_key(name: &str) -> String {
         .join(" ")
 }
 
-pub fn scope_new_targets(targets: &[SaveTarget]) -> Vec<SaveTarget> {
-    if targets
+/// Gives each new directory without a cloud path its own prefix once a target list has two
+/// or more directories, so their files never share one cloud location. Targets not marked
+/// in `is_new` (missing entries count as new) keep their layout: their cloud data was
+/// already synchronized with it.
+pub fn scope_new_targets(targets: &[SaveTarget], is_new: &[bool]) -> Vec<SaveTarget> {
+    let directories: Vec<usize> = targets
         .iter()
-        .filter(|t| t.kind == SaveTargetType::Directory)
-        .count()
-        < 2
-    {
+        .enumerate()
+        .filter(|(_, t)| t.kind == SaveTargetType::Directory)
+        .map(|(index, _)| index)
+        .collect();
+    if directories.len() < 2 {
         return targets.to_vec();
     }
+    let paths: Vec<&str> = directories
+        .iter()
+        .map(|&i| targets[i].path.as_str())
+        .collect();
+    let names = folder_cloud_names(&paths);
     let mut used: Vec<String> = targets
         .iter()
-        .filter_map(|t| t.cloud_path.clone())
+        .filter_map(|t| {
+            t.cloud_path
+                .as_deref()
+                .and_then(nonblank)
+                .map(str::to_owned)
+        })
         .collect();
-    let mut next = 1;
-    targets
+    let mut scoped = targets.to_vec();
+    for (&index, name) in directories.iter().zip(names) {
+        let target = &mut scoped[index];
+        let unscoped = target.cloud_path.as_deref().and_then(nonblank).is_none();
+        if !unscoped || !is_new.get(index).copied().unwrap_or(true) {
+            continue;
+        }
+        let mut candidate = name.clone();
+        let mut suffix = 2;
+        while used.iter().any(|p| cloud_paths_overlap(p, &candidate)) {
+            candidate = format!("{name}-{suffix}");
+            suffix += 1;
+        }
+        used.push(candidate.clone());
+        target.cloud_path = Some(candidate);
+    }
+    scoped
+}
+
+/// One cloud folder name per local folder: the first path segment where the folders stop
+/// sharing their path (`…/savedata/1/X` and `…/trophies/X` give `savedata` and `trophies`),
+/// so devices with the same folder layout derive the same names.
+pub fn folder_cloud_names(paths: &[&str]) -> Vec<String> {
+    let segments: Vec<Vec<&str>> = paths
         .iter()
-        .cloned()
-        .map(|mut target| {
-            if target.kind == SaveTargetType::Directory
-                && target
-                    .cloud_path
-                    .as_deref()
-                    .is_none_or(|p| p.trim().is_empty())
-            {
-                loop {
-                    let candidate = format!("save-target-{next}");
-                    next += 1;
-                    if !used.iter().any(|p| cloud_paths_overlap(p, &candidate)) {
-                        used.push(candidate.clone());
-                        target.cloud_path = Some(candidate);
-                        break;
-                    }
-                }
+        .map(|path| {
+            path.split(['/', '\\'])
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && *s != "." && *s != "..")
+                .collect()
+        })
+        .collect();
+    let shared = segments.split_first().map_or(0, |(first, rest)| {
+        rest.iter().fold(first.len(), |shared, other| {
+            first
+                .iter()
+                .zip(other)
+                .take(shared)
+                .take_while(|(a, b)| a == b)
+                .count()
+        })
+    });
+    segments
+        .iter()
+        .map(|segments| {
+            let name = segments
+                .get(shared)
+                .or(segments.last())
+                .map(|s| s.trim_end_matches(':').trim())
+                .unwrap_or_default();
+            if name.is_empty() {
+                "saves".to_owned()
+            } else {
+                name.to_owned()
             }
-            target
         })
         .collect()
 }

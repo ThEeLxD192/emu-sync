@@ -197,7 +197,41 @@ fn existing_targets_are_not_scoped_and_new_ones_are() {
         .iter()
         .map(|t| t.cloud_path.as_deref())
         .collect();
-    assert_eq!(clouds, vec![Some("save-target-1"), Some("save-target-2")]);
+    assert_eq!(clouds, vec![Some("d1"), Some("d2")]);
+}
+
+#[test]
+fn a_folder_added_to_a_game_synced_at_the_cloud_root_gets_its_own_cloud_path() {
+    let dir = |path: &str| SaveTarget {
+        path: path.to_string(),
+        kind: SaveTargetType::Directory,
+        cloud_path: None,
+    };
+    let mut form = GameEditFormState::new(&celeste(), &[dir("/sd/Saves/savedata/1/X")]);
+    // Editing the saved folder's path does not move its cloud data either.
+    form.saves
+        .update_path(0, "/sd2/Saves/savedata/1/X".to_string());
+    form.saves.add_row();
+    form.saves
+        .update_path(1, "/sd2/Saves/trophies/X".to_string());
+    form.saves.update_type(1, SaveTargetType::Directory);
+
+    // The form shows the path it will assign before saving.
+    assert_eq!(
+        form.saves.automatic_cloud_paths(),
+        vec![None, Some("trophies".to_string())]
+    );
+    let result = form.build_result(&[]).expect("valid");
+    let clouds: Vec<_> = result
+        .targets
+        .iter()
+        .map(|t| t.cloud_path.as_deref())
+        .collect();
+    assert_eq!(clouds, vec![None, Some("trophies")]);
+
+    // A cloud path typed by the user wins over the automatic one.
+    form.saves.update_cloud_path(1, "trophy-data".to_string());
+    assert_eq!(form.saves.automatic_cloud_paths(), vec![None, None]);
 }
 
 #[test]

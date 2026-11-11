@@ -4,7 +4,7 @@ use super::save_targets::SaveTargetFormState;
 use crate::model::EntryType;
 use emusync_domain::{
     execution::{format_arguments, parse_arguments},
-    library::{Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, scope_new_targets},
+    library::{Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget},
     sync::remote_path_segments,
 };
 
@@ -26,7 +26,6 @@ pub struct EntryFormState {
     pub saves: SaveTargetFormState,
     pub error_message: Option<String>,
     pub initial_entry: Option<GameEntry>,
-    has_initial_targets: bool,
 }
 
 impl EntryFormState {
@@ -90,7 +89,6 @@ impl EntryFormState {
         };
 
         let saves = SaveTargetFormState::from_targets(initial_targets);
-        let has_initial_targets = !initial_targets.is_empty();
 
         Self {
             entry_type,
@@ -108,7 +106,6 @@ impl EntryFormState {
             saves,
             error_message: None,
             initial_entry,
-            has_initial_targets,
         }
     }
 
@@ -169,11 +166,7 @@ impl EntryFormState {
             return Err(msg.to_string());
         }
 
-        let targets = if !self.has_initial_targets {
-            scope_new_targets(&raw_targets)
-        } else {
-            raw_targets
-        };
+        let targets = self.saves.scoped_targets();
 
         let trimmed_name = self.name.trim();
         let trimmed_exec = self.executable_path.trim();
