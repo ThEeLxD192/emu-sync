@@ -15,14 +15,27 @@ if [[ ! $cargo_version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
     echo "Error: the Cargo workspace version must be a three-part SemVer." >&2
     exit 1
 fi
-awk -v expected="$cargo_version" '
+# Packages whose manifest inherits the workspace version; their Cargo.lock entries follow it.
+inheriting=$(awk '
+    function flush() { if (inherits && name != "") print name }
+    FNR == 1 { if (NR > 1) flush(); name=""; inherits=0 }
+    /^name = "[^"]+"$/ && name == "" { split($0, p, "\""); name=p[2] }
+    /^version\.workspace = true$/ { inherits=1 }
+    END { flush() }
+' rust/*/Cargo.toml xtask/Cargo.toml | sort | tr '\n' ' ')
+if [[ -z $inheriting ]]; then
+    echo "Error: no package inherits the workspace version." >&2
+    exit 1
+fi
+awk -v expected="$cargo_version" -v names="$inheriting" '
+    BEGIN { n = split(names, list, " "); for (i = 1; i <= n; i++) wanted[list[i]] = 1 }
     /^\[\[package\]\]$/ { package="" }
     /^name = "/ { split($0, p, "\""); package=p[2] }
-    /^version = "/ && (package == "emusync-desktop-app" || package == "emusync-presentation") {
+    /^version = "/ && (package in wanted) {
         split($0, p, "\""); if (p[2] != expected) exit 1; seen[package]++
     }
-    END { if (seen["emusync-desktop-app"] != 1 || seen["emusync-presentation"] != 1) exit 1 }
-' "$lock_file" || { echo "Error: Cargo.lock application versions do not match." >&2; exit 1; }
+    END { for (name in wanted) if (seen[name] != 1) exit 1 }
+' "$lock_file" || { echo "Error: Cargo.lock versions of $inheriting do not match the workspace." >&2; exit 1; }
 
 IFS=. read -r major minor patch <<< "$cargo_version"
 case "$bump_type" in
@@ -36,10 +49,11 @@ tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
 
 awk -v v="$new_version" '/^\[/ { section = ($0 == "[workspace.package]") } section && /^version = "[^"]+"$/ { sub(/"[^"]+"/, "\"" v "\"") } { print }' "$cargo_file" > "$tmp/cargo"
-awk -v v="$new_version" '
+awk -v v="$new_version" -v names="$inheriting" '
+    BEGIN { n = split(names, list, " "); for (i = 1; i <= n; i++) wanted[list[i]] = 1 }
     /^\[\[package\]\]$/ { package="" }
     /^name = "/ { split($0, p, "\""); package=p[2] }
-    /^version = "/ && (package == "emusync-desktop-app" || package == "emusync-presentation") { sub(/"[^"]+"/, "\"" v "\"") }
+    /^version = "/ && (package in wanted) { sub(/"[^"]+"/, "\"" v "\"") }
     { print }
 ' "$lock_file" > "$tmp/lock"
 
