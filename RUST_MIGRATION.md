@@ -2512,3 +2512,67 @@ anterior, todavía sin commit):
   como causa del aviso en Steam Deck. Se conservan las mejoras de diagnóstico y
   las pruebas de compatibilidad; no se modifica la regla de asignación ni se
   presenta este incidente como un fallo de sincronización confirmado.
+
+### Auditoría adversarial de presentation (2026-11-10, Linux)
+
+- `rust/presentation/tests/` se reorganiza por módulo y se eliminan `ui_view_tests.rs`
+  y `forms_tests.rs`. Mapa: `common/mod.rs` (helpers egui headless y fixtures),
+  `app_state_tests.rs`, `async_results_tests.rs`, `confirm_delete_tests.rs`,
+  `cover_cache_tests.rs`, `dialog_lifecycle_tests.rs`, `drive_setup_tests.rs`,
+  `entry_form_tests.rs`, `game_edit_form_tests.rs`, `game_item_tests.rs`,
+  `main_view_tests.rs`, `save_targets_tests.rs`, `sidebar_order_tests.rs`,
+  `status_overlay_tests.rs` y `update_dialog_tests.rs`. Los nombres de las pruebas
+  movidas se conservan, de modo que las referencias de este documento siguen válidas.
+- **F1 corregido** (respuestas de selector y vista previa de restauración aplicadas al
+  diálogo equivocado). Emparejar cada respuesta con la petición pendiente más antigua
+  del mismo destino fallaba fuera de orden: con dos save setups que piden `/dest`,
+  `desktop-app` resuelve ambas en `spawn_blocking` y la respuesta del segundo se
+  emparejaba con la petición del primero y se descartaba; la del primero se aceptaba,
+  el formulario ya no volvía a preguntar y Save quedaba habilitado con rutas de otro
+  juego. Ahora `EmuSyncApp::update` asigna un `request_id` monótono (desde 1) a cada
+  `PickPath` y `PreviewRestorePaths` antes de publicarlos (los handlers usan el
+  marcador 0), lo registra en `pending_picks`/`pending_previews` y lo vacía en cada
+  cambio de diálogo. `AppEvent::PathPicked` y `RestorePathsPreviewed` devuelven el
+  identificador y `apply_picked_path`/`apply_restore_preview` solo aplican la respuesta
+  a una petición del diálogo abierto; las desconocidas, repetidas o de otro diálogo se
+  descartan. Un selector cancelado no deja nada colgado porque el siguiente cambio de
+  diálogo vacía los mapas. Pruebas:
+  `out_of_order_previews_for_the_same_destination_apply_only_the_current_request`,
+  `out_of_order_pickers_for_the_same_field_apply_only_the_current_dialog`,
+  `unknown_or_repeated_request_ids_are_ignored`,
+  `answer_with_a_mismatched_target_or_destination_is_ignored`,
+  `published_requests_carry_distinct_non_zero_ids`,
+  `restore_preview_for_a_replaced_save_setup_is_ignored`,
+  `picked_path_requested_by_the_entry_form_is_not_applied_to_a_save_setup` y, en
+  `desktop-app`, `restore_preview_event_echoes_the_request_id`. No se escribió
+  `picked_path_event_echoes_the_request_id`: `PlatformServices` contiene el
+  `FilePicker` nativo concreto y no admite un selector falso sin abrir un diálogo real.
+- **F2 corregido**: `Credentials` implementa `Debug` a mano y oculta el secreto y el
+  refresh token. Prueba: `app_ui_state_debug_never_shows_credentials`.
+- **F7 corregido**: las etiquetas de las tarjetas de conflicto usan
+  `.selectable(false)` y dejan pasar el clic a la tarjeta. Prueba:
+  `clicking_the_title_or_date_of_a_conflict_card_chooses_it`; la prueba de conflicto
+  anterior pasaba porque hacía clic antes de que el modal se colocara.
+- **Pendientes de decisión**: **F3** (el aviso de actualización cancela un save setup
+  abierto; un save setup descarta el borrador del formulario de entrada), **F4**
+  (diferencia de validación de rutas cloud entre los dos formularios; falta verificar
+  la paridad con Kotlin), **F5** (acciones repetidas por clic, ya descartadas por el
+  coordinador) y **F6** (paso de arrastre calculado sobre entradas aún no
+  actualizadas). Sus pruebas de caracterización quedan fuera del árbol.
+- Comandos (Linux, desde `rust/`, `CARGO_BUILD_JOBS=2 nice -n 19`, ejecución nueva):
+  `cargo fmt --all -- --check` sin diferencias; `cargo clippy --workspace
+  --all-targets --locked -- -D warnings` sin avisos; `cargo test --workspace --locked
+  -- --test-threads=2`: 784 aprobadas, 0 fallidas; `cargo xtask check`: código de
+  salida 0.
+- Mutaciones manuales (restauradas y comprobadas con `cmp`): quitar el vaciado de los
+  mapas en `set_dialog` falló cuatro pruebas de `async_results_tests`, entre ellas
+  `out_of_order_pickers_for_the_same_field_apply_only_the_current_dialog`; aceptar
+  identificadores desconocidos falló cinco, entre ellas
+  `unknown_or_repeated_request_ids_are_ignored`; emparejar la vista previa por destino
+  falló tres, entre ellas
+  `out_of_order_previews_for_the_same_destination_apply_only_the_current_request`;
+  enviar `request_id: 0` desde `platform.rs` falló
+  `restore_preview_event_echoes_the_request_id`. La misma mutación en el evento
+  `PathPicked` sobrevive porque ninguna prueba lo cubre, por la omisión indicada arriba;
+  no es una mutación equivalente.
+- Solo se validó Linux headless; Windows nativo y Steam Deck siguen pendientes.
