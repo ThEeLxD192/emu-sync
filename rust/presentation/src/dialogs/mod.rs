@@ -13,6 +13,7 @@ pub use drive_setup::{DriveSetupDialogState, DriveSetupEvents, render_drive_setu
 pub use entry_dialog::{EntryDialogEvents, render_entry_dialog};
 pub use game_edit_dialog::{GameEditDialogEvents, render_game_edit_dialog};
 pub use status_overlay::{
-    StatusOverlayEvents, conflict_card_id, post_sync_failed_message, render_status_overlay,
+    SaveFolderSelection, StatusOverlayEvents, conflict_card_id, post_sync_failed_message,
+    render_status_overlay, save_folder_option_id,
 };
 pub use update_dialog::{UpdateDialogEvents, render_update_dialog, update_dialog_dismissible};

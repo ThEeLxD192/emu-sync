@@ -8,7 +8,7 @@ use emusync_domain::config::{AppConfig, CloudAuthorization};
 use emusync_domain::execution::GameLauncher;
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, LocalSaveAccess, LocalSaveFiles, LocalSavePath,
-    PostSyncFailure, RequestId, SaveConflict, SyncEvent,
+    PostSyncFailure, RequestId, SaveConflict, SavePlacementGroup, SavePlacementRequest, SyncEvent,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -28,12 +28,14 @@ pub struct SyncServices<A, L, F, T, Auth, R> {
 type RetryFn =
     Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + 'static>;
 
-struct CleanupGuard<'a> {
-    pending: &'a Mutex<Option<(RequestId, OneshotSender<Decision>)>>,
+type PendingAnswer<T> = Mutex<Option<(RequestId, OneshotSender<T>)>>;
+
+struct CleanupGuard<'a, T> {
+    pending: &'a PendingAnswer<T>,
     req_id: RequestId,
 }
 
-impl<'a> Drop for CleanupGuard<'a> {
+impl<T> Drop for CleanupGuard<'_, T> {
     fn drop(&mut self) {
         let mut lock = self.pending.lock().unwrap();
         if lock.as_ref().is_some_and(|(id, _)| *id == self.req_id) {
@@ -53,7 +55,8 @@ where
     pub(crate) mapping: SaveTargetMapping<A>,
     pub(crate) resolver: SaveTargetResolver<A>,
     request_counter: AtomicU64,
-    pending_conflict: Mutex<Option<(RequestId, OneshotSender<Decision>)>>,
+    pending_conflict: PendingAnswer<Decision>,
+    pending_placement: PendingAnswer<Option<Vec<usize>>>,
     pending_retry: Mutex<Option<(RequestId, RetryFn)>>,
 }
 
@@ -88,6 +91,7 @@ where
             resolver,
             request_counter: AtomicU64::new(0),
             pending_conflict: Mutex::new(None),
+            pending_placement: Mutex::new(None),
             pending_retry: Mutex::new(None),
         }
     }
@@ -139,6 +143,51 @@ where
         };
         if let Some(tx) = tx {
             let _ = tx.send(decision);
+        }
+    }
+
+    /// Asks which folder receives each group; `None` when cancelled or unanswered.
+    pub async fn request_save_placement(
+        &self,
+        game_name: String,
+        folders: Vec<String>,
+        groups: Vec<SavePlacementGroup>,
+    ) -> Option<Vec<usize>> {
+        let req_id = self.next_request_id();
+        let request = SavePlacementRequest {
+            request_id: req_id,
+            game_name,
+            folders,
+            groups,
+        };
+        let (tx, rx) = oneshot();
+        *self.pending_placement.lock().unwrap() = Some((req_id, tx));
+        let _guard = CleanupGuard {
+            pending: &self.pending_placement,
+            req_id,
+        };
+        (self.on_status)(SyncEvent::ChooseSaveFolders(request));
+        rx.await.unwrap_or(None)
+    }
+
+    pub fn resolve_save_placement(
+        &self,
+        request: &SavePlacementRequest,
+        choice: Option<Vec<usize>>,
+    ) {
+        let tx = {
+            let mut lock = self.pending_placement.lock().unwrap();
+            if lock
+                .as_ref()
+                .is_some_and(|(id, _)| *id == request.request_id)
+            {
+                lock.take().map(|(_, tx)| tx)
+            } else {
+                None
+            }
+        };
+        if let Some(tx) = tx {
+            let _ = tx.send(choice);
         }
     }
 

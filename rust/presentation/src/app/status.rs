@@ -10,6 +10,7 @@ use crate::{
 impl EmuSyncApp {
     pub(super) fn show_status_overlay(&mut self, ctx: &egui::Context, actions: &mut Vec<UiAction>) {
         let mut resolve_conflict = None;
+        let mut choose_save_folders = None;
         let mut retry_post_sync = false;
         let mut dismiss_status = false;
 
@@ -18,6 +19,7 @@ impl EmuSyncApp {
         if self.answered_conflict.as_ref() != Some(&self.state.status) {
             self.answered_conflict = None;
         }
+        self.save_folder_selection.follow(&self.state.status);
         // A save setup stays interactable above the non-interactive launch states.
         let setup_open = matches!(
             self.active_dialog,
@@ -35,8 +37,10 @@ impl EmuSyncApp {
                 ctx,
                 &self.state.status,
                 self.answered_conflict.is_some(),
+                &mut self.save_folder_selection,
                 StatusOverlayEvents {
                     on_resolve_conflict: &mut |decision| resolve_conflict = Some(decision),
+                    on_choose_save_folders: &mut |choice| choose_save_folders = Some(choice),
                     on_retry_post_sync: &mut || retry_post_sync = true,
                     on_dismiss: &mut || dismiss_status = true,
                 },
@@ -46,6 +50,9 @@ impl EmuSyncApp {
         if let Some(decision) = resolve_conflict {
             actions.push(UiAction::ResolveConflict(decision));
             self.answered_conflict = Some(self.state.status.clone());
+        }
+        if let Some(choice) = choose_save_folders {
+            actions.push(UiAction::ResolveSaveFolders(choice));
         }
         if retry_post_sync {
             actions.push(UiAction::RetryPostSync);

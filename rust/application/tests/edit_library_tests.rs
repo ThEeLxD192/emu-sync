@@ -7,8 +7,8 @@ use emusync_domain::library::{
     Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType, SteamLibrary,
 };
 use emusync_domain::sync::{
-    Decision, EntrySyncStatus, PostSyncFailure, SaveConflict, SaveSetup, SaveSynchronizer,
-    SaveSynchronizerFactory, SyncEvent, SyncGame,
+    Decision, EntrySyncStatus, PostSyncFailure, SaveConflict, SavePlacementRequest, SaveSetup,
+    SaveSynchronizer, SaveSynchronizerFactory, SyncEvent, SyncGame,
 };
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -142,6 +142,9 @@ impl SaveSynchronizer for SpySynchronizer {
     }
 
     fn resolve_conflict(&self, _request: &SaveConflict, _decision: Decision) {}
+
+    fn resolve_save_placement(&self, _request: &SavePlacementRequest, _choice: Option<Vec<usize>>) {
+    }
 
     async fn retry_post_sync(&self, _failure: &PostSyncFailure) -> Result<(), Self::Error> {
         Ok(())

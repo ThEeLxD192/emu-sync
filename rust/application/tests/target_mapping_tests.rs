@@ -545,3 +545,137 @@ fn sibling_legacy_directories_reserve_newer_files_and_report_all_ambiguity_categ
         }
     }
 }
+
+fn cloud_file(name: &str) -> RemoteFile {
+    RemoteFile {
+        id: format!("id-{name}"),
+        name: name.into(),
+        modified: 1000,
+        is_folder: false,
+        sha256: None,
+        version: None,
+    }
+}
+
+fn legacy_dir(path: &str) -> SaveTarget {
+    SaveTarget {
+        path: path.into(),
+        kind: SaveTargetType::Directory,
+        cloud_path: None,
+    }
+}
+
+fn unplaced(
+    mapping: &SaveTargetMapping<MockFs>,
+    targets: &[SaveTarget],
+    cloud: &[RemoteFile],
+) -> emusync_application::UnplacedLegacyFiles {
+    match mapping.validate_save_target_mappings(targets, cloud) {
+        Err(SaveTargetMappingError::UnplacedLegacyFiles(unplaced)) => unplaced,
+        other => panic!("expected cloud files to place, got {other:?}"),
+    }
+}
+
+#[test]
+fn new_device_with_empty_legacy_folders_gets_files_to_place_instead_of_a_dead_end() {
+    // Steam Deck case: both shared-root folders exist but are empty on this device.
+    let fs = MockFs::new();
+    fs.add_dir("/sd/Saves/savedata/1/CUSA13795");
+    fs.add_dir("/sd/Saves/trophies/CUSA13795");
+    let targets = [
+        legacy_dir("/sd/Saves/savedata/1/CUSA13795"),
+        legacy_dir("/sd/Saves/trophies/CUSA13795"),
+    ];
+    let cloud = [
+        cloud_file("savedata1/SYS-DATA.sav"),
+        cloud_file("savedata1.sce_sys/param.bin"),
+        cloud_file("savedata1.sce_sys/icon0.png"),
+        cloud_file("TROPHY.TRP"),
+    ];
+    let mapping = SaveTargetMapping::new(fs);
+
+    let unplaced = unplaced(&mapping, &targets, &cloud);
+
+    assert_eq!(
+        unplaced.folders,
+        vec![
+            "/sd/Saves/savedata/1/CUSA13795".to_string(),
+            "/sd/Saves/trophies/CUSA13795".to_string()
+        ]
+    );
+    assert!(unplaced.inferred.is_empty());
+    let groups: Vec<_> = unplaced
+        .groups
+        .iter()
+        .map(|g| (g.name.as_str(), g.files.len(), g.suggested_folder))
+        .collect();
+    // Every file is offered exactly once, grouped by its first segment, with the
+    // folder whose name resembles the group preselected.
+    assert_eq!(
+        groups,
+        vec![
+            ("TROPHY.TRP", 1, Some(1)),
+            ("savedata1", 1, Some(0)),
+            ("savedata1.sce_sys", 2, Some(0)),
+        ]
+    );
+    // Callers that cannot ask still explain the situation.
+    let message = SaveTargetMappingError::UnplacedLegacyFiles(unplaced).to_string();
+    assert!(message.contains("Cloud files with no matching local save"));
+    assert!(message.contains("savedata1.sce_sys/icon0.png"));
+}
+
+#[test]
+fn a_parent_directory_held_by_one_folder_places_the_file_without_asking() {
+    let fs = MockFs::new();
+    fs.add_dir("/saves/a");
+    fs.add_dir("/saves/b");
+    fs.add_dir("/saves/a/slot1");
+    fs.add_dir("/saves/a/shared");
+    fs.add_dir("/saves/b/shared");
+    let targets = [legacy_dir("/saves/a"), legacy_dir("/saves/b")];
+    let cloud = [
+        cloud_file("slot1/new.sav"),
+        cloud_file("shared/x.sav"),
+        cloud_file("loose.sav"),
+    ];
+    let mapping = SaveTargetMapping::new(fs);
+
+    let unplaced = unplaced(&mapping, &targets, &cloud);
+
+    assert_eq!(unplaced.inferred, vec![("slot1/new.sav".to_string(), 0)]);
+    // A parent present in both folders, or none, decides nothing.
+    let asked: Vec<_> = unplaced.groups.iter().map(|g| g.name.as_str()).collect();
+    assert_eq!(asked, vec!["loose.sav", "shared"]);
+    assert!(unplaced.groups.iter().all(|g| g.suggested_folder.is_none()));
+}
+
+#[test]
+fn files_already_in_a_folder_need_no_placement() {
+    let fs = MockFs::new();
+    fs.add_file("/saves/a/one.sav", 1000);
+    fs.add_dir("/saves/b");
+    let targets = [legacy_dir("/saves/a"), legacy_dir("/saves/b")];
+    let mapping = SaveTargetMapping::new(fs);
+
+    assert_eq!(
+        mapping.validate_save_target_mappings(&targets, &[cloud_file("one.sav")]),
+        Ok(())
+    );
+}
+
+#[test]
+fn an_unavailable_legacy_folder_still_blocks_instead_of_offering_placement() {
+    // A missing folder may be an unmounted SD card: never restore around it.
+    let fs = MockFs::new();
+    fs.add_dir("/saves/a");
+    let targets = [legacy_dir("/saves/a"), legacy_dir("/media/sd/b")];
+    let mapping = SaveTargetMapping::new(fs);
+
+    let result = mapping.validate_save_target_mappings(&targets, &[cloud_file("one.sav")]);
+
+    assert!(
+        matches!(&result, Err(SaveTargetMappingError::AmbiguousLegacyDirectories(msg)) if msg.contains("Folders unavailable on this device")),
+        "got {result:?}"
+    );
+}

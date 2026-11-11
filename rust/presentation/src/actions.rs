@@ -66,6 +66,8 @@ pub enum UiAction {
     DownloadUpdate(UpdateInfo),
     RestartApp(PathBuf),
     ResolveConflict(Decision),
+    /// One folder index per group of the pending folder choice, or `None` to cancel.
+    ResolveSaveFolders(Option<Vec<usize>>),
     RetryPostSync,
     ClearStatus,
     OpenConfigDirectory,
@@ -155,6 +157,7 @@ impl std::fmt::Debug for UiAction {
             Self::DownloadUpdate(v) => f.debug_tuple("DownloadUpdate").field(v).finish(),
             Self::RestartApp(v) => f.debug_tuple("RestartApp").field(v).finish(),
             Self::ResolveConflict(v) => f.debug_tuple("ResolveConflict").field(v).finish(),
+            Self::ResolveSaveFolders(v) => f.debug_tuple("ResolveSaveFolders").field(v).finish(),
             Self::RetryPostSync => f.write_str("RetryPostSync"),
             Self::ClearStatus => f.write_str("ClearStatus"),
             Self::OpenConfigDirectory => f.write_str("OpenConfigDirectory"),

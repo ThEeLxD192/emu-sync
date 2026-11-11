@@ -359,6 +359,8 @@ pub struct MockTrackedSync {
     pub fail_upload_for: Arc<Mutex<Option<String>>>,
     pub fail_download_for: Arc<Mutex<Option<String>>>,
     pub fail_plan: Arc<AtomicBool>,
+    /// When set, directory downloads create the file there, as a real restore does.
+    pub materialize_in: Arc<Mutex<Option<MockFs>>>,
 }
 
 impl LocalSaveFiles for MockTrackedSync {
@@ -415,6 +417,9 @@ impl LocalSaveFiles for MockTrackedSync {
             && path == fail
         {
             return Err(format!("checksum mismatch / disk full: {path}"));
+        }
+        if let Some(fs) = self.materialize_in.lock().unwrap().as_ref() {
+            fs.add_file(&path, 1);
         }
         self.downloads.lock().unwrap().push(path);
         Ok(())

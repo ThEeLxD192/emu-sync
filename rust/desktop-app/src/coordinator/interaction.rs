@@ -2,7 +2,8 @@ use crate::events::AppEvent;
 use emusync_application::library::game_specific_targets;
 use emusync_data_local::LocalSaveTargets;
 use emusync_domain::sync::{
-    Decision, PostSyncFailure, SaveConflict, SaveSetup, SaveSetupRequest, SaveSetupResult,
+    Decision, PostSyncFailure, SaveConflict, SavePlacementRequest, SaveSetup, SaveSetupRequest,
+    SaveSetupResult,
 };
 use emusync_presentation::model::GameItem;
 use std::{
@@ -21,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 const SAVE_SETUP_CANCELLED: &str = "Save setup cancelled.";
 
 pub type ConflictResolver = Arc<dyn Fn(&SaveConflict, Decision) + Send + Sync>;
+pub type PlacementResolver = Arc<dyn Fn(&SavePlacementRequest, Option<Vec<usize>>) + Send + Sync>;
 pub type RetryRunner = Arc<
     dyn Fn(PostSyncFailure) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
 >;
@@ -51,6 +53,8 @@ pub struct InteractionControls {
     pub redraw: Arc<dyn Fn() + Send + Sync>,
     pub current_conflict: Arc<Mutex<Option<SaveConflict>>>,
     pub active_conflict_resolver: Arc<Mutex<Option<ConflictResolver>>>,
+    pub current_placement: Arc<Mutex<Option<SavePlacementRequest>>>,
+    pub active_placement_resolver: Arc<Mutex<Option<PlacementResolver>>>,
     pub active_retry_failure: Arc<Mutex<Option<PostSyncFailure>>>,
     pub active_retry_runner: Arc<Mutex<Option<RetryRunner>>>,
     pub active_cancel: Arc<Mutex<Option<CancellationToken>>>,
@@ -65,6 +69,8 @@ impl InteractionControls {
             redraw,
             current_conflict: Arc::new(Mutex::new(None)),
             active_conflict_resolver: Arc::new(Mutex::new(None)),
+            current_placement: Arc::new(Mutex::new(None)),
+            active_placement_resolver: Arc::new(Mutex::new(None)),
             active_retry_failure: Arc::new(Mutex::new(None)),
             active_retry_runner: Arc::new(Mutex::new(None)),
             active_cancel: Arc::new(Mutex::new(None)),
@@ -83,6 +89,7 @@ impl InteractionControls {
         }
         self.cancel_save_setup();
         self.cancel_conflict();
+        self.resolve_placement(None);
     }
 
     pub fn set_conflict_resolver(&self, resolver: ConflictResolver) {
@@ -124,6 +131,27 @@ impl InteractionControls {
         }
     }
 
+    pub fn set_placement_resolver(&self, resolver: PlacementResolver) {
+        *self.active_placement_resolver.lock().unwrap() = Some(resolver);
+    }
+
+    pub fn on_placement(&self, request: SavePlacementRequest) {
+        *self.current_placement.lock().unwrap() = Some(request);
+    }
+
+    /// Answers the pending folder choice once; `None` cancels it.
+    pub fn resolve_placement(&self, choice: Option<Vec<usize>>) -> bool {
+        let request = self.current_placement.lock().unwrap().take();
+        let resolver = self.active_placement_resolver.lock().unwrap().clone();
+        if let (Some(request), Some(resolver)) = (request, resolver) {
+            resolver(&request, choice);
+            (self.redraw)();
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn set_retry(&self, failure: PostSyncFailure, runner: RetryRunner) {
         *self.active_retry_failure.lock().unwrap() = Some(failure);
         *self.active_retry_runner.lock().unwrap() = Some(runner);
@@ -142,6 +170,8 @@ impl InteractionControls {
     pub fn clear_controls(&self) {
         *self.current_conflict.lock().unwrap() = None;
         *self.active_conflict_resolver.lock().unwrap() = None;
+        *self.current_placement.lock().unwrap() = None;
+        *self.active_placement_resolver.lock().unwrap() = None;
         *self.active_retry_failure.lock().unwrap() = None;
         *self.active_retry_runner.lock().unwrap() = None;
         *self.active_cancel.lock().unwrap() = None;

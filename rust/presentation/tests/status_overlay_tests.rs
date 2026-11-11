@@ -4,10 +4,10 @@ mod common;
 
 use common::*;
 use egui::Context;
-use emusync_domain::sync::Decision;
+use emusync_domain::sync::{Decision, SavePlacementGroup};
 use emusync_presentation::{
     AppStatus, EmuSyncApp, UiAction,
-    dialogs::{conflict_card_id, post_sync_failed_message},
+    dialogs::{conflict_card_id, post_sync_failed_message, save_folder_option_id},
 };
 
 fn conflict() -> AppStatus {
@@ -208,4 +208,65 @@ fn clicking_the_title_or_date_of_a_conflict_card_chooses_it() {
             );
         }
     }
+}
+
+fn folder_choice() -> AppStatus {
+    AppStatus::ChooseSaveFolders {
+        game_name: "Crash Team Racing".to_string(),
+        folders: vec![
+            "/sd/Saves/savedata/1/CUSA13795".to_string(),
+            "/sd/Saves/trophies/CUSA13795".to_string(),
+        ],
+        groups: vec![
+            SavePlacementGroup {
+                name: "savedata1".to_string(),
+                files: vec!["savedata1/SYS-DATA.sav".to_string()],
+                suggested_folder: Some(0),
+            },
+            SavePlacementGroup {
+                name: "unknown.bin".to_string(),
+                files: vec!["unknown.bin".to_string()],
+                suggested_folder: None,
+            },
+        ],
+    }
+}
+
+#[test]
+fn folder_choice_needs_every_group_and_sends_the_picked_folders_once() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    app.state.status = folder_choice();
+
+    // Escape does not dismiss it, and Restore waits for a folder for every group.
+    run_frames(&ctx, &mut app, vec![Vec::new(), escape()]);
+    click_button(&ctx, &mut app, "Restore");
+    assert!(app.take_actions().is_empty());
+
+    // The suggestion is only a preselection: it can be changed.
+    for (group, folder) in [(1, 1), (0, 1)] {
+        let option = settled_center_of(&ctx, &mut app, save_folder_option_id(group, folder));
+        run_frames(&ctx, &mut app, click_at(option));
+    }
+    click_button(&ctx, &mut app, "Restore");
+    assert_eq!(
+        app.take_actions(),
+        vec![UiAction::ResolveSaveFolders(Some(vec![1, 1]))]
+    );
+
+    // While the coordinator has not changed the status, no second answer can be sent.
+    run_frames(&ctx, &mut app, vec![Vec::new(), Vec::new()]);
+    assert!(ctx.read_response(save_folder_option_id(0, 0)).is_none());
+    assert!(app.take_actions().is_empty());
+}
+
+#[test]
+fn cancelling_the_folder_choice_answers_without_folders() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    app.state.status = folder_choice();
+
+    click_button(&ctx, &mut app, "Cancel");
+
+    assert_eq!(app.take_actions(), vec![UiAction::ResolveSaveFolders(None)]);
 }

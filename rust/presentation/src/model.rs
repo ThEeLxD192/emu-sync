@@ -3,6 +3,7 @@
 use crate::theme::{ERROR, ON_SURFACE_DIM, PRIMARY, SUCCESS, WARNING};
 use egui::Color32;
 use emusync_domain::library::{Emulator, GameEntry, NativeGame, SaveTarget};
+use emusync_domain::sync::SavePlacementGroup;
 use std::path::{Path, PathBuf};
 
 /// Cloud sync status for an entry/emulator system (Steam Cloud style).
@@ -67,6 +68,12 @@ pub enum AppStatus {
         local_date: String,
         cloud_date: String,
         game_name: String,
+    },
+    /// Cloud files no local folder holds yet; the user picks each group's folder.
+    ChooseSaveFolders {
+        game_name: String,
+        folders: Vec<String>,
+        groups: Vec<SavePlacementGroup>,
     },
 }
 
