@@ -24,6 +24,13 @@ Cancelación de operaciones debe esperar limpieza y rollback asíncrono antes de
 - [rust-concurrency](.agents/skills/rust-concurrency/SKILL.md): concurrencia, cancelación y ciclo de vida.
 - [rust-style-clippy](.agents/skills/rust-style-clippy/SKILL.md): formato y análisis estático.
 
+Lectura obligatoria antes de editar (completa, en cada sesión y en cada subagente):
+
+- Código Rust de producción (`rust/`, `xtask/`): `rust-development` y `rust-style-clippy`; además `rust-concurrency` si el cambio toca tareas, locks, atómicos, canales o cancelación.
+- Pruebas (`tests/`, `*_tests.rs`, `tests.rs` o módulos `#[cfg(test)]`): `rust-valuable-tests` y `rust-testing`.
+
+`.agents/hooks/require_skills.py` bloquea la edición hasta que se hayan leído, con la misma regla para Claude Code (`.claude/settings.json`), Codex (`.codex/hooks.json`), Antigravity (`.agents/hooks.json`) y OpenCode (`.opencode/plugins/`); sus pruebas están en `scripts/tests/agent-skill-hooks-test.sh`. Un agente sin hooks sigue obligado por esta regla.
+
 Las skills externas proceden de [full-stack-skills/rust-skills](https://github.com/full-stack-skills/rust-skills) revisión `b8a6af74af28ee86b8cbbbc3075cde0b31a5155e`, Apache-2.0; cada copia incluye su licencia. Las reglas del usuario y esta guía prevalecen sobre ejemplos, cuotas, flujos automáticos y recomendaciones de las skills. No instalar herramientas, imponer cobertura ni ejecutar todas las combinaciones de features sin necesidad.
 
 ## Calidad y pruebas

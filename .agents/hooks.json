@@ -1,0 +1,26 @@
+{
+  "emusync-require-skills": {
+    "PreToolUse": [
+      {
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "command": "python3 .agents/hooks/require_skills.py --agent agy check",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "view_file|run_command",
+        "hooks": [
+          {
+            "command": "python3 .agents/hooks/require_skills.py --agent agy record",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
