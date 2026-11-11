@@ -152,10 +152,24 @@ impl EmuSyncApp {
         } = &self.active_dialog
         {
             self.pending_actions.push(UiAction::CancelSaveSetup {
-                game_name: request.item.name.clone(),
+                request_id: request.id,
             });
         }
         self.active_dialog = dialog;
+    }
+
+    /// Closes the save setup for `request_id` without answering it; the coordinator
+    /// already did. Any other dialog is left untouched.
+    pub fn close_save_setup(&mut self, request_id: u64) {
+        if matches!(
+            &self.active_dialog,
+            ActiveDialog::GameEdit {
+                origin: GameEditOrigin::SaveSetup(request),
+                ..
+            } if request.id == request_id
+        ) {
+            self.active_dialog = ActiveDialog::None;
+        }
     }
 
     /// The open modal dialog, read-only.

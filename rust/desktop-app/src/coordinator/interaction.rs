@@ -2,25 +2,48 @@ use crate::events::AppEvent;
 use emusync_application::library::game_specific_targets;
 use emusync_data_local::LocalSaveTargets;
 use emusync_domain::sync::{
-    Decision, PostSyncFailure, SaveConflict, SaveSetup, SaveSetupRequest, SaveSetupResult, SyncGame,
+    Decision, PostSyncFailure, SaveConflict, SaveSetup, SaveSetupRequest, SaveSetupResult,
 };
 use emusync_presentation::model::GameItem;
 use std::{
     future::Future,
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, Mutex, mpsc::Sender},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+        mpsc::Sender,
+    },
 };
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
+
+const SAVE_SETUP_CANCELLED: &str = "Save setup cancelled.";
 
 pub type ConflictResolver = Arc<dyn Fn(&SaveConflict, Decision) + Send + Sync>;
 pub type RetryRunner = Arc<
     dyn Fn(PostSyncFailure) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
 >;
 
-type PendingSaveSetupSlot =
-    Arc<Mutex<Option<(String, oneshot::Sender<Result<SaveSetupResult, String>>)>>>;
+/// A save setup request waiting for the UI. `id` tells apart two requests for the
+/// same game, such as the one before and the one after playing.
+pub struct PendingSaveSetup {
+    pub id: u64,
+    pub sender: oneshot::Sender<Result<SaveSetupResult, String>>,
+}
+
+impl PendingSaveSetup {
+    /// Answers the waiting operation with a cancellation.
+    pub fn cancel(self) {
+        let _ = self.sender.send(Err(SAVE_SETUP_CANCELLED.into()));
+    }
+
+    pub fn complete(self, result: SaveSetupResult) {
+        let _ = self.sender.send(Ok(result));
+    }
+}
+
+type PendingSaveSetupSlot = Arc<Mutex<Option<PendingSaveSetup>>>;
 
 #[derive(Clone)]
 pub struct InteractionControls {
@@ -32,6 +55,7 @@ pub struct InteractionControls {
     pub active_retry_runner: Arc<Mutex<Option<RetryRunner>>>,
     pub active_cancel: Arc<Mutex<Option<CancellationToken>>>,
     pub pending_save_setup: PendingSaveSetupSlot,
+    next_save_setup_id: Arc<AtomicU64>,
 }
 
 impl InteractionControls {
@@ -45,6 +69,7 @@ impl InteractionControls {
             active_retry_runner: Arc::new(Mutex::new(None)),
             active_cancel: Arc::new(Mutex::new(None)),
             pending_save_setup: Arc::new(Mutex::new(None)),
+            next_save_setup_id: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -123,39 +148,49 @@ impl InteractionControls {
         self.cancel_save_setup();
     }
 
-    pub fn cancel_save_setup(&self) {
-        if let Some((_, sender)) = self.pending_save_setup.lock().unwrap().take() {
-            let _ = sender.send(Err("Save setup cancelled.".into()));
-        }
-    }
-
-    /// Cancels the pending request only if it is the one for `game_name`, so a late
-    /// cancel of a dismissed dialog cannot cancel a newer request.
-    pub fn cancel_save_setup_for(&self, game_name: &str) {
-        let mut pending = self.pending_save_setup.lock().unwrap();
-        if pending.as_ref().is_some_and(|(name, _)| name == game_name)
-            && let Some((_, sender)) = pending.take()
-        {
-            let _ = sender.send(Err("Save setup cancelled.".into()));
-        }
-    }
-
-    pub fn complete_save_setup_response(
+    /// Takes the pending request if `filter` accepts it. The lock is released before the
+    /// UI is told, and every request that leaves the slot emits one `SaveSetupClosed`.
+    fn take_pending(
         &self,
-        game_name: &str,
-        game: SyncGame,
-        targets: Vec<emusync_domain::library::SaveTarget>,
-    ) -> bool {
-        let mut pending = self.pending_save_setup.lock().unwrap();
-        if let Some((name, _)) = pending.as_ref()
-            && name == game_name
-        {
-            let (_, sender) = pending.take().unwrap();
-            let _ = sender.send(Ok(SaveSetupResult { game, targets }));
-            (self.redraw)();
-            return true;
+        filter: impl FnOnce(&PendingSaveSetup) -> bool,
+    ) -> Option<PendingSaveSetup> {
+        let taken = {
+            let mut slot = self.pending_save_setup.lock().unwrap();
+            if slot.as_ref().is_some_and(filter) {
+                slot.take()
+            } else {
+                None
+            }
+        }?;
+        self.notify_closed(taken.id);
+        Some(taken)
+    }
+
+    fn notify_closed(&self, id: u64) {
+        let _ = self
+            .event_tx
+            .send(AppEvent::SaveSetupClosed { request_id: id });
+        (self.redraw)();
+    }
+
+    /// Cancels whatever request is pending.
+    pub fn cancel_save_setup(&self) {
+        if let Some(pending) = self.take_pending(|_| true) {
+            pending.cancel();
         }
-        false
+    }
+
+    /// Cancels the pending request only if it is `id`, so a late cancel of a dismissed
+    /// dialog cannot cancel a newer request.
+    pub fn cancel_save_setup_for(&self, id: u64) {
+        if let Some(pending) = self.take_pending(|p| p.id == id) {
+            pending.cancel();
+        }
+    }
+
+    /// Claims request `id` so the caller answers it; nobody else can cancel it afterwards.
+    pub fn take_save_setup(&self, id: u64) -> Option<PendingSaveSetup> {
+        self.take_pending(|p| p.id == id)
     }
 }
 
@@ -168,9 +203,19 @@ impl SaveSetup for AsyncSaveSetupBridge {
 
     async fn request(&self, request: SaveSetupRequest) -> Result<SaveSetupResult, Self::Error> {
         let (tx, rx) = oneshot::channel();
-        {
-            let mut pending = self.controls.pending_save_setup.lock().unwrap();
-            *pending = Some((request.game.name.clone(), tx));
+        let id = self
+            .controls
+            .next_save_setup_id
+            .fetch_add(1, Ordering::Relaxed);
+        // Replace in one step so no request can slip in between; a superseded one is
+        // answered and its dialog closed once the lock is released.
+        let superseded = {
+            let mut slot = self.controls.pending_save_setup.lock().unwrap();
+            slot.replace(PendingSaveSetup { id, sender: tx })
+        };
+        if let Some(old) = superseded {
+            self.controls.notify_closed(old.id);
+            old.cancel();
         }
 
         let item = GameItem::new(
@@ -189,15 +234,25 @@ impl SaveSetup for AsyncSaveSetupBridge {
         .and_then(Result::ok)
         .unwrap_or_default();
         let ui_request = emusync_presentation::model::SaveSetupRequest {
+            id,
             item,
             notice: None,
             cloud_file_names: request.cloud_file_names,
             targets,
         };
 
-        let _ = self.controls.event_tx.send(AppEvent::SaveSetupRequested {
-            request: Box::new(ui_request),
-        });
+        {
+            // The check and the send share one lock so `SaveSetupClosed`, which is only
+            // sent after taking the slot, can never overtake `SaveSetupRequested`.
+            // `Sender::send` does not block.
+            let slot = self.controls.pending_save_setup.lock().unwrap();
+            if !slot.as_ref().is_some_and(|p| p.id == id) {
+                return Err(SAVE_SETUP_CANCELLED.to_string());
+            }
+            let _ = self.controls.event_tx.send(AppEvent::SaveSetupRequested {
+                request: Box::new(ui_request),
+            });
+        }
         (self.controls.redraw)();
 
         rx.await

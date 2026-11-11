@@ -243,6 +243,10 @@ impl ApplicationHandler for App {
                             self.emusync_app.open_save_setup(&request);
                             window.request_redraw();
                         }
+                        AppEvent::SaveSetupClosed { request_id } => {
+                            self.emusync_app.close_save_setup(request_id);
+                            window.request_redraw();
+                        }
                         AppEvent::SyncStatusUpdated { entry_name, status } => {
                             self.emusync_app
                                 .state

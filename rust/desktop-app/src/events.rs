@@ -61,6 +61,11 @@ pub enum AppEvent {
     SaveSetupRequested {
         request: Box<SaveSetupRequest>,
     },
+    /// The coordinator resolved or dropped request `request_id`; its dialog must close
+    /// without answering.
+    SaveSetupClosed {
+        request_id: u64,
+    },
 }
 
 /// Applies an `EntryGamesScanned` event to presentation state if the revision is newer or equal

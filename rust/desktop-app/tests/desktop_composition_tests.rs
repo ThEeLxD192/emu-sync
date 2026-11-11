@@ -425,7 +425,13 @@ async fn complete_save_setup_cancels_bridge_when_category_deleted_or_persists_an
     // Complete setup for non-existent category
     harness
         .coordinator
-        .complete_save_setup(*req1, vec![], None, None);
+        .handle_action(UiAction::CompleteSaveSetup {
+            request: req1,
+            targets: vec![],
+            title: None,
+            cover_path: None,
+            restore: None,
+        });
 
     // Bridge task 1 terminates with error
     let res1 = bridge_task_1.await.unwrap();
@@ -470,12 +476,15 @@ async fn complete_save_setup_cancels_bridge_when_category_deleted_or_persists_an
         cloud_path: Some("zelda.sav".into()),
         kind: SaveTargetType::File,
     };
-    harness.coordinator.complete_save_setup(
-        *req2,
-        vec![new_target.clone()],
-        Some("Zelda DX".into()),
-        None,
-    );
+    harness
+        .coordinator
+        .handle_action(UiAction::CompleteSaveSetup {
+            request: req2,
+            targets: vec![new_target.clone()],
+            title: Some("Zelda DX".into()),
+            cover_path: None,
+            restore: None,
+        });
 
     // Bridge task 2 resolves with Ok(result)
     let res2 = bridge_task_2
@@ -496,5 +505,48 @@ async fn complete_save_setup_cancels_bridge_when_category_deleted_or_persists_an
     assert_eq!(
         saved_entry.common().save_targets[0].path,
         "/saves/zelda.sav"
+    );
+}
+
+#[tokio::test]
+async fn complete_save_setup_without_a_pending_request_writes_nothing() {
+    let harness = TestHarness::new();
+    let entry = test_native_entry("Zelda");
+    harness
+        .manager
+        .update(|_| AppConfig {
+            credentials: None,
+            entries: vec![entry.clone()],
+        })
+        .unwrap();
+    let before = harness.manager.load().unwrap();
+
+    harness
+        .coordinator
+        .handle_action(UiAction::CompleteSaveSetup {
+            request: Box::new(emusync_presentation::model::SaveSetupRequest {
+                id: 7,
+                item: emusync_presentation::model::GameItem::new("Zelda", entry, None),
+                notice: None,
+                cloud_file_names: vec![],
+                targets: vec![],
+            }),
+            targets: vec![SaveTarget {
+                path: "/saves/orphan.sav".into(),
+                cloud_path: None,
+                kind: SaveTargetType::File,
+            }],
+            title: Some("Orphan".into()),
+            cover_path: None,
+            restore: None,
+        });
+
+    assert_eq!(harness.manager.load().unwrap(), before);
+    let events: Vec<_> = harness.event_rx.try_iter().collect();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AppEvent::Toast(_) | AppEvent::ConfigReloaded(_))),
+        "{events:?}"
     );
 }

@@ -34,111 +34,155 @@ fn test_game(name: &str) -> SyncGame {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn bridge_emits_requested_event_and_resolves_on_confirmation() {
+fn controls_with_events() -> (InteractionControls, std::sync::mpsc::Receiver<AppEvent>) {
     let (tx, rx) = channel();
-    let notify = Arc::new(tokio::sync::Notify::new());
-    let notify_clone = notify.clone();
-    let controls = InteractionControls::new(
-        tx,
-        Arc::new(move || {
-            notify_clone.notify_waiters();
-            notify_clone.notify_one();
-        }),
-    );
+    (InteractionControls::new(tx, Arc::new(|| {})), rx)
+}
+
+fn request_for(name: &str) -> SaveSetupRequest {
+    SaveSetupRequest {
+        game: test_game(name),
+        cloud_file_names: vec![format!("{name}.sav")],
+    }
+}
+
+/// Starts a request and returns its id once the UI event shows it is pending.
+async fn start_request(
+    controls: &InteractionControls,
+    rx: &std::sync::mpsc::Receiver<AppEvent>,
+    name: &str,
+    closed: &mut Vec<u64>,
+) -> (
+    u64,
+    tokio::task::JoinHandle<Result<emusync_domain::sync::SaveSetupResult, String>>,
+) {
     let bridge = AsyncSaveSetupBridge {
         controls: controls.clone(),
     };
-
-    let game = test_game("Zelda");
-    let req = SaveSetupRequest {
-        game: game.clone(),
-        cloud_file_names: vec!["zelda.sav".to_string()],
-    };
-
-    let bridge_task = tokio::spawn(async move { bridge.request(req).await });
-
-    let event = common::recv_event_matching(&rx, &notify, |e| {
-        matches!(e, AppEvent::SaveSetupRequested { .. })
-    })
-    .await;
-    match event {
-        AppEvent::SaveSetupRequested { request } => {
-            assert_eq!(request.item.name, "Zelda");
-            assert_eq!(request.cloud_file_names, vec!["zelda.sav".to_string()]);
+    let req = request_for(name);
+    let task = tokio::spawn(async move { bridge.request(req).await });
+    loop {
+        match rx.try_recv() {
+            Ok(AppEvent::SaveSetupRequested { request }) => return (request.id, task),
+            Ok(AppEvent::SaveSetupClosed { request_id }) => closed.push(request_id),
+            Ok(_) => {}
+            Err(_) => tokio::time::sleep(std::time::Duration::from_millis(5)).await,
         }
-        other => panic!("Unexpected event: {other:?}"),
     }
+}
 
-    // 2. UI confirms setup
+fn closed_ids(rx: &std::sync::mpsc::Receiver<AppEvent>) -> Vec<u64> {
+    rx.try_iter()
+        .filter_map(|e| match e {
+            AppEvent::SaveSetupClosed { request_id } => Some(request_id),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn taking_the_request_closes_it_once_and_lets_the_caller_answer() {
+    let (controls, rx) = controls_with_events();
+    let (id, task) = start_request(&controls, &rx, "Zelda", &mut Vec::new()).await;
+
+    let pending = controls.take_save_setup(id).expect("request is pending");
+    assert_eq!(closed_ids(&rx), vec![id]);
+    assert!(controls.take_save_setup(id).is_none(), "claimed only once");
+
     let target = SaveTarget {
         path: "/saves/zelda.sav".to_string(),
         kind: SaveTargetType::File,
         cloud_path: Some("zelda.sav".to_string()),
     };
-    let resolved = controls.complete_save_setup_response("Zelda", game, vec![target.clone()]);
-    assert!(resolved, "Confirmation must be accepted for matching game");
-
-    let result = bridge_task.await.unwrap().expect("Bridge should succeed");
+    pending.complete(emusync_domain::sync::SaveSetupResult {
+        game: test_game("Zelda"),
+        targets: vec![target.clone()],
+    });
+    let result = task.await.unwrap().expect("bridge succeeds");
     assert_eq!(result.targets, vec![target]);
+    assert!(closed_ids(&rx).is_empty(), "no second close");
 }
 
-#[tokio::test]
-async fn bridge_returns_error_on_cancellation() {
-    let (tx, _rx) = channel();
-    let controls = InteractionControls::new(tx, Arc::new(|| {}));
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_save_setup_errors_the_bridge_and_closes_once() {
+    let (controls, rx) = controls_with_events();
+    let (id, task) = start_request(&controls, &rx, "Metroid", &mut Vec::new()).await;
+
+    controls.cancel_save_setup();
+    controls.cancel_save_setup();
+
+    assert!(task.await.unwrap().is_err());
+    assert_eq!(closed_ids(&rx), vec![id]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_for_the_matching_id_closes_once_and_another_id_keeps_the_request() {
+    let (controls, rx) = controls_with_events();
+    let (id, task) = start_request(&controls, &rx, "Metroid", &mut Vec::new()).await;
+
+    controls.cancel_save_setup_for(id + 1);
+    assert!(closed_ids(&rx).is_empty(), "other id emits nothing");
+    assert!(!task.is_finished(), "request stays pending");
+
+    controls.cancel_save_setup_for(id);
+    assert!(task.await.unwrap().is_err());
+    assert_eq!(closed_ids(&rx), vec![id]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_new_request_for_the_same_game_supersedes_the_first() {
+    let (controls, rx) = controls_with_events();
+    let (first, first_task) = start_request(&controls, &rx, "Zelda", &mut Vec::new()).await;
+    let mut closed = Vec::new();
+    let (second, second_task) = start_request(&controls, &rx, "Zelda", &mut closed).await;
+
+    assert_ne!(first, second, "same game, distinct ids");
+    assert!(first_task.await.unwrap().is_err());
+    closed.extend(closed_ids(&rx));
+    assert_eq!(closed, vec![first]);
+    assert!(!second_task.is_finished(), "second stays pending");
+    assert!(controls.take_save_setup(first).is_none());
+    assert!(controls.take_save_setup(second).is_some());
+}
+
+#[test]
+fn taking_an_absent_request_returns_none_and_emits_nothing() {
+    let (controls, rx) = controls_with_events();
+    assert!(controls.take_save_setup(3).is_none());
+    assert!(closed_ids(&rx).is_empty());
+}
+
+// Needs `current_thread`: the cancel must land while the bridge is parked reading targets.
+#[tokio::test(flavor = "current_thread")]
+async fn a_request_cancelled_before_its_announcement_is_never_requested() {
+    let (controls, rx) = controls_with_events();
     let bridge = AsyncSaveSetupBridge {
         controls: controls.clone(),
     };
+    let req = request_for("Zelda");
+    let task = tokio::spawn(async move { bridge.request(req).await });
 
-    let game = test_game("Metroid");
-    let req = SaveSetupRequest {
-        game,
-        cloud_file_names: vec!["metroid.dat".to_string()],
-    };
-
-    let bridge_task = tokio::spawn(async move { bridge.request(req).await });
-
-    // Cancel setup from UI / dialog close
+    // Single-threaded runtime: the bridge is parked on reading targets, and the cancel
+    // below runs before it is polled again.
     tokio::task::yield_now().await;
     controls.cancel_save_setup();
 
-    let result = bridge_task.await.unwrap();
-    assert!(result.is_err(), "Cancelled setup must return error");
-}
-
-#[tokio::test]
-async fn mismatched_game_name_is_rejected() {
-    let (tx, _rx) = channel();
-    let controls = InteractionControls::new(tx, Arc::new(|| {}));
-    let bridge = AsyncSaveSetupBridge {
-        controls: controls.clone(),
-    };
-
-    let game = test_game("Castlevania");
-    let req = SaveSetupRequest {
-        game: game.clone(),
-        cloud_file_names: vec!["save.bin".to_string()],
-    };
-
-    let _bridge_task = tokio::spawn(async move { bridge.request(req).await });
-    tokio::task::yield_now().await;
-
-    // Responding with wrong game name
-    let wrong = controls.complete_save_setup_response("WrongGame", game, vec![]);
-    assert!(!wrong, "Mismatched game name must return false");
-}
-
-#[tokio::test]
-async fn cancel_for_another_game_keeps_the_pending_request() {
-    let (events, _events_rx) = channel();
-    let controls = InteractionControls::new(events, Arc::new(|| {}));
-    let (tx, mut rx) = tokio::sync::oneshot::channel();
-    *controls.pending_save_setup.lock().unwrap() = Some(("Metroid".to_string(), tx));
-
-    controls.cancel_save_setup_for("Zelda");
-    assert!(rx.try_recv().is_err(), "another game's cancel is ignored");
-
-    controls.cancel_save_setup_for("Metroid");
-    assert!(matches!(rx.await, Ok(Err(_))));
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .expect("bridge did not finish: the cancel must land after it registers its request and before it announces it");
+    assert!(result.unwrap().is_err());
+    let events: Vec<_> = rx.try_iter().collect();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AppEvent::SaveSetupRequested { .. })),
+        "{events:?}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, AppEvent::SaveSetupClosed { .. }))
+            .count(),
+        1
+    );
 }

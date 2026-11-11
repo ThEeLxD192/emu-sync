@@ -7,7 +7,7 @@ pub mod platform;
 pub mod sync;
 
 pub use composition::DriveEndpoints;
-pub use interaction::{ConflictResolver, InteractionControls, RetryRunner};
+pub use interaction::{ConflictResolver, InteractionControls, PendingSaveSetup, RetryRunner};
 pub use platform::PlatformServices;
 pub use sync::resolve_effective_targets;
 
@@ -30,7 +30,10 @@ use emusync_data_local::{
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
     library::{GameEntry, SaveTarget, SteamLibrary},
-    sync::{Decision, PostSyncFailure, SaveConflict, SaveSynchronizer, SyncEvent, SyncGame},
+    sync::{
+        Decision, PostSyncFailure, SaveConflict, SaveSetupResult, SaveSynchronizer, SyncEvent,
+        SyncGame,
+    },
 };
 use emusync_platform_desktop::{
     DesktopBrowserLauncher, DesktopSteamLibrary, FilePicker, SteamShortcutManager,
@@ -412,8 +415,8 @@ impl DesktopCoordinator {
                 let targets = resolve_target_kinds(targets, &LocalSaveTargets);
                 library::LibraryManager::edit_game_override(self, item, title, targets, cover_path);
             }
-            UiAction::CancelSaveSetup { game_name } => {
-                self.interaction.cancel_save_setup_for(&game_name)
+            UiAction::CancelSaveSetup { request_id } => {
+                self.interaction.cancel_save_setup_for(request_id)
             }
             UiAction::CompleteSaveSetup {
                 request,
@@ -422,6 +425,10 @@ impl DesktopCoordinator {
                 cover_path,
                 restore,
             } => {
+                // Claim the request first: without a live one nothing is written.
+                let Some(pending) = self.interaction.take_save_setup(request.id) else {
+                    return;
+                };
                 let targets = match restore {
                     None => targets,
                     // Rebuilt here rather than trusting the form, as Kotlin's `result`.
@@ -435,13 +442,13 @@ impl DesktopCoordinator {
                             self.send_toast(
                                 "No valid restore location for the cloud files in that folder.",
                             );
-                            self.interaction.cancel_save_setup();
+                            pending.cancel();
                             return;
                         }
                     },
                 };
                 let targets = resolve_target_kinds(targets, &LocalSaveTargets);
-                self.complete_save_setup(*request, targets, title, cover_path);
+                self.complete_save_setup(pending, *request, targets, title, cover_path);
             }
             UiAction::EditGame(item) => {
                 let handle = self.platform.load_game_edit(item);
@@ -530,8 +537,11 @@ impl DesktopCoordinator {
         self.track_task(handle);
     }
 
+    /// Writes the setup and answers `pending`, which the caller already claimed with
+    /// `take_save_setup`; every path answers it exactly once.
     pub fn complete_save_setup(
         &self,
+        pending: PendingSaveSetup,
         request: UiSaveSetupRequest,
         targets: Vec<SaveTarget>,
         title: Option<String>,
@@ -544,7 +554,7 @@ impl DesktopCoordinator {
             Ok(c) => c,
             Err(e) => {
                 self.send_toast(format!("Failed to load config: {e}"));
-                self.interaction.cancel_save_setup();
+                pending.cancel();
                 return;
             }
         };
@@ -555,7 +565,7 @@ impl DesktopCoordinator {
             .find(|e| e.common().name == entry_name)
         else {
             self.send_toast("Category no longer exists.");
-            self.interaction.cancel_save_setup();
+            pending.cancel();
             return;
         };
 
@@ -601,12 +611,15 @@ impl DesktopCoordinator {
                     save_targets: targets.clone(),
                 };
                 // Respond to the waiting SaveSetup future so it continues its single execution
-                self.interaction
-                    .complete_save_setup_response(&item.name, updated_game, targets);
+                pending.complete(SaveSetupResult {
+                    game: updated_game,
+                    targets,
+                });
+                (self.redraw)();
             }
             Err(err) => {
                 self.send_toast(format!("Failed to save game setup: {err}"));
-                self.interaction.cancel_save_setup();
+                pending.cancel();
             }
         }
     }

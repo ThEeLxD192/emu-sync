@@ -193,6 +193,8 @@ impl GameItem {
 /// Request for setting up save targets before game launch or after cloud download.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaveSetupRequest {
+    /// Identifies this request; the same game is asked twice per launch.
+    pub id: u64,
     pub item: GameItem,
     pub notice: Option<String>,
     pub cloud_file_names: Vec<String>,

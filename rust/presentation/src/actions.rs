@@ -44,8 +44,8 @@ pub enum UiAction {
     },
     /// The save setup dialog was dismissed without saving.
     CancelSaveSetup {
-        /// The game whose pending request was dismissed.
-        game_name: String,
+        /// The request that was dismissed.
+        request_id: u64,
     },
     /// Resolves where each cloud file would be restored inside `destination`.
     PreviewRestorePaths {
@@ -123,9 +123,9 @@ impl std::fmt::Debug for UiAction {
                 .field("cover_path", cover_path)
                 .field("restore", restore)
                 .finish(),
-            Self::CancelSaveSetup { game_name } => f
+            Self::CancelSaveSetup { request_id } => f
                 .debug_struct("CancelSaveSetup")
-                .field("game_name", game_name)
+                .field("request_id", request_id)
                 .finish(),
             Self::PreviewRestorePaths { destination, names } => f
                 .debug_struct("PreviewRestorePaths")

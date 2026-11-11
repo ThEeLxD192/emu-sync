@@ -100,9 +100,7 @@ fn app_opens_update_dialog_and_emits_download_action() {
 }
 
 fn cancel() -> UiAction {
-    UiAction::CancelSaveSetup {
-        game_name: "smw.sfc".to_string(),
-    }
+    UiAction::CancelSaveSetup { request_id: 1 }
 }
 
 fn setup_request() -> SaveSetupRequest {
@@ -114,6 +112,7 @@ fn setup_request() -> SaveSetupRequest {
         ..Emulator::default()
     });
     SaveSetupRequest {
+        id: 1,
         item: GameItem::new("smw.sfc", entry, None),
         notice: Some("Configure saves before play".to_string()),
         cloud_file_names: Vec::new(),
@@ -210,6 +209,49 @@ fn replacing_a_save_setup_cancels_the_previous_request() {
 
     app.close_dialog();
     assert!(app.take_actions().is_empty());
+}
+
+#[test]
+fn close_save_setup_closes_the_matching_request_without_cancelling() {
+    let mut app = EmuSyncApp::new();
+    app.open_save_setup(&setup_request());
+
+    app.close_save_setup(1);
+
+    assert!(matches!(app.active_dialog(), ActiveDialog::None));
+    assert!(app.take_actions().is_empty());
+}
+
+#[test]
+fn close_save_setup_for_another_id_keeps_the_dialog() {
+    let mut app = EmuSyncApp::new();
+    app.open_save_setup(&setup_request());
+
+    app.close_save_setup(2);
+
+    assert!(matches!(app.active_dialog(), ActiveDialog::GameEdit { .. }));
+    assert!(app.take_actions().is_empty());
+}
+
+#[test]
+fn close_save_setup_leaves_other_dialogs_untouched() {
+    let mut app = EmuSyncApp::new();
+    app.open_add_entry();
+    app.close_save_setup(1);
+    assert!(matches!(app.active_dialog(), ActiveDialog::Entry(_)));
+
+    app.close_dialog();
+    app.state.update_state = emusync_application::UpdateState::Available(UpdateInfo {
+        version: "1.3.0".to_string(),
+        tag_name: "v1.3.0".to_string(),
+        release_notes: String::new(),
+        download_url: "https://example.com/app.AppImage".to_string(),
+        asset_size: 1,
+        asset_name: "EmuSync.AppImage".to_string(),
+    });
+    app.open_update_dialog();
+    app.close_save_setup(1);
+    assert_eq!(app.active_dialog(), &ActiveDialog::Update);
 }
 
 #[test]
