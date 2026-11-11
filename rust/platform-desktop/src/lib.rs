@@ -18,4 +18,4 @@ pub use steam::{
     WindowsLaunchConfiguration,
 };
 pub use update::{AppImageInstaller, DesktopUpdateInstaller, UpdateStagingFiles};
-pub use util::{AppImageEnvironment, shell_argument};
+pub use util::{AppImageEnvironment, gamescope_session_from, is_gamescope_session, shell_argument};

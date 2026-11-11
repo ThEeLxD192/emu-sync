@@ -223,8 +223,8 @@ fn new_entry_scopes_multiple_directories_but_edits_keep_targets() {
     let created = form.build_entry().expect("valid new entry");
     let targets = &created.common().save_targets;
     assert_eq!(targets.len(), 2);
-    assert_eq!(targets[0].cloud_path.as_deref(), Some("save-target-1"));
-    assert_eq!(targets[1].cloud_path.as_deref(), Some("save-target-2"));
+    assert_eq!(targets[0].cloud_path.as_deref(), Some("d1"));
+    assert_eq!(targets[1].cloud_path.as_deref(), Some("d2"));
     assert_eq!(created.common().save_paths, vec!["/d1", "/d2"]);
 
     let initial = GameEntry::Emulator(Emulator::new(

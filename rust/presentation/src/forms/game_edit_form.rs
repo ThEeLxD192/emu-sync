@@ -3,7 +3,7 @@
 
 use super::save_targets::SaveTargetFormState;
 use crate::model::GameItem;
-use emusync_domain::library::{SaveTarget, scope_new_targets};
+use emusync_domain::library::SaveTarget;
 
 /// Where cloud saves should be restored; the composition turns it into targets with
 /// `SaveTargetAccess::for_restore`, which rejects names escaping the destination.
@@ -32,7 +32,6 @@ pub struct GameEditFormState {
     pub restore_whole_folder: bool,
     pub saves: SaveTargetFormState,
     pub error_message: Option<String>,
-    has_initial_targets: bool,
     /// Restore paths resolved for a destination, and the destination last requested.
     restore_preview: Option<(String, Vec<String>)>,
     requested_preview: Option<String>,
@@ -49,7 +48,6 @@ impl GameEditFormState {
             restore_whole_folder: false,
             saves: SaveTargetFormState::from_targets(game_targets),
             error_message: None,
-            has_initial_targets: !game_targets.is_empty(),
             restore_preview: None,
             requested_preview: None,
         }
@@ -117,12 +115,7 @@ impl GameEditFormState {
         }
 
         let (targets, restore) = if cloud_file_names.is_empty() {
-            let raw = self.saves.build_targets();
-            let targets = if self.has_initial_targets {
-                raw
-            } else {
-                scope_new_targets(&raw)
-            };
+            let targets = self.saves.scoped_targets();
             (targets, None)
         } else {
             let choice = RestoreChoice {

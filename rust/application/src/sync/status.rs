@@ -2,7 +2,9 @@
 
 use super::context::SyncContext;
 use super::manual::remote_to_state;
-use super::target_mapping::{directory_cloud_name, project_directory_files};
+use super::target_mapping::{
+    SaveTargetMappingError, directory_cloud_name, project_directory_files,
+};
 use super::target_resolver::ResolvedSaveTarget;
 use emusync_domain::execution::GameLauncher;
 use emusync_domain::library::{GameEntry, SaveTarget};
@@ -106,13 +108,19 @@ where
 
             let configured: Vec<SaveTarget> =
                 folder_targets.iter().map(|t| t.configured()).collect();
-            if self
+            match self
                 .context
                 .mapping
                 .validate_save_target_mappings(&configured, &cloud_files)
-                .is_err()
             {
-                return EntrySyncStatus::Error;
+                Ok(()) => {}
+                // Syncing restores these cloud files into their folders; until then the
+                // folders cannot be compared file by file.
+                Err(SaveTargetMappingError::UnplacedLegacyFiles(_)) => {
+                    observation.record(Decision::DownloadCloud);
+                    continue;
+                }
+                Err(_) => return EntrySyncStatus::Error,
             }
 
             for (target, cfg) in folder_targets.into_iter().zip(&configured) {

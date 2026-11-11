@@ -10,8 +10,8 @@ pub use decision::{
     Timestamp, plan_directory, plan_sync, plan_tracked,
 };
 pub use events::{
-    EntrySyncStatus, PostSyncFailure, RequestId, SaveConflict, SaveSetupRequest, SaveSetupResult,
-    SyncEvent, SyncGame,
+    EntrySyncStatus, PostSyncFailure, RequestId, SaveConflict, SavePlacementGroup,
+    SavePlacementRequest, SaveSetupRequest, SaveSetupResult, SyncEvent, SyncGame,
 };
 pub use ports::{
     CloudFileListing, CloudFolderStore, CloudSaveTransfer, DirectoryDownload, LocalSaveAccess,

@@ -16,6 +16,23 @@ pub struct SaveConflict {
     pub cloud_modified_ms: i64,
     pub game_name: String,
 }
+/// Cloud files that share a first path segment and that no local save folder holds yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavePlacementGroup {
+    pub name: String,
+    pub files: Vec<String>,
+    /// Folder whose path resembles `name`; only a preselection for the user.
+    pub suggested_folder: Option<usize>,
+}
+/// Asks which of a game's folders sharing one cloud location receives each group.
+/// The answer holds one index into `folders` per group, or nothing when cancelled.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavePlacementRequest {
+    pub request_id: RequestId,
+    pub game_name: String,
+    pub folders: Vec<String>,
+    pub groups: Vec<SavePlacementGroup>,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PostSyncFailure {
     pub request_id: RequestId,
@@ -31,6 +48,7 @@ pub enum SyncEvent {
     Playing,
     Error(String),
     Conflict(SaveConflict),
+    ChooseSaveFolders(SavePlacementRequest),
     PostSyncFailed(PostSyncFailure),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

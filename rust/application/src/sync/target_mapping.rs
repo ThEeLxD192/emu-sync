@@ -1,7 +1,9 @@
 //! Validation and mapping between local save targets and remote cloud structures.
 
-use emusync_domain::library::{SaveTarget, SaveTargetType};
-use emusync_domain::sync::{LocalSaveAccess, LocalSavePath, RemoteFile, remote_path_segments};
+use emusync_domain::library::{SaveTarget, SaveTargetType, folder_cloud_names};
+use emusync_domain::sync::{
+    LocalSaveAccess, LocalSavePath, RemoteFile, SavePlacementGroup, remote_path_segments,
+};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Display;
 
@@ -13,7 +15,35 @@ pub enum SaveTargetMappingError {
     OverlappingDirectoryScopes,
     ConflictingRemoteToLocalPaths,
     AmbiguousLegacyDirectories(String),
+    /// Older folders share the cloud location and some cloud files are in none of them
+    /// yet; downloading each file into its folder resolves it.
+    UnplacedLegacyFiles(UnplacedLegacyFiles),
     LocalAccess(String),
+}
+
+/// Cloud files of older save folders (several folders without a cloud path) that no
+/// folder holds on this device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnplacedLegacyFiles {
+    /// Configured paths of the folders sharing the cloud location.
+    pub folders: Vec<String>,
+    /// Files whose folder follows from the local layout: (cloud name, folder index).
+    pub inferred: Vec<(String, usize)>,
+    /// Files whose folder only the user can tell.
+    pub groups: Vec<SavePlacementGroup>,
+}
+
+impl UnplacedLegacyFiles {
+    fn file_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .inferred
+            .iter()
+            .map(|(name, _)| name.clone())
+            .chain(self.groups.iter().flat_map(|g| g.files.iter().cloned()))
+            .collect();
+        names.sort();
+        names
+    }
 }
 
 impl Display for SaveTargetMappingError {
@@ -40,6 +70,15 @@ impl Display for SaveTargetMappingError {
                 "Cloud files resolve to conflicting local paths. Choose separate destinations before restoring them."
             ),
             Self::AmbiguousLegacyDirectories(msg) => write!(f, "{msg}"),
+            Self::UnplacedLegacyFiles(unplaced) => write!(
+                f,
+                "Cannot safely match cloud saves to these older save folders.\n\n{}\n\n{}\n\nSync this game from the library to choose the folder for each cloud file. These folders were not synchronized.",
+                mapping_details("Configured save folders", &unplaced.folders),
+                mapping_details(
+                    "Cloud files with no matching local save",
+                    &unplaced.file_names()
+                ),
+            ),
             Self::LocalAccess(msg) => write!(f, "Local access error: {msg}"),
         }
     }
@@ -539,6 +578,29 @@ where
                 .map(|f| f.name.clone())
                 .collect();
 
+            // Another device keeping these folders under their own cloud paths uploads
+            // `savedata/...`; placing those files here would nest them one level too deep.
+            let legacy_paths: Vec<&str> = legacy.iter().map(|t| t.path.as_str()).collect();
+            let folder_names = folder_cloud_names(&legacy_paths);
+            let mut scoped_elsewhere: Vec<String> = unassigned_names
+                .iter()
+                .filter_map(|name| name.split_once('/').map(|(first, _)| first))
+                .filter(|first| {
+                    folder_names.iter().any(|f| f == first) || first.starts_with("save-target-")
+                })
+                .map(str::to_owned)
+                .collect();
+            scoped_elsewhere.sort();
+            scoped_elsewhere.dedup();
+            if !scoped_elsewhere.is_empty() {
+                let configured_paths: Vec<_> = legacy.iter().map(|t| t.path.clone()).collect();
+                return Err(SaveTargetMappingError::AmbiguousLegacyDirectories(format!(
+                    "Another device stores these save folders under their own cloud paths, but on this device they have none.\n\n{}\n\n{}\n\nIn Edit Game on this device, set the same cloud path for each folder as on the other device. These folders were not synchronized.",
+                    mapping_details("Configured save folders", &configured_paths),
+                    mapping_details("Cloud paths found", &scoped_elsewhere),
+                )));
+            }
+
             let mut problems = Vec::new();
             if !unavailable_roots.is_empty() && !legacy_files.is_empty() {
                 problems.push(mapping_details(
@@ -550,6 +612,13 @@ where
                 problems.push(mapping_details(
                     "Names found in multiple save folders",
                     &colliding_names,
+                ));
+            }
+            if problems.is_empty() && !unassigned_names.is_empty() {
+                // Every folder is reachable and unambiguous, so the missing files only
+                // need a destination: they are restored, never overwritten.
+                return Err(SaveTargetMappingError::UnplacedLegacyFiles(
+                    self.legacy_placement(&legacy, unassigned_names),
                 ));
             }
             if !unassigned_names.is_empty() {
@@ -572,6 +641,95 @@ where
         }
 
         Ok(())
+    }
+
+    /// Assigns each file to the only folder that already holds one of its parent
+    /// directories; the rest are grouped by first segment for the user to place.
+    fn legacy_placement(&self, legacy: &[&SaveTarget], names: Vec<String>) -> UnplacedLegacyFiles {
+        let folders: Vec<String> = legacy.iter().map(|t| t.path.clone()).collect();
+        let mut inferred = Vec::new();
+        let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for name in names {
+            match self.folder_holding_parent(&folders, &name) {
+                Some(index) => inferred.push((name, index)),
+                None => {
+                    let first = name.split('/').next().unwrap_or(&name).to_string();
+                    groups.entry(first).or_default().push(name);
+                }
+            }
+        }
+        let groups = groups
+            .into_iter()
+            .map(|(name, files)| SavePlacementGroup {
+                suggested_folder: suggested_folder(&name, &folders),
+                name,
+                files,
+            })
+            .collect();
+        UnplacedLegacyFiles {
+            folders,
+            inferred,
+            groups,
+        }
+    }
+
+    /// The deepest parent directory of `name` decides; it must exist in exactly one folder.
+    fn folder_holding_parent(&self, folders: &[String], name: &str) -> Option<usize> {
+        let segments: Vec<&str> = name.split('/').collect();
+        for depth in (1..segments.len()).rev() {
+            let parent = segments[..depth].join("/");
+            let holders: Vec<usize> = folders
+                .iter()
+                .enumerate()
+                .filter(|(_, folder)| {
+                    self.files
+                        .path(folder)
+                        .resolve_remote(&parent)
+                        .ok()
+                        .flatten()
+                        .and_then(|p| p.is_directory().ok())
+                        .unwrap_or(false)
+                })
+                .map(|(index, _)| index)
+                .collect();
+            match holders.as_slice() {
+                [] => continue,
+                [only] => return Some(*only),
+                _ => return None,
+            }
+        }
+        None
+    }
+}
+
+/// The only folder with a path segment sharing a word with `group` (`savedata1` with
+/// `savedata`, `TROPHY` with `trophies`).
+fn suggested_folder(group: &str, folders: &[String]) -> Option<usize> {
+    let word: String = group
+        .chars()
+        .take_while(char::is_ascii_alphabetic)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    if word.len() < 4 {
+        return None;
+    }
+    let resembles = |segment: &str| {
+        let segment = segment.to_ascii_lowercase();
+        let shared = word
+            .bytes()
+            .zip(segment.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        shared >= 5 || (shared >= 4 && shared == word.len().min(segment.len()))
+    };
+    let mut matches = folders
+        .iter()
+        .enumerate()
+        .filter(|(_, folder)| folder.split(['/', '\\']).any(resembles))
+        .map(|(index, _)| index);
+    match (matches.next(), matches.next()) {
+        (Some(index), None) => Some(index),
+        _ => None,
     }
 }
 

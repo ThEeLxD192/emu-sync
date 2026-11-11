@@ -32,8 +32,8 @@ use emusync_domain::{
     execution::PathPicker,
     library::{GameEntry, SaveTarget, SteamLibrary},
     sync::{
-        Decision, PostSyncFailure, SaveConflict, SaveSetupResult, SaveSynchronizer, SyncEvent,
-        SyncGame,
+        Decision, PostSyncFailure, SaveConflict, SavePlacementRequest, SaveSetupResult,
+        SaveSynchronizer, SyncEvent, SyncGame,
     },
 };
 use emusync_platform_desktop::{
@@ -499,6 +499,9 @@ impl DesktopCoordinator {
             UiAction::ResolveConflict(decision) => {
                 self.interaction.resolve_conflict(decision);
             }
+            UiAction::ResolveSaveFolders(choice) => {
+                self.interaction.resolve_placement(choice);
+            }
             UiAction::RetryPostSync => {
                 if let Some((failure, runner)) = self.interaction.take_retry() {
                     if !self.try_acquire_admission() {
@@ -699,6 +702,14 @@ impl DesktopCoordinator {
                         game_name: conflict.game_name.clone(),
                     }));
                 }
+                SyncEvent::ChooseSaveFolders(request) => {
+                    interaction_status.on_placement(request.clone());
+                    let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::ChooseSaveFolders {
+                        game_name: request.game_name.clone(),
+                        folders: request.folders.clone(),
+                        groups: request.groups.clone(),
+                    }));
+                }
                 SyncEvent::PostSyncFailed(failure) => {
                     if let Some(runner) = retry_runner_slot_status.lock().unwrap().as_ref() {
                         interaction_status.set_retry(failure.clone(), runner.clone());
@@ -729,6 +740,13 @@ impl DesktopCoordinator {
         self.interaction.set_conflict_resolver(Arc::new(
             move |conflict: &SaveConflict, decision: Decision| {
                 orch_resolve.resolve_conflict(conflict, decision);
+            },
+        ));
+
+        let orch_place = built.orchestrator.clone();
+        self.interaction.set_placement_resolver(Arc::new(
+            move |request: &SavePlacementRequest, choice: Option<Vec<usize>>| {
+                orch_place.resolve_save_placement(request, choice);
             },
         ));
 

@@ -1,7 +1,7 @@
 use super::decision::{Decision, RemoteState, Timestamp};
 use super::events::{
-    EntrySyncStatus, PostSyncFailure, SaveConflict, SaveSetupRequest, SaveSetupResult, SyncEvent,
-    SyncGame,
+    EntrySyncStatus, PostSyncFailure, SaveConflict, SavePlacementRequest, SaveSetupRequest,
+    SaveSetupResult, SyncEvent, SyncGame,
 };
 use super::remote::RemoteFile;
 
@@ -208,6 +208,9 @@ pub trait SaveSynchronizer {
     ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send;
     /// Only the exact pending request is resolved; completed requests are ignored.
     fn resolve_conflict(&self, request: &SaveConflict, decision: Decision);
+    /// Answers a pending folder choice with one folder index per group, or `None` to
+    /// cancel; like conflicts, only the exact pending request is resolved.
+    fn resolve_save_placement(&self, request: &SavePlacementRequest, choice: Option<Vec<usize>>);
     /// A stale failure must not replay a newer batch.
     fn retry_post_sync(
         &self,

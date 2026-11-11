@@ -2,6 +2,7 @@
 
 mod channel;
 mod context;
+mod legacy_placement;
 mod lifecycle;
 mod manual;
 mod migration;
@@ -18,5 +19,7 @@ pub use manual::{ManualEntrySync, ManualFileSync, PlannedSave};
 pub use migration::CloudEntryMigration;
 pub use migrator::{CloudFolderMigrator, MigrationError};
 pub use orchestrator::{SyncOrchestrator, SyncOrchestratorFactory};
-pub use target_mapping::{SaveTargetMapping, SaveTargetMappingError, project_directory_files};
+pub use target_mapping::{
+    SaveTargetMapping, SaveTargetMappingError, UnplacedLegacyFiles, project_directory_files,
+};
 pub use target_resolver::{ResolvedSaveTarget, SaveTargetResolver};

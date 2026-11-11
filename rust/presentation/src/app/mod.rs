@@ -10,7 +10,7 @@ use crate::{
         sidebar_order::SidebarInteraction,
     },
     cover_cache::CoverCache,
-    dialogs::DriveSetupDialogState,
+    dialogs::{DriveSetupDialogState, SaveFolderSelection},
     forms::{EntryFormState, GameEditFormState},
     model::{AppStatus, GameItem, PathTarget, PickMode, SaveSetupRequest},
     state::AppUiState,
@@ -61,6 +61,8 @@ pub struct EmuSyncApp {
     pub sidebar: SidebarInteraction,
     /// The conflict already answered, shown as syncing until the status changes.
     answered_conflict: Option<AppStatus>,
+    /// Folders picked in the folder choice on screen.
+    save_folder_selection: SaveFolderSelection,
     /// Fullscreen flags auto-detected from an emulator executable, injected by the
     /// composition (Kotlin's `LibraryFormActions.detectFullscreenArgs`).
     pub fullscreen_detector: fn(&str) -> String,
@@ -92,6 +94,7 @@ impl EmuSyncApp {
             pending_actions: Vec::new(),
             sidebar: SidebarInteraction::default(),
             answered_conflict: None,
+            save_folder_selection: SaveFolderSelection::default(),
             fullscreen_detector: no_fullscreen_flags,
             last_request_id: 0,
             pending_picks: HashMap::new(),
@@ -108,6 +111,7 @@ impl EmuSyncApp {
             pending_actions: Vec::new(),
             sidebar: SidebarInteraction::default(),
             answered_conflict: None,
+            save_folder_selection: SaveFolderSelection::default(),
             fullscreen_detector: no_fullscreen_flags,
             last_request_id: 0,
             pending_picks: HashMap::new(),

@@ -1,6 +1,7 @@
 //! Manual and interactive file and entry synchronization with Google Drive.
 
 use super::context::SyncContext;
+use super::legacy_placement::LegacyPlacement;
 use super::target_mapping::{directory_cloud_name, project_directory_files};
 use emusync_domain::library::GameEntry;
 use emusync_domain::sync::{
@@ -426,10 +427,17 @@ where
                 .map_err(|e| format!("Duplicate cloud file: {}", e.name))?;
             let configured_targets: Vec<_> =
                 folder_targets.iter().map(|t| t.configured()).collect();
-            self.context
-                .mapping
-                .validate_save_target_mappings(&configured_targets, &cloud_files)
-                .map_err(|e| e.to_string())?;
+            LegacyPlacement::new(self.context)
+                .validate_restoring_unplaced(
+                    &token,
+                    &folder_id,
+                    &configured_targets,
+                    &cloud_files,
+                    folder_targets
+                        .first()
+                        .map_or(entry.common().name.as_str(), |t| t.display_name.as_str()),
+                )
+                .await?;
 
             for (target, configured) in folder_targets.into_iter().zip(&configured_targets) {
                 (self.context.on_status)(SyncEvent::Syncing(format!(

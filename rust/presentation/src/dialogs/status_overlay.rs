@@ -21,21 +21,66 @@ use egui::{
     Align, Color32, FontId, Frame, Id, Label, Layout, Margin, Modal, Rect, RichText, ScrollArea,
     Sense, Stroke, Ui, vec2,
 };
-use emusync_domain::sync::Decision;
+use emusync_domain::sync::{Decision, SavePlacementGroup};
 
 /// Callbacks the status overlay reports to the application.
 pub struct StatusOverlayEvents<'a> {
     pub on_resolve_conflict: &'a mut dyn FnMut(Decision),
+    /// One folder index per group, or `None` when the choice is cancelled.
+    pub on_choose_save_folders: &'a mut dyn FnMut(Option<Vec<usize>>),
     pub on_retry_post_sync: &'a mut dyn FnMut(),
     pub on_dismiss: &'a mut dyn FnMut(),
 }
 
+/// Folder picked for each group of the folder choice on screen, kept across frames.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SaveFolderSelection {
+    request: Option<AppStatus>,
+    folders: Vec<Option<usize>>,
+    answered: bool,
+}
+
+impl SaveFolderSelection {
+    /// Starts a new folder choice from its suggestions; any other status forgets it.
+    pub fn follow(&mut self, status: &AppStatus) {
+        if self.request.as_ref() == Some(status) {
+            return;
+        }
+        *self = Self::default();
+        if let AppStatus::ChooseSaveFolders { groups, .. } = status {
+            self.request = Some(status.clone());
+            self.folders = groups.iter().map(|g| g.suggested_folder).collect();
+        }
+    }
+
+    /// The folder of every group, once each one has been picked.
+    pub fn chosen(&self) -> Option<Vec<usize>> {
+        self.folders.iter().copied().collect()
+    }
+
+    /// Marks the choice as sent so it is shown as syncing until the status changes.
+    pub fn mark_answered(&mut self) {
+        self.answered = true;
+    }
+
+    pub fn is_answered(&self) -> bool {
+        self.answered
+    }
+}
+
+/// Stable id of the option placing group `group` in folder `folder`.
+pub fn save_folder_option_id(group: usize, folder: usize) -> Id {
+    Id::unique(("save_folder_option", group, folder))
+}
+
 /// Renders the overlay for `status`. `conflict_resolved` shows the conflict as syncing
-/// right after a choice, as Kotlin does, so the other option cannot be picked.
+/// right after a choice, as Kotlin does, so the other option cannot be picked; the folder
+/// choice behaves the same through `folder_selection`.
 pub fn render_status_overlay(
     ctx: &egui::Context,
     status: &AppStatus,
     conflict_resolved: bool,
+    folder_selection: &mut SaveFolderSelection,
     events: StatusOverlayEvents<'_>,
 ) {
     match status {
@@ -72,6 +117,21 @@ pub fn render_status_overlay(
             local_date,
             cloud_date,
             events.on_resolve_conflict,
+        ),
+        AppStatus::ChooseSaveFolders { .. } if folder_selection.is_answered() => {
+            status_dialog(ctx, glyph::CLOUD_SYNC, "Syncing...", None, true, PRIMARY)
+        }
+        AppStatus::ChooseSaveFolders {
+            game_name,
+            folders,
+            groups,
+        } => save_folders_dialog(
+            ctx,
+            game_name,
+            folders,
+            groups,
+            folder_selection,
+            events.on_choose_save_folders,
         ),
         AppStatus::PostSyncFailed {
             game_name,
@@ -246,6 +306,164 @@ fn conflict_card(
     text_ui.add(Label::new(RichText::new(title).font(bold(13.0)).color(color)).selectable(false));
     text_ui.add_space(4.0);
     text_ui.add(Label::new(RichText::new(date).size(11.0).color(ON_SURFACE_DIM)).selectable(false));
+    response.clicked()
+}
+
+fn save_folders_dialog(
+    ctx: &egui::Context,
+    game_name: &str,
+    folders: &[String],
+    groups: &[SavePlacementGroup],
+    selection: &mut SaveFolderSelection,
+    on_choose: &mut dyn FnMut(Option<Vec<usize>>),
+) {
+    overlay("save_folders_dialog", PRIMARY.gamma_multiply(0.5)).show(ctx, |ui| {
+        ui.set_width(460.0);
+        ui.vertical_centered(|ui| {
+            alert_icon(ui, glyph::CLOUD_DOWNLOAD, PRIMARY);
+            ui.label(
+                RichText::new("Choose Save Folders")
+                    .font(bold(18.0))
+                    .color(PRIMARY),
+            );
+            ui.add_space(4.0);
+            ui.label(RichText::new(game_name).size(13.0).color(ON_SURFACE_DIM));
+            ui.add_space(12.0);
+        });
+        ui.label(
+            RichText::new(
+                "These cloud saves are not in any of this game's save folders on this device yet. Choose the folder each one belongs to; it will be downloaded there and no local file is overwritten.",
+            )
+            .size(12.0)
+            .color(ON_SURFACE_DIM),
+        );
+        ui.add_space(16.0);
+        ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            for (group_index, group) in groups.iter().enumerate() {
+                ui.label(RichText::new(&group.name).font(bold(13.0)).color(ON_BACKGROUND));
+                ui.label(
+                    RichText::new(files_summary(&group.files))
+                        .size(11.0)
+                        .color(ON_SURFACE_DIM),
+                );
+                ui.add_space(6.0);
+                for (folder_index, folder) in folders.iter().enumerate() {
+                    let picked = selection.folders.get(group_index) == Some(&Some(folder_index));
+                    let id = save_folder_option_id(group_index, folder_index);
+                    if folder_option(ui, id, folder, picked)
+                        && let Some(slot) = selection.folders.get_mut(group_index)
+                    {
+                        *slot = Some(folder_index);
+                    }
+                }
+                ui.add_space(12.0);
+            }
+        });
+        ui.add_space(16.0);
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), 40.0),
+            Layout::right_to_left(Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                let chosen = selection.chosen();
+                let restore = ui
+                    .add_enabled_ui(chosen.is_some(), |ui| primary_button(ui, "Restore"))
+                    .inner;
+                if restore.clicked()
+                    && let Some(chosen) = chosen
+                {
+                    selection.mark_answered();
+                    on_choose(Some(chosen));
+                }
+                let cancel = Pill {
+                    text: "Cancel",
+                    text_color: PRIMARY,
+                    font: FontId::proportional(13.0),
+                    fill: Color32::TRANSPARENT,
+                    stroke: Stroke::new(1.0, DIVIDER),
+                    padding: vec2(20.0, 0.0),
+                    min_height: 40.0,
+                    corner_radius: 20,
+                    ..Pill::default()
+                };
+                if cancel.show(ui).clicked() {
+                    selection.mark_answered();
+                    on_choose(None);
+                }
+            },
+        );
+    });
+}
+
+/// "1 file: a" or "3 files: a, b, …".
+fn files_summary(files: &[String]) -> String {
+    let shown: Vec<&str> = files.iter().take(2).map(String::as_str).collect();
+    let more = if files.len() > shown.len() {
+        ", …"
+    } else {
+        ""
+    };
+    let count = if files.len() == 1 {
+        "1 file".to_string()
+    } else {
+        format!("{} files", files.len())
+    };
+    format!("{count}: {}{more}", shown.join(", "))
+}
+
+/// Last three segments of `folder`, enough to tell a game's folders apart.
+fn short_folder(folder: &str) -> String {
+    let segments: Vec<&str> = folder
+        .split(['/', '\\'])
+        .filter(|s| !s.is_empty())
+        .collect();
+    if segments.len() <= 3 {
+        folder.to_string()
+    } else {
+        format!("…/{}", segments[segments.len() - 3..].join("/"))
+    }
+}
+
+/// A full-width, touch-sized radio row; returns whether it was picked this frame.
+fn folder_option(ui: &mut Ui, id: Id, folder: &str, picked: bool) -> bool {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+    let response = ui
+        .interact(rect, id, Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(folder);
+    let fill = if picked {
+        PRIMARY.gamma_multiply(0.18)
+    } else if response.hovered() {
+        PRIMARY.gamma_multiply(0.08)
+    } else {
+        Color32::TRANSPARENT
+    };
+    let stroke = if picked { PRIMARY } else { DIVIDER };
+    ui.painter().rect(
+        rect,
+        10,
+        fill,
+        Stroke::new(1.0, stroke),
+        egui::StrokeKind::Inside,
+    );
+    let dot = egui::pos2(rect.left() + 20.0, rect.center().y);
+    ui.painter().circle_stroke(
+        dot,
+        7.0,
+        Stroke::new(1.5, if picked { PRIMARY } else { ON_SURFACE_DIM }),
+    );
+    if picked {
+        ui.painter().circle_filled(dot, 3.5, PRIMARY);
+    }
+    let text = ui.painter().layout(
+        short_folder(folder),
+        FontId::proportional(12.0),
+        ON_SURFACE,
+        rect.width() - 48.0,
+    );
+    let text_pos = egui::pos2(rect.left() + 36.0, rect.center().y - text.size().y / 2.0);
+    ui.painter().galley(text_pos, text, ON_SURFACE);
+    ui.add_space(6.0);
     response.clicked()
 }
 

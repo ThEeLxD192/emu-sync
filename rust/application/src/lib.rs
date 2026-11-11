@@ -15,6 +15,6 @@ pub use operation::{OperationCoordinator, OperationEvent};
 pub use sync::{
     CloudEntryMigration, CloudFolderMigrator, ManualEntrySync, ManualFileSync, MigrationError,
     PlannedSave, SaveTargetMapping, SaveTargetMappingError, SaveTargetResolver, SyncContext,
-    SyncOrchestrator, SyncOrchestratorFactory, SyncServices,
+    SyncOrchestrator, SyncOrchestratorFactory, SyncServices, UnplacedLegacyFiles,
 };
 pub use update::{UpdateCoordinator, UpdateState};

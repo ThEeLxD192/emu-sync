@@ -1,6 +1,7 @@
 //! Full game launch lifecycle: pre-sync, process execution, offline mode fallback, and post-sync.
 
 use super::context::SyncContext;
+use super::legacy_placement::LegacyPlacement;
 use super::manual::ManualFileSync;
 use super::post_game::PostGameSync;
 use super::target_mapping::project_directory_files;
@@ -163,10 +164,15 @@ where
             };
 
             // Mapping errors must NOT allow offline play!
-            self.context
-                .mapping
-                .validate_save_target_mappings(&prepared.item.save_targets, &cloud_files)
-                .map_err(|e| e.to_string())?;
+            LegacyPlacement::new(&self.context)
+                .validate_restoring_unplaced(
+                    &token,
+                    &folder_id,
+                    &prepared.item.save_targets,
+                    &cloud_files,
+                    &prepared.item.effective_title,
+                )
+                .await?;
 
             let manual = ManualFileSync::new(&self.context);
             for target in &prepared.item.save_targets {

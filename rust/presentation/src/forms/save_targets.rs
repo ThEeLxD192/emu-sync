@@ -1,7 +1,7 @@
 //! Save target form rows and validation.
 
 use emusync_domain::{
-    library::{SaveTarget, SaveTargetType},
+    library::{SaveTarget, SaveTargetType, scope_new_targets},
     sync::remote_path_segments,
 };
 
@@ -17,6 +17,9 @@ pub struct SaveTargetRow {
     pub path: String,
     pub target_type: SaveTargetType,
     pub cloud_path: String,
+    /// Loaded from the configuration: its cloud layout is in use and is never changed
+    /// automatically, even if its path is edited.
+    pub established: bool,
 }
 
 impl SaveTargetRow {
@@ -25,7 +28,21 @@ impl SaveTargetRow {
             path,
             target_type,
             cloud_path,
+            established: false,
         }
+    }
+
+    fn target(&self) -> Option<SaveTarget> {
+        let path = self.path.trim();
+        if path.is_empty() {
+            return None;
+        }
+        let cloud = self.cloud_path.trim();
+        Some(SaveTarget {
+            path: path.to_string(),
+            kind: self.target_type.clone(),
+            cloud_path: (!cloud.is_empty()).then(|| cloud.to_string()),
+        })
     }
 }
 
@@ -54,8 +71,9 @@ impl SaveTargetFormState {
         }
         let rows = targets
             .iter()
-            .map(|t| {
-                SaveTargetRow::new(
+            .map(|t| SaveTargetRow {
+                established: true,
+                ..SaveTargetRow::new(
                     t.path.clone(),
                     t.kind.clone(),
                     t.cloud_path.clone().unwrap_or_default(),
@@ -114,25 +132,29 @@ impl SaveTargetFormState {
     }
 
     pub fn build_targets(&self) -> Vec<SaveTarget> {
+        self.rows.iter().filter_map(SaveTargetRow::target).collect()
+    }
+
+    /// The targets to save: new directories get their own cloud prefix when the list
+    /// holds two or more directories, so their files never mix in the cloud.
+    pub fn scoped_targets(&self) -> Vec<SaveTarget> {
+        let (targets, is_new): (Vec<_>, Vec<_>) = self
+            .rows
+            .iter()
+            .filter_map(|row| row.target().map(|target| (target, !row.established)))
+            .unzip();
+        scope_new_targets(&targets, &is_new)
+    }
+
+    /// Per row, the cloud path saving will assign because the row left it empty.
+    pub fn automatic_cloud_paths(&self) -> Vec<Option<String>> {
+        let mut scoped = self.scoped_targets().into_iter();
         self.rows
             .iter()
-            .filter_map(|r| {
-                let trimmed_path = r.path.trim();
-                if trimmed_path.is_empty() {
-                    None
-                } else {
-                    let trimmed_cloud = r.cloud_path.trim();
-                    let cloud_path = if trimmed_cloud.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed_cloud.to_string())
-                    };
-                    Some(SaveTarget {
-                        path: trimmed_path.to_string(),
-                        kind: r.target_type.clone(),
-                        cloud_path,
-                    })
-                }
+            .map(|row| {
+                let target = row.target()?;
+                let saved = scoped.next()?;
+                saved.cloud_path.filter(|_| target.cloud_path.is_none())
             })
             .collect()
     }

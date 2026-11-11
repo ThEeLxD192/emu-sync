@@ -10,8 +10,8 @@ use emusync_domain::execution::GameLauncher;
 use emusync_domain::library::{GameEntry, SaveTarget};
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, EntrySyncStatus, LocalSaveAccess, LocalSaveFiles,
-    LocalSavePath, PostSyncFailure, SaveConflict, SaveSetup, SaveSynchronizer,
-    SaveSynchronizerFactory, SyncEvent, SyncGame,
+    LocalSavePath, PostSyncFailure, SaveConflict, SavePlacementRequest, SaveSetup,
+    SaveSynchronizer, SaveSynchronizerFactory, SyncEvent, SyncGame,
 };
 use std::sync::Arc;
 
@@ -83,6 +83,10 @@ where
 
     fn resolve_conflict(&self, request: &SaveConflict, decision: Decision) {
         self.context.resolve_conflict(request, decision);
+    }
+
+    fn resolve_save_placement(&self, request: &SavePlacementRequest, choice: Option<Vec<usize>>) {
+        self.context.resolve_save_placement(request, choice);
     }
 
     async fn retry_post_sync(&self, failure: &PostSyncFailure) -> Result<(), Self::Error> {
