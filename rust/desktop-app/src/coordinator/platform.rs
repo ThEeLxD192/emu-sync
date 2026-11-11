@@ -70,7 +70,12 @@ impl PlatformServices {
         }
     }
 
-    pub fn pick_path(&self, target: PathTarget, mode: PickMode) -> tokio::task::JoinHandle<()> {
+    pub fn pick_path(
+        &self,
+        request_id: u64,
+        target: PathTarget,
+        mode: PickMode,
+    ) -> tokio::task::JoinHandle<()> {
         let picker = self.picker;
         let tx = self.event_tx.clone();
         let redraw = self.redraw.clone();
@@ -83,7 +88,12 @@ impl PlatformServices {
         self.tokio_handle
             .spawn_blocking(move || match picker.pick("Select path", "", kind) {
                 Ok(Some(path)) => {
-                    let _ = tx.send(AppEvent::PathPicked { target, mode, path });
+                    let _ = tx.send(AppEvent::PathPicked {
+                        request_id,
+                        target,
+                        mode,
+                        path,
+                    });
                     (redraw)();
                 }
                 Ok(None) => {}
@@ -119,6 +129,7 @@ impl PlatformServices {
     /// escaping the destination.
     pub fn preview_restore_paths(
         &self,
+        request_id: u64,
         destination: String,
         names: Vec<String>,
     ) -> tokio::task::JoinHandle<()> {
@@ -128,7 +139,11 @@ impl PlatformServices {
             let paths = restore_targets(&destination, false, &names)
                 .map(|targets| dedup_paths(&targets))
                 .unwrap_or_default();
-            let _ = tx.send(AppEvent::RestorePathsPreviewed { destination, paths });
+            let _ = tx.send(AppEvent::RestorePathsPreviewed {
+                request_id,
+                destination,
+                paths,
+            });
             (redraw)();
         })
     }

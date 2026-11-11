@@ -77,7 +77,14 @@ pub(super) fn handle_entry(
     }
 
     if let Some((target, mode)) = pick {
-        actions.push(UiAction::PickPath { target, mode });
+        actions.push(
+            // Placeholder: `EmuSyncApp::update` assigns the real id before publishing.
+            UiAction::PickPath {
+                request_id: 0,
+                target,
+                mode,
+            },
+        );
     }
     close
 }
@@ -126,6 +133,8 @@ pub(super) fn handle_game_edit(
 
     if let Some(destination) = form.take_restore_preview_request(cloud_files) {
         actions.push(UiAction::PreviewRestorePaths {
+            // Placeholder: `EmuSyncApp::update` assigns the real id before publishing.
+            request_id: 0,
             destination,
             names: cloud_files.to_vec(),
         });
@@ -165,7 +174,14 @@ pub(super) fn handle_game_edit(
     }
 
     if let Some((target, mode)) = pick {
-        actions.push(UiAction::PickPath { target, mode });
+        actions.push(
+            // Placeholder: `EmuSyncApp::update` assigns the real id before publishing.
+            UiAction::PickPath {
+                request_id: 0,
+                target,
+                mode,
+            },
+        );
     }
     outcome
 }

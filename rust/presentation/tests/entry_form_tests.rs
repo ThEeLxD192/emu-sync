@@ -1,54 +1,25 @@
-//! Unit and integration tests for presentation form states and validations.
+//! Entry form defaults, validation and metadata preservation.
 
 use emusync_domain::library::{
     Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType,
 };
-use emusync_presentation::{EntryFormState, EntryType, GameEditFormState, SaveTargetFormState};
+use emusync_presentation::{EntryFormState, EntryType};
 
-#[test]
-fn save_targets_form_manages_rows_and_toggles_types() {
-    let mut form = SaveTargetFormState::default();
-    assert_eq!(form.rows.len(), 1);
-    assert_eq!(form.rows[0].target_type, SaveTargetType::File);
-
-    form.toggle_type(0);
-    assert_eq!(form.rows[0].target_type, SaveTargetType::Directory);
-
-    form.add_row();
-    assert_eq!(form.rows.len(), 2);
-
-    form.update_path(0, "saves/game.dat".to_string());
-    form.update_cloud_path(0, "custom_cloud.dat".to_string());
-
-    form.remove_row(1);
-    assert_eq!(form.rows.len(), 1);
-
-    // Removing last row resets to a default row
-    form.remove_row(0);
-    assert_eq!(form.rows.len(), 1);
-    assert!(form.rows[0].path.is_empty());
+fn valid_emulator_form() -> EntryFormState {
+    let mut form = EntryFormState::new(None, &[]);
+    form.name = "GBA".to_string();
+    form.executable_path = "/usr/bin/mgba".to_string();
+    form.roms_directory = "/roms".to_string();
+    form.extensions = "gba".to_string();
+    form
 }
 
-#[test]
-fn save_targets_form_validates_cloud_paths() {
-    let mut form = SaveTargetFormState::default();
-
-    // Valid relative path
-    form.update_path(0, "local/path".to_string());
-    form.update_cloud_path(0, "remote/save.dat".to_string());
-    assert!(form.cloud_paths_are_valid());
-
-    // Invalid traversal path
-    form.update_cloud_path(0, "../save.dat".to_string());
-    assert!(!form.cloud_paths_are_valid());
-
-    // Invalid absolute path
-    form.update_cloud_path(0, "/etc/save.dat".to_string());
-    assert!(!form.cloud_paths_are_valid());
-
-    // Blank cloud path is valid (inherits local filename)
-    form.update_cloud_path(0, "".to_string());
-    assert!(form.cloud_paths_are_valid());
+fn dir_target(path: &str) -> SaveTarget {
+    SaveTarget {
+        path: path.to_string(),
+        kind: SaveTargetType::Directory,
+        cloud_path: None,
+    }
 }
 
 #[test]
@@ -166,103 +137,6 @@ fn entry_form_requires_targets_for_native_game() {
 }
 
 #[test]
-fn game_edit_restore_waits_for_resolved_paths_and_returns_the_choice() {
-    use emusync_presentation::RestoreChoice;
-
-    let entry = GameEntry::Native(NativeGame {
-        common: EntryCommon {
-            name: "Celeste".to_string(),
-            ..EntryCommon::default()
-        },
-        ..NativeGame::default()
-    });
-    let game = emusync_presentation::GameItem::new("Celeste", entry, None);
-    let mut form = GameEditFormState::new(&game, &[]);
-    let cloud_files = vec!["0.celeste".to_string(), "settings.celeste".to_string()];
-
-    // Without a destination nothing can be saved or previewed.
-    assert!(!form.can_save(&cloud_files));
-    assert_eq!(form.take_restore_preview_request(&cloud_files), None);
-
-    // Per-file restore asks once for the paths resolved by the composition.
-    form.restore_destination_folder = " /local/celeste ".to_string();
-    assert_eq!(
-        form.take_restore_preview_request(&cloud_files),
-        Some("/local/celeste".to_string())
-    );
-    assert_eq!(form.take_restore_preview_request(&cloud_files), None);
-    assert!(
-        !form.can_save(&cloud_files),
-        "unresolved paths block saving"
-    );
-
-    // A preview for a destination no longer in the form is ignored.
-    form.apply_restore_preview("/elsewhere", vec!["/elsewhere/0.celeste".to_string()]);
-    assert!(form.selected_restore_paths(&cloud_files).is_empty());
-
-    // Every name rejected by the resolver: still nothing to save.
-    form.apply_restore_preview("/local/celeste", Vec::new());
-    assert!(!form.can_save(&cloud_files));
-
-    form.apply_restore_preview(
-        "/local/celeste",
-        vec!["/local/celeste/0.celeste".to_string()],
-    );
-    assert!(form.can_save(&cloud_files));
-    let result = form.build_result(&cloud_files).expect("restore is ready");
-    assert!(
-        result.targets.is_empty(),
-        "targets are rebuilt by the composition"
-    );
-    assert_eq!(
-        result.restore,
-        Some(RestoreChoice {
-            destination: "/local/celeste".to_string(),
-            whole_folder: false,
-        })
-    );
-    assert_eq!(result.title, Some("Celeste".to_string()));
-
-    // The whole folder needs no resolution.
-    form.restore_whole_folder = true;
-    assert_eq!(
-        form.selected_restore_paths(&cloud_files),
-        vec!["/local/celeste"]
-    );
-    assert_eq!(form.take_restore_preview_request(&cloud_files), None);
-    let result = form
-        .build_result(&cloud_files)
-        .expect("whole folder is ready");
-    assert_eq!(result.restore.map(|c| c.whole_folder), Some(true));
-}
-
-#[test]
-fn game_edit_starts_from_the_custom_cover_only() {
-    use std::path::PathBuf;
-
-    let mut emulator = Emulator::new("GBA", "/usr/bin/mgba", "/roms", vec!["gba".into()]);
-    emulator.cover_path_by_rom = vec![("zelda.gba".to_string(), "/covers/custom.png".to_string())];
-    let rom = Some(PathBuf::from("/roms/zelda.gba"));
-
-    // Auto-detected cover only: the field stays empty so automatic detection keeps working.
-    let detected = emusync_presentation::GameItem::new(
-        "zelda.gba",
-        GameEntry::Emulator(Emulator::new("GBA", "/usr/bin/mgba", "/roms", vec![])),
-        rom.clone(),
-    )
-    .with_cover_path(Some("/roms/zelda.png".to_string()));
-    assert_eq!(GameEditFormState::new(&detected, &[]).cover_path, "");
-
-    let custom =
-        emusync_presentation::GameItem::new("zelda.gba", GameEntry::Emulator(emulator), rom)
-            .with_cover_path(Some("/covers/custom.png".to_string()));
-    assert_eq!(
-        GameEditFormState::new(&custom, &[]).cover_path,
-        "/covers/custom.png"
-    );
-}
-
-#[test]
 fn cloud_folder_preview_falls_back_from_cloud_folder_to_group_to_name() {
     let mut form = EntryFormState::new(None, &[]);
     assert_eq!(form.cloud_folder_preview(), "...");
@@ -315,17 +189,6 @@ fn group_chips_toggle_ignoring_case_and_list_distinct_groups() {
 }
 
 #[test]
-fn cloud_path_validation_rejects_parent_segments_only_when_filled() {
-    use emusync_presentation::forms::save_targets::cloud_path_is_valid;
-
-    assert!(cloud_path_is_valid(""));
-    assert!(cloud_path_is_valid("   "));
-    assert!(cloud_path_is_valid("saves/slot1.sav"));
-    assert!(!cloud_path_is_valid("../outside.sav"));
-    assert!(!cloud_path_is_valid("saves/../../x"));
-}
-
-#[test]
 fn existing_groups_keep_case_variants_like_kotlin_distinct() {
     use emusync_presentation::forms::entry_form::existing_groups;
 
@@ -346,4 +209,121 @@ fn existing_groups_keep_case_variants_like_kotlin_distinct() {
         entry(" "),
     ];
     assert_eq!(existing_groups(&entries), vec!["Switch", "switch"]);
+}
+
+#[test]
+fn new_entry_scopes_multiple_directories_but_edits_keep_targets() {
+    let mut form = valid_emulator_form();
+    form.saves.update_path(0, "/d1".to_string());
+    form.saves.update_type(0, SaveTargetType::Directory);
+    form.saves.add_row();
+    form.saves.update_path(1, "/d2".to_string());
+    form.saves.update_type(1, SaveTargetType::Directory);
+
+    let created = form.build_entry().expect("valid new entry");
+    let targets = &created.common().save_targets;
+    assert_eq!(targets.len(), 2);
+    assert_eq!(targets[0].cloud_path.as_deref(), Some("save-target-1"));
+    assert_eq!(targets[1].cloud_path.as_deref(), Some("save-target-2"));
+    assert_eq!(created.common().save_paths, vec!["/d1", "/d2"]);
+
+    let initial = GameEntry::Emulator(Emulator::new(
+        "GBA",
+        "/usr/bin/mgba",
+        "/roms",
+        vec!["gba".into()],
+    ));
+    let initial_targets = [dir_target("/d1"), dir_target("/d2")];
+    let mut edit = EntryFormState::new(Some(initial), &initial_targets);
+    let edited = edit.build_entry().expect("valid edit");
+    assert!(
+        edited
+            .common()
+            .save_targets
+            .iter()
+            .all(|t| t.cloud_path.is_none()),
+        "{:?}",
+        edited.common().save_targets
+    );
+}
+
+#[test]
+fn cloud_path_error_wins_over_missing_required_fields() {
+    let mut form = EntryFormState::new(None, &[]);
+    form.saves.update_path(0, "/saves".to_string());
+    form.saves.update_cloud_path(0, "..\\x".to_string());
+    assert!(form.name.is_empty());
+
+    assert_eq!(
+        form.build_entry(),
+        Err("Cloud paths must be relative and cannot contain '..'.".to_string())
+    );
+}
+
+#[test]
+fn switching_edited_emulator_to_native_drops_rom_maps_and_keeps_identity() {
+    let initial = GameEntry::Emulator(Emulator {
+        common: EntryCommon {
+            name: "Mixed".to_string(),
+            executable_path: "/bin/mixed".to_string(),
+            drive_file_id: Some("drive-1".to_string()),
+            steam_app_id: Some(777),
+            ..EntryCommon::default()
+        },
+        roms_directory: "/roms".to_string(),
+        extensions: vec!["gba".to_string()],
+        title_by_rom: vec![("a.gba".to_string(), "A".to_string())],
+        ..Emulator::default()
+    });
+    let mut form = EntryFormState::new(Some(initial), &[dir_target("/saves")]);
+    form.entry_type = EntryType::Native;
+
+    let entry = form.build_entry().expect("valid native conversion");
+
+    let GameEntry::Native(native) = entry else {
+        panic!("expected a native game");
+    };
+    assert_eq!(native.common.drive_file_id.as_deref(), Some("drive-1"));
+    assert_eq!(native.common.steam_app_id, Some(777));
+    assert_eq!(native.cover_path, None);
+}
+
+#[test]
+fn successful_build_clears_previous_error() {
+    let mut form = valid_emulator_form();
+    form.name.clear();
+    assert!(form.build_entry().is_err());
+    assert!(form.error_message.is_some());
+
+    form.name = "GBA".to_string();
+    assert!(form.build_entry().is_ok());
+
+    assert_eq!(form.error_message, None);
+}
+
+#[test]
+fn extensions_split_on_commas_and_spaces_ignoring_empties() {
+    let mut form = valid_emulator_form();
+    form.extensions = " ,gba,, gbc  ,".to_string();
+
+    let entry = form.build_entry().expect("valid entry");
+
+    let GameEntry::Emulator(emulator) = entry else {
+        panic!("expected an emulator");
+    };
+    assert_eq!(emulator.extensions, vec!["gba", "gbc"]);
+}
+
+#[test]
+fn native_switch_removes_only_the_bare_rom_placeholder() {
+    let mut form = EntryFormState::new(None, &[]);
+    form.entry_type = EntryType::Native;
+
+    form.arguments = "{ROM} --x".to_string();
+    form.apply_type_defaults();
+    assert_eq!(form.arguments, "{ROM} --x");
+
+    form.arguments = " {ROM} ".to_string();
+    form.apply_type_defaults();
+    assert_eq!(form.arguments, "");
 }

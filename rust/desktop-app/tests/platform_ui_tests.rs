@@ -288,3 +288,60 @@ fn stale_steam_refresh_does_not_overwrite_newer_state() {
     assert_eq!(registered, HashSet::from(["New".to_string()]));
     assert_eq!(revision, 2);
 }
+
+// `picked_path_event_echoes_the_request_id` is not written: `PlatformServices` holds the
+// concrete native `FilePicker`, so no fake picker can be injected without opening a
+// real dialog.
+
+#[tokio::test]
+async fn restore_preview_event_echoes_the_request_id() {
+    let config_dir = tempdir().unwrap();
+    let destination_dir = tempdir().unwrap();
+    let manager = ConfigManager::new(&config_dir.path().join("config.json")).unwrap();
+    let (tx, rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager,
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
+    let destination = destination_dir.path().to_string_lossy().into_owned();
+
+    coordinator.handle_action(UiAction::PreviewRestorePaths {
+        request_id: 7,
+        destination: destination.clone(),
+        names: vec!["a.sav".to_string()],
+    });
+
+    let event = tokio::task::spawn_blocking(move || {
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+                Ok(event @ AppEvent::RestorePathsPreviewed { .. }) => return event,
+                Ok(_) => {}
+                Err(err) => panic!("no RestorePathsPreviewed event: {err}"),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let AppEvent::RestorePathsPreviewed {
+        request_id,
+        destination: echoed,
+        paths,
+    } = event
+    else {
+        unreachable!()
+    };
+    assert_eq!(request_id, 7);
+    assert_eq!(echoed, destination);
+    assert_eq!(
+        paths,
+        vec![
+            destination_dir
+                .path()
+                .join("a.sav")
+                .to_string_lossy()
+                .into_owned()
+        ]
+    );
+}

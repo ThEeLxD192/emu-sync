@@ -4,7 +4,7 @@
 use emusync_domain::library::{Emulator, EntryCommon, GameEntry, NativeGame};
 use emusync_presentation::components::sidebar_order::{
     SidebarInteraction, SidebarRow, SidebarUnit, compute_sidebar_rows, flatten_units,
-    move_child_entry, move_top_level_unit, partition_into_units,
+    move_child_entry, move_sidebar_entry, move_top_level_unit, partition_into_units,
 };
 use std::collections::BTreeSet;
 
@@ -350,4 +350,54 @@ fn invalid_sibling_moves_preserve_original_order() {
     assert_eq!(move_child_entry(&entries, "Group", 0, 2), entries);
     assert_eq!(move_child_entry(&entries, "Group", 0, 0), entries);
     assert_eq!(move_top_level_unit(&entries, 0, 5), entries);
+}
+
+#[test]
+fn move_sidebar_entry_out_of_bounds_keeps_order() {
+    // A standalone entry already first cannot move up.
+    let entries = vec![standalone(), first(), second()];
+    let rows = compute_sidebar_rows(&entries, &BTreeSet::new(), None);
+    let standalone_row = rows
+        .iter()
+        .find(|r| matches!(r, SidebarRow::Entry { entry, .. } if *entry == standalone()))
+        .unwrap();
+    assert_eq!(move_sidebar_entry(&entries, standalone_row, -1), entries);
+
+    // A nested entry already last in its folder cannot move down.
+    let last_child = entry_row(&second());
+    assert_eq!(move_sidebar_entry(&library(), &last_child, 1), library());
+
+    // A folder header is not an entry row.
+    assert_eq!(
+        move_sidebar_entry(&library(), &header(&SidebarInteraction::default(), None), 1),
+        library()
+    );
+}
+
+#[test]
+fn drag_with_non_positive_item_height_never_reorders() {
+    for item_height in [0.0, -48.0] {
+        let mut state = SidebarInteraction::default();
+        let row = entry_row(&standalone());
+        state.start_drag(row.key());
+
+        assert_eq!(
+            state.drag_entry(&library(), &row, -104.0, item_height),
+            None,
+            "item_height {item_height}"
+        );
+    }
+}
+
+#[test]
+fn nan_drag_delta_never_reorders() {
+    let mut state = SidebarInteraction::default();
+    let row = entry_row(&standalone());
+    state.start_drag(row.key());
+
+    assert_eq!(state.drag_entry(&library(), &row, f32::NAN, 48.0), None);
+
+    state.end_drag();
+    assert_eq!(state.drag_offset_y(), 0.0);
+    assert_eq!(state.dragging_key(), None);
 }

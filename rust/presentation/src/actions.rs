@@ -49,6 +49,8 @@ pub enum UiAction {
     },
     /// Resolves where each cloud file would be restored inside `destination`.
     PreviewRestorePaths {
+        /// Identifies this request; the answer must echo it.
+        request_id: u64,
         destination: String,
         names: Vec<String>,
     },
@@ -68,6 +70,8 @@ pub enum UiAction {
     ClearStatus,
     OpenConfigDirectory,
     PickPath {
+        /// Identifies this request; the answer must echo it.
+        request_id: u64,
         target: PathTarget,
         mode: PickMode,
     },
@@ -127,8 +131,13 @@ impl std::fmt::Debug for UiAction {
                 .debug_struct("CancelSaveSetup")
                 .field("request_id", request_id)
                 .finish(),
-            Self::PreviewRestorePaths { destination, names } => f
+            Self::PreviewRestorePaths {
+                request_id,
+                destination,
+                names,
+            } => f
                 .debug_struct("PreviewRestorePaths")
+                .field("request_id", request_id)
                 .field("destination", destination)
                 .field("names", names)
                 .finish(),
@@ -149,8 +158,13 @@ impl std::fmt::Debug for UiAction {
             Self::RetryPostSync => f.write_str("RetryPostSync"),
             Self::ClearStatus => f.write_str("ClearStatus"),
             Self::OpenConfigDirectory => f.write_str("OpenConfigDirectory"),
-            Self::PickPath { target, mode } => f
+            Self::PickPath {
+                request_id,
+                target,
+                mode,
+            } => f
                 .debug_struct("PickPath")
+                .field("request_id", request_id)
                 .field("target", target)
                 .field("mode", mode)
                 .finish(),

@@ -454,8 +454,14 @@ impl DesktopCoordinator {
                 let handle = self.platform.load_game_edit(item);
                 self.track_task(handle);
             }
-            UiAction::PreviewRestorePaths { destination, names } => {
-                let handle = self.platform.preview_restore_paths(destination, names);
+            UiAction::PreviewRestorePaths {
+                request_id,
+                destination,
+                names,
+            } => {
+                let handle = self
+                    .platform
+                    .preview_restore_paths(request_id, destination, names);
                 self.track_task(handle);
             }
             UiAction::ToggleSteam(entry) => {
@@ -512,8 +518,12 @@ impl DesktopCoordinator {
             UiAction::OpenConfigDirectory => {
                 self.platform.open_config_dir();
             }
-            UiAction::PickPath { target, mode } => {
-                let handle = self.platform.pick_path(target, mode);
+            UiAction::PickPath {
+                request_id,
+                target,
+                mode,
+            } => {
+                let handle = self.platform.pick_path(request_id, target, mode);
                 self.track_task(handle);
             }
             UiAction::DetectSaveTargetType { index, path } => {

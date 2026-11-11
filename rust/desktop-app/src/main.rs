@@ -293,8 +293,14 @@ impl ApplicationHandler for App {
                         AppEvent::UpdateStateChanged(update_state) => {
                             self.emusync_app.state.update_state = update_state;
                         }
-                        AppEvent::PathPicked { target, mode, path } => {
-                            self.emusync_app.apply_picked_path(target, mode, path);
+                        AppEvent::PathPicked {
+                            request_id,
+                            target,
+                            mode,
+                            path,
+                        } => {
+                            self.emusync_app
+                                .apply_picked_path(request_id, target, mode, path);
                             window.request_redraw();
                         }
                         AppEvent::GameEditReady { item, targets } => {
@@ -303,8 +309,13 @@ impl ApplicationHandler for App {
                                 self.emusync_app.open_edit_game(&item, &targets);
                             }
                         }
-                        AppEvent::RestorePathsPreviewed { destination, paths } => {
-                            self.emusync_app.apply_restore_preview(&destination, paths);
+                        AppEvent::RestorePathsPreviewed {
+                            request_id,
+                            destination,
+                            paths,
+                        } => {
+                            self.emusync_app
+                                .apply_restore_preview(request_id, &destination, paths);
                         }
                         AppEvent::SaveTargetTypeDetected { index, path, kind } => {
                             self.emusync_app

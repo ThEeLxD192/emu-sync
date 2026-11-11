@@ -19,6 +19,7 @@ use crate::{
 use dialog_dispatch::{GameEditOutcome, GameEditParts};
 use egui::{CentralPanel, Frame, Margin, Panel, Ui};
 use emusync_domain::library::{GameEntry, SaveTarget, SaveTargetType};
+use std::collections::HashMap;
 
 /// Where a game dialog came from, which decides how it ends.
 #[derive(Clone, Debug, PartialEq)]
@@ -60,6 +61,12 @@ pub struct EmuSyncApp {
     /// Fullscreen flags auto-detected from an emulator executable, injected by the
     /// composition (Kotlin's `LibraryFormActions.detectFullscreenArgs`).
     pub fullscreen_detector: fn(&str) -> String,
+    /// Last request id handed out; ids are monotonic and start at 1.
+    last_request_id: u64,
+    /// Picker requests of the open dialog still unanswered, by request id.
+    pending_picks: HashMap<u64, PathTarget>,
+    /// Restore preview requests of the open dialog still unanswered, with their destination.
+    pending_previews: HashMap<u64, String>,
 }
 
 fn no_fullscreen_flags(_: &str) -> String {
@@ -82,6 +89,9 @@ impl EmuSyncApp {
             sidebar: SidebarInteraction::default(),
             answered_conflict: None,
             fullscreen_detector: no_fullscreen_flags,
+            last_request_id: 0,
+            pending_picks: HashMap::new(),
+            pending_previews: HashMap::new(),
         }
     }
 
@@ -94,12 +104,25 @@ impl EmuSyncApp {
             sidebar: SidebarInteraction::default(),
             answered_conflict: None,
             fullscreen_detector: no_fullscreen_flags,
+            last_request_id: 0,
+            pending_picks: HashMap::new(),
+            pending_previews: HashMap::new(),
         }
     }
 
     /// Fills the path chosen in a picker; a save row takes the kind that was picked,
-    /// as Kotlin's File/Folder buttons do.
-    pub fn apply_picked_path(&mut self, target: PathTarget, mode: PickMode, path: String) {
+    /// as Kotlin's File/Folder buttons do. Only the answer to a request of the open
+    /// dialog is applied; unknown, repeated or stale ids are dropped.
+    pub fn apply_picked_path(
+        &mut self,
+        request_id: u64,
+        target: PathTarget,
+        mode: PickMode,
+        path: String,
+    ) {
+        if self.pending_picks.remove(&request_id).as_ref() != Some(&target) {
+            return;
+        }
         let picked_kind = match mode {
             PickMode::File => SaveTargetType::File,
             PickMode::Directory => SaveTargetType::Directory,
@@ -124,8 +147,17 @@ impl EmuSyncApp {
         }
     }
 
-    /// Stores resolved restore paths if the dialog still shows that destination.
-    pub fn apply_restore_preview(&mut self, destination: &str, paths: Vec<String>) {
+    /// Stores resolved restore paths if they answer a request of the open dialog for
+    /// that destination; unknown, repeated or stale ids are dropped.
+    pub fn apply_restore_preview(
+        &mut self,
+        request_id: u64,
+        destination: &str,
+        paths: Vec<String>,
+    ) {
+        if self.pending_previews.remove(&request_id).as_deref() != Some(destination) {
+            return;
+        }
         if let ActiveDialog::GameEdit { form, .. } = &mut self.active_dialog {
             form.apply_restore_preview(destination, paths);
         }
@@ -155,6 +187,7 @@ impl EmuSyncApp {
                 request_id: request.id,
             });
         }
+        self.forget_pending_requests();
         self.active_dialog = dialog;
     }
 
@@ -168,7 +201,43 @@ impl EmuSyncApp {
                 ..
             } if request.id == request_id
         ) {
+            self.forget_pending_requests();
             self.active_dialog = ActiveDialog::None;
+        }
+    }
+
+    /// Drops every unanswered picker and preview request: whatever answers later
+    /// belongs to a dialog that is no longer open.
+    fn forget_pending_requests(&mut self) {
+        self.pending_picks.clear();
+        self.pending_previews.clear();
+    }
+
+    /// Gives each picker and preview action a fresh id and records it as pending.
+    /// The dialog handlers publish them with the placeholder id 0; this pass runs
+    /// before the actions are queued, so no published action keeps it.
+    fn register_requests(&mut self, actions: &mut [UiAction]) {
+        for action in actions {
+            match action {
+                UiAction::PickPath {
+                    request_id, target, ..
+                } => {
+                    self.last_request_id += 1;
+                    *request_id = self.last_request_id;
+                    self.pending_picks.insert(*request_id, target.clone());
+                }
+                UiAction::PreviewRestorePaths {
+                    request_id,
+                    destination,
+                    ..
+                } => {
+                    self.last_request_id += 1;
+                    *request_id = self.last_request_id;
+                    self.pending_previews
+                        .insert(*request_id, destination.clone());
+                }
+                _ => {}
+            }
         }
     }
 
@@ -446,9 +515,12 @@ impl EmuSyncApp {
             }
         }
 
+        self.register_requests(&mut actions);
+
         if close_dialog {
             if setup_completed {
                 // Answered by `CompleteSaveSetup`; closing it must not cancel.
+                self.forget_pending_requests();
                 self.active_dialog = ActiveDialog::None;
             } else {
                 self.close_dialog();

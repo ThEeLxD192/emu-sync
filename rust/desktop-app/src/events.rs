@@ -38,6 +38,8 @@ pub enum AppEvent {
     Toast(String),
     UpdateStateChanged(UpdateState),
     PathPicked {
+        /// The id of the `PickPath` request this answers.
+        request_id: u64,
         target: PathTarget,
         mode: PickMode,
         path: String,
@@ -49,6 +51,8 @@ pub enum AppEvent {
     },
     /// Where each cloud file would be restored inside `destination`.
     RestorePathsPreviewed {
+        /// The id of the `PreviewRestorePaths` request this answers.
+        request_id: u64,
         destination: String,
         paths: Vec<String>,
     },

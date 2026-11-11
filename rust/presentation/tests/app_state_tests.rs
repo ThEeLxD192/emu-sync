@@ -1,59 +1,13 @@
-//! Tests for UI state, models, and GameItem resolution.
+//! Tests for UI state queries.
 
+mod common;
+
+use common::*;
 use emusync_domain::{
     config::{AppConfig, Credentials},
-    library::{Emulator, EntryCommon, GameEntry, NativeGame},
+    library::{EntryCommon, GameEntry, NativeGame},
 };
-use emusync_presentation::{AppUiState, CloudSyncStatus, GameItem};
-use std::path::PathBuf;
-
-#[test]
-fn game_item_resolves_effective_title_and_cover_path() {
-    let emulator = GameEntry::Emulator(Emulator {
-        common: EntryCommon {
-            name: "GBA".to_string(),
-            ..EntryCommon::default()
-        },
-        title_by_rom: vec![("zelda.gba".to_string(), "The Minish Cap".to_string())],
-        cover_path_by_rom: vec![("zelda.gba".to_string(), "/covers/zelda.png".to_string())],
-        ..Emulator::default()
-    });
-
-    let overridden_item = GameItem::new(
-        "zelda.gba",
-        emulator.clone(),
-        Some(PathBuf::from("/roms/gba/zelda.gba")),
-    );
-    assert_eq!(overridden_item.effective_title(), "The Minish Cap");
-    assert_eq!(
-        overridden_item.effective_cover_path(),
-        Some("/covers/zelda.png".to_string())
-    );
-
-    let default_item = GameItem::new(
-        "pokemon.gba",
-        emulator,
-        Some(PathBuf::from("/roms/gba/pokemon.gba")),
-    );
-    assert_eq!(default_item.effective_title(), "pokemon");
-    assert_eq!(default_item.effective_cover_path(), None);
-
-    let native = GameEntry::Native(NativeGame {
-        common: EntryCommon {
-            name: "Hades".to_string(),
-            ..EntryCommon::default()
-        },
-        cover_path: Some("/covers/hades.jpg".to_string()),
-        ..NativeGame::default()
-    });
-
-    let native_item = GameItem::new("Hades", native, None);
-    assert_eq!(native_item.effective_title(), "Hades");
-    assert_eq!(
-        native_item.effective_cover_path(),
-        Some("/covers/hades.jpg".to_string())
-    );
-}
+use emusync_presentation::{AppUiState, CloudSyncStatus};
 
 #[test]
 fn app_ui_state_drive_connection_and_sync_queries() {
@@ -142,33 +96,56 @@ fn app_ui_state_sync_status_lookup() {
 }
 
 #[test]
-fn connect_drive_uses_stored_credentials_and_falls_back_to_setup_when_blank() {
-    use emusync_presentation::{UiAction, components::header::connect_drive_action};
-
-    let with_credentials = |client_id: &str, client_secret: &str| AppUiState {
-        config: Some(AppConfig {
-            credentials: Some(Credentials {
-                client_id: client_id.to_string(),
-                client_secret: client_secret.to_string(),
-                refresh_token: None,
+fn whitespace_or_missing_refresh_token_is_not_connected() {
+    let with_token = |token: Option<&str>| AppUiState {
+        config: Some(config_with(
+            Vec::new(),
+            Some(Credentials {
+                client_id: "id".to_string(),
+                client_secret: "secret".to_string(),
+                refresh_token: token.map(str::to_string),
             }),
-            entries: Vec::new(),
-        }),
+        )),
         ..AppUiState::default()
     };
 
-    assert_eq!(
-        connect_drive_action(&with_credentials("id", "secret")),
-        Some(UiAction::ConnectDrive {
-            client_id: "id".to_string(),
-            client_secret: "secret".to_string(),
-        })
-    );
-    // Kotlin `isBlank`: whitespace-only values open the setup dialog instead.
-    assert_eq!(connect_drive_action(&with_credentials("id", "  ")), None);
-    assert_eq!(
-        connect_drive_action(&with_credentials("\t", "secret")),
-        None
-    );
-    assert_eq!(connect_drive_action(&AppUiState::default()), None);
+    assert!(!with_token(Some("  \t")).is_drive_connected());
+    assert!(!with_token(None).is_drive_connected());
+    let no_credentials = AppUiState {
+        config: Some(config_with(Vec::new(), None)),
+        ..AppUiState::default()
+    };
+    assert!(!no_credentials.is_drive_connected());
+}
+
+#[test]
+fn no_selection_reports_idle_even_with_known_statuses() {
+    let mut state = AppUiState::default();
+    state
+        .entry_sync_status
+        .insert("A".to_string(), CloudSyncStatus::Conflict);
+    assert_eq!(state.selected_entry, None);
+
+    assert_eq!(state.sync_status_for_selected(), CloudSyncStatus::Idle);
+}
+
+#[test]
+fn app_ui_state_debug_never_shows_credentials() {
+    let state = AppUiState {
+        config: Some(config_with(
+            Vec::new(),
+            Some(Credentials {
+                client_id: "id".to_string(),
+                client_secret: "GOCSPX-state-secret".to_string(),
+                refresh_token: Some("1//state-refresh-token".to_string()),
+            }),
+        )),
+        ..AppUiState::default()
+    };
+
+    let rendered = format!("{state:?}");
+
+    assert!(!rendered.contains("GOCSPX-state-secret"), "{rendered}");
+    assert!(!rendered.contains("1//state-refresh-token"), "{rendered}");
+    assert!(rendered.contains("client_id: \"id\""), "{rendered}");
 }
