@@ -1,6 +1,6 @@
 //! Immutable single source of truth for the entire application UI state.
 
-use crate::model::{AppStatus, CloudSyncStatus, GameItem, SaveSetupRequest};
+use crate::model::{AppStatus, CloudSyncStatus, GameItem};
 use emusync_application::UpdateState;
 use emusync_domain::{config::AppConfig, library::GameEntry};
 use std::collections::{HashMap, HashSet};
@@ -16,7 +16,6 @@ pub struct AppUiState {
     pub status: AppStatus,
     pub is_loading: bool,
     pub is_operation_in_progress: bool,
-    pub save_setup_request: Option<SaveSetupRequest>,
     pub entry_sync_status: HashMap<String, CloudSyncStatus>,
     pub update_state: UpdateState,
     pub show_update_dialog: bool,
@@ -36,7 +35,6 @@ impl Default for AppUiState {
             status: AppStatus::Idle,
             is_loading: false,
             is_operation_in_progress: false,
-            save_setup_request: None,
             entry_sync_status: HashMap::new(),
             update_state: UpdateState::Idle,
             show_update_dialog: false,

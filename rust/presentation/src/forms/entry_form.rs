@@ -308,6 +308,9 @@ impl EntryFormState {
 }
 
 /// Distinct non-blank groups already used in the library, in library order.
+///
+/// Case-sensitive on purpose: Kotlin's dropdown uses `distinct()` (`EmuSyncApp.kt`), even
+/// though the sidebar merges groups ignoring case.
 pub fn existing_groups(entries: &[GameEntry]) -> Vec<String> {
     let mut groups: Vec<String> = Vec::new();
     for entry in entries {

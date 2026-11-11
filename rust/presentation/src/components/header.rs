@@ -141,7 +141,10 @@ fn render_update_slot(
         // Rust-only extras: Kotlin shows nothing in these states.
         UpdateState::Downloading { progress, .. } => Pill {
             icon: Some((glyph::DOWNLOAD, PRIMARY)),
-            text: &format!("Downloading {}%", (progress * 100.0) as u32),
+            text: &format!(
+                "Downloading {}%",
+                crate::dialogs::update_dialog::progress_percent(*progress)
+            ),
             text_color: PRIMARY,
             fill: SURFACE_VARIANT,
             ..Pill::default()

@@ -166,9 +166,8 @@ pub(crate) fn path_field(
     placeholder: &str,
     pickers: &[(&str, PickMode)],
 ) -> (Response, Option<PickMode>) {
-    let mut picked = None;
-    let mut field = None;
     ui.horizontal(|ui| {
+        let mut picked = None;
         ui.spacing_mut().item_spacing.x = 8.0;
         // Reserve the buttons' real width (text + padding + spacing) for them.
         let button_width: f32 = pickers
@@ -183,14 +182,15 @@ pub(crate) fn path_field(
             })
             .sum();
         let width = (ui.available_width() - button_width).max(120.0);
-        field = Some(text_field(ui, id_salt, value, placeholder, width, false));
+        let field = text_field(ui, id_salt, value, placeholder, width, false);
         for (label, mode) in pickers {
             if tonal_button(ui, label).clicked() {
                 picked = Some(*mode);
             }
         }
-    });
-    (field.expect("field is always rendered"), picked)
+        (field, picked)
+    })
+    .inner
 }
 
 /// Optional cloud path with live validation (Kotlin's `CloudPathField`).
@@ -335,22 +335,19 @@ pub(crate) fn secret_field(
         .stroke(Stroke::new(1.0, if focused { PRIMARY } else { DIVIDER }))
         .corner_radius(FIELD_RADIUS)
         .inner_margin(Margin::symmetric(12, 10));
-    let mut field = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         let width = (ui.available_width() - FIELD_HEIGHT - 4.0).max(120.0);
-        field = Some(
-            ui.add(
-                TextEdit::singleline(value)
-                    .id(id)
-                    .frame(frame)
-                    .password(!*revealed)
-                    .hint_text(RichText::new(placeholder).color(ON_SURFACE_DIM.gamma_multiply(0.5)))
-                    .text_color(if focused { ON_BACKGROUND } else { ON_SURFACE })
-                    .font(FontId::proportional(13.0))
-                    .desired_width(width)
-                    .min_size(vec2(width, FIELD_HEIGHT)),
-            ),
+        let field = ui.add(
+            TextEdit::singleline(value)
+                .id(id)
+                .frame(frame)
+                .password(!*revealed)
+                .hint_text(RichText::new(placeholder).color(ON_SURFACE_DIM.gamma_multiply(0.5)))
+                .text_color(if focused { ON_BACKGROUND } else { ON_SURFACE })
+                .font(FontId::proportional(13.0))
+                .desired_width(width)
+                .min_size(vec2(width, FIELD_HEIGHT)),
         );
         let (rect, _) =
             ui.allocate_exact_size(vec2(FIELD_HEIGHT, FIELD_HEIGHT), egui::Sense::hover());
@@ -366,6 +363,7 @@ pub(crate) fn secret_field(
         {
             *revealed = !*revealed;
         }
-    });
-    field.expect("field is always rendered")
+        field
+    })
+    .inner
 }

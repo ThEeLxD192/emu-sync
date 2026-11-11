@@ -16,7 +16,7 @@ use egui::{
 const MISSING_CREDENTIALS: &str = "Please enter both Client ID and Client Secret.";
 
 /// State for the drive setup dialog.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct DriveSetupDialogState {
     pub client_id: String,
     pub client_secret: String,
@@ -24,6 +24,18 @@ pub struct DriveSetupDialogState {
     pub error_message: Option<String>,
     /// Rust-only: the secret is masked unless the user reveals it.
     pub secret_revealed: bool,
+}
+
+impl std::fmt::Debug for DriveSetupDialogState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DriveSetupDialogState")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"<redacted>")
+            .field("is_linked", &self.is_linked)
+            .field("error_message", &self.error_message)
+            .field("secret_revealed", &self.secret_revealed)
+            .finish()
+    }
 }
 
 impl DriveSetupDialogState {

@@ -44,7 +44,7 @@ fn app_renders_headless_and_emits_navigation_actions() {
     output.drop_without_applying_deltas();
 
     // Should render without panics
-    assert!(app.pending_actions.is_empty());
+    assert!(app.take_actions().is_empty());
 }
 
 #[test]
@@ -53,10 +53,10 @@ fn app_opens_and_submits_add_category_modal() {
     let mut app = EmuSyncApp::new();
 
     app.open_add_entry();
-    assert!(matches!(app.active_dialog, ActiveDialog::Entry(_)));
+    assert!(matches!(app.active_dialog(), ActiveDialog::Entry(_)));
 
     // Fill the active form
-    if let ActiveDialog::Entry(form) = &mut app.active_dialog {
+    if let Some(form) = app.entry_form_mut() {
         form.name = "GameBoy Advance".to_string();
         form.executable_path = "mgba".to_string();
         form.roms_directory = "/roms/gba".to_string();
@@ -64,18 +64,7 @@ fn app_opens_and_submits_add_category_modal() {
         form.saves.update_path(0, "/saves/gba".to_string());
     }
 
-    // Render frame which triggers build and save
-    let output = ctx.run_ui(RawInput::default(), |ui| {
-        app.update(ui);
-    });
-    output.drop_without_applying_deltas();
-
-    // Manually trigger save from dialog
-    if let ActiveDialog::Entry(form) = &mut app.active_dialog {
-        let entry = form.build_entry().expect("valid entry");
-        app.pending_actions.push(UiAction::AddEntry(entry));
-        app.close_dialog();
-    }
+    click_button(&ctx, &mut app, "Add");
 
     let actions = app.take_actions();
     assert_eq!(actions.len(), 1);
@@ -86,7 +75,7 @@ fn app_opens_and_submits_add_category_modal() {
         }
         _ => panic!("expected AddEntry action"),
     }
-    assert_eq!(app.active_dialog, ActiveDialog::None);
+    assert_eq!(app.active_dialog(), &ActiveDialog::None);
 }
 
 #[test]
@@ -103,53 +92,20 @@ fn app_opens_update_dialog_and_emits_download_action() {
 
     app.state.update_state = emusync_application::UpdateState::Available(info.clone());
     app.open_update_dialog();
-    assert_eq!(app.active_dialog, ActiveDialog::Update);
+    assert_eq!(app.active_dialog(), &ActiveDialog::Update);
 
-    app.pending_actions
-        .push(UiAction::DownloadUpdate(info.clone()));
-    let actions = app.take_actions();
-    assert_eq!(actions, vec![UiAction::DownloadUpdate(info)]);
-}
-
-#[test]
-fn app_resolves_conflict_and_retries_post_sync() {
-    let mut app = EmuSyncApp::new();
-
-    app.state.status = AppStatus::Conflict {
-        local_date: "2026-11-06 12:00:00".to_string(),
-        cloud_date: "2026-11-06 13:00:00".to_string(),
-        game_name: "Super Mario World".to_string(),
-    };
-
-    // Simulate user choosing keep local
-    app.pending_actions
-        .push(UiAction::ResolveConflict(Decision::UploadLocal));
-    app.state.status = AppStatus::Idle;
-
-    let actions = app.take_actions();
-    assert_eq!(
-        actions,
-        vec![UiAction::ResolveConflict(Decision::UploadLocal)]
-    );
-
-    // Simulate post-sync failed retry
-    app.state.status = AppStatus::PostSyncFailed {
-        game_name: "Super Mario World".to_string(),
-        reason: "Network timeout".to_string(),
-        completed_save_count: 0,
-        pending_save_count: 1,
-    };
-
-    app.pending_actions.push(UiAction::RetryPostSync);
-    let retry_actions = app.take_actions();
-    assert_eq!(retry_actions, vec![UiAction::RetryPostSync]);
-}
-
-#[test]
-fn app_auto_opens_save_setup_request() {
     let ctx = Context::default();
-    let mut app = EmuSyncApp::new();
+    click_button(&ctx, &mut app, "Update Now");
+    assert_eq!(app.take_actions(), vec![UiAction::DownloadUpdate(info)]);
+}
 
+fn cancel() -> UiAction {
+    UiAction::CancelSaveSetup {
+        game_name: "smw.sfc".to_string(),
+    }
+}
+
+fn setup_request() -> SaveSetupRequest {
     let entry = GameEntry::Emulator(Emulator {
         common: EntryCommon {
             name: "SNES".to_string(),
@@ -157,21 +113,150 @@ fn app_auto_opens_save_setup_request() {
         },
         ..Emulator::default()
     });
-
-    let item = GameItem::new("smw.sfc", entry, None);
-    app.state.save_setup_request = Some(SaveSetupRequest {
-        item,
+    SaveSetupRequest {
+        item: GameItem::new("smw.sfc", entry, None),
         notice: Some("Configure saves before play".to_string()),
-        cloud_file_names: vec!["smw.srm".to_string()],
+        cloud_file_names: Vec::new(),
         targets: Vec::new(),
-    });
+    }
+}
 
-    let output = ctx.run_ui(RawInput::default(), |ui| {
-        app.update(ui);
-    });
+fn text_center(ctx: &Context, app: &mut EmuSyncApp, label: &str) -> Option<egui::Pos2> {
+    let input = RawInput {
+        screen_rect: Some(screen()),
+        ..RawInput::default()
+    };
+    let output = ctx.run_ui(input, |ui| app.update(ui));
+    let center = output
+        .shapes
+        .iter()
+        .find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == label => {
+                Some(text.visual_bounding_rect().center())
+            }
+            _ => None,
+        });
     output.drop_without_applying_deltas();
+    center
+}
 
-    assert!(matches!(app.active_dialog, ActiveDialog::GameEdit { .. }));
+/// Center of the text `label` once the dialog layout has settled (it moves over its
+/// first frames while it sizes itself).
+fn center_of_text(ctx: &Context, app: &mut EmuSyncApp, label: &str) -> egui::Pos2 {
+    let mut previous = None;
+    for _ in 0..12 {
+        let current = text_center(ctx, app, label);
+        if current.is_some() && current == previous {
+            return current.unwrap_or_default();
+        }
+        previous = current;
+    }
+    panic!("`{label}` never settled");
+}
+
+fn click_button(ctx: &Context, app: &mut EmuSyncApp, label: &str) {
+    let pos = center_of_text(ctx, app, label);
+    run_frames(ctx, app, click_at(pos));
+}
+
+#[test]
+fn save_setup_save_completes_the_same_request() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    let request = setup_request();
+    app.open_save_setup(&request);
+
+    click_button(&ctx, &mut app, "Save");
+
+    let actions = app.take_actions();
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [UiAction::CompleteSaveSetup { request: sent, .. }] if **sent == request
+        ),
+        "{actions:?}"
+    );
+    assert!(matches!(app.active_dialog(), ActiveDialog::None));
+}
+
+#[test]
+fn save_setup_cancel_and_escape_each_emit_one_cancel() {
+    for dismiss in ["Cancel", "Escape"] {
+        let ctx = Context::default();
+        let mut app = EmuSyncApp::new();
+        app.open_save_setup(&setup_request());
+        run_frames(&ctx, &mut app, vec![Vec::new()]);
+
+        if dismiss == "Cancel" {
+            click_button(&ctx, &mut app, "Cancel");
+        } else {
+            run_frames(&ctx, &mut app, vec![escape()]);
+        }
+
+        assert_eq!(app.take_actions(), vec![cancel()], "{dismiss}");
+        assert!(matches!(app.active_dialog(), ActiveDialog::None));
+    }
+}
+
+#[test]
+fn replacing_a_save_setup_cancels_the_previous_request() {
+    let mut app = EmuSyncApp::new();
+    app.open_save_setup(&setup_request());
+    app.open_save_setup(&setup_request());
+    assert_eq!(app.take_actions(), vec![cancel()]);
+
+    app.close_dialog();
+    assert_eq!(app.take_actions(), vec![cancel()]);
+
+    app.close_dialog();
+    assert!(app.take_actions().is_empty());
+}
+
+#[test]
+fn game_override_save_emits_override_without_cancel() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    let item = setup_request().item;
+    app.open_edit_game(&item, &[]);
+
+    click_button(&ctx, &mut app, "Save");
+
+    let actions = app.take_actions();
+    assert!(
+        matches!(actions.as_slice(), [UiAction::EditGameOverride { .. }]),
+        "{actions:?}"
+    );
+}
+
+#[test]
+fn save_setup_stays_clickable_above_a_launch_status() {
+    for status in [AppStatus::Playing, AppStatus::Loading] {
+        let ctx = Context::default();
+        let mut app = EmuSyncApp::new();
+        app.state.status = status.clone();
+        app.open_save_setup(&setup_request());
+
+        click_button(&ctx, &mut app, "Save");
+
+        let actions = app.take_actions();
+        assert!(
+            matches!(actions.as_slice(), [UiAction::CompleteSaveSetup { .. }]),
+            "{status:?}: {actions:?}"
+        );
+    }
+}
+
+#[test]
+fn drive_secret_never_appears_in_debug_output() {
+    use emusync_presentation::dialogs::DriveSetupDialogState;
+
+    let action = UiAction::ConnectDrive {
+        client_id: "id".into(),
+        client_secret: "GOCSPX-secret".into(),
+    };
+    assert!(!format!("{action:?}").contains("GOCSPX-secret"));
+    let state = DriveSetupDialogState::new("id".into(), "GOCSPX-secret".into(), false);
+    assert!(!format!("{state:?}").contains("GOCSPX-secret"));
 }
 
 #[test]
@@ -225,7 +310,10 @@ fn deleting_a_category_waits_for_confirmation_and_escape_cancels() {
     app.request_delete_entry(entry);
     let output = ctx.run_ui(RawInput::default(), |ui| app.update(ui));
     output.drop_without_applying_deltas();
-    assert!(matches!(app.active_dialog, ActiveDialog::ConfirmDelete(_)));
+    assert!(matches!(
+        app.active_dialog(),
+        ActiveDialog::ConfirmDelete(_)
+    ));
     assert!(
         app.take_actions().is_empty(),
         "nothing is deleted before confirming"
@@ -244,7 +332,7 @@ fn deleting_a_category_waits_for_confirmation_and_escape_cancels() {
     let output = ctx.run_ui(escape, |ui| app.update(ui));
     output.drop_without_applying_deltas();
 
-    assert!(matches!(app.active_dialog, ActiveDialog::None));
+    assert!(matches!(app.active_dialog(), ActiveDialog::None));
     assert!(
         !app.take_actions()
             .iter()
@@ -265,7 +353,7 @@ fn picked_save_path_takes_the_picked_kind_and_stale_detection_is_ignored() {
         PickMode::Directory,
         "/saves/folder".to_string(),
     );
-    let ActiveDialog::Entry(form) = &app.active_dialog else {
+    let ActiveDialog::Entry(form) = &app.active_dialog() else {
         panic!("entry dialog must stay open");
     };
     assert_eq!(form.saves.rows[0].path, "/saves/folder");
@@ -273,13 +361,13 @@ fn picked_save_path_takes_the_picked_kind_and_stale_detection_is_ignored() {
 
     // A detection for a path the row no longer holds must not change its kind.
     app.apply_detected_save_type(0, "/saves/old-file", SaveTargetType::File);
-    let ActiveDialog::Entry(form) = &app.active_dialog else {
+    let ActiveDialog::Entry(form) = &app.active_dialog() else {
         unreachable!()
     };
     assert_eq!(form.saves.rows[0].target_type, SaveTargetType::Directory);
 
     app.apply_detected_save_type(0, "/saves/folder", SaveTargetType::File);
-    let ActiveDialog::Entry(form) = &app.active_dialog else {
+    let ActiveDialog::Entry(form) = &app.active_dialog() else {
         unreachable!()
     };
     assert_eq!(form.saves.rows[0].target_type, SaveTargetType::File);
@@ -289,7 +377,7 @@ fn picked_save_path_takes_the_picked_kind_and_stale_detection_is_ignored() {
         PickMode::File,
         "/usr/bin/mgba".to_string(),
     );
-    let ActiveDialog::Entry(form) = &app.active_dialog else {
+    let ActiveDialog::Entry(form) = &app.active_dialog() else {
         unreachable!()
     };
     assert_eq!(form.executable_path, "/usr/bin/mgba");
@@ -303,11 +391,11 @@ fn entry_dialog_renders_both_entry_types_headless() {
     for _ in 0..2 {
         let output = ctx.run_ui(RawInput::default(), |ui| app.update(ui));
         output.drop_without_applying_deltas();
-        if let ActiveDialog::Entry(form) = &mut app.active_dialog {
+        if let Some(form) = app.entry_form_mut() {
             form.entry_type = emusync_presentation::EntryType::Native;
         }
     }
-    assert!(matches!(app.active_dialog, ActiveDialog::Entry(_)));
+    assert!(matches!(app.active_dialog(), ActiveDialog::Entry(_)));
     assert!(app.take_actions().is_empty());
 }
 
@@ -505,7 +593,7 @@ fn drive_setup_opens_with_stored_credentials_and_closes_on_escape() {
     });
 
     app.open_drive_setup();
-    let ActiveDialog::DriveSetup(state) = &app.active_dialog else {
+    let ActiveDialog::DriveSetup(state) = &app.active_dialog() else {
         panic!("drive dialog must open");
     };
     assert_eq!(
@@ -519,7 +607,7 @@ fn drive_setup_opens_with_stored_credentials_and_closes_on_escape() {
 
     run_frames(&ctx, &mut app, vec![Vec::new(), escape()]);
 
-    assert!(matches!(app.active_dialog, ActiveDialog::None));
+    assert!(matches!(app.active_dialog(), ActiveDialog::None));
     assert!(
         app.take_actions().is_empty(),
         "closing must not connect or unlink"
@@ -556,7 +644,7 @@ fn update_dialog_cannot_be_dismissed_while_downloading() {
         run_frames(&ctx, &mut app, vec![Vec::new(), escape()]);
 
         assert_eq!(
-            matches!(app.active_dialog, ActiveDialog::None),
+            matches!(app.active_dialog(), ActiveDialog::None),
             closes,
             "Escape with {state:?}"
         );

@@ -129,6 +129,17 @@ impl InteractionControls {
         }
     }
 
+    /// Cancels the pending request only if it is the one for `game_name`, so a late
+    /// cancel of a dismissed dialog cannot cancel a newer request.
+    pub fn cancel_save_setup_for(&self, game_name: &str) {
+        let mut pending = self.pending_save_setup.lock().unwrap();
+        if pending.as_ref().is_some_and(|(name, _)| name == game_name)
+            && let Some((_, sender)) = pending.take()
+        {
+            let _ = sender.send(Err("Save setup cancelled.".into()));
+        }
+    }
+
     pub fn complete_save_setup_response(
         &self,
         game_name: &str,

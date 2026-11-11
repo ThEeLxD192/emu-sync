@@ -208,7 +208,8 @@ fn cover_art(
         .filter(|p| !p.is_empty())
         .map(str::to_string);
     let preview_path = if is_custom {
-        Some(form.cover_path.trim().to_string())
+        // Only an existing file is previewed, so half-typed paths never reach the cache.
+        Some(form.cover_path.trim().to_string()).filter(|path| Path::new(path).is_file())
     } else {
         detected.clone()
     };

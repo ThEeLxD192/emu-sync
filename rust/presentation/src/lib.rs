@@ -11,7 +11,7 @@ pub mod state;
 pub mod theme;
 
 pub use actions::UiAction;
-pub use app::{ActiveDialog, EmuSyncApp};
+pub use app::{ActiveDialog, EmuSyncApp, GameEditOrigin};
 pub use cover_cache::CoverCache;
 pub use forms::{
     EntryFormState, GameEditFormState, GameEditResult, RestoreChoice, SaveTargetFormState,

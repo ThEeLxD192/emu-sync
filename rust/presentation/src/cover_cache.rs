@@ -3,9 +3,13 @@
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
 use std::collections::HashMap;
 
-/// Cache mapping file paths or cover keys to egui TextureHandles.
+/// Largest cover file read from disk, so a wrong path cannot stall the UI thread.
+const MAX_COVER_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Cache mapping file paths or cover keys to egui TextureHandles; `None` remembers a
+/// path that could not be loaded so it is not read again every frame.
 pub struct CoverCache {
-    textures: HashMap<String, TextureHandle>,
+    textures: HashMap<String, Option<TextureHandle>>,
 }
 
 impl Default for CoverCache {
@@ -27,27 +31,39 @@ impl CoverCache {
         if trimmed.is_empty() {
             return None;
         }
-        if !self.textures.contains_key(trimmed)
-            && let Ok(bytes) = std::fs::read(trimmed)
-            && let Ok(image) = image::load_from_memory(&bytes)
-        {
-            let rgba = image.to_rgba8();
-            let size = [rgba.width() as usize, rgba.height() as usize];
-            let pixels = rgba.into_raw();
-            let color_image = ColorImage::from_rgba_unmultiplied(size, &pixels);
-            let texture = ctx.load_texture(trimmed, color_image, TextureOptions::LINEAR);
+        if !self.textures.contains_key(trimmed) {
+            let texture = load_texture(ctx, trimmed);
             self.textures.insert(trimmed.to_string(), texture);
         }
-        self.textures.get(trimmed)
+        self.textures.get(trimmed).and_then(Option::as_ref)
     }
 
     /// Explicitly inserts a texture into the cache.
     pub fn insert(&mut self, key: impl Into<String>, handle: TextureHandle) {
-        self.textures.insert(key.into(), handle);
+        self.textures.insert(key.into(), Some(handle));
+    }
+
+    /// Forgets remembered failures so a cover created later is tried again.
+    pub fn forget_failures(&mut self) {
+        self.textures.retain(|_, texture| texture.is_some());
     }
 
     /// Clears the cache.
     pub fn clear(&mut self) {
         self.textures.clear();
     }
+}
+
+fn load_texture(ctx: &Context, path: &str) -> Option<TextureHandle> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_COVER_BYTES {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let image = image::load_from_memory(&bytes).ok()?;
+    let rgba = image.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let pixels = rgba.into_raw();
+    let color_image = ColorImage::from_rgba_unmultiplied(size, &pixels);
+    Some(ctx.load_texture(path, color_image, TextureOptions::LINEAR))
 }

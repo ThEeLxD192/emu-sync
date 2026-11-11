@@ -1,5 +1,8 @@
 //! Main EmuSync application presentation coordinator and window layout.
 
+mod dialog_dispatch;
+mod status;
+
 use crate::{
     actions::UiAction,
     components::{
@@ -7,19 +10,25 @@ use crate::{
         sidebar_order::SidebarInteraction,
     },
     cover_cache::CoverCache,
-    dialogs::{
-        ConfirmDeleteOutcome, DriveSetupDialogState, DriveSetupEvents, EntryDialogEvents,
-        GameEditDialogEvents, StatusOverlayEvents, UpdateDialogEvents,
-        render_confirm_delete_dialog, render_drive_setup_dialog, render_entry_dialog,
-        render_game_edit_dialog, render_status_overlay, render_update_dialog,
-    },
-    forms::{EntryFormState, GameEditFormState, entry_form::existing_groups},
+    dialogs::DriveSetupDialogState,
+    forms::{EntryFormState, GameEditFormState},
     model::{AppStatus, GameItem, PathTarget, PickMode, SaveSetupRequest},
     state::AppUiState,
-    theme::{BACKGROUND, configure_egui_theme},
+    theme::BACKGROUND,
 };
+use dialog_dispatch::{GameEditOutcome, GameEditParts};
 use egui::{CentralPanel, Frame, Margin, Panel, Ui};
 use emusync_domain::library::{GameEntry, SaveTarget, SaveTargetType};
+
+/// Where a game dialog came from, which decides how it ends.
+#[derive(Clone, Debug, PartialEq)]
+pub enum GameEditOrigin {
+    /// Opened by the user to override a game's title, cover or saves.
+    Override,
+    /// Opened by a launch that needs a save setup; it must end in
+    /// `CompleteSaveSetup` or `CancelSaveSetup`.
+    SaveSetup(Box<SaveSetupRequest>),
+}
 
 /// Currently active modal dialog.
 #[derive(Clone, Debug, PartialEq)]
@@ -31,6 +40,7 @@ pub enum ActiveDialog {
         notice: Option<String>,
         cloud_files: Vec<String>,
         game: Box<GameItem>,
+        origin: GameEditOrigin,
     },
     DriveSetup(DriveSetupDialogState),
     Update,
@@ -42,8 +52,8 @@ pub enum ActiveDialog {
 pub struct EmuSyncApp {
     pub state: AppUiState,
     pub cover_cache: CoverCache,
-    pub active_dialog: ActiveDialog,
-    pub pending_actions: Vec<UiAction>,
+    active_dialog: ActiveDialog,
+    pending_actions: Vec<UiAction>,
     pub sidebar: SidebarInteraction,
     /// The conflict already answered, shown as syncing until the status changes.
     answered_conflict: Option<AppStatus>,
@@ -133,34 +143,79 @@ impl EmuSyncApp {
         }
     }
 
+    /// Replaces the open dialog. A save setup it dismisses is cancelled, so its
+    /// pending request never stays unanswered.
+    fn set_dialog(&mut self, dialog: ActiveDialog) {
+        if let ActiveDialog::GameEdit {
+            origin: GameEditOrigin::SaveSetup(request),
+            ..
+        } = &self.active_dialog
+        {
+            self.pending_actions.push(UiAction::CancelSaveSetup {
+                game_name: request.item.name.clone(),
+            });
+        }
+        self.active_dialog = dialog;
+    }
+
+    /// The open modal dialog, read-only.
+    pub fn active_dialog(&self) -> &ActiveDialog {
+        &self.active_dialog
+    }
+
+    /// The open entry form, editable but not replaceable, so a dialog can only be
+    /// swapped through the methods that answer a pending save setup.
+    pub fn entry_form_mut(&mut self) -> Option<&mut EntryFormState> {
+        match &mut self.active_dialog {
+            ActiveDialog::Entry(form) => Some(form),
+            _ => None,
+        }
+    }
+
+    /// Whether any modal dialog is open.
+    pub fn has_open_dialog(&self) -> bool {
+        !matches!(self.active_dialog, ActiveDialog::None)
+    }
+
     pub fn open_add_entry(&mut self) {
-        self.active_dialog = ActiveDialog::Entry(Box::new(EntryFormState::new(None, &[])));
+        self.set_dialog(ActiveDialog::Entry(Box::new(EntryFormState::new(
+            None,
+            &[],
+        ))));
     }
 
     pub fn open_edit_entry(&mut self, entry: &GameEntry) {
         let targets = &entry.common().save_targets;
-        self.active_dialog =
-            ActiveDialog::Entry(Box::new(EntryFormState::new(Some(entry.clone()), targets)));
+        self.set_dialog(ActiveDialog::Entry(Box::new(EntryFormState::new(
+            Some(entry.clone()),
+            targets,
+        ))));
     }
 
     /// Opens the game dialog; `game_targets` are the game's own targets, read by the
     /// composition with `game_specific_targets`.
     pub fn open_edit_game(&mut self, game: &GameItem, game_targets: &[SaveTarget]) {
-        self.active_dialog = ActiveDialog::GameEdit {
+        self.cover_cache.forget_failures();
+        self.set_dialog(ActiveDialog::GameEdit {
             form: Box::new(GameEditFormState::new(game, game_targets)),
             notice: None,
             cloud_files: Vec::new(),
             game: Box::new(game.clone()),
-        };
+            origin: GameEditOrigin::Override,
+        });
     }
 
+    /// Opens the save setup for `request`; it ends in `CompleteSaveSetup` or
+    /// `CancelSaveSetup`.
     pub fn open_save_setup(&mut self, request: &SaveSetupRequest) {
-        self.active_dialog = ActiveDialog::GameEdit {
+        self.cover_cache.forget_failures();
+        self.set_dialog(ActiveDialog::GameEdit {
             form: Box::new(GameEditFormState::new(&request.item, &request.targets)),
             notice: request.notice.clone(),
             cloud_files: request.cloud_file_names.clone(),
             game: Box::new(request.item.clone()),
-        };
+            origin: GameEditOrigin::SaveSetup(Box::new(request.clone())),
+        });
     }
 
     pub fn open_drive_setup(&mut self) {
@@ -173,24 +228,24 @@ impl EmuSyncApp {
             .unwrap_or_default();
 
         let is_linked = self.state.is_drive_connected();
-        self.active_dialog = ActiveDialog::DriveSetup(DriveSetupDialogState::new(
+        self.set_dialog(ActiveDialog::DriveSetup(DriveSetupDialogState::new(
             client_id,
             client_secret,
             is_linked,
-        ));
+        )));
     }
 
     /// Asks for confirmation; nothing is deleted until the user confirms.
     pub fn request_delete_entry(&mut self, entry: GameEntry) {
-        self.active_dialog = ActiveDialog::ConfirmDelete(Box::new(entry));
+        self.set_dialog(ActiveDialog::ConfirmDelete(Box::new(entry)));
     }
 
     pub fn open_update_dialog(&mut self) {
-        self.active_dialog = ActiveDialog::Update;
+        self.set_dialog(ActiveDialog::Update);
     }
 
     pub fn close_dialog(&mut self) {
-        self.active_dialog = ActiveDialog::None;
+        self.set_dialog(ActiveDialog::None);
     }
 
     pub fn set_toast(&mut self, message: impl Into<String>) {
@@ -209,14 +264,6 @@ impl EmuSyncApp {
     /// Processes one frame of UI layout, updates and event collection within a given Ui.
     pub fn update(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        configure_egui_theme(&ctx);
-
-        // Auto-open Save Setup modal when requested by the application layer
-        if let Some(req) = &self.state.save_setup_request
-            && !matches!(self.active_dialog, ActiveDialog::GameEdit { .. })
-        {
-            self.open_save_setup(&req.clone());
-        }
 
         // Auto-open Update dialog when requested
         if self.state.show_update_dialog && !matches!(self.active_dialog, ActiveDialog::Update) {
@@ -325,215 +372,76 @@ impl EmuSyncApp {
 
         // Modals
         let mut close_dialog = false;
+        let mut setup_completed = false;
 
         match &mut self.active_dialog {
             ActiveDialog::None => {}
             ActiveDialog::Entry(form) => {
-                let mut saved_entry = None;
-                let mut pick = None;
-                let mut edited_paths = Vec::new();
-                let groups = existing_groups(
-                    self.state
-                        .config
-                        .as_ref()
-                        .map(|c| c.entries.as_slice())
-                        .unwrap_or_default(),
-                );
-
-                render_entry_dialog(
+                close_dialog = dialog_dispatch::handle_entry(
                     &ctx,
                     form,
-                    &groups,
+                    &self.state,
                     self.fullscreen_detector,
-                    EntryDialogEvents {
-                        on_save: &mut |entry| saved_entry = Some(entry),
-                        on_pick_path: &mut |target, mode| pick = Some((target, mode)),
-                        on_save_path_edited: &mut |index, path| edited_paths.push((index, path)),
-                        on_close: &mut || close_dialog = true,
-                    },
+                    &mut actions,
                 );
-
-                for (index, path) in edited_paths {
-                    actions.push(UiAction::DetectSaveTargetType { index, path });
-                }
-
-                if let Some(entry) = saved_entry {
-                    if let Some(old) = &form.initial_entry {
-                        actions.push(UiAction::EditEntry {
-                            old: Box::new(old.clone()),
-                            new: Box::new(entry),
-                        });
-                    } else {
-                        actions.push(UiAction::AddEntry(entry));
-                    }
-                    close_dialog = true;
-                }
-
-                if let Some((target, mode)) = pick {
-                    actions.push(UiAction::PickPath { target, mode });
-                }
             }
             ActiveDialog::GameEdit {
                 form,
                 notice,
                 cloud_files,
                 game,
+                origin,
             } => {
-                let mut saved_result = None;
-                let mut pick = None;
-                let mut edited_paths = Vec::new();
-
-                render_game_edit_dialog(
-                    &ctx,
+                let parts = GameEditParts {
                     form,
-                    game,
-                    notice.as_deref(),
+                    notice: notice.as_deref(),
                     cloud_files,
+                    game,
+                    origin,
+                };
+                match dialog_dispatch::handle_game_edit(
+                    &ctx,
+                    parts,
                     &mut self.cover_cache,
-                    GameEditDialogEvents {
-                        on_save: &mut |result| saved_result = Some(result),
-                        on_pick_path: &mut |target, mode| pick = Some((target, mode)),
-                        on_save_path_edited: &mut |index, path| edited_paths.push((index, path)),
-                        on_close: &mut || close_dialog = true,
-                    },
-                );
-
-                if let Some(destination) = form.take_restore_preview_request(cloud_files) {
-                    actions.push(UiAction::PreviewRestorePaths {
-                        destination,
-                        names: cloud_files.clone(),
-                    });
-                }
-                for (index, path) in edited_paths {
-                    actions.push(UiAction::DetectSaveTargetType { index, path });
-                }
-
-                if let Some(result) = saved_result {
-                    if let Some(req) = &self.state.save_setup_request {
-                        actions.push(UiAction::CompleteSaveSetup {
-                            request: Box::new(req.clone()),
-                            targets: result.targets,
-                            title: result.title,
-                            cover_path: result.cover_path,
-                            restore: result.restore,
-                        });
-                        self.state.save_setup_request = None;
-                    } else {
-                        actions.push(UiAction::EditGameOverride {
-                            item: *game.clone(),
-                            title: result.title,
-                            targets: result.targets,
-                            cover_path: result.cover_path,
-                        });
+                    &mut actions,
+                ) {
+                    GameEditOutcome::Open => {}
+                    GameEditOutcome::Closed => close_dialog = true,
+                    GameEditOutcome::Saved {
+                        setup_completed: done,
+                    } => {
+                        close_dialog = true;
+                        setup_completed = done;
                     }
-                    close_dialog = true;
-                }
-
-                if let Some((target, mode)) = pick {
-                    actions.push(UiAction::PickPath { target, mode });
                 }
             }
             ActiveDialog::DriveSetup(drive_state) => {
-                let mut connect_args = None;
-                let mut unlink_clicked = false;
-                let mut open_cfg = false;
-
-                render_drive_setup_dialog(
+                close_dialog = dialog_dispatch::handle_drive(
                     &ctx,
                     drive_state,
                     &self.state.config_path,
-                    DriveSetupEvents {
-                        on_save_connect: &mut |id, sec| connect_args = Some((id, sec)),
-                        on_unlink: &mut || unlink_clicked = true,
-                        on_open_config: &mut || open_cfg = true,
-                        on_close: &mut || close_dialog = true,
-                    },
+                    &mut actions,
                 );
-
-                if let Some((client_id, client_secret)) = connect_args {
-                    actions.push(UiAction::ConnectDrive {
-                        client_id,
-                        client_secret,
-                    });
-                }
-                if unlink_clicked {
-                    actions.push(UiAction::UnlinkDrive);
-                }
-                if open_cfg {
-                    actions.push(UiAction::OpenConfigDirectory);
-                }
             }
             ActiveDialog::Update => {
-                let mut download_info = None;
-                let mut restart_path = None;
-
-                render_update_dialog(
-                    &ctx,
-                    &self.state.update_state,
-                    &self.state.current_version,
-                    UpdateDialogEvents {
-                        on_download: &mut |info| download_info = Some(info),
-                        on_restart: &mut |path| restart_path = Some(path),
-                        on_close: &mut || close_dialog = true,
-                    },
-                );
-
-                if let Some(info) = download_info {
-                    actions.push(UiAction::DownloadUpdate(info));
-                }
-                if let Some(path) = restart_path {
-                    actions.push(UiAction::RestartApp(path));
-                }
+                close_dialog = dialog_dispatch::handle_update(&ctx, &self.state, &mut actions);
             }
             ActiveDialog::ConfirmDelete(entry) => {
-                let steam_registered = self.state.is_steam_registered(entry);
-                match render_confirm_delete_dialog(&ctx, &entry.common().name, steam_registered) {
-                    ConfirmDeleteOutcome::Confirmed => {
-                        actions.push(UiAction::DeleteEntry((**entry).clone()));
-                        close_dialog = true;
-                    }
-                    ConfirmDeleteOutcome::Cancelled => close_dialog = true,
-                    ConfirmDeleteOutcome::Pending => {}
-                }
+                close_dialog =
+                    dialog_dispatch::handle_confirm_delete(&ctx, entry, &self.state, &mut actions);
             }
         }
 
         if close_dialog {
-            self.close_dialog();
+            if setup_completed {
+                // Answered by `CompleteSaveSetup`; closing it must not cancel.
+                self.active_dialog = ActiveDialog::None;
+            } else {
+                self.close_dialog();
+            }
         }
 
-        // Status overlay
-        let mut resolve_conflict = None;
-        let mut retry_post_sync = false;
-        let mut dismiss_status = false;
-
-        // A choice is remembered only for the conflict it answered, like Kotlin's
-        // `remember(gameName, localDate, cloudDate)`; any other status forgets it.
-        if self.answered_conflict.as_ref() != Some(&self.state.status) {
-            self.answered_conflict = None;
-        }
-        render_status_overlay(
-            &ctx,
-            &self.state.status,
-            self.answered_conflict.is_some(),
-            StatusOverlayEvents {
-                on_resolve_conflict: &mut |decision| resolve_conflict = Some(decision),
-                on_retry_post_sync: &mut || retry_post_sync = true,
-                on_dismiss: &mut || dismiss_status = true,
-            },
-        );
-
-        if let Some(decision) = resolve_conflict {
-            actions.push(UiAction::ResolveConflict(decision));
-            self.answered_conflict = Some(self.state.status.clone());
-        }
-        if retry_post_sync {
-            actions.push(UiAction::RetryPostSync);
-        }
-        if dismiss_status {
-            actions.push(UiAction::ClearStatus);
-            self.state.status = AppStatus::Idle;
-        }
+        self.show_status_overlay(&ctx, &mut actions);
 
         // Toast overlay
         let mut dismiss_toast = false;

@@ -119,7 +119,7 @@ pub fn render_update_dialog(
                     ui.add_space(8.0);
                     ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                         ui.label(
-                            RichText::new(format!("{}%", (progress * 100.0) as u32))
+                            RichText::new(format!("{}%", progress_percent(*progress)))
                                 .size(11.0)
                                 .color(ON_SURFACE_DIM),
                         );
@@ -238,4 +238,9 @@ fn progress_bar(ui: &mut Ui, progress: f32) {
         vec2(rect.width() * progress.clamp(0.0, 1.0), rect.height()),
     );
     ui.painter().rect_filled(filled, 4, PRIMARY);
+}
+
+/// Whole-number percentage of a download progress, clamped to 0–100.
+pub(crate) fn progress_percent(progress: f32) -> u32 {
+    (progress.clamp(0.0, 1.0) * 100.0).round() as u32
 }

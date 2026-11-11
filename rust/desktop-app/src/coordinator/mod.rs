@@ -412,6 +412,9 @@ impl DesktopCoordinator {
                 let targets = resolve_target_kinds(targets, &LocalSaveTargets);
                 library::LibraryManager::edit_game_override(self, item, title, targets, cover_path);
             }
+            UiAction::CancelSaveSetup { game_name } => {
+                self.interaction.cancel_save_setup_for(&game_name)
+            }
             UiAction::CompleteSaveSetup {
                 request,
                 targets,

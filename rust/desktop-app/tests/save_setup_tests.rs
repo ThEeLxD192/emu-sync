@@ -128,3 +128,17 @@ async fn mismatched_game_name_is_rejected() {
     let wrong = controls.complete_save_setup_response("WrongGame", game, vec![]);
     assert!(!wrong, "Mismatched game name must return false");
 }
+
+#[tokio::test]
+async fn cancel_for_another_game_keeps_the_pending_request() {
+    let (events, _events_rx) = channel();
+    let controls = InteractionControls::new(events, Arc::new(|| {}));
+    let (tx, mut rx) = tokio::sync::oneshot::channel();
+    *controls.pending_save_setup.lock().unwrap() = Some(("Metroid".to_string(), tx));
+
+    controls.cancel_save_setup_for("Zelda");
+    assert!(rx.try_recv().is_err(), "another game's cancel is ignored");
+
+    controls.cancel_save_setup_for("Metroid");
+    assert!(matches!(rx.await, Ok(Err(_))));
+}

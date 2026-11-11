@@ -6,7 +6,7 @@ use emusync_desktop_app::{
 use emusync_domain::config::ConfigurationStore;
 use emusync_platform_desktop::SteamShortcutManager;
 use emusync_presentation::{
-    ActiveDialog, EmuSyncApp, actions::UiAction, model::AppStatus, theme::configure_egui_theme,
+    EmuSyncApp, actions::UiAction, model::AppStatus, theme::configure_egui_theme,
 };
 use std::{
     ffi::OsString,
@@ -295,7 +295,7 @@ impl ApplicationHandler for App {
                         }
                         AppEvent::GameEditReady { item, targets } => {
                             // A dialog opened meanwhile keeps priority.
-                            if matches!(self.emusync_app.active_dialog, ActiveDialog::None) {
+                            if !self.emusync_app.has_open_dialog() {
                                 self.emusync_app.open_edit_game(&item, &targets);
                             }
                         }

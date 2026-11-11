@@ -324,3 +324,26 @@ fn cloud_path_validation_rejects_parent_segments_only_when_filled() {
     assert!(!cloud_path_is_valid("../outside.sav"));
     assert!(!cloud_path_is_valid("saves/../../x"));
 }
+
+#[test]
+fn existing_groups_keep_case_variants_like_kotlin_distinct() {
+    use emusync_presentation::forms::entry_form::existing_groups;
+
+    let entry = |group: &str| {
+        GameEntry::Native(NativeGame {
+            common: EntryCommon {
+                name: format!("game-{group}"),
+                group: Some(group.to_string()),
+                ..EntryCommon::default()
+            },
+            ..NativeGame::default()
+        })
+    };
+    let entries = [
+        entry("Switch"),
+        entry(" Switch "),
+        entry("switch"),
+        entry(" "),
+    ];
+    assert_eq!(existing_groups(&entries), vec!["Switch", "switch"]);
+}
