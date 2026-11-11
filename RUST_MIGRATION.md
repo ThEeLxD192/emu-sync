@@ -2544,9 +2544,8 @@ anterior, todavía sin commit):
   `published_requests_carry_distinct_non_zero_ids`,
   `restore_preview_for_a_replaced_save_setup_is_ignored`,
   `picked_path_requested_by_the_entry_form_is_not_applied_to_a_save_setup` y, en
-  `desktop-app`, `restore_preview_event_echoes_the_request_id`. No se escribió
-  `picked_path_event_echoes_the_request_id`: `PlatformServices` contiene el
-  `FilePicker` nativo concreto y no admite un selector falso sin abrir un diálogo real.
+  `desktop-app`, `restore_preview_event_echoes_the_request_id`. La prueba equivalente
+  para `PathPicked` se añadió después con el selector inyectable (seguimiento posterior).
 - **F2 corregido**: `Credentials` implementa `Debug` a mano y oculta el secreto y el
   refresh token. Prueba: `app_ui_state_debug_never_shows_credentials`.
 - **F7 corregido**: las etiquetas de las tarjetas de conflicto usan
@@ -2573,6 +2572,69 @@ anterior, todavía sin commit):
   `out_of_order_previews_for_the_same_destination_apply_only_the_current_request`;
   enviar `request_id: 0` desde `platform.rs` falló
   `restore_preview_event_echoes_the_request_id`. La misma mutación en el evento
-  `PathPicked` sobrevive porque ninguna prueba lo cubre, por la omisión indicada arriba;
-  no es una mutación equivalente.
+  `PathPicked` sobrevivía entonces; ya no (véase el seguimiento posterior).
+- Solo se validó Linux headless; Windows nativo y Steam Deck siguen pendientes.
+
+#### Seguimiento de las decisiones pendientes (2026-11-10, Linux)
+
+- **F3 corregido, por paridad con `EmuSyncApp.kt:216-245`** (Kotlin pinta cada diálogo
+  según su propio estado). `update()` ya no abre el aviso de actualización si hay un
+  diálogo abierto: `show_update_dialog` sigue en `true` y se abre en el primer frame sin
+  diálogo, donde vuelve a `false`. `open_update_dialog()` manual y el chip del header no
+  cambian y siguen cancelando un save setup abierto. `open_save_setup` suspende en
+  `EmuSyncApp::suspended_dialog` el diálogo abierto que no sea otro save setup, sin emitir
+  nada; si era otro save setup se emite un único `CancelSaveSetup` y el suspendido se
+  conserva. Al terminar el setup (`CompleteSaveSetup`, Cancel/Escape o
+  `close_save_setup(id)`) se restaura el diálogo suspendido, sin peticiones de selector ni
+  de vista previa pendientes. Un reemplazo explícito por otro diálogo descarta el
+  suspendido, como antes. Pruebas en `dialog_lifecycle_tests.rs`:
+  `update_flag_waits_for_an_open_save_setup_and_opens_after_it`,
+  `update_flag_waits_for_an_open_entry_form`,
+  `save_setup_suspends_an_open_entry_form_and_restores_its_draft` y
+  `replacing_one_save_setup_with_another_keeps_the_suspended_dialog`;
+  `every_dialog_replacing_a_save_setup_answers_it_exactly_once` pasa sin cambios.
+- **F4 mantenido por paridad**: `EntryFormState.kt:55-60` valida solo las filas con ruta
+  local (`saves.buildTargets()`) y `GameEditFormState.kt:35` todas
+  (`saves.cloudPathsAreValid`); Rust hace lo mismo y `src/` no cambia. Pruebas:
+  `entry_form_ignores_invalid_cloud_path_on_a_row_without_local_path_like_kotlin` y
+  `game_edit_form_blocks_invalid_cloud_path_on_a_row_without_local_path_like_kotlin`.
+- **F5 descartado**: el coordinador ya descarta los duplicados (`take_retry` y la
+  admisión en `desktop-app/src/coordinator/mod.rs`), de modo que repetir el clic no
+  encadena operaciones; no se recupera la prueba de caracterización.
+- **F6 no ocurre**: `handle_action(ReorderEntries)` llama a `LibraryManager::reorder_entries`
+  de forma síncrona, que guarda la configuración y envía `AppEvent::ConfigReloaded` antes
+  de volver, y `main.rs` procesa la cola al inicio del frame siguiente. Lo protege
+  `reorder_is_reloaded_before_handle_action_returns` (`library_regression_tests.rs`).
+  Observación sin corregir: cada paso del arrastre escribe en disco desde el hilo de la
+  interfaz, y AGENTS.md pide separar interfaz y operaciones bloqueantes; si el reorden se
+  vuelve asíncrono habrá que aplicarlo localmente en `presentation`.
+- **Selector inyectable**: `PlatformServices::picker` es ahora
+  `Arc<dyn PathPicker<Error = std::io::Error> + Send + Sync>` y
+  `DesktopCoordinator::with_path_picker` lo sustituye; la composición de producción sigue
+  usando `FilePicker`. Pruebas en `platform_ui_tests.rs`:
+  `picked_path_event_echoes_the_request_id`, `cancelled_picker_sends_no_event` y
+  `failing_picker_reports_a_toast`.
+- **Bandera de actualización con el diálogo ya abierto**: `update()` apaga
+  `show_update_dialog` sin hacer nada más si el diálogo activo ya es `ActiveDialog::Update`;
+  antes, cerrarlo lo reabría en el frame siguiente. Paridad con `dismissUpdateDialog` de
+  Kotlin (`AppViewModel.kt:293-294`, `EmuSyncApp.kt:231`). Prueba:
+  `update_flag_raised_while_the_update_dialog_is_open_does_not_reopen_it`. Mutación
+  (restaurada y comprobada con `git diff`): sin el bloque nuevo falla la aserción
+  intermedia de la bandera; con esa aserción retirada, falla la final porque el diálogo
+  vuelve a ser `Update` (`left: Update, right: None`).
+- **Variante Escape**: `save_setup_suspends_an_open_entry_form_and_restores_its_draft`
+  incluye `"Escape"`: emite `[cancel(1)]`, restaura el borrador `"Draft"` y el formulario
+  sigue abierto tras 2 frames vacíos más.
+- Comandos (Linux, desde `rust/`, `CARGO_BUILD_JOBS=2 nice -n 19`, ejecución nueva):
+  `cargo fmt --all -- --check` sin diferencias; `cargo clippy --workspace --all-targets
+  --locked -- -D warnings` sin avisos; `cargo test --workspace --locked --
+  --test-threads=2`: 795 aprobadas, 0 fallidas (784 + 11 nuevas); `cargo xtask check`:
+  código de salida 0.
+- Mutaciones manuales (restauradas y comprobadas con `git diff`): volver a la condición
+  anterior de apertura automática falló `update_flag_waits_for_an_open_save_setup_and_opens_after_it`
+  y `update_flag_waits_for_an_open_entry_form`; quitar la restauración del diálogo
+  suspendido falló `save_setup_suspends_an_open_entry_form_and_restores_its_draft`; enviar
+  `request_id: 0` en `PathPicked` falló `picked_path_event_echoes_the_request_id`; mover
+  `reorder_entries` a `spawn_blocking` falló `reorder_is_reloaded_before_handle_action_returns`
+  (y las dos pruebas de reorden anteriores).
 - Solo se validó Linux headless; Windows nativo y Steam Deck siguen pendientes.
