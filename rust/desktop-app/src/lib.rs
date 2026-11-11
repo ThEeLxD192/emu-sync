@@ -25,4 +25,5 @@ pub mod events;
 pub use events::{AppEvent, apply_entry_games_scanned, apply_steam_state_refreshed};
 
 pub mod scanner_helper;
+pub mod target_types;
 pub use scanner_helper::scan_entry_games;

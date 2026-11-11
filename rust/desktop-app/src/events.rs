@@ -1,9 +1,9 @@
 //! Application events sent from background operations to the presentation layer.
 
 use emusync_application::UpdateState;
-use emusync_domain::config::AppConfig;
+use emusync_domain::{config::AppConfig, library::SaveTargetType};
 use emusync_presentation::model::{
-    AppStatus, CloudSyncStatus, GameItem, PathTarget, SaveSetupRequest,
+    AppStatus, CloudSyncStatus, GameItem, PathTarget, PickMode, SaveSetupRequest,
 };
 use std::collections::HashSet;
 
@@ -36,7 +36,13 @@ pub enum AppEvent {
     UpdateStateChanged(UpdateState),
     PathPicked {
         target: PathTarget,
+        mode: PickMode,
         path: String,
+    },
+    SaveTargetTypeDetected {
+        index: usize,
+        path: String,
+        kind: SaveTargetType,
     },
     CloseNotice(String),
     SaveSetupRequested {

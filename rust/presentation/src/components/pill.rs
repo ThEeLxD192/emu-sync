@@ -18,6 +18,8 @@ pub(crate) struct Pill<'a> {
     pub(crate) stroke: Stroke,
     pub(crate) padding: Vec2,
     pub(crate) min_height: f32,
+    /// Content is centered when the pill is wider than it.
+    pub(crate) min_width: f32,
     pub(crate) corner_radius: u8,
     /// Clickable chips react to the pointer; status chips only display.
     pub(crate) interactive: bool,
@@ -34,6 +36,7 @@ impl Default for Pill<'_> {
             stroke: Stroke::NONE,
             padding: CHIP_PADDING,
             min_height: 0.0,
+            min_width: 0.0,
             corner_radius: 8,
             interactive: true,
         }
@@ -58,8 +61,9 @@ pub(crate) fn pill(ui: &mut Ui, spec: &Pill<'_>) -> Response {
     let icon_box = icon.as_ref().map(|g| g.mesh_bounds.width().max(ICON_SIZE));
     let icon_width = icon_box.map_or(0.0, |w| w + ICON_GAP);
     let content_height = icon.as_ref().map_or(0.0, |g| g.size().y).max(text.size().y);
+    let content_width = icon_width + text.size().x;
     let size = vec2(
-        icon_width + text.size().x + 2.0 * spec.padding.x,
+        (content_width + 2.0 * spec.padding.x).max(spec.min_width),
         (content_height + 2.0 * spec.padding.y).max(spec.min_height),
     );
     let sense = if spec.interactive {
@@ -91,7 +95,7 @@ pub(crate) fn pill(ui: &mut Ui, spec: &Pill<'_>) -> Response {
             painter.rect_filled(rect, spec.corner_radius, Color32::from_white_alpha(overlay));
         }
 
-        let mut x = rect.left() + spec.padding.x;
+        let mut x = rect.center().x - content_width / 2.0;
         if let (Some(icon), Some(box_width)) = (icon, icon_box) {
             // Center the painted glyph (not its advance box) inside the icon slot.
             let bounds = icon.mesh_bounds;

@@ -279,3 +279,62 @@ fn deleting_a_category_waits_for_confirmation_and_escape_cancels() {
             .any(|a| matches!(a, UiAction::DeleteEntry(_)))
     );
 }
+
+#[test]
+fn picked_save_path_takes_the_picked_kind_and_stale_detection_is_ignored() {
+    use emusync_domain::library::SaveTargetType;
+    use emusync_presentation::model::{PathTarget, PickMode};
+
+    let mut app = EmuSyncApp::new();
+    app.open_add_entry();
+
+    app.apply_picked_path(
+        PathTarget::SavePath(0),
+        PickMode::Directory,
+        "/saves/folder".to_string(),
+    );
+    let ActiveDialog::Entry(form) = &app.active_dialog else {
+        panic!("entry dialog must stay open");
+    };
+    assert_eq!(form.saves.rows[0].path, "/saves/folder");
+    assert_eq!(form.saves.rows[0].target_type, SaveTargetType::Directory);
+
+    // A detection for a path the row no longer holds must not change its kind.
+    app.apply_detected_save_type(0, "/saves/old-file", SaveTargetType::File);
+    let ActiveDialog::Entry(form) = &app.active_dialog else {
+        unreachable!()
+    };
+    assert_eq!(form.saves.rows[0].target_type, SaveTargetType::Directory);
+
+    app.apply_detected_save_type(0, "/saves/folder", SaveTargetType::File);
+    let ActiveDialog::Entry(form) = &app.active_dialog else {
+        unreachable!()
+    };
+    assert_eq!(form.saves.rows[0].target_type, SaveTargetType::File);
+
+    app.apply_picked_path(
+        PathTarget::Executable,
+        PickMode::File,
+        "/usr/bin/mgba".to_string(),
+    );
+    let ActiveDialog::Entry(form) = &app.active_dialog else {
+        unreachable!()
+    };
+    assert_eq!(form.executable_path, "/usr/bin/mgba");
+}
+
+#[test]
+fn entry_dialog_renders_both_entry_types_headless() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    app.open_add_entry();
+    for _ in 0..2 {
+        let output = ctx.run_ui(RawInput::default(), |ui| app.update(ui));
+        output.drop_without_applying_deltas();
+        if let ActiveDialog::Entry(form) = &mut app.active_dialog {
+            form.entry_type = emusync_presentation::EntryType::Native;
+        }
+    }
+    assert!(matches!(app.active_dialog, ActiveDialog::Entry(_)));
+    assert!(app.take_actions().is_empty());
+}

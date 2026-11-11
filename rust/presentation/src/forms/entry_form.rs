@@ -112,6 +112,35 @@ impl EntryFormState {
         }
     }
 
+    /// Drive folder the saves will use: the stored cloud folder, else the group, else the
+    /// name (Kotlin's `cloudFolder.ifBlank { group.ifBlank { name } }`).
+    pub fn cloud_folder_preview(&self) -> String {
+        [
+            self.cloud_folder.as_deref().unwrap_or(""),
+            &self.group,
+            &self.name,
+        ]
+        .into_iter()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .unwrap_or("...")
+        .to_string()
+    }
+
+    /// Toggles a group chip: selecting the current group (ignoring case) clears it.
+    pub fn toggle_group(&mut self, group: &str) {
+        self.group = if self.group_is(group) {
+            String::new()
+        } else {
+            group.to_string()
+        };
+    }
+
+    /// Whether `group` is the current group, ignoring case.
+    pub fn group_is(&self, group: &str) -> bool {
+        self.group.to_lowercase() == group.to_lowercase()
+    }
+
     pub fn apply_type_defaults(&mut self) {
         match self.entry_type {
             EntryType::Emulator => {
@@ -276,4 +305,18 @@ impl EntryFormState {
         self.error_message = None;
         Ok(entry)
     }
+}
+
+/// Distinct non-blank groups already used in the library, in library order.
+pub fn existing_groups(entries: &[GameEntry]) -> Vec<String> {
+    let mut groups: Vec<String> = Vec::new();
+    for entry in entries {
+        if let Some(group) = entry.common().group.as_deref().map(str::trim)
+            && !group.is_empty()
+            && !groups.iter().any(|g| g == group)
+        {
+            groups.push(group.to_string());
+        }
+    }
+    groups
 }

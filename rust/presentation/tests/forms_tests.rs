@@ -202,3 +202,66 @@ fn game_edit_form_computes_restore_paths_and_result() {
     assert_eq!(title, Some("Celeste".to_string()));
     assert_eq!(cover, None);
 }
+
+#[test]
+fn cloud_folder_preview_falls_back_from_cloud_folder_to_group_to_name() {
+    let mut form = EntryFormState::new(None, &[]);
+    assert_eq!(form.cloud_folder_preview(), "...");
+
+    form.name = "Eden".to_string();
+    assert_eq!(form.cloud_folder_preview(), "Eden");
+
+    form.group = "  Switch ".to_string();
+    assert_eq!(form.cloud_folder_preview(), "Switch");
+
+    form.cloud_folder = Some("Legacy Folder".to_string());
+    assert_eq!(form.cloud_folder_preview(), "Legacy Folder");
+
+    form.cloud_folder = Some("   ".to_string());
+    assert_eq!(form.cloud_folder_preview(), "Switch");
+}
+
+#[test]
+fn group_chips_toggle_ignoring_case_and_list_distinct_groups() {
+    use emusync_presentation::forms::entry_form::existing_groups;
+
+    let with_group = |name: &str, group: Option<&str>| {
+        GameEntry::Native(NativeGame {
+            common: EntryCommon {
+                name: name.to_string(),
+                group: group.map(str::to_string),
+                ..EntryCommon::default()
+            },
+            ..NativeGame::default()
+        })
+    };
+    let entries = [
+        with_group("A", Some(" Switch ")),
+        with_group("B", None),
+        with_group("C", Some("   ")),
+        with_group("D", Some("PlayStation")),
+        with_group("E", Some("Switch")),
+    ];
+    assert_eq!(existing_groups(&entries), vec!["Switch", "PlayStation"]);
+
+    let mut form = EntryFormState::new(None, &[]);
+    form.toggle_group("Switch");
+    assert_eq!(form.group, "Switch");
+    form.group = "SWITCH".to_string();
+    form.toggle_group("Switch");
+    assert_eq!(
+        form.group, "",
+        "selecting the current group again clears it"
+    );
+}
+
+#[test]
+fn cloud_path_validation_rejects_parent_segments_only_when_filled() {
+    use emusync_presentation::forms::save_targets::cloud_path_is_valid;
+
+    assert!(cloud_path_is_valid(""));
+    assert!(cloud_path_is_valid("   "));
+    assert!(cloud_path_is_valid("saves/slot1.sav"));
+    assert!(!cloud_path_is_valid("../outside.sav"));
+    assert!(!cloud_path_is_valid("saves/../../x"));
+}

@@ -1,0 +1,243 @@
+//! Form building blocks shared by the entry and game dialogs, styled like Kotlin's
+//! `FormField`, `PathField`, `CloudPathField` and Material filter chips.
+
+use crate::forms::save_targets::cloud_path_is_valid;
+use crate::{
+    components::{icons::glyph_button, pill::Pill},
+    model::PickMode,
+    theme::{
+        DIVIDER, ERROR, ON_BACKGROUND, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, PRIMARY_CONTAINER,
+        SURFACE_SELECTED, SURFACE_VARIANT, glyph,
+    },
+};
+use egui::{Color32, FontId, Frame, Margin, Response, RichText, Stroke, TextEdit, Ui, vec2};
+use emusync_domain::library::SaveTargetType;
+
+const FIELD_HEIGHT: f32 = 40.0;
+const FIELD_RADIUS: u8 = 10;
+
+/// Small dim label shown above a field.
+pub(crate) fn field_label(ui: &mut Ui, text: &str) {
+    ui.label(RichText::new(text).size(12.0).color(ON_SURFACE_DIM));
+    ui.add_space(4.0);
+}
+
+/// Helper text shown below a field.
+pub(crate) fn field_hint(ui: &mut Ui, text: &str, color: Color32) {
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.add_space(4.0);
+        ui.label(RichText::new(text).size(11.0).color(color));
+    });
+}
+
+/// Single-line text field: blue border when focused, red when invalid.
+pub(crate) fn text_field(
+    ui: &mut Ui,
+    id_salt: impl egui::AsIdSalt,
+    value: &mut String,
+    placeholder: &str,
+    width: f32,
+    invalid: bool,
+) -> Response {
+    let id = ui.make_persistent_id(id_salt);
+    let focused = ui.memory(|m| m.has_focus(id));
+    let border = if invalid {
+        ERROR
+    } else if focused {
+        PRIMARY
+    } else {
+        DIVIDER
+    };
+    let frame = Frame::new()
+        .fill(Color32::TRANSPARENT)
+        .stroke(Stroke::new(1.0, border))
+        .corner_radius(FIELD_RADIUS)
+        .inner_margin(Margin::symmetric(12, 10));
+    ui.add(
+        TextEdit::singleline(value)
+            .id(id)
+            .frame(frame)
+            .hint_text(RichText::new(placeholder).color(ON_SURFACE_DIM.gamma_multiply(0.5)))
+            .text_color(if focused { ON_BACKGROUND } else { ON_SURFACE })
+            .font(FontId::proportional(13.0))
+            .desired_width(width)
+            .min_size(vec2(width, FIELD_HEIGHT)),
+    )
+}
+
+/// Labelled full-width text field.
+pub(crate) fn labelled_field(
+    ui: &mut Ui,
+    label: &str,
+    id_salt: impl egui::AsIdSalt,
+    value: &mut String,
+    placeholder: &str,
+) -> Response {
+    field_label(ui, label);
+    text_field(ui, id_salt, value, placeholder, ui.available_width(), false)
+}
+
+/// A filled secondary button ("Browse", "File", "Folder").
+pub(crate) fn tonal_button(ui: &mut Ui, text: &str) -> Response {
+    Pill {
+        text,
+        text_color: ON_SURFACE,
+        font: FontId::proportional(13.0),
+        fill: SURFACE_SELECTED,
+        padding: vec2(16.0, 0.0),
+        min_height: FIELD_HEIGHT,
+        corner_radius: FIELD_RADIUS,
+        ..Pill::default()
+    }
+    .show(ui)
+}
+
+/// Text-only primary button ("Cancel", "+ Add Another Path", type toggles).
+pub(crate) fn text_button(ui: &mut Ui, text: &str, color: Color32) -> Response {
+    Pill {
+        text,
+        text_color: color,
+        font: FontId::proportional(13.0),
+        fill: Color32::TRANSPARENT,
+        padding: vec2(12.0, 0.0),
+        min_height: FIELD_HEIGHT,
+        corner_radius: 20,
+        ..Pill::default()
+    }
+    .show(ui)
+}
+
+/// Filled primary button ("Add", "Save").
+pub(crate) fn primary_button(ui: &mut Ui, text: &str) -> Response {
+    Pill {
+        text,
+        text_color: Color32::WHITE,
+        font: FontId::proportional(13.0),
+        fill: PRIMARY,
+        padding: vec2(24.0, 0.0),
+        min_height: FIELD_HEIGHT,
+        corner_radius: 20,
+        ..Pill::default()
+    }
+    .show(ui)
+}
+
+/// Material filter chip with an optional leading icon.
+pub(crate) fn filter_chip(
+    ui: &mut Ui,
+    text: &str,
+    icon: Option<&str>,
+    selected: bool,
+    min_width: f32,
+) -> Response {
+    let color = if selected { PRIMARY } else { ON_SURFACE };
+    Pill {
+        icon: icon.map(|glyph| (glyph, color)),
+        text,
+        text_color: color,
+        font: FontId::proportional(13.0),
+        fill: if selected {
+            PRIMARY_CONTAINER
+        } else {
+            SURFACE_VARIANT
+        },
+        stroke: if selected {
+            Stroke::NONE
+        } else {
+            Stroke::new(1.0, DIVIDER)
+        },
+        padding: vec2(12.0, 0.0),
+        min_height: 32.0,
+        min_width,
+        corner_radius: 8,
+        ..Pill::default()
+    }
+    .show(ui)
+}
+
+/// A path text field followed by picker buttons; returns the field response and the
+/// picker that was clicked, if any.
+pub(crate) fn path_field(
+    ui: &mut Ui,
+    id_salt: impl egui::AsIdSalt,
+    value: &mut String,
+    placeholder: &str,
+    pickers: &[(&str, PickMode)],
+) -> (Response, Option<PickMode>) {
+    let mut picked = None;
+    let mut field = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        // Reserve the buttons' real width (text + padding + spacing) for them.
+        let button_width: f32 = pickers
+            .iter()
+            .map(|(label, _)| {
+                let text = ui.painter().layout_no_wrap(
+                    (*label).to_owned(),
+                    FontId::proportional(13.0),
+                    ON_SURFACE,
+                );
+                text.size().x + 32.0 + 8.0
+            })
+            .sum();
+        let width = (ui.available_width() - button_width).max(120.0);
+        field = Some(text_field(ui, id_salt, value, placeholder, width, false));
+        for (label, mode) in pickers {
+            if tonal_button(ui, label).clicked() {
+                picked = Some(*mode);
+            }
+        }
+    });
+    (field.expect("field is always rendered"), picked)
+}
+
+/// Optional cloud path with live validation (Kotlin's `CloudPathField`).
+pub(crate) fn cloud_path_field(
+    ui: &mut Ui,
+    id_salt: impl egui::AsIdSalt,
+    value: &mut String,
+    kind: &SaveTargetType,
+) -> Response {
+    let invalid = !cloud_path_is_valid(value);
+    let placeholder = if *kind == SaveTargetType::Directory {
+        "Folder prefix shared across devices"
+    } else {
+        "File name, including any subfolders"
+    };
+    field_label(ui, "Cloud path (optional)");
+    let response = text_field(
+        ui,
+        id_salt,
+        value,
+        placeholder,
+        ui.available_width(),
+        invalid,
+    );
+    if invalid {
+        field_hint(ui, "Use a relative path without '..'.", ERROR);
+    } else {
+        field_hint(
+            ui,
+            "Use the same cloud path for this save on each device.",
+            ON_SURFACE_DIM,
+        );
+    }
+    response
+}
+
+/// Label for a save target kind's toggle button.
+pub fn save_kind_label(kind: &SaveTargetType) -> &'static str {
+    match kind {
+        SaveTargetType::File => "File",
+        SaveTargetType::Directory => "Folder",
+        SaveTargetType::Unknown => "Choose type",
+    }
+}
+
+/// Trash icon button used to remove a row.
+pub(crate) fn remove_button(ui: &mut Ui, id_salt: impl egui::AsIdSalt) -> Response {
+    let (rect, _) = ui.allocate_exact_size(vec2(FIELD_HEIGHT, FIELD_HEIGHT), egui::Sense::hover());
+    let id = ui.make_persistent_id(("remove_row", id_salt));
+    glyph_button(ui, id, rect, glyph::DELETE, 20.0, ERROR).on_hover_text("Remove Path")
+}

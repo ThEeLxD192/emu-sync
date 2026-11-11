@@ -8,17 +8,17 @@ use crate::{
     },
     cover_cache::CoverCache,
     dialogs::{
-        ConfirmDeleteOutcome, DriveSetupDialogState, render_confirm_delete_dialog,
-        render_drive_setup_dialog, render_entry_dialog, render_game_edit_dialog,
-        render_status_overlay, render_update_dialog,
+        ConfirmDeleteOutcome, DriveSetupDialogState, EntryDialogEvents,
+        render_confirm_delete_dialog, render_drive_setup_dialog, render_entry_dialog,
+        render_game_edit_dialog, render_status_overlay, render_update_dialog,
     },
-    forms::{EntryFormState, GameEditFormState},
-    model::{AppStatus, GameItem, SaveSetupRequest},
+    forms::{EntryFormState, GameEditFormState, entry_form::existing_groups},
+    model::{AppStatus, GameItem, PathTarget, PickMode, SaveSetupRequest},
     state::AppUiState,
     theme::{BACKGROUND, configure_egui_theme},
 };
 use egui::{CentralPanel, Frame, Margin, Panel, Ui};
-use emusync_domain::library::GameEntry;
+use emusync_domain::library::{GameEntry, SaveTargetType};
 
 /// Currently active modal dialog.
 #[derive(Clone, Debug, PartialEq)]
@@ -44,6 +44,13 @@ pub struct EmuSyncApp {
     pub active_dialog: ActiveDialog,
     pub pending_actions: Vec<UiAction>,
     pub sidebar: SidebarInteraction,
+    /// Fullscreen flags auto-detected from an emulator executable, injected by the
+    /// composition (Kotlin's `LibraryFormActions.detectFullscreenArgs`).
+    pub fullscreen_detector: fn(&str) -> String,
+}
+
+fn no_fullscreen_flags(_: &str) -> String {
+    String::new()
 }
 
 impl Default for EmuSyncApp {
@@ -60,6 +67,7 @@ impl EmuSyncApp {
             active_dialog: ActiveDialog::None,
             pending_actions: Vec::new(),
             sidebar: SidebarInteraction::default(),
+            fullscreen_detector: no_fullscreen_flags,
         }
     }
 
@@ -70,6 +78,46 @@ impl EmuSyncApp {
             active_dialog: ActiveDialog::None,
             pending_actions: Vec::new(),
             sidebar: SidebarInteraction::default(),
+            fullscreen_detector: no_fullscreen_flags,
+        }
+    }
+
+    /// Fills the path chosen in a picker; a save row takes the kind that was picked,
+    /// as Kotlin's File/Folder buttons do.
+    pub fn apply_picked_path(&mut self, target: PathTarget, mode: PickMode, path: String) {
+        let picked_kind = match mode {
+            PickMode::File => SaveTargetType::File,
+            PickMode::Directory => SaveTargetType::Directory,
+        };
+        match (&mut self.active_dialog, target) {
+            (ActiveDialog::Entry(form), PathTarget::Executable) => form.executable_path = path,
+            (ActiveDialog::Entry(form), PathTarget::RomsDirectory) => form.roms_directory = path,
+            (ActiveDialog::Entry(form), PathTarget::CoverPath) => form.cover_path = path,
+            (ActiveDialog::Entry(form), PathTarget::SavePath(index)) => {
+                form.saves.update_path(index, path);
+                form.saves.update_type(index, picked_kind);
+            }
+            (ActiveDialog::GameEdit { form, .. }, PathTarget::CoverPath) => form.cover_path = path,
+            (ActiveDialog::GameEdit { form, .. }, PathTarget::RestoreDestination) => {
+                form.restore_destination_folder = path
+            }
+            (ActiveDialog::GameEdit { form, .. }, PathTarget::SavePath(index)) => {
+                form.saves.update_path(index, path);
+                form.saves.update_type(index, picked_kind);
+            }
+            _ => {}
+        }
+    }
+
+    /// Applies a detected save kind only if the row still holds the path that was checked.
+    pub fn apply_detected_save_type(&mut self, index: usize, path: &str, kind: SaveTargetType) {
+        let saves = match &mut self.active_dialog {
+            ActiveDialog::Entry(form) => &mut form.saves,
+            ActiveDialog::GameEdit { form, .. } => &mut form.saves,
+            _ => return,
+        };
+        if saves.rows.get(index).is_some_and(|row| row.path == path) {
+            saves.update_type(index, kind);
         }
     }
 
@@ -271,14 +319,31 @@ impl EmuSyncApp {
             ActiveDialog::Entry(form) => {
                 let mut saved_entry = None;
                 let mut pick = None;
+                let mut edited_paths = Vec::new();
+                let groups = existing_groups(
+                    self.state
+                        .config
+                        .as_ref()
+                        .map(|c| c.entries.as_slice())
+                        .unwrap_or_default(),
+                );
 
                 render_entry_dialog(
                     &ctx,
                     form,
-                    &mut |entry| saved_entry = Some(entry),
-                    &mut |target, mode| pick = Some((target, mode)),
-                    &mut || close_dialog = true,
+                    &groups,
+                    self.fullscreen_detector,
+                    EntryDialogEvents {
+                        on_save: &mut |entry| saved_entry = Some(entry),
+                        on_pick_path: &mut |target, mode| pick = Some((target, mode)),
+                        on_save_path_edited: &mut |index, path| edited_paths.push((index, path)),
+                        on_close: &mut || close_dialog = true,
+                    },
                 );
+
+                for (index, path) in edited_paths {
+                    actions.push(UiAction::DetectSaveTargetType { index, path });
+                }
 
                 if let Some(entry) = saved_entry {
                     if let Some(old) = &form.initial_entry {

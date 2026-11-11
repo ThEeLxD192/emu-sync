@@ -1,9 +1,9 @@
 use crate::{events::AppEvent, scanner_helper::scan_entry_games};
 use emusync_application::library::{EntryEditResult, SteamRegistration};
-use emusync_data_local::ConfigManager;
+use emusync_data_local::{ConfigManager, LocalSaveTargets};
 use emusync_domain::{
     execution::{BrowserLauncher, PathPicker, PickerType},
-    library::{GameEntry, SteamLibrary},
+    library::{GameEntry, SaveTargetAccess, SteamLibrary},
 };
 use emusync_platform_desktop::{DesktopBrowserLauncher, DesktopSteamLibrary, FilePicker};
 use emusync_presentation::model::{PathTarget, PickMode};
@@ -82,7 +82,7 @@ impl PlatformServices {
         self.tokio_handle
             .spawn_blocking(move || match picker.pick("Select path", "", kind) {
                 Ok(Some(path)) => {
-                    let _ = tx.send(AppEvent::PathPicked { target, path });
+                    let _ = tx.send(AppEvent::PathPicked { target, mode, path });
                     (redraw)();
                 }
                 Ok(None) => {}
@@ -93,6 +93,22 @@ impl PlatformServices {
                     (redraw)();
                 }
             })
+    }
+
+    /// Reports the real kind of a typed save path, if it exists.
+    pub fn detect_save_target_type(
+        &self,
+        index: usize,
+        path: String,
+    ) -> tokio::task::JoinHandle<()> {
+        let tx = self.event_tx.clone();
+        let redraw = self.redraw.clone();
+        self.tokio_handle.spawn_blocking(move || {
+            if let Ok(Some(kind)) = LocalSaveTargets.type_of(path.trim()) {
+                let _ = tx.send(AppEvent::SaveTargetTypeDetected { index, path, kind });
+                (redraw)();
+            }
+        })
     }
 
     pub fn open_config_dir(&self) {

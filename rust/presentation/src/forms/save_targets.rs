@@ -5,6 +5,12 @@ use emusync_domain::{
     sync::remote_path_segments,
 };
 
+/// An optional cloud path is valid when empty or relative without `..` segments.
+pub fn cloud_path_is_valid(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.is_empty() || remote_path_segments(trimmed).is_some()
+}
+
 /// An editable row representing a save target.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaveTargetRow {
@@ -104,10 +110,7 @@ impl SaveTargetFormState {
     }
 
     pub fn cloud_paths_are_valid(&self) -> bool {
-        self.rows.iter().all(|r| {
-            let trimmed = r.cloud_path.trim();
-            trimmed.is_empty() || remote_path_segments(trimmed).is_some()
-        })
+        self.rows.iter().all(|r| cloud_path_is_valid(&r.cloud_path))
     }
 
     pub fn build_targets(&self) -> Vec<SaveTarget> {

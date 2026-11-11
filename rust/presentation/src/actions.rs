@@ -54,5 +54,10 @@ pub enum UiAction {
         target: PathTarget,
         mode: PickMode,
     },
+    /// Detects whether a typed save path is a file or a directory, off the UI thread.
+    DetectSaveTargetType {
+        index: usize,
+        path: String,
+    },
     Exit,
 }

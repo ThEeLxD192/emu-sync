@@ -4,11 +4,9 @@ use emusync_desktop_app::{
     apply_entry_games_scanned, apply_steam_state_refreshed,
 };
 use emusync_domain::config::ConfigurationStore;
+use emusync_platform_desktop::SteamShortcutManager;
 use emusync_presentation::{
-    ActiveDialog, EmuSyncApp,
-    actions::UiAction,
-    model::{AppStatus, PathTarget},
-    theme::configure_egui_theme,
+    EmuSyncApp, actions::UiAction, model::AppStatus, theme::configure_egui_theme,
 };
 use std::{
     ffi::OsString,
@@ -291,34 +289,13 @@ impl ApplicationHandler for App {
                         AppEvent::UpdateStateChanged(update_state) => {
                             self.emusync_app.state.update_state = update_state;
                         }
-                        AppEvent::PathPicked { target, path } => {
-                            match &mut self.emusync_app.active_dialog {
-                                ActiveDialog::Entry(form) => match target {
-                                    PathTarget::Executable => form.executable_path = path,
-                                    PathTarget::RomsDirectory => form.roms_directory = path,
-                                    PathTarget::CoverPath => form.cover_path = path,
-                                    PathTarget::SavePath(idx) => {
-                                        if let Some(row) = form.saves.rows.get_mut(idx) {
-                                            row.path = path;
-                                        }
-                                    }
-                                    _ => {}
-                                },
-                                ActiveDialog::GameEdit { form, .. } => match target {
-                                    PathTarget::CoverPath => form.cover_path = path,
-                                    PathTarget::RestoreDestination => {
-                                        form.restore_destination_folder = path
-                                    }
-                                    PathTarget::SavePath(idx) => {
-                                        if let Some(row) = form.saves.rows.get_mut(idx) {
-                                            row.path = path;
-                                        }
-                                    }
-                                    _ => {}
-                                },
-                                _ => {}
-                            }
+                        AppEvent::PathPicked { target, mode, path } => {
+                            self.emusync_app.apply_picked_path(target, mode, path);
                             window.request_redraw();
+                        }
+                        AppEvent::SaveTargetTypeDetected { index, path, kind } => {
+                            self.emusync_app
+                                .apply_detected_save_type(index, &path, kind);
                         }
                         AppEvent::CloseNotice(notice) => {
                             self.close_notice = true;
@@ -407,7 +384,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         window: None,
         state: None,
         painter: None,
-        emusync_app: EmuSyncApp::new(),
+        emusync_app: EmuSyncApp {
+            fullscreen_detector: SteamShortcutManager::detect_fullscreen_args,
+            ..EmuSyncApp::new()
+        },
         configuration,
         coordinator: None,
         event_tx,

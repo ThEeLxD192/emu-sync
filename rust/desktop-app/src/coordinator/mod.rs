@@ -19,11 +19,14 @@ use crate::{
         reconcile_tracked_upload_with_listing,
     },
     events::AppEvent,
+    target_types::{resolve_entry_target_kinds, resolve_target_kinds},
 };
 use composition::{BuiltOrchestrator, drive_connected, format_epoch_ms};
 use emusync_application::library::LoadLibrary;
 use emusync_data_drive::{DriveHttpPolicy, InteractiveOAuth, ResumableUpload, TransferProgress};
-use emusync_data_local::{ConfigManager, RecoveryCredentials, RecoveryStore, TrackedError};
+use emusync_data_local::{
+    ConfigManager, LocalSaveTargets, RecoveryCredentials, RecoveryStore, TrackedError,
+};
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
     library::{GameEntry, SaveTarget, SteamLibrary},
@@ -360,6 +363,7 @@ impl DesktopCoordinator {
                     config_manager: self.config_manager.clone(),
                     platform: self.platform.clone(),
                 };
+                let entry = resolve_entry_target_kinds(entry, &LocalSaveTargets);
                 library.add_entry(self, entry);
                 self.release_admission();
             }
@@ -368,7 +372,8 @@ impl DesktopCoordinator {
                     self.send_toast("Cannot edit category: another operation is in progress or requires recovery.");
                     return;
                 }
-                library::LibraryManager::edit_entry(self, *old, *new);
+                let new = resolve_entry_target_kinds(*new, &LocalSaveTargets);
+                library::LibraryManager::edit_entry(self, *old, new);
             }
             UiAction::DeleteEntry(entry) => {
                 if !self.try_acquire_admission() {
@@ -404,6 +409,7 @@ impl DesktopCoordinator {
                     );
                     return;
                 }
+                let targets = resolve_target_kinds(targets, &LocalSaveTargets);
                 library::LibraryManager::edit_game_override(self, item, title, targets, cover_path);
             }
             UiAction::CompleteSaveSetup {
@@ -412,6 +418,7 @@ impl DesktopCoordinator {
                 title,
                 cover_path,
             } => {
+                let targets = resolve_target_kinds(targets, &LocalSaveTargets);
                 self.complete_save_setup(*request, targets, title, cover_path);
             }
             UiAction::ToggleSteam(entry) => {
@@ -470,6 +477,10 @@ impl DesktopCoordinator {
             }
             UiAction::PickPath { target, mode } => {
                 let handle = self.platform.pick_path(target, mode);
+                self.track_task(handle);
+            }
+            UiAction::DetectSaveTargetType { index, path } => {
+                let handle = self.platform.detect_save_target_type(index, path);
                 self.track_task(handle);
             }
             UiAction::Exit => {

@@ -1,274 +1,406 @@
-//! Dialog for adding and editing emulator and native game categories.
+//! Add / edit entry dialog, laid out like Kotlin's `AddEntryDialog`.
 
 use crate::{
+    dialogs::form_fields::{
+        cloud_path_field, field_hint, field_label, filter_chip, labelled_field, path_field,
+        primary_button, remove_button, save_kind_label, text_button,
+    },
     forms::EntryFormState,
     model::{EntryType, PathTarget, PickMode},
-    theme::{DIVIDER, ERROR, ON_BACKGROUND, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, SURFACE},
+    theme::{DIVIDER, ERROR, ON_BACKGROUND, ON_SURFACE_DIM, PRIMARY, SURFACE, bold, glyph},
 };
 use egui::{
-    Button, Color32, CornerRadius, Frame, Id, Margin, Modal, RichText, ScrollArea, Stroke,
-    TextEdit, Vec2,
+    Align, Color32, CornerRadius, Frame, Id, Layout, Margin, Modal, RichText, ScrollArea, Stroke,
+    Ui, vec2,
 };
-use emusync_domain::library::{GameEntry, SaveTargetType};
+use emusync_domain::library::GameEntry;
 
-/// Renders the Add / Edit category modal dialog.
+/// Callbacks the entry dialog reports to the application.
+pub struct EntryDialogEvents<'a> {
+    pub on_save: &'a mut dyn FnMut(GameEntry),
+    pub on_pick_path: &'a mut dyn FnMut(PathTarget, PickMode),
+    /// A save path was edited by hand; its real kind should be detected.
+    pub on_save_path_edited: &'a mut dyn FnMut(usize, String),
+    pub on_close: &'a mut dyn FnMut(),
+}
+
+/// Renders the Add / Edit entry modal dialog.
 pub fn render_entry_dialog(
     ctx: &egui::Context,
     form: &mut EntryFormState,
-    on_save: &mut impl FnMut(GameEntry),
-    on_pick_path: &mut impl FnMut(PathTarget, PickMode),
-    on_close: &mut impl FnMut(),
+    existing_groups: &[String],
+    detect_fullscreen: fn(&str) -> String,
+    events: EntryDialogEvents<'_>,
 ) {
     let is_editing = form.initial_entry.is_some();
-    let title = if is_editing {
-        "Edit Category"
-    } else {
-        "Add Category"
-    };
+    let max_height = (ctx.content_rect().height() - 160.0).max(240.0);
 
-    Modal::new(Id::unique("entry_dialog_modal"))
+    let modal = Modal::new(Id::unique("entry_dialog_modal"))
         .backdrop_color(Color32::from_black_alpha(160))
         .frame(
             Frame::new()
                 .fill(SURFACE)
                 .stroke(Stroke::new(1.0, DIVIDER))
-                .corner_radius(CornerRadius::same(12))
-                .inner_margin(Margin::same(20)),
+                .corner_radius(CornerRadius::same(20))
+                .inner_margin(Margin::same(24)),
         )
         .show(ctx, |ui| {
-            ui.set_width(540.0);
-            ui.vertical(|ui| {
-                ui.label(RichText::new(title).size(16.0).strong().color(ON_BACKGROUND));
-                ui.add_space(10.0);
+            ui.set_width(560.0);
+            ui.label(
+                RichText::new(if is_editing {
+                    "Edit Entry"
+                } else {
+                    "Add New Entry"
+                })
+                .font(bold(20.0))
+                .color(ON_BACKGROUND),
+            );
+            ui.add_space(20.0);
 
-                ScrollArea::vertical().max_height(580.0).show(ui, |ui| {
-                    ui.vertical(|ui| {
-                    // Type selector
-                    ui.horizontal(|ui| {
-                        let is_emu = form.entry_type == EntryType::Emulator;
-                        if ui
-                            .selectable_label(is_emu, RichText::new("Emulator System").strong())
-                            .clicked()
-                            && !is_emu
-                        {
-                            form.entry_type = EntryType::Emulator;
-                            form.apply_type_defaults();
-                        }
-
-                        let is_nat = form.entry_type == EntryType::Native;
-                        if ui
-                            .selectable_label(is_nat, RichText::new("Native PC Game").strong())
-                            .clicked()
-                            && !is_nat
-                        {
-                            form.entry_type = EntryType::Native;
-                            form.apply_type_defaults();
-                        }
-                    });
-
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-
-                    // Name and Group
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("Category Name:").size(12.0).strong().color(ON_BACKGROUND));
-                            ui.add(TextEdit::singleline(&mut form.name).desired_width(240.0));
-                        });
-
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("Group (Optional):").size(12.0).color(ON_SURFACE_DIM));
-                            ui.add(TextEdit::singleline(&mut form.group).desired_width(240.0));
-                        });
-                    });
-
-                    ui.add_space(8.0);
-
-                    // Executable Path
-                    ui.label(RichText::new("Executable Path:").size(12.0).strong().color(ON_BACKGROUND));
-                    ui.horizontal(|ui| {
-                        ui.add(TextEdit::singleline(&mut form.executable_path).desired_width(430.0));
-                        if ui.button("Browse").clicked() {
-                            on_pick_path(PathTarget::Executable, PickMode::File);
-                        }
-                    });
-
-                    ui.add_space(8.0);
-
-                    // Arguments
-                    ui.label(RichText::new("Arguments:").size(12.0).color(ON_BACKGROUND));
-                    ui.add(
-                        TextEdit::singleline(&mut form.arguments)
-                            .hint_text(if form.entry_type == EntryType::Emulator { "{ROM}" } else { "" })
-                            .desired_width(f32::INFINITY),
-                    );
-
-                    ui.add_space(8.0);
-
-                    // Specific fields
+            ScrollArea::vertical()
+                .max_height(max_height)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    type_selector(ui, form);
+                    identity_fields(ui, form, existing_groups);
+                    launch_fields(ui, form, events.on_pick_path);
                     match form.entry_type {
                         EntryType::Emulator => {
-                            ui.label(RichText::new("ROMs Directory:").size(12.0).strong().color(ON_BACKGROUND));
-                            ui.horizontal(|ui| {
-                                ui.add(TextEdit::singleline(&mut form.roms_directory).desired_width(430.0));
-                                if ui.button("Browse").clicked() {
-                                    on_pick_path(PathTarget::RomsDirectory, PickMode::Directory);
-                                }
-                            });
-
-                            ui.add_space(8.0);
-
-                            ui.label(RichText::new("File Extensions (comma-separated):").size(12.0).strong().color(ON_BACKGROUND));
-                            ui.add(
-                                TextEdit::singleline(&mut form.extensions)
-                                    .hint_text("e.g. iso, chd, bin, cue")
-                                    .desired_width(f32::INFINITY),
-                            );
-
-                            ui.add_space(8.0);
-
-                            ui.label(RichText::new("Fullscreen Arguments (Optional):").size(12.0).color(ON_SURFACE_DIM));
-                            ui.add(
-                                TextEdit::singleline(&mut form.fullscreen_args)
-                                    .hint_text("e.g. -f or --fullscreen")
-                                    .desired_width(f32::INFINITY),
-                            );
+                            emulator_fields(ui, form, detect_fullscreen, events.on_pick_path)
                         }
-                        EntryType::Native => {
-                            ui.label(RichText::new("Wait For Process Name (Optional):").size(12.0).color(ON_SURFACE_DIM));
-                            ui.add(
-                                TextEdit::singleline(&mut form.wait_for_process)
-                                    .hint_text("Process to monitor if launcher exits early")
-                                    .desired_width(f32::INFINITY),
-                            );
-
-                            ui.add_space(8.0);
-
-                            ui.label(RichText::new("Cover Art Path (Optional):").size(12.0).color(ON_SURFACE_DIM));
-                            ui.horizontal(|ui| {
-                                ui.add(TextEdit::singleline(&mut form.cover_path).desired_width(430.0));
-                                if ui.button("Browse").clicked() {
-                                    on_pick_path(PathTarget::CoverPath, PickMode::File);
-                                }
-                            });
-                        }
+                        EntryType::Native => native_fields(ui, form, events.on_pick_path),
                     }
-
-                    ui.add_space(12.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-
-                    // Save Targets section
-                    ui.label(
-                        RichText::new("Save Target Locations:")
-                            .size(13.0)
-                            .strong()
-                            .color(ON_BACKGROUND),
-                    );
-                    ui.label(
-                        RichText::new("Define where save files or directories are stored locally and in the cloud.")
-                            .size(11.0)
-                            .color(ON_SURFACE_DIM),
-                    );
-
-                    ui.add_space(8.0);
-
-                    let mut rows_to_remove = Vec::new();
-
-                    for (idx, row) in form.saves.rows.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            // Path input
-                            ui.add(
-                                TextEdit::singleline(&mut row.path)
-                                    .hint_text("Local save file or directory path")
-                                    .desired_width(260.0),
-                            );
-
-                            // Browse button
-                            let mode = match row.target_type {
-                                SaveTargetType::File | SaveTargetType::Unknown => PickMode::File,
-                                SaveTargetType::Directory => PickMode::Directory,
-                            };
-                            if ui.button("...").clicked() {
-                                on_pick_path(PathTarget::SavePath(idx), mode);
-                            }
-
-                            // Type toggle
-                            let type_label = match row.target_type {
-                                SaveTargetType::File => "File",
-                                SaveTargetType::Directory => "Folder",
-                                SaveTargetType::Unknown => "Unknown",
-                            };
-                            if ui.button(type_label).clicked() {
-                                row.target_type = match row.target_type {
-                                    SaveTargetType::File => SaveTargetType::Directory,
-                                    SaveTargetType::Directory | SaveTargetType::Unknown => SaveTargetType::File,
-                                };
-                            }
-
-                            // Cloud path
-                            ui.add(
-                                TextEdit::singleline(&mut row.cloud_path)
-                                    .hint_text("Cloud folder/file name")
-                                    .desired_width(120.0),
-                            );
-
-                            // Delete button
-                            if ui.button("x").clicked() {
-                                rows_to_remove.push(idx);
-                            }
-                        });
-                        ui.add_space(4.0);
-                    }
-
-                    for idx in rows_to_remove.into_iter().rev() {
-                        form.saves.remove_row(idx);
-                    }
-
-                    if ui.button("+ Add Save Location").clicked() {
-                        form.saves.add_row();
-                    }
-
-                    // Error banner
-                    if let Some(err) = &form.error_message {
+                    save_fields(ui, form, events.on_pick_path, events.on_save_path_edited);
+                    if let Some(message) = &form.error_message {
                         ui.add_space(8.0);
-                        ui.label(RichText::new(err).size(12.0).color(ERROR));
+                        ui.label(RichText::new(message).size(12.0).color(ERROR));
                     }
-
-                    ui.add_space(16.0);
-                    ui.separator();
-                    ui.add_space(12.0);
-
-                    // Form action buttons
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    Button::new(RichText::new("Save Category").size(12.0).strong().color(Color32::WHITE))
-                                        .fill(PRIMARY)
-                                        .min_size(Vec2::new(120.0, 28.0)),
-                                )
-                                .clicked()
-                                && let Ok(entry) = form.build_entry()
-                            {
-                                on_save(entry);
-                                on_close();
-                            }
-
-                            if ui
-                                .add(
-                                    Button::new(RichText::new("Cancel").size(12.0).color(ON_SURFACE))
-                                        .min_size(Vec2::new(75.0, 28.0)),
-                                )
-                                .clicked()
-                            {
-                                on_close();
-                            }
-                        });
-                    });
                 });
-            });
+
+            ui.add_space(20.0);
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width(), 40.0),
+                Layout::right_to_left(Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if primary_button(ui, if is_editing { "Save" } else { "Add" }).clicked()
+                        && let Ok(entry) = form.build_entry()
+                    {
+                        (events.on_save)(entry);
+                        (events.on_close)();
+                    }
+                    if text_button(ui, "Cancel", PRIMARY).clicked() {
+                        (events.on_close)();
+                    }
+                },
+            );
         });
+    if modal.should_close() {
+        (events.on_close)();
+    }
+}
+
+fn type_selector(ui: &mut Ui, form: &mut EntryFormState) {
+    field_label(ui, "Type");
+    ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let half = (ui.available_width() - 8.0) / 2.0;
+        for (kind, label, icon) in [
+            (EntryType::Emulator, "Emulator", glyph::CONTROLLER),
+            (EntryType::Native, "Native", glyph::GAMEPAD),
+        ] {
+            let selected = form.entry_type == kind;
+            if filter_chip(ui, label, Some(icon), selected, half).clicked() && !selected {
+                form.entry_type = kind;
+                form.apply_type_defaults();
+            }
+        }
     });
+    ui.add_space(16.0);
+}
+
+fn identity_fields(ui: &mut Ui, form: &mut EntryFormState, existing_groups: &[String]) {
+    let emulator = form.entry_type == EntryType::Emulator;
+    labelled_field(
+        ui,
+        "Name",
+        "entry_name",
+        &mut form.name,
+        if emulator {
+            "e.g. Yuzu or Eden"
+        } else {
+            "e.g. Spelunky Classic"
+        },
+    );
+    ui.add_space(12.0);
+
+    labelled_field(
+        ui,
+        "Folder / Platform Group (Optional)",
+        "entry_group",
+        &mut form.group,
+        "e.g. Switch, PlayStation (shares cloud saves folder)",
+    );
+    if !existing_groups.is_empty() {
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Assign to existing folder:")
+                .size(11.0)
+                .color(ON_SURFACE_DIM),
+        );
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+            for group in existing_groups {
+                if filter_chip(ui, group, None, form.group_is(group), 0.0).clicked() {
+                    form.toggle_group(group);
+                }
+            }
+        });
+    }
+    let preview_color = if form.group.trim().is_empty() {
+        ON_SURFACE_DIM
+    } else {
+        PRIMARY
+    };
+    field_hint(
+        ui,
+        &format!(
+            "☁️ Google Drive saves folder: \"{}\"",
+            form.cloud_folder_preview()
+        ),
+        preview_color,
+    );
+    ui.add_space(12.0);
+}
+
+fn launch_fields(
+    ui: &mut Ui,
+    form: &mut EntryFormState,
+    on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
+) {
+    let emulator = form.entry_type == EntryType::Emulator;
+    field_label(
+        ui,
+        if emulator {
+            "Emulator Executable Path"
+        } else {
+            "Executable Path"
+        },
+    );
+    let (_, picked) = path_field(
+        ui,
+        "entry_executable",
+        &mut form.executable_path,
+        if emulator {
+            "/usr/bin/mgba-qt"
+        } else {
+            "/opt/spelunky/spelunky"
+        },
+        &[("Browse", PickMode::File)],
+    );
+    if let Some(mode) = picked {
+        on_pick_path(PathTarget::Executable, mode);
+    }
+    ui.add_space(12.0);
+
+    labelled_field(
+        ui,
+        "Arguments (quote values that contain spaces)",
+        "entry_arguments",
+        &mut form.arguments,
+        if emulator {
+            "{ROM} --fullscreen"
+        } else {
+            "--fullscreen --no-intro"
+        },
+    );
+    field_hint(
+        ui,
+        "Example: --profile \"My Profile\" keeps My Profile as one argument.",
+        ON_SURFACE_DIM,
+    );
+    if emulator {
+        field_hint(
+            ui,
+            "Use {ROM} to insert the requested game's path.",
+            ON_SURFACE_DIM,
+        );
+    }
+    ui.add_space(12.0);
+}
+
+fn emulator_fields(
+    ui: &mut Ui,
+    form: &mut EntryFormState,
+    detect_fullscreen: fn(&str) -> String,
+    on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
+) {
+    field_label(ui, "ROMs Directory");
+    let (_, picked) = path_field(
+        ui,
+        "entry_roms",
+        &mut form.roms_directory,
+        "/home/user/roms/gba",
+        &[("Browse", PickMode::Directory)],
+    );
+    if let Some(mode) = picked {
+        on_pick_path(PathTarget::RomsDirectory, mode);
+    }
+    ui.add_space(12.0);
+
+    labelled_field(
+        ui,
+        "File Extensions (comma-separated)",
+        "entry_extensions",
+        &mut form.extensions,
+        "gba, gbc",
+    );
+    ui.add_space(12.0);
+
+    let detected = detect_fullscreen(&form.executable_path);
+    let placeholder = if detected.is_empty() {
+        "e.g. -bigpicture -fullscreen"
+    } else {
+        &detected
+    };
+    labelled_field(
+        ui,
+        "Fullscreen / Big Picture Flags (auto-detected if empty)",
+        "entry_fullscreen",
+        &mut form.fullscreen_args,
+        placeholder,
+    );
+    field_hint(
+        ui,
+        &format!(
+            "Forces the emulator to bypass its Qt GUI. Auto-detected: \"{}\"",
+            if detected.is_empty() {
+                "(none)"
+            } else {
+                &detected
+            }
+        ),
+        ON_SURFACE_DIM,
+    );
+    ui.add_space(12.0);
+}
+
+fn native_fields(
+    ui: &mut Ui,
+    form: &mut EntryFormState,
+    on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
+) {
+    labelled_field(
+        ui,
+        "Wait for Process Name (Optional)",
+        "entry_wait_process",
+        &mut form.wait_for_process,
+        "Spelunky.exe",
+    );
+    field_hint(
+        ui,
+        "Useful for Steam games: EmuSync will wait for this process to close.",
+        ON_SURFACE_DIM,
+    );
+    ui.add_space(12.0);
+
+    field_label(ui, "Cover Image (Optional)");
+    let (_, picked) = path_field(
+        ui,
+        "entry_cover",
+        &mut form.cover_path,
+        "/path/to/game_cover.png",
+        &[("Browse", PickMode::File)],
+    );
+    if let Some(mode) = picked {
+        on_pick_path(PathTarget::CoverPath, mode);
+    }
+    ui.add_space(12.0);
+}
+
+fn save_fields(
+    ui: &mut Ui,
+    form: &mut EntryFormState,
+    on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
+    on_save_path_edited: &mut dyn FnMut(usize, String),
+) {
+    let placeholder = if form.entry_type == EntryType::Emulator {
+        "/home/user/emulator/memcards/Mcd001.ps2"
+    } else {
+        "/home/user/.local/share/save.dat"
+    };
+    field_label(ui, "Save Files/Directories Paths");
+
+    let removable = form.saves.rows.len() > 1;
+    let mut remove = None;
+    for index in 0..form.saves.rows.len() {
+        let mut toggle = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let kind_label = save_kind_label(&form.saves.rows[index].target_type);
+            let tail = if removable { 40.0 + 4.0 } else { 0.0 };
+            let toggle_width = text_width(ui, kind_label) + 24.0 + 4.0;
+            ui.scope(|ui| {
+                ui.set_width(ui.available_width() - toggle_width - tail);
+                let (field, picked) = path_field(
+                    ui,
+                    ("entry_save_path", index),
+                    &mut form.saves.rows[index].path,
+                    placeholder,
+                    &[("File", PickMode::File), ("Folder", PickMode::Directory)],
+                );
+                if field.changed() {
+                    on_save_path_edited(index, form.saves.rows[index].path.clone());
+                }
+                if let Some(mode) = picked {
+                    on_pick_path(PathTarget::SavePath(index), mode);
+                }
+            });
+            if text_button(ui, kind_label, PRIMARY).clicked() {
+                toggle = true;
+            }
+            if removable && remove_button(ui, ("entry_save_remove", index)).clicked() {
+                remove = Some(index);
+            }
+        });
+        if toggle {
+            form.saves.toggle_type(index);
+        }
+        ui.add_space(8.0);
+        let row = &mut form.saves.rows[index];
+        cloud_path_field(
+            ui,
+            ("entry_save_cloud", index),
+            &mut row.cloud_path,
+            &row.target_type,
+        );
+        ui.add_space(12.0);
+    }
+    if let Some(index) = remove {
+        form.saves.remove_row(index);
+    }
+
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), 40.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            if text_button(ui, "+ Add Another Path", PRIMARY).clicked() {
+                form.saves.add_row();
+            }
+        },
+    );
+}
+
+fn text_width(ui: &Ui, text: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            egui::FontId::proportional(13.0),
+            Color32::WHITE,
+        )
+        .size()
+        .x
 }
