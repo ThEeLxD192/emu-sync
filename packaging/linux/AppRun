@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -x "$HERE/usr/bin/emusync-probe-library" ]; then
+    APPDIR=$HERE
+    export APPDIR
+    while IFS= read -r library; do
+        if ! "$HERE/usr/bin/emusync-probe-library" "$library"; then
+            fallback="$HERE/usr/lib/emusync-fallback/$library"
+            if [ ! -f "$fallback/$library" ]; then
+                echo "Required library is unavailable: $library" >&2
+                exit 1
+            fi
+            LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$fallback"
+            export LD_LIBRARY_PATH
+            if ! "$HERE/usr/bin/emusync-probe-library" "$library"; then
+                echo "Bundled library could not be loaded: $library" >&2
+                exit 1
+            fi
+        fi
+    done < "$HERE/usr/share/emusync/fallback-libraries.txt"
+fi
+exec "$HERE/usr/bin/EmuSync" "$@"

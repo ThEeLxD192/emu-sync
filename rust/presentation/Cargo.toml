@@ -1,0 +1,12 @@
+[package]
+name = "emusync-presentation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+emusync-domain = { path = "../domain" }
+emusync-application = { path = "../application" }
+egui = { version = "0.37.0", features = ["default_fonts"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

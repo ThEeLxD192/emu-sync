@@ -1,0 +1,32 @@
+[package]
+name = "emusync-desktop-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+emusync-domain = { path = "../domain" }
+emusync-application = { path = "../application" }
+emusync-data-local = { path = "../data-local" }
+emusync-data-drive = { path = "../data-drive" }
+emusync-data-updates = { path = "../data-updates" }
+emusync-platform-desktop = { path = "../platform-desktop" }
+emusync-presentation = { path = "../presentation" }
+egui = { version = "0.37.0", features = ["default_fonts"] }
+egui-winit = "0.37.0"
+egui-wgpu = { version = "0.37.0", features = ["winit", "wayland", "x11"] }
+winit = "0.30.13"
+pollster = "0.4"
+
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+time = { version = "0.3.55", features = ["parsing", "formatting"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tempfile = "3"
+serde_json = "1"

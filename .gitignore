@@ -2,17 +2,9 @@
 config.json
 *.env
 
-# ── Build & Cache Artifacts ───────────────────────────
-build/
-.gradle/
-.kotlin/
-docs/
-
 # ── Executables & Binaries ────────────────────────────
 *.AppImage
 appimagetool
-*.jar
-!gradle/wrapper/gradle-wrapper.jar
 
 # ── IDE & Editor Files ────────────────────────────────
 .idea/
@@ -29,12 +21,11 @@ Thumbs.db
 *.log
 *.bak
 shortcuts.vdf.bak
-hs_err_pid*
-replay_pid*
 
 # Local synchronization history and recovery saves
 *.sync-state.json
 *.sync-backups/
+*.sync-recovery/
 
-# Local audit notes
-/AUDIT_STATUS.md
+# Rust build outputs
+/target/

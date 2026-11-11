@@ -1,0 +1,27 @@
+# kind	input fields	expected
+conflict	null	null	RESOLVE	IN_SYNC
+conflict	0	null	RESOLVE	UPLOAD_LOCAL
+conflict	null	0	RESOLVE	DOWNLOAD_CLOUD
+conflict	5000	0	RESOLVE	IN_SYNC
+conflict	5001	0	RESOLVE	CONFLICT
+conflict	0	5900	RESOLVE	DOWNLOAD_CLOUD
+conflict	1	0	UPLOAD	UPLOAD_LOCAL
+remote	slot\sub/save.dat	slot|sub|save.dat
+remote	../save	INVALID
+remote	C:save	INVALID
+remote	a//b	INVALID
+remote	/save	INVALID
+arguments	--profile "My Profile" --fullscreen	--profile|My Profile|--fullscreen
+arguments	"" prefix" with spaces "suffix	|prefix with spaces suffix
+arguments	"unfinished	INVALID
+title	Super_Mario_World_[U].sfc	Super Mario World
+title	Crash_Bandicoot_(USA)_(Disc 1)	Crash Bandicoot (Disc 1)
+title	[!]	[!]
+directory	local@0;shared@10000	c@cloud@0;b@shared@0;a@shared@0	cloud:DOWNLOAD_CLOUD:c:;local:UPLOAD_LOCAL:-:;shared:CONFLICT:b:a
+tracked	old	OLD	1	no	IN_SYNC
+tracked	new	old	1	no	CONFLICT
+tracked	new	old	1	yes	UPLOAD_LOCAL
+tracked	old	changed	1	yes	DOWNLOAD_CLOUD
+tracked	new	changed	1	yes	CONFLICT
+tracked	new	NEW	1	yes	IN_SYNC
+tracked	old	null	2	yes	DOWNLOAD_CLOUD

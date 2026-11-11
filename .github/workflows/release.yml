@@ -55,71 +55,23 @@ jobs:
 
       - name: Build AppImage via Docker
         run: |
-          docker compose build
-          docker compose run --rm build
+          mkdir -p dist
+          bash scripts/build-appimage-container.sh dist/EmuSync-x86_64.AppImage
 
       - name: Upload AppImage Artifact
         uses: actions/upload-artifact@v7
         with:
           name: EmuSync-${{ needs.prepare-version.outputs.new_version }}-x86_64-linux
-          path: EmuSync-x86_64.AppImage
+          path: dist/EmuSync-x86_64.AppImage
           retention-days: 90
 
-  build-windows:
-    name: Build Windows MSI & EXE
-    needs: prepare-version
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-
-      - name: Apply Candidate Version
-        shell: bash
-        run: |
-          chmod +x scripts/bump-version.sh
-          ./scripts/bump-version.sh "${{ github.event.inputs.release_type }}"
-
-      - name: Set up Java 25
-        uses: actions/setup-java@v6
-        with:
-          distribution: 'temurin'
-          java-version: '25'
-
-      - name: Setup Gradle Cache
-        uses: gradle/actions/setup-gradle@v6
-
-      - name: Build Windows Installers (MSI & EXE)
-        run: ./gradlew packageReleaseMsi packageReleaseExe --no-daemon
-
-      - name: Prepare Windows Distribution Files
-        shell: bash
-        run: |
-          mkdir -p dist
-          MSI_FILE=$(find desktopApp/build/compose/binaries -type f -name "*.msi" | head -n 1)
-          EXE_FILE=$(find desktopApp/build/compose/binaries -type f -name "*.exe" | head -n 1)
-          if [ -z "$MSI_FILE" ] || [ -z "$EXE_FILE" ]; then
-            echo "Error: MSI or EXE binary not found under desktopApp/build/compose/binaries"
-            find desktopApp/build/compose/binaries -type f || true
-            exit 1
-          fi
-          echo "Found MSI: $MSI_FILE"
-          echo "Found EXE: $EXE_FILE"
-          cp "$MSI_FILE" dist/EmuSync-x86_64.msi
-          cp "$EXE_FILE" dist/EmuSync-x86_64.exe
-
-      - name: Upload Windows Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: EmuSync-${{ needs.prepare-version.outputs.new_version }}-x86_64-windows
-          path: dist/*
-          retention-days: 90
+  # Windows installers (scripts/build-windows-installers.sh, WiX 4) are excluded
+  # from releases until they are validated natively on Windows.
 
   create-release:
     name: Create GitHub Release
-    needs: [prepare-version, build-linux, build-windows]
+    if: github.ref == 'refs/heads/main'
+    needs: [prepare-version, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -136,12 +88,6 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: EmuSync-${{ needs.prepare-version.outputs.new_version }}-x86_64-linux
-          path: release-assets
-
-      - name: Download Windows Artifacts
-        uses: actions/download-artifact@v7
-        with:
-          name: EmuSync-${{ needs.prepare-version.outputs.new_version }}-x86_64-windows
           path: release-assets
 
       - name: Publish Version Commit and Tag
@@ -164,7 +110,7 @@ jobs:
             ./scripts/bump-version.sh "${{ github.event.inputs.release_type }}"
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add desktopApp/src/main/kotlin/com/emusync/AppInfo.kt desktopApp/build.gradle.kts
+            git add Cargo.toml Cargo.lock
             git commit -m "chore(release): ${RELEASE_TAG}"
             git tag "${RELEASE_TAG}"
             git push --atomic origin HEAD:main "refs/tags/${RELEASE_TAG}"

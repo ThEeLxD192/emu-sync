@@ -1,8 +1,9 @@
-**/.gradle
-**/.kotlin
-**/build
+/target
 *.AppImage
 appimagetool
 config.json
+*.sync-state.json
+*.sync-backups
+*.sync-recovery
 .git
 .idea

@@ -11,29 +11,32 @@ export EMUSYNC_HOOK_TEST_LOG="$test_root/invocations"
 export EMUSYNC_HOOK_TEST_SNAPSHOT="$test_root/snapshot-path"
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
-mkdir -p "$test_root/repo with spaces"
-cd "$test_root/repo with spaces"
-git init --quiet
-mkdir -p .githooks scripts src config
-cp "$source_root/.githooks/pre-commit" .githooks/
-cp "$source_root/scripts/install-git-hooks.sh" scripts/
-cat > gradlew <<'EOF'
+# A fake Cargo records each call and fails when the snapshot holds bad staged content.
+mkdir -p "$test_root/bin"
+cat > "$test_root/bin/cargo" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$*" == 'qualityCheck --console=plain --no-daemon' ]]
-printf 'called\n' >> "$EMUSYNC_HOOK_TEST_LOG"
+[[ "$*" == 'xtask quality' ]]
+printf 'cargo\n' >> "$EMUSYNC_HOOK_TEST_LOG"
 pwd > "$EMUSYNC_HOOK_TEST_SNAPSHOT"
-if [[ -n ${EMUSYNC_HOOK_TEST_EXPECTED_PATH:-} ]]; then
-    [[ $(cat "$EMUSYNC_HOOK_TEST_EXPECTED_PATH") == GOOD ]]
-fi
 if [[ ${EMUSYNC_HOOK_TEST_INTERRUPT:-0} == 1 ]]; then
     kill -TERM "$PPID"
     exit 0
 fi
-if [[ -d src ]] && find src -name '*.kt' -exec grep -l BAD {} + | grep -q .; then exit 1; fi
+! grep -rqsx BAD rust
 EOF
-printf 'INITIAL\n' > 'src/Example with spaces.kt'
-git add gradlew 'src/Example with spaces.kt'
+chmod +x "$test_root/bin/cargo"
+export PATH="$test_root/bin:$PATH"
+
+mkdir -p "$test_root/repo with spaces"
+cd "$test_root/repo with spaces"
+git init --quiet
+mkdir -p .githooks scripts rust/domain/src
+cp "$source_root/.githooks/pre-commit" .githooks/
+cp "$source_root/scripts/install-git-hooks.sh" scripts/
+printf 'lock\n' > Cargo.lock
+printf 'INITIAL\n' > 'rust/domain/src/file with spaces.rs'
+git add Cargo.lock 'rust/domain/src/file with spaces.rs'
 fixture_tree=$(git write-tree)
 fixture_commit=$(git -c user.name=HookTest -c user.email=hook-test@example.invalid commit-tree "$fixture_tree" -m fixture)
 git update-ref HEAD "$fixture_commit"
@@ -41,8 +44,7 @@ git update-ref HEAD "$fixture_commit"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 prepare() {
     git read-tree HEAD
-    git add gradlew
-    printf 'GOOD\n' > 'src/Example with spaces.kt'
+    printf 'GOOD\n' > 'rust/domain/src/file with spaces.rs'
     rm -f "$EMUSYNC_HOOK_TEST_LOG" "$EMUSYNC_HOOK_TEST_SNAPSHOT"
 }
 assert_cleaned() {
@@ -52,23 +54,25 @@ assert_cleaned() {
 }
 
 prepare
-git add 'src/Example with spaces.kt'
-printf 'BAD\n' > 'src/Example with spaces.kt'
+git add 'rust/domain/src/file with spaces.rs'
+printf 'BAD\n' > 'rust/domain/src/file with spaces.rs'
 index_before=$(git write-tree)
-work_before=$(git hash-object 'src/Example with spaces.kt')
+work_before=$(git hash-object 'rust/domain/src/file with spaces.rs')
 "$BASH" .githooks/pre-commit
+[[ $(cat "$EMUSYNC_HOOK_TEST_LOG") == cargo ]] || fail 'Rust changes did not run Cargo once'
 [[ $(git write-tree) == "$index_before" ]] || fail 'index changed'
-[[ $(git hash-object 'src/Example with spaces.kt') == "$work_before" ]] || fail 'working copy changed'
+[[ $(git hash-object 'rust/domain/src/file with spaces.rs') == "$work_before" ]] || fail 'working copy changed'
 assert_cleaned
 echo 'PASS: staged good content passes despite unstaged bad content; files and index unchanged'
 
-printf 'BAD\n' > 'src/Example with spaces.kt'
-git add 'src/Example with spaces.kt'
-printf 'GOOD\n' > 'src/Example with spaces.kt'
+prepare
+printf 'BAD\n' > 'rust/domain/src/file with spaces.rs'
+git add 'rust/domain/src/file with spaces.rs'
+printf 'GOOD\n' > 'rust/domain/src/file with spaces.rs'
 index_before=$(git write-tree)
 if "$BASH" .githooks/pre-commit; then fail 'bad staged content was accepted'; fi
 [[ $(git write-tree) == "$index_before" ]] || fail 'failed hook changed the index'
-[[ $(cat 'src/Example with spaces.kt') == GOOD ]] || fail 'failed hook changed working content'
+[[ $(cat 'rust/domain/src/file with spaces.rs') == GOOD ]] || fail 'failed hook changed working content'
 assert_cleaned
 echo 'PASS: staged bad content blocks despite unstaged good content; failure cleans the snapshot'
 
@@ -76,65 +80,49 @@ prepare
 printf 'Documentation\n' > README.md
 git add README.md
 "$BASH" .githooks/pre-commit
-[[ ! -e "$EMUSYNC_HOOK_TEST_LOG" ]] || fail 'documentation ran Gradle'
-echo 'PASS: documentation-only changes skip Gradle'
+[[ ! -e "$EMUSYNC_HOOK_TEST_LOG" ]] || fail 'documentation ran Cargo'
+echo 'PASS: documentation-only changes skip Cargo'
 
-prepare
-printf 'config: {}\n' > config/detekt.yml
-git add config/detekt.yml
-"$BASH" .githooks/pre-commit
-[[ -s "$EMUSYNC_HOOK_TEST_LOG" ]] || fail 'quality configuration did not run Gradle'
-assert_cleaned
-echo 'PASS: configuration changes trigger quality checks'
-
-for config_path in \
-    gradle/libs.versions.toml \
-    build-logic/gradle.properties \
-    build-logic/src/main/resources/META-INF/gradle-plugins/emusync.properties \
-    domain/build.gradle.kts \
-    data/local/build.gradle.kts \
-    presentation/build.gradle.kts \
-    desktopApp/build.gradle.kts; do
+for config_path in Cargo.toml rust/domain/Cargo.toml rust-toolchain.toml .cargo/config.toml xtask/src/main.rs .editorconfig; do
     prepare
     mkdir -p "$(dirname "$config_path")"
     printf 'GOOD\n' > "$config_path"
     git add "$config_path"
-    printf 'BAD\n' > "$config_path"
-    index_before=$(git write-tree)
-    work_before=$(git hash-object "$config_path")
-    EMUSYNC_HOOK_TEST_EXPECTED_PATH="$config_path" "$BASH" .githooks/pre-commit
-    [[ -s "$EMUSYNC_HOOK_TEST_LOG" ]] || fail "$config_path did not run Gradle"
-    [[ $(git write-tree) == "$index_before" ]] || fail "$config_path changed the index"
-    [[ $(git hash-object "$config_path") == "$work_before" ]] || fail "$config_path changed working content"
+    "$BASH" .githooks/pre-commit
+    [[ -s "$EMUSYNC_HOOK_TEST_LOG" ]] || fail "$config_path did not run Cargo"
     assert_cleaned
 done
-echo 'PASS: catalogs, build conventions and module scripts validate only staged content'
+echo 'PASS: manifests, toolchain and quality configuration trigger checks'
 
 prepare
-git add config/detekt.yml
+git add 'rust/domain/src/file with spaces.rs'
 if EMUSYNC_HOOK_TEST_INTERRUPT=1 "$BASH" .githooks/pre-commit; then fail 'interruption was accepted'; fi
 assert_cleaned
 echo 'PASS: interruption cleans the snapshot'
 
 prepare
-git add 'src/Example with spaces.kt'
-git mv 'src/Example with spaces.kt' 'src/Renamed file.kt'
+git rm --quiet Cargo.lock
+if "$BASH" .githooks/pre-commit; then fail 'commit without Cargo.lock was accepted'; fi
+echo 'PASS: a staged commit without Cargo.lock is rejected'
+
+prepare
+git add 'rust/domain/src/file with spaces.rs'
+git mv 'rust/domain/src/file with spaces.rs' 'rust/domain/src/renamed file.rs'
 "$BASH" .githooks/pre-commit
 assert_cleaned
-[[ -f 'src/Renamed file.kt' ]] || fail 'rename was lost'
+[[ -f 'rust/domain/src/renamed file.rs' ]] || fail 'rename was lost'
 echo 'PASS: renamed files work'
 
-# A tracked deletion still triggers when an existing tree is used as the comparison base.
 tree=$(git write-tree)
 git -c user.name=HookTest -c user.email=hook-test@example.invalid \
     commit-tree "$tree" -m fixture > "$test_root/fixture-commit"
 git update-ref HEAD "$(cat "$test_root/fixture-commit")"
-git rm --quiet 'src/Renamed file.kt'
+git rm --quiet 'rust/domain/src/renamed file.rs'
 rm -f "$EMUSYNC_HOOK_TEST_LOG"
 "$BASH" .githooks/pre-commit
-[[ -s "$EMUSYNC_HOOK_TEST_LOG" ]] || fail 'Kotlin deletion did not trigger the hook'
+[[ -s "$EMUSYNC_HOOK_TEST_LOG" ]] || fail 'Rust deletion did not trigger the hook'
 assert_cleaned
-echo 'PASS: deleted Kotlin files trigger checks'
+echo 'PASS: deleted Rust files trigger checks'
 
 "$BASH" scripts/install-git-hooks.sh
 [[ $(git config --local --get core.hooksPath) == .githooks ]] || fail 'hook not activated'
