@@ -2,9 +2,6 @@
 config.json
 *.env
 
-# ── Build & Cache Artifacts ───────────────────────────
-docs/
-
 # ── Executables & Binaries ────────────────────────────
 *.AppImage
 appimagetool
