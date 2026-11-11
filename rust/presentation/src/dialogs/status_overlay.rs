@@ -18,8 +18,8 @@ use crate::{
     },
 };
 use egui::{
-    Align, Color32, FontId, Frame, Id, Layout, Margin, Modal, Rect, RichText, ScrollArea, Sense,
-    Stroke, Ui, vec2,
+    Align, Color32, FontId, Frame, Id, Label, Layout, Margin, Modal, Rect, RichText, ScrollArea,
+    Sense, Stroke, Ui, vec2,
 };
 use emusync_domain::sync::Decision;
 
@@ -242,9 +242,10 @@ fn conflict_card(
             .max_rect(text_area)
             .layout(Layout::top_down(Align::Center)),
     );
-    text_ui.label(RichText::new(title).font(bold(13.0)).color(color));
+    // Not selectable: selectable labels sense clicks and would swallow the card's.
+    text_ui.add(Label::new(RichText::new(title).font(bold(13.0)).color(color)).selectable(false));
     text_ui.add_space(4.0);
-    text_ui.label(RichText::new(date).size(11.0).color(ON_SURFACE_DIM));
+    text_ui.add(Label::new(RichText::new(date).size(11.0).color(ON_SURFACE_DIM)).selectable(false));
     response.clicked()
 }
 
