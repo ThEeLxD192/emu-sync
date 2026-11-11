@@ -93,19 +93,25 @@ async fn coordinator_initializes_and_scans_library() {
 
     assert!(redraw_requested.load(Ordering::SeqCst));
 
+    // Configuration and Steam events are sent before `initialize` returns; the game scan
+    // reports from a blocking worker, so wait for it instead of racing it.
+    let scanned = |e: &AppEvent| matches!(e, AppEvent::EntryGamesScanned { entry_name, .. } if entry_name == "SNES");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut events = Vec::new();
-    while let Ok(event) = rx.try_recv() {
-        events.push(event);
+    while !events.iter().any(scanned) {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        match rx.recv_timeout(remaining) {
+            Ok(event) => events.push(event),
+            Err(error) => panic!("no scan event for SNES ({error}); got {events:?}"),
+        }
     }
+    events.extend(rx.try_iter());
 
     assert!(
         events
             .iter()
             .any(|e| matches!(e, AppEvent::ConfigReloaded(_)))
     );
-    assert!(events.iter().any(
-        |e| matches!(e, AppEvent::EntryGamesScanned { entry_name, .. } if entry_name == "SNES")
-    ));
     assert!(
         events
             .iter()
