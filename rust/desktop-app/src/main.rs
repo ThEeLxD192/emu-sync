@@ -36,6 +36,8 @@ struct App {
     error: Option<String>,
     operations: RuntimeOwner<AuthorizedTransferFailure<ConfigManager>>,
     closing: bool,
+    /// Inside gamescope the UI is scaled to fit the output (see `fit_pixels_per_point`).
+    gamescope: bool,
     close_notice: bool,
     current_scan_revision: u64,
     current_steam_revision: u64,
@@ -50,7 +52,7 @@ impl ApplicationHandler for App {
             let mut attributes = Window::default_attributes()
                 .with_title("EmuSync")
                 .with_inner_size(winit::dpi::LogicalSize::new(1080.0, 720.0));
-            if is_gamescope_session() {
+            if self.gamescope {
                 // Gamescope letterboxes smaller windows and pointer/touch input then misses
                 // what is drawn; filling its output keeps both in the same coordinates.
                 attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
@@ -339,6 +341,16 @@ impl ApplicationHandler for App {
                 }
 
                 let context = state.egui_ctx().clone();
+                if self.gamescope {
+                    let size = window.inner_size();
+                    if size.width > 0 && size.height > 0 {
+                        let zoom = fit_pixels_per_point(size.width, size.height)
+                            / window.scale_factor() as f32;
+                        if (context.zoom_factor() - zoom).abs() > 0.001 {
+                            context.set_zoom_factor(zoom);
+                        }
+                    }
+                }
                 let input = state.take_egui_input(window);
                 let mut output = context.run_ui(input, |ui| {
                     self.emusync_app.update(ui);
@@ -381,6 +393,18 @@ impl ApplicationHandler for App {
             _ => {}
         }
     }
+}
+
+/// Size, in points, the window layout is designed for.
+const DESIGN_SIZE: (f32, f32) = (1080.0, 720.0);
+
+/// Pixels per point that fit the designed layout in an output of this size.
+///
+/// Gamescope gives X11 clients no DPI setting, so winit derives one from the panel's
+/// physical size (2.25 on the Steam Deck) and the layout no longer fits its screen.
+fn fit_pixels_per_point(width_px: u32, height_px: u32) -> f32 {
+    let fit = (width_px as f32 / DESIGN_SIZE.0).min(height_px as f32 / DESIGN_SIZE.1);
+    fit.clamp(0.75, 4.0)
 }
 
 fn config_argument(
@@ -494,6 +518,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         error: None,
         operations: RuntimeOwner::new()?,
         closing: false,
+        gamescope: is_gamescope_session(),
         close_notice: false,
         current_scan_revision: 0,
         current_steam_revision: 0,
@@ -507,6 +532,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gamescope_layout_fits_the_output_whatever_its_physical_size() {
+        use super::fit_pixels_per_point;
+        // Steam Deck: the whole 1080x720 layout fits, close to its desktop size.
+        let deck = fit_pixels_per_point(1280, 800);
+        assert!((deck - 1.111).abs() < 0.001, "{deck}");
+        assert!(1280.0 / deck >= 1079.99 && 800.0 / deck >= 719.99);
+        // Docked to a TV, the layout grows with the output instead of staying tiny.
+        assert_eq!(fit_pixels_per_point(1920, 1080), 1.5);
+        assert_eq!(fit_pixels_per_point(3840, 2160), 3.0);
+        // Odd outputs stay usable.
+        assert_eq!(fit_pixels_per_point(100, 100), 0.75);
+    }
     #[test]
     fn config_argument_requires_one_path() {
         use super::config_argument;
