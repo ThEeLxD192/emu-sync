@@ -270,6 +270,73 @@ fn sync_chip_maps_each_status_to_its_action() {
     }
 }
 
+/// Width of every painted "`label`" text in one frame.
+fn text_widths(ctx: &Context, app: &mut EmuSyncApp, label: &str) -> Vec<f32> {
+    let input = egui::RawInput {
+        screen_rect: Some(screen()),
+        ..egui::RawInput::default()
+    };
+    let output = ctx.run_ui(input, |ui| app.update(ui));
+    let widths = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == label => {
+                Some(text.visual_bounding_rect().width())
+            }
+            _ => None,
+        })
+        .collect();
+    output.drop_without_applying_deltas();
+    widths
+}
+
+#[test]
+fn sync_status_chip_hugs_its_content_and_leaves_room_for_the_title() {
+    let title = "A Category Name Long Enough To Need Room";
+    let entry = native_entry(title);
+    // Width of the toolbar title without a status chip.
+    let ctx = Context::default();
+    let mut reference = app_with(vec![entry.clone()]);
+    settle(&ctx, &mut reference);
+    let full_width = text_widths(&ctx, &mut reference, title)
+        .into_iter()
+        .fold(0.0_f32, f32::max);
+    assert!(full_width > 300.0, "{full_width}");
+
+    for (status, label) in [
+        (CloudSyncStatus::InSync, "In Sync"),
+        (CloudSyncStatus::Checking, "Checking..."),
+        (CloudSyncStatus::Syncing, "Syncing..."),
+    ] {
+        let ctx = Context::default();
+        let mut app = app_with(vec![entry.clone()]);
+        app.state
+            .entry_sync_status
+            .insert(title.to_string(), status);
+        settle(&ctx, &mut app);
+
+        // The chip sits beside the category actions instead of stretching across the row.
+        let chip = center_of_text(&ctx, &mut app, label);
+        let edit = find_glyph_centers(&ctx, &mut app, PENCIL);
+        assert_eq!(edit.len(), 1, "{status:?}");
+        let gap = edit[0].x - chip.x;
+        assert!(
+            (0.0..150.0).contains(&gap),
+            "{status:?}: chip {gap} px from the actions"
+        );
+
+        // The title keeps its full width on the 1280 px window.
+        let widest = text_widths(&ctx, &mut app, title)
+            .into_iter()
+            .fold(0.0_f32, f32::max);
+        assert!(
+            (widest - full_width).abs() < 1.0,
+            "{status:?}: title {widest} px, expected {full_width} px"
+        );
+    }
+}
+
 #[test]
 fn connect_drive_click_connects_directly_or_opens_setup() {
     let credentials_app = |credentials: Credentials| {

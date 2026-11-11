@@ -214,15 +214,16 @@ fn sync_chip(ui: &mut Ui, status: CloudSyncStatus) -> Option<SyncChipAction> {
     match status {
         CloudSyncStatus::InSync => {
             let mut check = false;
+            // Right to left: refresh, label, then the status icon.
             status_frame(ui, |ui| {
-                icon_slot(ui, glyph::CLOUD_CHECK, crate::theme::SUCCESS);
-                ui.label(RichText::new("In Sync").size(LABEL_SIZE).color(ON_SURFACE));
-                ui.add_space(4.0);
                 let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
                 let id = ui.make_persistent_id("sync_check");
                 check = glyph_button(ui, id, rect, glyph::REFRESH, 13.0, ON_SURFACE_DIM)
                     .on_hover_text("Check sync")
                     .clicked();
+                ui.add_space(4.0);
+                ui.label(RichText::new("In Sync").size(LABEL_SIZE).color(ON_SURFACE));
+                icon_slot(ui, glyph::CLOUD_CHECK, crate::theme::SUCCESS);
             });
             check.then_some(SyncChipAction::Check)
         }
@@ -252,10 +253,11 @@ fn sync_chip(ui: &mut Ui, status: CloudSyncStatus) -> Option<SyncChipAction> {
             } else {
                 "Checking..."
             };
+            // Right to left: label, then the spinner.
             status_frame(ui, |ui| {
-                ui.add(Spinner::new().size(14.0).color(PRIMARY));
-                ui.add_space(6.0);
                 ui.label(RichText::new(text).size(LABEL_SIZE).color(ON_SURFACE));
+                ui.add_space(6.0);
+                ui.add(Spinner::new().size(14.0).color(PRIMARY));
             });
             None
         }
@@ -273,23 +275,27 @@ fn sync_chip(ui: &mut Ui, status: CloudSyncStatus) -> Option<SyncChipAction> {
     }
 }
 
+/// Status chip in the right-to-left toolbar. `add_contents` adds items from right to
+/// left: a left-to-right child would take the whole remaining width, stretching the
+/// chip and leaving no room for the category title.
 fn status_frame(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
     Frame::new()
         .fill(SURFACE_VARIANT)
         .corner_radius(8)
         .inner_margin(Margin::symmetric(10, 6))
         .show(ui, |ui| {
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 add_contents(ui);
             });
         });
 }
 
+/// Status icon followed by its gap to the label, for a right-to-left chip.
 fn icon_slot(ui: &mut Ui, icon: &str, color: Color32) {
+    ui.add_space(6.0);
     let (rect, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
     paint_glyph(ui, rect.center(), icon, 16.0, color);
-    ui.add_space(6.0);
 }
 
 fn render_game_card(
