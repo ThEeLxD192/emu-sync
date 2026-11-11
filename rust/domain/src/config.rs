@@ -1,11 +1,25 @@
 use crate::library::GameEntry;
 use std::future::Future;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct Credentials {
     pub client_id: String,
     pub client_secret: String,
     pub refresh_token: Option<String>,
+}
+
+/// Hand-written so the client secret and refresh token never reach logs or panics.
+impl std::fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Credentials")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"<redacted>")
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AppConfig {
