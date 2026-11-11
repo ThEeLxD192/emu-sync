@@ -5,7 +5,9 @@ mod common;
 use common::linux_manager;
 use emusync_domain::library::Emulator;
 use emusync_platform_desktop::{SteamShortcutManager, WindowsLaunchConfiguration};
-use std::{fs, path::Path};
+use std::fs;
+#[cfg(target_os = "linux")]
+use std::path::Path;
 use tempfile::tempdir;
 
 #[test]

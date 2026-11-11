@@ -337,10 +337,13 @@ fn download_guarded_aborts_on_mid_flight_credential_change_preserving_local_save
     });
 }
 
+// Used only by the Linux pinned-download test.
+#[cfg(target_os = "linux")]
 struct PinnedDownloadTransfer {
     content_map: std::collections::HashMap<String, Vec<u8>>,
 }
 
+#[cfg(target_os = "linux")]
 impl CloudSaveTransfer for PinnedDownloadTransfer {
     type Error = io::Error;
     async fn download(

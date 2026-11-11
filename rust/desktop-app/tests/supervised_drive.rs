@@ -9,10 +9,9 @@ use emusync_desktop_app::{
     AuthorizedTransferFailure, CloseState, OperationFailure, OperationSupervisor, RecoveryStatus,
     RuntimeOwner, reconcile_tracked_upload, start_authorized_transfer,
 };
-use emusync_domain::{
-    config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
-    sync::RemoteState,
-};
+use emusync_domain::config::{AppConfig, ConfigurationStore, CredentialStore, Credentials};
+#[cfg(target_os = "linux")]
+use emusync_domain::sync::RemoteState;
 use reqwest::{Client, Url};
 use std::{
     io::Write,

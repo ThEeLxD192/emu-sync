@@ -1,7 +1,6 @@
 use emusync_data_local::{HistoryCheckpoint, SyncHistoryStore, file_sha256};
 use std::{
     fs,
-    path::Path,
     sync::{Arc, Barrier},
     thread,
 };
@@ -57,7 +56,7 @@ fn history_keeps_legacy_data_and_concurrent_records_and_refuses_corruption() {
     #[cfg(unix)]
     assert_eq!(
         a.key(
-            Path::new("/synthetic/sub/../save.dat"),
+            std::path::Path::new("/synthetic/sub/../save.dat"),
             "folder",
             "slot/save.dat"
         )

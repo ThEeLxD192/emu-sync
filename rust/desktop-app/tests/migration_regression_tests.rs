@@ -279,6 +279,9 @@ async fn cloud_migration_entry_records_pending_recovery_when_local_config_save_f
                                     use std::os::unix::fs::PermissionsExt;
                                     let _ = std::fs::set_permissions(&dir_for_perm, std::fs::Permissions::from_mode(0o555));
                                 }
+                                // Read-only directories are a Unix concept here.
+                                #[cfg(not(unix))]
+                                let _ = &dir_for_perm;
                                 let body = r#"{"id":"folder_id","name":"NewCat"}"#;
                                 let _ = write_http_json_async(&mut stream, 200, "OK", body).await;
                             }

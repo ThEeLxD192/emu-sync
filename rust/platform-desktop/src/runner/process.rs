@@ -1,5 +1,8 @@
+#[cfg(not(target_os = "windows"))]
 use crate::util::AppImageEnvironment;
-use std::{collections::HashSet, fs, path::Path, process::Command};
+#[cfg(target_os = "linux")]
+use std::fs;
+use std::{collections::HashSet, path::Path, process::Command};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProcessMonitor;
@@ -29,6 +32,8 @@ impl ProcessMonitor {
             return HashSet::new();
         }
 
+        // Windows matches the image name through `tasklist`; other systems compare stems.
+        #[cfg(not(target_os = "windows"))]
         let target_stem = Path::new(&clean_name)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -142,6 +147,7 @@ impl ProcessMonitor {
         pids
     }
 
+    #[cfg(not(target_os = "windows"))]
     fn fallback_pgrep(target_stem: &str) -> HashSet<u64> {
         let mut command = Command::new("pgrep");
         command.args(["-x", target_stem]);
@@ -191,10 +197,11 @@ impl ProcessMonitor {
                 .split(',')
                 .map(|s| s.trim().trim_matches('"'))
                 .collect();
-            if parts.len() >= 2 && parts[0].eq_ignore_ascii_case(&target_exe) {
-                if let Ok(pid) = parts[1].parse::<u64>() {
-                    pids.insert(pid);
-                }
+            if parts.len() >= 2
+                && parts[0].eq_ignore_ascii_case(&target_exe)
+                && let Ok(pid) = parts[1].parse::<u64>()
+            {
+                pids.insert(pid);
             }
         }
         pids
