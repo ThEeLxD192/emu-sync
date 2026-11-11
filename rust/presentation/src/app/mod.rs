@@ -54,6 +54,9 @@ pub struct EmuSyncApp {
     pub state: AppUiState,
     pub cover_cache: CoverCache,
     active_dialog: ActiveDialog,
+    /// The dialog a save setup replaced, shown again when the setup ends (Kotlin
+    /// paints each dialog from its own state, so a setup never discards another).
+    suspended_dialog: Option<ActiveDialog>,
     pending_actions: Vec<UiAction>,
     pub sidebar: SidebarInteraction,
     /// The conflict already answered, shown as syncing until the status changes.
@@ -85,6 +88,7 @@ impl EmuSyncApp {
             state: AppUiState::default(),
             cover_cache: CoverCache::new(),
             active_dialog: ActiveDialog::None,
+            suspended_dialog: None,
             pending_actions: Vec::new(),
             sidebar: SidebarInteraction::default(),
             answered_conflict: None,
@@ -100,6 +104,7 @@ impl EmuSyncApp {
             state,
             cover_cache: CoverCache::new(),
             active_dialog: ActiveDialog::None,
+            suspended_dialog: None,
             pending_actions: Vec::new(),
             sidebar: SidebarInteraction::default(),
             answered_conflict: None,
@@ -176,7 +181,9 @@ impl EmuSyncApp {
     }
 
     /// Replaces the open dialog. A save setup it dismisses is cancelled, so its
-    /// pending request never stays unanswered.
+    /// pending request never stays unanswered. Closing a save setup (`None`) shows
+    /// again the dialog it suspended; replacing it with any other dialog is an
+    /// explicit choice and drops the suspended one.
     fn set_dialog(&mut self, dialog: ActiveDialog) {
         if let ActiveDialog::GameEdit {
             origin: GameEditOrigin::SaveSetup(request),
@@ -188,11 +195,23 @@ impl EmuSyncApp {
             });
         }
         self.forget_pending_requests();
-        self.active_dialog = dialog;
+        let suspended = self.suspended_dialog.take();
+        self.active_dialog = match dialog {
+            ActiveDialog::None => suspended.unwrap_or(ActiveDialog::None),
+            other => other,
+        };
+    }
+
+    /// Ends the open save setup without cancelling it (already answered) and shows
+    /// the dialog it suspended, if any.
+    fn finish_answered_save_setup(&mut self) {
+        self.forget_pending_requests();
+        self.active_dialog = self.suspended_dialog.take().unwrap_or(ActiveDialog::None);
     }
 
     /// Closes the save setup for `request_id` without answering it; the coordinator
-    /// already did. Any other dialog is left untouched.
+    /// already did, and the dialog it suspended comes back. Any other dialog is left
+    /// untouched.
     pub fn close_save_setup(&mut self, request_id: u64) {
         if matches!(
             &self.active_dialog,
@@ -201,8 +220,7 @@ impl EmuSyncApp {
                 ..
             } if request.id == request_id
         ) {
-            self.forget_pending_requests();
-            self.active_dialog = ActiveDialog::None;
+            self.finish_answered_save_setup();
         }
     }
 
@@ -289,16 +307,36 @@ impl EmuSyncApp {
     }
 
     /// Opens the save setup for `request`; it ends in `CompleteSaveSetup` or
-    /// `CancelSaveSetup`.
+    /// `CancelSaveSetup`. Another open dialog is suspended, not discarded, and comes
+    /// back when the setup ends. A previous save setup is cancelled and replaced; the
+    /// dialog it had suspended stays suspended.
     pub fn open_save_setup(&mut self, request: &SaveSetupRequest) {
         self.cover_cache.forget_failures();
-        self.set_dialog(ActiveDialog::GameEdit {
+        let setup = ActiveDialog::GameEdit {
             form: Box::new(GameEditFormState::new(&request.item, &request.targets)),
             notice: request.notice.clone(),
             cloud_files: request.cloud_file_names.clone(),
             game: Box::new(request.item.clone()),
             origin: GameEditOrigin::SaveSetup(Box::new(request.clone())),
-        });
+        };
+        match &self.active_dialog {
+            ActiveDialog::None => self.active_dialog = setup,
+            ActiveDialog::GameEdit {
+                origin: GameEditOrigin::SaveSetup(previous),
+                ..
+            } => {
+                self.pending_actions.push(UiAction::CancelSaveSetup {
+                    request_id: previous.id,
+                });
+                self.forget_pending_requests();
+                self.active_dialog = setup;
+            }
+            _ => {
+                self.forget_pending_requests();
+                let displaced = std::mem::replace(&mut self.active_dialog, setup);
+                self.suspended_dialog = Some(displaced);
+            }
+        }
     }
 
     pub fn open_drive_setup(&mut self) {
@@ -348,10 +386,18 @@ impl EmuSyncApp {
     pub fn update(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
 
-        // Auto-open Update dialog when requested
-        if self.state.show_update_dialog && !matches!(self.active_dialog, ActiveDialog::Update) {
-            self.state.show_update_dialog = false;
-            self.open_update_dialog();
+        // The flag means "the update dialog should be visible" (Kotlin
+        // `dismissUpdateDialog`): if that dialog is already open the request is
+        // satisfied, so drop it or closing the dialog would reopen it. With another
+        // dialog open the flag waits, so it never cancels a save setup or discards a
+        // form; with none open it opens the dialog and is consumed.
+        if self.state.show_update_dialog {
+            if self.active_dialog == ActiveDialog::Update {
+                self.state.show_update_dialog = false;
+            } else if !self.has_open_dialog() {
+                self.state.show_update_dialog = false;
+                self.open_update_dialog();
+            }
         }
 
         let is_modal_active = !matches!(self.state.status, AppStatus::Idle)
@@ -520,8 +566,7 @@ impl EmuSyncApp {
         if close_dialog {
             if setup_completed {
                 // Answered by `CompleteSaveSetup`; closing it must not cancel.
-                self.forget_pending_requests();
-                self.active_dialog = ActiveDialog::None;
+                self.finish_answered_save_setup();
             } else {
                 self.close_dialog();
             }

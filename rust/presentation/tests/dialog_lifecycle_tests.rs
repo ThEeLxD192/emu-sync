@@ -453,3 +453,144 @@ fn invalid_cloud_path_disables_game_save() {
     assert_eq!(app.take_actions(), Vec::<UiAction>::new());
     assert!(matches!(app.active_dialog(), ActiveDialog::GameEdit { .. }));
 }
+
+fn draft_name(app: &EmuSyncApp) -> Option<&str> {
+    match app.active_dialog() {
+        ActiveDialog::Entry(form) => Some(form.name.as_str()),
+        _ => None,
+    }
+}
+
+fn complete(actions: &[UiAction]) -> Option<u64> {
+    match actions {
+        [UiAction::CompleteSaveSetup { request, .. }] => Some(request.id),
+        _ => None,
+    }
+}
+
+#[test]
+fn update_flag_waits_for_an_open_save_setup_and_opens_after_it() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    app.open_save_setup(&setup_request(1, &[]));
+    app.state.show_update_dialog = true;
+
+    run_frames(&ctx, &mut app, vec![Vec::new(), Vec::new(), Vec::new()]);
+
+    assert_eq!(app.take_actions(), vec![]);
+    assert!(matches!(app.active_dialog(), ActiveDialog::GameEdit { .. }));
+    assert!(app.state.show_update_dialog);
+
+    click_button(&ctx, &mut app, "Save");
+    let actions = app.take_actions();
+    assert_eq!(complete(&actions), Some(1), "{actions:?}");
+
+    run_frames(&ctx, &mut app, vec![Vec::new()]);
+    assert_eq!(app.active_dialog(), &ActiveDialog::Update);
+    assert!(!app.state.show_update_dialog);
+    assert_eq!(app.take_actions(), vec![]);
+}
+
+#[test]
+fn update_flag_waits_for_an_open_entry_form() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    app.open_add_entry();
+    app.entry_form_mut().expect("entry form").name = "Draft".to_string();
+    app.state.show_update_dialog = true;
+
+    run_frames(&ctx, &mut app, vec![Vec::new(), Vec::new()]);
+
+    assert_eq!(draft_name(&app), Some("Draft"));
+    assert!(app.state.show_update_dialog);
+    assert_eq!(app.take_actions(), vec![]);
+}
+
+#[test]
+fn save_setup_suspends_an_open_entry_form_and_restores_its_draft() {
+    for ending in ["Cancel", "Escape", "Save", "close_save_setup"] {
+        let ctx = Context::default();
+        let mut app = EmuSyncApp::new();
+        app.open_add_entry();
+        app.entry_form_mut().expect("entry form").name = "Draft".to_string();
+
+        app.open_save_setup(&setup_request(1, &[]));
+        assert_eq!(
+            app.take_actions(),
+            vec![],
+            "{ending}: opening emits nothing"
+        );
+        assert!(matches!(app.active_dialog(), ActiveDialog::GameEdit { .. }));
+
+        let actions = match ending {
+            "Cancel" => {
+                click_button(&ctx, &mut app, "Cancel");
+                app.take_actions()
+            }
+            "Escape" => {
+                run_frames(&ctx, &mut app, vec![Vec::new()]);
+                run_frames(&ctx, &mut app, vec![escape()]);
+                app.take_actions()
+            }
+            "Save" => {
+                click_button(&ctx, &mut app, "Save");
+                let actions = app.take_actions();
+                assert_eq!(complete(&actions), Some(1), "{actions:?}");
+                vec![]
+            }
+            _ => {
+                app.close_save_setup(1);
+                app.take_actions()
+            }
+        };
+
+        let expected = if matches!(ending, "Cancel" | "Escape") {
+            vec![cancel(1)]
+        } else {
+            vec![]
+        };
+        assert_eq!(actions, expected, "{ending}");
+        assert_eq!(draft_name(&app), Some("Draft"), "{ending}");
+        if ending == "Escape" {
+            run_frames(&ctx, &mut app, vec![Vec::new(), Vec::new()]);
+            assert_eq!(draft_name(&app), Some("Draft"), "{ending}: still open");
+        }
+    }
+}
+
+#[test]
+fn update_flag_raised_while_the_update_dialog_is_open_does_not_reopen_it() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    app.state.update_state = emusync_application::UpdateState::Available(update_info("9.9.9"));
+    app.open_update_dialog();
+    run_frames(&ctx, &mut app, vec![Vec::new()]);
+
+    app.state.show_update_dialog = true;
+    run_frames(&ctx, &mut app, vec![Vec::new()]);
+    assert_eq!(app.active_dialog(), &ActiveDialog::Update);
+    assert!(!app.state.show_update_dialog);
+
+    click_button(&ctx, &mut app, "Later");
+    run_frames(&ctx, &mut app, vec![Vec::new(), Vec::new()]);
+    assert_eq!(app.active_dialog(), &ActiveDialog::None);
+    assert!(!app.state.show_update_dialog);
+    assert_eq!(app.take_actions(), vec![]);
+}
+
+#[test]
+fn replacing_one_save_setup_with_another_keeps_the_suspended_dialog() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    app.open_add_entry();
+    app.entry_form_mut().expect("entry form").name = "Draft".to_string();
+
+    app.open_save_setup(&setup_request(1, &[]));
+    assert_eq!(app.take_actions(), vec![]);
+    app.open_save_setup(&setup_request(2, &[]));
+    assert_eq!(app.take_actions(), vec![cancel(1)]);
+
+    click_button(&ctx, &mut app, "Cancel");
+    assert_eq!(app.take_actions(), vec![cancel(2)]);
+    assert_eq!(draft_name(&app), Some("Draft"));
+}
