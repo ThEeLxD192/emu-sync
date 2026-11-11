@@ -2,8 +2,8 @@
 
 use crate::{
     dialogs::form_fields::{
-        cloud_path_field, field_hint, field_label, filter_chip, labelled_field, path_field,
-        primary_button, remove_button, save_kind_label, text_button,
+        field_hint, field_label, filter_chip, labelled_field, path_field, primary_button,
+        save_target_rows, text_button,
     },
     forms::EntryFormState,
     model::{EntryType, PathTarget, PickMode},
@@ -333,74 +333,12 @@ fn save_fields(
         "/home/user/.local/share/save.dat"
     };
     field_label(ui, "Save Files/Directories Paths");
-
-    let removable = form.saves.rows.len() > 1;
-    let mut remove = None;
-    for index in 0..form.saves.rows.len() {
-        let mut toggle = false;
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let kind_label = save_kind_label(&form.saves.rows[index].target_type);
-            let tail = if removable { 40.0 + 4.0 } else { 0.0 };
-            let toggle_width = text_width(ui, kind_label) + 24.0 + 4.0;
-            ui.scope(|ui| {
-                ui.set_width(ui.available_width() - toggle_width - tail);
-                let (field, picked) = path_field(
-                    ui,
-                    ("entry_save_path", index),
-                    &mut form.saves.rows[index].path,
-                    placeholder,
-                    &[("File", PickMode::File), ("Folder", PickMode::Directory)],
-                );
-                if field.changed() {
-                    on_save_path_edited(index, form.saves.rows[index].path.clone());
-                }
-                if let Some(mode) = picked {
-                    on_pick_path(PathTarget::SavePath(index), mode);
-                }
-            });
-            if text_button(ui, kind_label, PRIMARY).clicked() {
-                toggle = true;
-            }
-            if removable && remove_button(ui, ("entry_save_remove", index)).clicked() {
-                remove = Some(index);
-            }
-        });
-        if toggle {
-            form.saves.toggle_type(index);
-        }
-        ui.add_space(8.0);
-        let row = &mut form.saves.rows[index];
-        cloud_path_field(
-            ui,
-            ("entry_save_cloud", index),
-            &mut row.cloud_path,
-            &row.target_type,
-        );
-        ui.add_space(12.0);
-    }
-    if let Some(index) = remove {
-        form.saves.remove_row(index);
-    }
-
-    ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), 40.0),
-        Layout::left_to_right(Align::Center),
-        |ui| {
-            if text_button(ui, "+ Add Another Path", PRIMARY).clicked() {
-                form.saves.add_row();
-            }
-        },
+    save_target_rows(
+        ui,
+        "entry_save",
+        &mut form.saves,
+        placeholder,
+        on_pick_path,
+        on_save_path_edited,
     );
-}
-
-fn text_width(ui: &Ui, text: &str) -> f32 {
-    ui.painter()
-        .layout_no_wrap(
-            text.to_owned(),
-            egui::FontId::proportional(13.0),
-            Color32::WHITE,
-        )
-        .size()
-        .x
 }

@@ -2,7 +2,7 @@
 
 use crate::theme::{ERROR, ON_SURFACE_DIM, PRIMARY, SUCCESS, WARNING};
 use egui::Color32;
-use emusync_domain::library::{Emulator, GameEntry, NativeGame};
+use emusync_domain::library::{Emulator, GameEntry, NativeGame, SaveTarget};
 use std::path::{Path, PathBuf};
 
 /// Cloud sync status for an entry/emulator system (Steam Cloud style).
@@ -122,38 +122,53 @@ impl GameItem {
         }
     }
 
+    /// Cover shown in the grid: the scanned cover (which already prefers the custom one),
+    /// else the custom cover.
     pub fn effective_cover_path(&self) -> Option<String> {
-        if let Some(ref path) = self.cover_path {
-            let trimmed = path.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-        match &self.entry {
-            GameEntry::Native(native) => native.cover_path.as_deref().and_then(|p| {
-                let trimmed = p.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                }
-            }),
-            GameEntry::Emulator(emulator) => {
-                let rom_name = self
-                    .rom_file
-                    .as_ref()
-                    .and_then(|p| p.file_name())
-                    .map(|f| f.to_string_lossy().to_string())?;
+        self.cover_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .or_else(|| self.custom_cover_path())
+    }
 
+    /// Only the cover the user chose for this game, never an auto-detected one
+    /// (Kotlin's `GameItem.effectiveCoverPath`).
+    pub fn custom_cover_path(&self) -> Option<String> {
+        let custom = match &self.entry {
+            GameEntry::Native(native) => native.cover_path.as_deref(),
+            GameEntry::Emulator(emulator) => {
+                let rom_name = self.rom_file_name()?;
                 emulator
                     .cover_path_by_rom
                     .iter()
-                    .find(|(k, _)| k == &rom_name)
-                    .map(|(_, v)| v.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
+                    .find(|(k, _)| *k == rom_name)
+                    .map(|(_, v)| v.as_str())
             }
-        }
+        };
+        custom
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+    }
+
+    /// File name of the ROM, if this game comes from one.
+    pub fn rom_file_name(&self) -> Option<String> {
+        self.rom_file
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|f| f.to_string_lossy().into_owned())
+    }
+
+    /// ROM file name without its extension, or the game name (Kotlin's
+    /// `romFile?.nameWithoutExtension ?: name`).
+    pub fn raw_name(&self) -> String {
+        self.rom_file
+            .as_ref()
+            .and_then(|p| p.file_stem())
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.name.clone())
     }
 
     pub fn is_emulator(&self) -> bool {
@@ -181,6 +196,8 @@ pub struct SaveSetupRequest {
     pub item: GameItem,
     pub notice: Option<String>,
     pub cloud_file_names: Vec<String>,
+    /// The game's own save targets, used to prefill the form.
+    pub targets: Vec<SaveTarget>,
 }
 
 /// Form entry type.

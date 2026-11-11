@@ -6,7 +6,7 @@ use emusync_desktop_app::{
 use emusync_domain::config::ConfigurationStore;
 use emusync_platform_desktop::SteamShortcutManager;
 use emusync_presentation::{
-    EmuSyncApp, actions::UiAction, model::AppStatus, theme::configure_egui_theme,
+    ActiveDialog, EmuSyncApp, actions::UiAction, model::AppStatus, theme::configure_egui_theme,
 };
 use std::{
     ffi::OsString,
@@ -292,6 +292,15 @@ impl ApplicationHandler for App {
                         AppEvent::PathPicked { target, mode, path } => {
                             self.emusync_app.apply_picked_path(target, mode, path);
                             window.request_redraw();
+                        }
+                        AppEvent::GameEditReady { item, targets } => {
+                            // A dialog opened meanwhile keeps priority.
+                            if matches!(self.emusync_app.active_dialog, ActiveDialog::None) {
+                                self.emusync_app.open_edit_game(&item, &targets);
+                            }
+                        }
+                        AppEvent::RestorePathsPreviewed { destination, paths } => {
+                            self.emusync_app.apply_restore_preview(&destination, paths);
                         }
                         AppEvent::SaveTargetTypeDetected { index, path, kind } => {
                             self.emusync_app

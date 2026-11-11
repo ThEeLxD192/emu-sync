@@ -57,6 +57,7 @@ pub mod glyph {
     pub const CLOUD_DOWNLOAD: &str = "\u{F0162}";
     pub const ALERT: &str = "\u{F0026}";
     pub const REFRESH: &str = "\u{F0450}";
+    pub const IMAGE: &str = "\u{F02E9}";
 }
 
 /// Font family rendering the bold weight of the application font.

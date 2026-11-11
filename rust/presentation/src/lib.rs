@@ -14,7 +14,8 @@ pub use actions::UiAction;
 pub use app::{ActiveDialog, EmuSyncApp};
 pub use cover_cache::CoverCache;
 pub use forms::{
-    EntryFormState, GameEditFormState, GameEditResult, SaveTargetFormState, SaveTargetRow,
+    EntryFormState, GameEditFormState, GameEditResult, RestoreChoice, SaveTargetFormState,
+    SaveTargetRow,
 };
 pub use model::{
     AppStatus, CloudSyncStatus, EntryType, GameItem, PathTarget, PickMode, SaveSetupRequest,

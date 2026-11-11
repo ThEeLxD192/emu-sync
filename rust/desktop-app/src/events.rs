@@ -1,7 +1,10 @@
 //! Application events sent from background operations to the presentation layer.
 
 use emusync_application::UpdateState;
-use emusync_domain::{config::AppConfig, library::SaveTargetType};
+use emusync_domain::{
+    config::AppConfig,
+    library::{SaveTarget, SaveTargetType},
+};
 use emusync_presentation::model::{
     AppStatus, CloudSyncStatus, GameItem, PathTarget, PickMode, SaveSetupRequest,
 };
@@ -38,6 +41,16 @@ pub enum AppEvent {
         target: PathTarget,
         mode: PickMode,
         path: String,
+    },
+    /// The game's own save targets were read; the game dialog can open.
+    GameEditReady {
+        item: Box<GameItem>,
+        targets: Vec<SaveTarget>,
+    },
+    /// Where each cloud file would be restored inside `destination`.
+    RestorePathsPreviewed {
+        destination: String,
+        paths: Vec<String>,
     },
     SaveTargetTypeDetected {
         index: usize,

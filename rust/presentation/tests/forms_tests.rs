@@ -166,7 +166,9 @@ fn entry_form_requires_targets_for_native_game() {
 }
 
 #[test]
-fn game_edit_form_computes_restore_paths_and_result() {
+fn game_edit_restore_waits_for_resolved_paths_and_returns_the_choice() {
+    use emusync_presentation::RestoreChoice;
+
     let entry = GameEntry::Native(NativeGame {
         common: EntryCommon {
             name: "Celeste".to_string(),
@@ -174,33 +176,90 @@ fn game_edit_form_computes_restore_paths_and_result() {
         },
         ..NativeGame::default()
     });
-
     let game = emusync_presentation::GameItem::new("Celeste", entry, None);
     let mut form = GameEditFormState::new(&game, &[]);
-
-    // Cloud restore paths computation
     let cloud_files = vec!["0.celeste".to_string(), "settings.celeste".to_string()];
-    form.restore_destination_folder = "/local/celeste/saves".to_string();
 
-    let paths = form.restore_paths(&cloud_files);
-    assert_eq!(paths.len(), 2);
-    assert_eq!(paths[0], "/local/celeste/saves/0.celeste");
-    assert_eq!(paths[1], "/local/celeste/saves/settings.celeste");
+    // Without a destination nothing can be saved or previewed.
+    assert!(!form.can_save(&cloud_files));
+    assert_eq!(form.take_restore_preview_request(&cloud_files), None);
 
-    // Whole folder restore toggle
+    // Per-file restore asks once for the paths resolved by the composition.
+    form.restore_destination_folder = " /local/celeste ".to_string();
+    assert_eq!(
+        form.take_restore_preview_request(&cloud_files),
+        Some("/local/celeste".to_string())
+    );
+    assert_eq!(form.take_restore_preview_request(&cloud_files), None);
+    assert!(
+        !form.can_save(&cloud_files),
+        "unresolved paths block saving"
+    );
+
+    // A preview for a destination no longer in the form is ignored.
+    form.apply_restore_preview("/elsewhere", vec!["/elsewhere/0.celeste".to_string()]);
+    assert!(form.selected_restore_paths(&cloud_files).is_empty());
+
+    // Every name rejected by the resolver: still nothing to save.
+    form.apply_restore_preview("/local/celeste", Vec::new());
+    assert!(!form.can_save(&cloud_files));
+
+    form.apply_restore_preview(
+        "/local/celeste",
+        vec!["/local/celeste/0.celeste".to_string()],
+    );
+    assert!(form.can_save(&cloud_files));
+    let result = form.build_result(&cloud_files).expect("restore is ready");
+    assert!(
+        result.targets.is_empty(),
+        "targets are rebuilt by the composition"
+    );
+    assert_eq!(
+        result.restore,
+        Some(RestoreChoice {
+            destination: "/local/celeste".to_string(),
+            whole_folder: false,
+        })
+    );
+    assert_eq!(result.title, Some("Celeste".to_string()));
+
+    // The whole folder needs no resolution.
     form.restore_whole_folder = true;
-    let whole_folder_paths = form.restore_paths(&cloud_files);
-    assert_eq!(whole_folder_paths, vec!["/local/celeste/saves"]);
-
-    // Build result
-    let (title, targets, cover) = form
+    assert_eq!(
+        form.selected_restore_paths(&cloud_files),
+        vec!["/local/celeste"]
+    );
+    assert_eq!(form.take_restore_preview_request(&cloud_files), None);
+    let result = form
         .build_result(&cloud_files)
-        .expect("valid restore result");
-    assert_eq!(targets.len(), 1);
-    assert_eq!(targets[0].path, "/local/celeste/saves");
-    assert_eq!(targets[0].kind, SaveTargetType::Directory);
-    assert_eq!(title, Some("Celeste".to_string()));
-    assert_eq!(cover, None);
+        .expect("whole folder is ready");
+    assert_eq!(result.restore.map(|c| c.whole_folder), Some(true));
+}
+
+#[test]
+fn game_edit_starts_from_the_custom_cover_only() {
+    use std::path::PathBuf;
+
+    let mut emulator = Emulator::new("GBA", "/usr/bin/mgba", "/roms", vec!["gba".into()]);
+    emulator.cover_path_by_rom = vec![("zelda.gba".to_string(), "/covers/custom.png".to_string())];
+    let rom = Some(PathBuf::from("/roms/zelda.gba"));
+
+    // Auto-detected cover only: the field stays empty so automatic detection keeps working.
+    let detected = emusync_presentation::GameItem::new(
+        "zelda.gba",
+        GameEntry::Emulator(Emulator::new("GBA", "/usr/bin/mgba", "/roms", vec![])),
+        rom.clone(),
+    )
+    .with_cover_path(Some("/roms/zelda.png".to_string()));
+    assert_eq!(GameEditFormState::new(&detected, &[]).cover_path, "");
+
+    let custom =
+        emusync_presentation::GameItem::new("zelda.gba", GameEntry::Emulator(emulator), rom)
+            .with_cover_path(Some("/covers/custom.png".to_string()));
+    assert_eq!(
+        GameEditFormState::new(&custom, &[]).cover_path,
+        "/covers/custom.png"
+    );
 }
 
 #[test]

@@ -1,6 +1,9 @@
 //! UI actions and events communicating user intentions to background handlers.
 
-use crate::model::{GameItem, PathTarget, PickMode, SaveSetupRequest};
+use crate::{
+    forms::game_edit_form::RestoreChoice,
+    model::{GameItem, PathTarget, PickMode, SaveSetupRequest},
+};
 use emusync_domain::{
     library::{Emulator, GameEntry, SaveTarget},
     sync::Decision,
@@ -23,6 +26,8 @@ pub enum UiAction {
     },
     DeleteEntry(GameEntry),
     ReorderEntries(Vec<GameEntry>),
+    /// Opens the game dialog once the game's own save targets have been read.
+    EditGame(GameItem),
     EditGameOverride {
         item: GameItem,
         title: Option<String>,
@@ -34,6 +39,13 @@ pub enum UiAction {
         targets: Vec<SaveTarget>,
         title: Option<String>,
         cover_path: Option<String>,
+        /// Restore from the cloud into this folder instead of `targets`.
+        restore: Option<RestoreChoice>,
+    },
+    /// Resolves where each cloud file would be restored inside `destination`.
+    PreviewRestorePaths {
+        destination: String,
+        names: Vec<String>,
     },
     ToggleSteam(GameEntry),
     ConnectDrive {

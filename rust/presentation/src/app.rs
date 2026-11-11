@@ -8,7 +8,7 @@ use crate::{
     },
     cover_cache::CoverCache,
     dialogs::{
-        ConfirmDeleteOutcome, DriveSetupDialogState, EntryDialogEvents,
+        ConfirmDeleteOutcome, DriveSetupDialogState, EntryDialogEvents, GameEditDialogEvents,
         render_confirm_delete_dialog, render_drive_setup_dialog, render_entry_dialog,
         render_game_edit_dialog, render_status_overlay, render_update_dialog,
     },
@@ -18,7 +18,7 @@ use crate::{
     theme::{BACKGROUND, configure_egui_theme},
 };
 use egui::{CentralPanel, Frame, Margin, Panel, Ui};
-use emusync_domain::library::{GameEntry, SaveTargetType};
+use emusync_domain::library::{GameEntry, SaveTarget, SaveTargetType};
 
 /// Currently active modal dialog.
 #[derive(Clone, Debug, PartialEq)]
@@ -109,6 +109,13 @@ impl EmuSyncApp {
         }
     }
 
+    /// Stores resolved restore paths if the dialog still shows that destination.
+    pub fn apply_restore_preview(&mut self, destination: &str, paths: Vec<String>) {
+        if let ActiveDialog::GameEdit { form, .. } = &mut self.active_dialog {
+            form.apply_restore_preview(destination, paths);
+        }
+    }
+
     /// Applies a detected save kind only if the row still holds the path that was checked.
     pub fn apply_detected_save_type(&mut self, index: usize, path: &str, kind: SaveTargetType) {
         let saves = match &mut self.active_dialog {
@@ -131,10 +138,11 @@ impl EmuSyncApp {
             ActiveDialog::Entry(Box::new(EntryFormState::new(Some(entry.clone()), targets)));
     }
 
-    pub fn open_edit_game(&mut self, game: &GameItem) {
-        let targets = &game.entry.common().save_targets;
+    /// Opens the game dialog; `game_targets` are the game's own targets, read by the
+    /// composition with `game_specific_targets`.
+    pub fn open_edit_game(&mut self, game: &GameItem, game_targets: &[SaveTarget]) {
         self.active_dialog = ActiveDialog::GameEdit {
-            form: Box::new(GameEditFormState::new(game, targets)),
+            form: Box::new(GameEditFormState::new(game, game_targets)),
             notice: None,
             cloud_files: Vec::new(),
             game: Box::new(game.clone()),
@@ -142,9 +150,8 @@ impl EmuSyncApp {
     }
 
     pub fn open_save_setup(&mut self, request: &SaveSetupRequest) {
-        let targets = &request.item.entry.common().save_targets;
         self.active_dialog = ActiveDialog::GameEdit {
-            form: Box::new(GameEditFormState::new(&request.item, targets)),
+            form: Box::new(GameEditFormState::new(&request.item, &request.targets)),
             notice: request.notice.clone(),
             cloud_files: request.cloud_file_names.clone(),
             game: Box::new(request.item.clone()),
@@ -301,7 +308,7 @@ impl EmuSyncApp {
                 self.open_add_entry();
             }
             if let Some(game) = edit_game {
-                self.open_edit_game(&game);
+                actions.push(UiAction::EditGame(game));
             }
             if let Some(entry) = edit_category {
                 self.open_edit_entry(&entry);
@@ -369,32 +376,49 @@ impl EmuSyncApp {
             } => {
                 let mut saved_result = None;
                 let mut pick = None;
+                let mut edited_paths = Vec::new();
 
                 render_game_edit_dialog(
                     &ctx,
                     form,
+                    game,
                     notice.as_deref(),
                     cloud_files,
-                    &mut |title, targets, cover| saved_result = Some((title, targets, cover)),
-                    &mut |target, mode| pick = Some((target, mode)),
-                    &mut || close_dialog = true,
+                    &mut self.cover_cache,
+                    GameEditDialogEvents {
+                        on_save: &mut |result| saved_result = Some(result),
+                        on_pick_path: &mut |target, mode| pick = Some((target, mode)),
+                        on_save_path_edited: &mut |index, path| edited_paths.push((index, path)),
+                        on_close: &mut || close_dialog = true,
+                    },
                 );
 
-                if let Some((title, targets, cover)) = saved_result {
+                if let Some(destination) = form.take_restore_preview_request(cloud_files) {
+                    actions.push(UiAction::PreviewRestorePaths {
+                        destination,
+                        names: cloud_files.clone(),
+                    });
+                }
+                for (index, path) in edited_paths {
+                    actions.push(UiAction::DetectSaveTargetType { index, path });
+                }
+
+                if let Some(result) = saved_result {
                     if let Some(req) = &self.state.save_setup_request {
                         actions.push(UiAction::CompleteSaveSetup {
                             request: Box::new(req.clone()),
-                            targets,
-                            title,
-                            cover_path: cover,
+                            targets: result.targets,
+                            title: result.title,
+                            cover_path: result.cover_path,
+                            restore: result.restore,
                         });
                         self.state.save_setup_request = None;
                     } else {
                         actions.push(UiAction::EditGameOverride {
                             item: *game.clone(),
-                            title,
-                            targets,
-                            cover_path: cover,
+                            title: result.title,
+                            targets: result.targets,
+                            cover_path: result.cover_path,
                         });
                     }
                     close_dialog = true;

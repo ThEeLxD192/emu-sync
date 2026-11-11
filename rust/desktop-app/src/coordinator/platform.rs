@@ -1,12 +1,13 @@
 use crate::{events::AppEvent, scanner_helper::scan_entry_games};
+use emusync_application::library::game_specific_targets;
 use emusync_application::library::{EntryEditResult, SteamRegistration};
 use emusync_data_local::{ConfigManager, LocalSaveTargets};
 use emusync_domain::{
     execution::{BrowserLauncher, PathPicker, PickerType},
-    library::{GameEntry, SaveTargetAccess, SteamLibrary},
+    library::{GameEntry, SaveTarget, SaveTargetAccess, SaveTargetType, SteamLibrary},
 };
 use emusync_platform_desktop::{DesktopBrowserLauncher, DesktopSteamLibrary, FilePicker};
-use emusync_presentation::model::{PathTarget, PickMode};
+use emusync_presentation::model::{GameItem, PathTarget, PickMode};
 use std::{
     path::Path,
     sync::{
@@ -95,6 +96,43 @@ impl PlatformServices {
             })
     }
 
+    /// Reads the game's own save targets off the UI thread, then opens its dialog.
+    pub fn load_game_edit(&self, item: GameItem) -> tokio::task::JoinHandle<()> {
+        let tx = self.event_tx.clone();
+        let redraw = self.redraw.clone();
+        self.tokio_handle.spawn_blocking(move || {
+            let rom_name = item.rom_file_name();
+            let event =
+                match game_specific_targets(&LocalSaveTargets, &item.entry, rom_name.as_deref()) {
+                    Ok(targets) => AppEvent::GameEditReady {
+                        item: Box::new(item),
+                        targets,
+                    },
+                    Err(err) => AppEvent::Toast(format!("Could not read save paths: {err}")),
+                };
+            let _ = tx.send(event);
+            (redraw)();
+        })
+    }
+
+    /// Resolves restore paths off the UI thread with `for_restore`, which rejects names
+    /// escaping the destination.
+    pub fn preview_restore_paths(
+        &self,
+        destination: String,
+        names: Vec<String>,
+    ) -> tokio::task::JoinHandle<()> {
+        let tx = self.event_tx.clone();
+        let redraw = self.redraw.clone();
+        self.tokio_handle.spawn_blocking(move || {
+            let paths = restore_targets(&destination, false, &names)
+                .map(|targets| dedup_paths(&targets))
+                .unwrap_or_default();
+            let _ = tx.send(AppEvent::RestorePathsPreviewed { destination, paths });
+            (redraw)();
+        })
+    }
+
     /// Reports the real kind of a typed save path, if it exists.
     pub fn detect_save_target_type(
         &self,
@@ -165,4 +203,35 @@ impl PlatformServices {
             (redraw)();
         })
     }
+}
+
+/// Restore targets for a cloud restore, as Kotlin's `GameEditFormState.result`: the whole
+/// folder, or each cloud file resolved inside it by `for_restore`.
+pub fn restore_targets(
+    destination: &str,
+    whole_folder: bool,
+    names: &[String],
+) -> std::io::Result<Vec<SaveTarget>> {
+    let destination = destination.trim();
+    if destination.is_empty() {
+        return Ok(Vec::new());
+    }
+    if whole_folder {
+        return Ok(vec![SaveTarget {
+            path: destination.to_string(),
+            kind: SaveTargetType::Directory,
+            cloud_path: None,
+        }]);
+    }
+    LocalSaveTargets.for_restore(destination, names)
+}
+
+fn dedup_paths(targets: &[SaveTarget]) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    for target in targets {
+        if !paths.contains(&target.path) {
+            paths.push(target.path.clone());
+        }
+    }
+    paths
 }

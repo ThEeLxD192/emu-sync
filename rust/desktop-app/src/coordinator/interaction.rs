@@ -1,4 +1,6 @@
 use crate::events::AppEvent;
+use emusync_application::library::game_specific_targets;
+use emusync_data_local::LocalSaveTargets;
 use emusync_domain::sync::{
     Decision, PostSyncFailure, SaveConflict, SaveSetup, SaveSetupRequest, SaveSetupResult, SyncGame,
 };
@@ -165,10 +167,21 @@ impl SaveSetup for AsyncSaveSetupBridge {
             request.game.entry.clone(),
             request.game.rom_path.as_ref().map(PathBuf::from),
         );
+        // Prefill with the game's own targets, never the emulator-wide fallbacks.
+        let entry = item.entry.clone();
+        let rom_name = item.rom_file_name();
+        let targets = tokio::task::spawn_blocking(move || {
+            game_specific_targets(&LocalSaveTargets, &entry, rom_name.as_deref())
+        })
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
         let ui_request = emusync_presentation::model::SaveSetupRequest {
             item,
             notice: None,
             cloud_file_names: request.cloud_file_names,
+            targets,
         };
 
         let _ = self.controls.event_tx.send(AppEvent::SaveSetupRequested {

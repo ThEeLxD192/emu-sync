@@ -4,7 +4,8 @@
 use crate::forms::save_targets::cloud_path_is_valid;
 use crate::{
     components::{icons::glyph_button, pill::Pill},
-    model::PickMode,
+    forms::SaveTargetFormState,
+    model::{PathTarget, PickMode},
     theme::{
         DIVIDER, ERROR, ON_BACKGROUND, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, PRIMARY_CONTAINER,
         SURFACE_SELECTED, SURFACE_VARIANT, glyph,
@@ -240,4 +241,81 @@ pub(crate) fn remove_button(ui: &mut Ui, id_salt: impl egui::AsIdSalt) -> Respon
     let (rect, _) = ui.allocate_exact_size(vec2(FIELD_HEIGHT, FIELD_HEIGHT), egui::Sense::hover());
     let id = ui.make_persistent_id(("remove_row", id_salt));
     glyph_button(ui, id, rect, glyph::DELETE, 20.0, ERROR).on_hover_text("Remove Path")
+}
+
+/// Editable save target rows (path with File/Folder pickers, kind toggle, remove button
+/// and cloud path) followed by "+ Add Another Path", shared by both dialogs.
+pub(crate) fn save_target_rows(
+    ui: &mut Ui,
+    id_prefix: &str,
+    saves: &mut SaveTargetFormState,
+    placeholder: &str,
+    on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
+    on_save_path_edited: &mut dyn FnMut(usize, String),
+) {
+    let removable = saves.rows.len() > 1;
+    let mut remove = None;
+    for index in 0..saves.rows.len() {
+        let mut toggle = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let kind_label = save_kind_label(&saves.rows[index].target_type);
+            let tail = if removable { FIELD_HEIGHT + 4.0 } else { 0.0 };
+            let toggle_width = text_width(ui, kind_label) + 24.0 + 4.0;
+            ui.scope(|ui| {
+                ui.set_width(ui.available_width() - toggle_width - tail);
+                let (field, picked) = path_field(
+                    ui,
+                    (id_prefix, "path", index),
+                    &mut saves.rows[index].path,
+                    placeholder,
+                    &[("File", PickMode::File), ("Folder", PickMode::Directory)],
+                );
+                if field.changed() {
+                    on_save_path_edited(index, saves.rows[index].path.clone());
+                }
+                if let Some(mode) = picked {
+                    on_pick_path(PathTarget::SavePath(index), mode);
+                }
+            });
+            if text_button(ui, kind_label, PRIMARY).clicked() {
+                toggle = true;
+            }
+            if removable && remove_button(ui, (id_prefix, "remove", index)).clicked() {
+                remove = Some(index);
+            }
+        });
+        if toggle {
+            saves.toggle_type(index);
+        }
+        ui.add_space(8.0);
+        let row = &mut saves.rows[index];
+        cloud_path_field(
+            ui,
+            (id_prefix, "cloud", index),
+            &mut row.cloud_path,
+            &row.target_type,
+        );
+        ui.add_space(12.0);
+    }
+    if let Some(index) = remove {
+        saves.remove_row(index);
+    }
+
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), FIELD_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            if text_button(ui, "+ Add Another Path", PRIMARY).clicked() {
+                saves.add_row();
+            }
+        },
+    );
+}
+
+fn text_width(ui: &Ui, text: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(text.to_owned(), FontId::proportional(13.0), Color32::WHITE)
+        .size()
+        .x
 }

@@ -417,9 +417,36 @@ impl DesktopCoordinator {
                 targets,
                 title,
                 cover_path,
+                restore,
             } => {
+                let targets = match restore {
+                    None => targets,
+                    // Rebuilt here rather than trusting the form, as Kotlin's `result`.
+                    Some(choice) => match platform::restore_targets(
+                        &choice.destination,
+                        choice.whole_folder,
+                        &request.cloud_file_names,
+                    ) {
+                        Ok(targets) if !targets.is_empty() => targets,
+                        Ok(_) | Err(_) => {
+                            self.send_toast(
+                                "No valid restore location for the cloud files in that folder.",
+                            );
+                            self.interaction.cancel_save_setup();
+                            return;
+                        }
+                    },
+                };
                 let targets = resolve_target_kinds(targets, &LocalSaveTargets);
                 self.complete_save_setup(*request, targets, title, cover_path);
+            }
+            UiAction::EditGame(item) => {
+                let handle = self.platform.load_game_edit(item);
+                self.track_task(handle);
+            }
+            UiAction::PreviewRestorePaths { destination, names } => {
+                let handle = self.platform.preview_restore_paths(destination, names);
+                self.track_task(handle);
             }
             UiAction::ToggleSteam(entry) => {
                 if !self.try_acquire_admission() {

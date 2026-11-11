@@ -192,6 +192,7 @@ fn app_auto_opens_save_setup_request() {
         item,
         notice: Some("Configure saves before play".to_string()),
         cloud_file_names: vec!["smw.srm".to_string()],
+        targets: Vec::new(),
     });
 
     let output = ctx.run_ui(RawInput::default(), |ui| {
@@ -337,4 +338,52 @@ fn entry_dialog_renders_both_entry_types_headless() {
     }
     assert!(matches!(app.active_dialog, ActiveDialog::Entry(_)));
     assert!(app.take_actions().is_empty());
+}
+
+#[test]
+fn running_game_overlay_ignores_escape_and_clicks_outside() {
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    app.state.status = AppStatus::Playing;
+
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
+    let corner = egui::pos2(5.0, 5.0);
+    let frames = [
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        vec![egui::Event::PointerMoved(corner)],
+        vec![egui::Event::PointerButton {
+            pos: corner,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        vec![egui::Event::PointerButton {
+            pos: corner,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        Vec::new(),
+    ];
+    for events in frames {
+        let input = RawInput {
+            screen_rect: Some(screen),
+            events,
+            ..RawInput::default()
+        };
+        let output = ctx.run_ui(input, |ui| app.update(ui));
+        output.drop_without_applying_deltas();
+    }
+
+    assert_eq!(app.state.status, AppStatus::Playing);
+    assert!(
+        app.take_actions().is_empty(),
+        "no action may end or dismiss a running game"
+    );
 }
