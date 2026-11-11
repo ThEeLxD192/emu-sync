@@ -165,6 +165,7 @@ pub fn test_native_entry(name: &str) -> GameEntry {
                 path: "/save.dat".to_string(),
                 cloud_path: Some("save.dat".to_string()),
                 kind: SaveTargetType::File,
+                excluded_folders: Vec::new(),
             }],
             ..Default::default()
         },
@@ -183,6 +184,7 @@ pub fn test_emulator_entry(name: &str) -> GameEntry {
                 path: "/saves".to_string(),
                 cloud_path: Some("saves".to_string()),
                 kind: SaveTargetType::Directory,
+                excluded_folders: Vec::new(),
             }],
             ..Default::default()
         },

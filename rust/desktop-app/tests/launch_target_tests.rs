@@ -38,6 +38,7 @@ fn rom_with_exact_filename_override_matches() {
         path: "/saves/global.srm".to_string(),
         kind: SaveTargetType::File,
         cloud_path: Some("global.srm".to_string()),
+        excluded_folders: Vec::new(),
     }];
     let overrides = vec![(
         "Chrono.sfc".to_string(),
@@ -45,6 +46,7 @@ fn rom_with_exact_filename_override_matches() {
             path: "/saves/chrono_exact.srm".to_string(),
             kind: SaveTargetType::File,
             cloud_path: Some("chrono_exact.srm".to_string()),
+            excluded_folders: Vec::new(),
         }],
     )];
 
@@ -61,6 +63,7 @@ fn rom_with_stem_fallback_override_matches() {
         path: "/saves/global.srm".to_string(),
         kind: SaveTargetType::File,
         cloud_path: Some("global.srm".to_string()),
+        excluded_folders: Vec::new(),
     }];
     let overrides = vec![(
         "Zelda".to_string(),
@@ -68,6 +71,7 @@ fn rom_with_stem_fallback_override_matches() {
             path: "/saves/zelda_stem.srm".to_string(),
             kind: SaveTargetType::File,
             cloud_path: Some("zelda_stem.srm".to_string()),
+            excluded_folders: Vec::new(),
         }],
     )];
 
@@ -84,6 +88,7 @@ fn rom_without_override_falls_back_to_global_targets() {
         path: "/saves/global_fallback.srm".to_string(),
         kind: SaveTargetType::File,
         cloud_path: Some("global_fallback.srm".to_string()),
+        excluded_folders: Vec::new(),
     }];
     let overrides = vec![(
         "OtherRom.sfc".to_string(),
@@ -91,6 +96,7 @@ fn rom_without_override_falls_back_to_global_targets() {
             path: "/saves/other.srm".to_string(),
             kind: SaveTargetType::File,
             cloud_path: Some("other.srm".to_string()),
+            excluded_folders: Vec::new(),
         }],
     )];
 
@@ -113,6 +119,7 @@ fn native_game_uses_its_save_targets() {
                 path: "/saves/hollow_knight.dat".into(),
                 kind: SaveTargetType::File,
                 cloud_path: Some("hk.dat".into()),
+                excluded_folders: Vec::new(),
             }],
             group: None,
             cloud_folder: None,

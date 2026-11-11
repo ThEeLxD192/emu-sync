@@ -474,6 +474,7 @@ async fn rename_entry_aborts_when_old_path_is_used_by_another_entry_save_targets
                 path: "/saves/rom_sub.srm".into(),
                 kind: SaveTargetType::File,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             }],
         )],
         title_by_rom: vec![("rom_sub.sfc".to_string(), "SubGame".to_string())],
@@ -568,6 +569,7 @@ async fn rename_game_cloud_data_with_drive_connected_relocates_merges_and_aborts
             path: "/saves/old.srm".into(),
             kind: SaveTargetType::File,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         };
 
         let res = migration
@@ -635,6 +637,7 @@ async fn rename_game_cloud_data_with_drive_connected_relocates_merges_and_aborts
             path: "/saves/save.srm".into(),
             kind: SaveTargetType::File,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         };
 
         let res = migration

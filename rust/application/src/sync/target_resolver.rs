@@ -1,6 +1,6 @@
 //! Resolves game and ROM configurations to concrete local and cloud targets.
 
-use emusync_domain::library::{GameEntry, SaveTarget, SaveTargetType};
+use emusync_domain::library::{GameEntry, SaveTarget, SaveTargetType, is_excluded};
 use emusync_domain::sync::{
     LocalSaveAccess, LocalSavePath, SyncGame, cloud_path_segments, sanitize_cloud_folder_name,
 };
@@ -13,14 +13,21 @@ pub struct ResolvedSaveTarget<P> {
     pub cloud_path_segments: Vec<String>,
     pub display_name: String,
     pub cloud_path: Option<String>,
+    pub excluded_folders: Vec<String>,
 }
 
 impl<P: LocalSavePath> ResolvedSaveTarget<P> {
+    /// Whether the file at `relative` lies inside one of this target's excluded folders.
+    pub fn excludes(&self, relative: &str) -> bool {
+        is_excluded(&self.excluded_folders, relative)
+    }
+
     pub fn configured(&self) -> SaveTarget {
         SaveTarget {
             path: self.file.path().to_string(),
             kind: self.kind.clone(),
             cloud_path: self.cloud_path.clone(),
+            excluded_folders: self.excluded_folders.clone(),
         }
     }
 }
@@ -89,6 +96,7 @@ impl<A: LocalSaveAccess> SaveTargetResolver<A> {
                         cloud_path_segments: cloud_path.clone(),
                         display_name: native.common.name.clone(),
                         cloud_path: t.cloud_path,
+                        excluded_folders: t.excluded_folders,
                     })
                     .collect())
             }
@@ -111,6 +119,7 @@ impl<A: LocalSaveAccess> SaveTargetResolver<A> {
                                 cloud_path_segments: global_path.clone(),
                                 display_name: emu.common.name.clone(),
                                 cloud_path: target.cloud_path,
+                                excluded_folders: target.excluded_folders,
                             });
                         }
                     }
@@ -144,6 +153,7 @@ impl<A: LocalSaveAccess> SaveTargetResolver<A> {
                                 cloud_path_segments: rom_cloud_path.clone(),
                                 display_name: title.clone(),
                                 cloud_path: target.cloud_path,
+                                excluded_folders: target.excluded_folders,
                             });
                         }
                     }

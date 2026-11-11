@@ -201,6 +201,9 @@ where
         let root = &target.file;
 
         for remote in remote_files {
+            if target.excludes(&remote.name) {
+                continue;
+            }
             let local = root
                 .resolve_remote(&remote.name)
                 .map_err(|_| ())?
@@ -230,7 +233,10 @@ where
             for local in local_files {
                 if local.is_file().map_err(|_| ())? {
                     let relative = local.relative_to(root).map_err(|_| ())?;
-                    if !reserved.contains(&relative) && !remote_names.contains(relative.as_str()) {
+                    if !reserved.contains(&relative)
+                        && !remote_names.contains(relative.as_str())
+                        && !target.excludes(&relative)
+                    {
                         observation.record(Decision::UploadLocal);
                     }
                 }

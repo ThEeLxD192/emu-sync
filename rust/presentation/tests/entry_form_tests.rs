@@ -19,6 +19,7 @@ fn dir_target(path: &str) -> SaveTarget {
         path: path.to_string(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     }
 }
 
@@ -91,6 +92,7 @@ fn entry_form_preserves_metadata_when_editing() {
         path: "/saves/snes".to_string(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     }];
 
     let mut form = EntryFormState::new(Some(initial), &targets);

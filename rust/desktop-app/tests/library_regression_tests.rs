@@ -125,6 +125,7 @@ async fn old_game_item_does_not_wipe_other_rom_overrides() {
             path: "/saves/rom2.srm".to_string(),
             kind: SaveTargetType::File,
             cloud_path: Some("rom2.srm".to_string()),
+            excluded_folders: Vec::new(),
         }],
     ));
     let entry = GameEntry::Emulator(emu);
@@ -158,6 +159,7 @@ async fn old_game_item_does_not_wipe_other_rom_overrides() {
             path: "/saves/rom1.srm".into(),
             kind: SaveTargetType::File,
             cloud_path: Some("rom1.srm".into()),
+            excluded_folders: Vec::new(),
         }],
         cover_path: None,
     });
@@ -437,6 +439,7 @@ async fn coordinator_edit_game_override() {
             path: "/new_save.dat".into(),
             cloud_path: Some("new_save.dat".into()),
             kind: SaveTargetType::File,
+            excluded_folders: Vec::new(),
         }],
         cover_path: Some("/custom_cover.png".into()),
     });

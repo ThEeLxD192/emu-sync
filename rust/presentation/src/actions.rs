@@ -76,6 +76,8 @@ pub enum UiAction {
         request_id: u64,
         target: PathTarget,
         mode: PickMode,
+        /// Where the picker opens; empty for its default location.
+        initial_path: String,
     },
     /// Detects whether a typed save path is a file or a directory, off the UI thread.
     DetectSaveTargetType {
@@ -165,11 +167,13 @@ impl std::fmt::Debug for UiAction {
                 request_id,
                 target,
                 mode,
+                initial_path,
             } => f
                 .debug_struct("PickPath")
                 .field("request_id", request_id)
                 .field("target", target)
                 .field("mode", mode)
+                .field("initial_path", initial_path)
                 .finish(),
             Self::DetectSaveTargetType { index, path } => f
                 .debug_struct("DetectSaveTargetType")

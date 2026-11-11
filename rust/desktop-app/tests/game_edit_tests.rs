@@ -15,6 +15,7 @@ fn file_target(path: &str) -> SaveTarget {
         path: path.to_string(),
         kind: SaveTargetType::File,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     }
 }
 
@@ -115,6 +116,7 @@ fn whole_folder_restore_targets_the_destination_and_blank_targets_nothing() {
             path: "/saves/celeste".to_string(),
             kind: SaveTargetType::Directory,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         }]
     );
     assert!(

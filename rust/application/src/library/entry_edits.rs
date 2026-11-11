@@ -103,10 +103,22 @@ fn sanitize_targets(targets: &[SaveTarget]) -> (Vec<String>, Vec<SaveTarget>) {
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .map(str::to_string),
+                excluded_folders: sanitize_excluded_folders(&t.excluded_folders),
             });
         }
     }
     (valid_paths, valid_targets)
+}
+
+/// Trimmed, non-blank and without repeats, in the order they were given.
+fn sanitize_excluded_folders(folders: &[String]) -> Vec<String> {
+    let mut valid: Vec<String> = Vec::with_capacity(folders.len());
+    for folder in folders.iter().map(|f| f.trim()).filter(|f| !f.is_empty()) {
+        if !valid.iter().any(|v| v == folder) {
+            valid.push(folder.to_string());
+        }
+    }
+    valid
 }
 
 fn update_emulator_overrides(

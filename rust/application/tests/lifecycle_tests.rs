@@ -659,6 +659,7 @@ async fn save_setup_before_and_after_play_updates_cloud_path_or_aborts_when_canc
                 path: "/saves/post_game.sav".into(),
                 kind: SaveTargetType::File,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             };
             let mut updated_game = req.game;
             updated_game.save_targets = vec![target.clone()];

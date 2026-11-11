@@ -604,8 +604,11 @@ impl DesktopCoordinator {
                 request_id,
                 target,
                 mode,
+                initial_path,
             } => {
-                let handle = self.platform.pick_path(request_id, target, mode);
+                let handle = self
+                    .platform
+                    .pick_path(request_id, target, mode, initial_path);
                 self.track_task(handle);
             }
             UiAction::DetectSaveTargetType { index, path } => {

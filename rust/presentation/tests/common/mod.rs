@@ -149,6 +149,7 @@ pub fn native_entry(name: &str) -> GameEntry {
                 path: format!("/saves/{name}"),
                 kind: SaveTargetType::Directory,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             }],
             ..EntryCommon::default()
         },
@@ -254,6 +255,7 @@ pub fn pick_request(actions: Vec<UiAction>) -> (u64, PathTarget, PickMode) {
                 request_id,
                 target,
                 mode,
+                ..
             },
         ] => (*request_id, target.clone(), *mode),
         other => panic!("expected exactly one PickPath, got {other:?}"),

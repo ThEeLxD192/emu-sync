@@ -75,6 +75,7 @@ impl PlatformServices {
         request_id: u64,
         target: PathTarget,
         mode: PickMode,
+        initial_path: String,
     ) -> tokio::task::JoinHandle<()> {
         let picker = self.picker.clone();
         let tx = self.event_tx.clone();
@@ -85,8 +86,8 @@ impl PlatformServices {
             PickMode::Directory => PickerType::Directory,
         };
 
-        self.tokio_handle
-            .spawn_blocking(move || match picker.pick("Select path", "", kind) {
+        self.tokio_handle.spawn_blocking(move || {
+            match picker.pick("Select path", &initial_path, kind) {
                 Ok(Some(path)) => {
                     let _ = tx.send(AppEvent::PathPicked {
                         request_id,
@@ -103,7 +104,8 @@ impl PlatformServices {
                     )));
                     (redraw)();
                 }
-            })
+            }
+        })
     }
 
     /// Reads the game's own save targets off the UI thread, then opens its dialog.
@@ -236,6 +238,7 @@ pub fn restore_targets(
             path: destination.to_string(),
             kind: SaveTargetType::Directory,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         }]);
     }
     LocalSaveTargets.for_restore(destination, names)

@@ -113,11 +113,13 @@ async fn test_post_sync_directory_with_conflicting_file_emits_error() {
             path: "/saves/dir".into(),
             kind: SaveTargetType::Directory,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         },
         SaveTarget {
             path: "/saves/other/file.sav".into(),
             kind: SaveTargetType::File,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         },
     ];
 
@@ -205,11 +207,13 @@ async fn post_sync_partial_failure_with_blocked_sibling_reports_exact_counts_and
         path: "/saves/dir".into(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
     let target_file = SaveTarget {
         path: "/saves/other/collision.sav".into(),
         kind: SaveTargetType::File,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
 
     let entry = GameEntry::Native(NativeGame {
@@ -347,11 +351,13 @@ async fn post_sync_prepare_cloud_state_failure_marks_all_configured_and_retry_ta
         path: "/saves/s1.sav".into(),
         kind: SaveTargetType::File,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
     let t2 = SaveTarget {
         path: "/saves/s2.sav".into(),
         kind: SaveTargetType::File,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
     let entry = GameEntry::Native(NativeGame {
         common: EntryCommon {

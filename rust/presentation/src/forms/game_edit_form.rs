@@ -100,16 +100,15 @@ impl GameEditFormState {
 
     pub fn can_save(&self, cloud_file_names: &[String]) -> bool {
         (cloud_file_names.is_empty() || !self.selected_restore_paths(cloud_file_names).is_empty())
-            && self.saves.cloud_paths_are_valid()
+            && self.saves.validation_error().is_none()
     }
 
     pub fn build_result(&mut self, cloud_file_names: &[String]) -> Result<GameEditResult, String> {
         if !self.can_save(cloud_file_names) {
-            let msg = if self.saves.cloud_paths_are_valid() {
-                "Select a destination folder before saving."
-            } else {
-                "Cloud paths must be relative and cannot contain '..'."
-            };
+            let msg = self
+                .saves
+                .validation_error()
+                .unwrap_or("Select a destination folder before saving.");
             self.error_message = Some(msg.to_string());
             return Err(msg.to_string());
         }

@@ -10,8 +10,8 @@ use crate::{
         render_drive_setup_dialog, render_entry_dialog, render_game_edit_dialog,
         render_update_dialog,
     },
-    forms::{EntryFormState, GameEditFormState, entry_form::existing_groups},
-    model::GameItem,
+    forms::{EntryFormState, GameEditFormState, SaveTargetFormState, entry_form::existing_groups},
+    model::{GameItem, PathTarget},
     state::AppUiState,
 };
 use emusync_domain::library::GameEntry;
@@ -77,12 +77,14 @@ pub(super) fn handle_entry(
     }
 
     if let Some((target, mode)) = pick {
+        let initial_path = picker_start(&form.saves, &target);
         actions.push(
             // Placeholder: `EmuSyncApp::update` assigns the real id before publishing.
             UiAction::PickPath {
                 request_id: 0,
                 target,
                 mode,
+                initial_path,
             },
         );
     }
@@ -174,12 +176,14 @@ pub(super) fn handle_game_edit(
     }
 
     if let Some((target, mode)) = pick {
+        let initial_path = picker_start(&form.saves, &target);
         actions.push(
             // Placeholder: `EmuSyncApp::update` assigns the real id before publishing.
             UiAction::PickPath {
                 request_id: 0,
                 target,
                 mode,
+                initial_path,
             },
         );
     }
@@ -270,5 +274,17 @@ pub(super) fn handle_confirm_delete(
         }
         ConfirmDeleteOutcome::Cancelled => true,
         ConfirmDeleteOutcome::Pending => false,
+    }
+}
+
+/// An excluded folder is chosen from inside its save folder, so the picker opens there.
+fn picker_start(saves: &SaveTargetFormState, target: &PathTarget) -> String {
+    match target {
+        PathTarget::ExcludedFolder { save, .. } => saves
+            .rows
+            .get(*save)
+            .map(|row| row.path.trim().to_string())
+            .unwrap_or_default(),
+        _ => String::new(),
     }
 }

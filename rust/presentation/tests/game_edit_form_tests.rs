@@ -178,6 +178,7 @@ fn existing_targets_are_not_scoped_and_new_ones_are() {
         path: path.to_string(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
 
     let mut existing = GameEditFormState::new(&celeste(), &[dir("/d1"), dir("/d2")]);
@@ -206,6 +207,7 @@ fn a_folder_added_to_a_game_synced_at_the_cloud_root_gets_its_own_cloud_path() {
         path: path.to_string(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
     let mut form = GameEditFormState::new(&celeste(), &[dir("/sd/Saves/savedata/1/X")]);
     // Editing the saved folder's path does not move its cloud data either.

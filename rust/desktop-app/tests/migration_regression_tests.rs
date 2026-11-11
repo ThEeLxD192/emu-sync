@@ -404,6 +404,7 @@ async fn cloud_migration_game_override_retains_transfer_error_and_leaves_config_
             path: "/saves/chrono.srm".into(),
             cloud_path: Some("chrono.srm".into()),
             kind: SaveTargetType::File,
+            excluded_folders: Vec::new(),
         }],
         cover_path: None,
     });

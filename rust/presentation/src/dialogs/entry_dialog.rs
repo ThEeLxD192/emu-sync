@@ -200,6 +200,7 @@ fn launch_fields(
             "/opt/spelunky/spelunky"
         },
         &[("Browse", PickMode::File)],
+        false,
     );
     if let Some(mode) = picked {
         on_pick_path(PathTarget::Executable, mode);
@@ -245,6 +246,7 @@ fn emulator_fields(
         &mut form.roms_directory,
         "/home/user/roms/gba",
         &[("Browse", PickMode::Directory)],
+        false,
     );
     if let Some(mode) = picked {
         on_pick_path(PathTarget::RomsDirectory, mode);
@@ -314,6 +316,7 @@ fn native_fields(
         &mut form.cover_path,
         "/path/to/game_cover.png",
         &[("Browse", PickMode::File)],
+        false,
     );
     if let Some(mode) = picked {
         on_pick_path(PathTarget::CoverPath, mode);

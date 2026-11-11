@@ -224,6 +224,7 @@ fn cloud_path_traversal_is_rejected() {
         path: "/saves/slot1.sav".into(),
         kind: SaveTargetType::File,
         cloud_path: Some("../traversal/path".into()),
+        excluded_folders: Vec::new(),
     }];
 
     let res = mapping.validate_save_target_mappings(&targets, &[]);
@@ -244,6 +245,7 @@ fn conflicting_remote_to_local_paths_rejected() {
         path: "/saves".into(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     }];
 
     // Remote files: both 'file.sav' and 'subdir/../file.sav' or case colliding
@@ -285,11 +287,13 @@ fn reserved_cloud_names_prevent_file_and_directory_name_collision() {
         path: "/saves/custom.sav".into(),
         kind: SaveTargetType::File,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
     let dir_target = SaveTarget {
         path: "/saves/dir".into(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
 
     let siblings = vec![file_target.clone(), dir_target.clone()];
@@ -314,11 +318,13 @@ fn legacy_folders_ambiguity_detects_colliding_filenames_and_aborts() {
         path: "/dir1".into(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
     let legacy2 = SaveTarget {
         path: "/dir2".into(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
 
     let res = mapping.validate_save_target_mappings(&[legacy1, legacy2], &[]);
@@ -338,11 +344,13 @@ fn conflicting_local_destinations_rejected() {
             path: "/saves/slot1.sav".into(),
             kind: SaveTargetType::File,
             cloud_path: Some("cloud1.sav".into()),
+            excluded_folders: Vec::new(),
         },
         SaveTarget {
             path: "/saves/slot1.sav".into(),
             kind: SaveTargetType::File,
             cloud_path: Some("cloud2.sav".into()),
+            excluded_folders: Vec::new(),
         },
     ];
 
@@ -365,11 +373,13 @@ fn file_is_parent_of_another_rejected() {
             path: "/saves/parent.sav".into(),
             kind: SaveTargetType::File,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         },
         SaveTarget {
             path: "/saves/parent.sav/child.sav".into(),
             kind: SaveTargetType::File,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         },
     ];
 
@@ -389,11 +399,13 @@ fn overlapping_directory_scopes_rejected() {
             path: "/saves/dir1".into(),
             kind: SaveTargetType::Directory,
             cloud_path: Some("common".into()),
+            excluded_folders: Vec::new(),
         },
         SaveTarget {
             path: "/saves/dir2".into(),
             kind: SaveTargetType::Directory,
             cloud_path: Some("common/sub".into()),
+            excluded_folders: Vec::new(),
         },
     ];
 
@@ -444,11 +456,13 @@ fn sibling_legacy_directories_reserve_newer_files_and_report_all_ambiguity_categ
             path: "/saves/dir_a".into(),
             kind: SaveTargetType::Directory,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         };
         let target_b = SaveTarget {
             path: "/saves/dir_b".into(),
             kind: SaveTargetType::Directory,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         };
         let all_targets = vec![target_a.clone(), target_b.clone()];
 
@@ -488,16 +502,19 @@ fn sibling_legacy_directories_reserve_newer_files_and_report_all_ambiguity_categ
                 path: "/saves/missing_dir".into(),
                 kind: SaveTargetType::Directory,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             },
             SaveTarget {
                 path: "/saves/dir1".into(),
                 kind: SaveTargetType::Directory,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             },
             SaveTarget {
                 path: "/saves/dir2".into(),
                 kind: SaveTargetType::Directory,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             },
         ];
 
@@ -562,6 +579,7 @@ fn legacy_dir(path: &str) -> SaveTarget {
         path: path.into(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     }
 }
 

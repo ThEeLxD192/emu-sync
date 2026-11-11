@@ -3,7 +3,7 @@
 use super::context::SyncContext;
 use super::legacy_placement::LegacyPlacement;
 use super::target_mapping::{directory_cloud_name, project_directory_files};
-use emusync_domain::library::GameEntry;
+use emusync_domain::library::{GameEntry, is_excluded};
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, DirectoryDownload, LocalSaveAccess,
     LocalSaveFiles, LocalSavePath, RemoteFile, RemoteState, SyncEvent, canonical_cloud_files,
@@ -57,6 +57,7 @@ where
         display_name: &str,
         reserved_sibling_names: &HashSet<String>,
         cloud_prefix: Option<&str>,
+        excluded_folders: &[String],
         before_play: bool,
     ) -> Result<(), String> {
         let actions = self
@@ -66,6 +67,7 @@ where
                 cloud_files,
                 reserved_sibling_names,
                 cloud_prefix,
+                excluded_folders,
             )
             .await?;
 
@@ -87,6 +89,7 @@ where
         cloud_files: &[RemoteFile],
         reserved: &HashSet<String>,
         prefix: Option<&str>,
+        excluded_folders: &[String],
     ) -> Result<Vec<DirectoryAction<A::Path>>, String> {
         let mut files: BTreeMap<String, DirectoryFileEntry<A::Path>> = BTreeMap::new();
 
@@ -97,6 +100,7 @@ where
                 if file.is_file().unwrap_or(false)
                     && let Ok(rel) = file.relative_to(root)
                     && !reserved.contains(&rel)
+                    && !is_excluded(excluded_folders, &rel)
                 {
                     files.entry(rel).or_default().local = Some(file);
                 }
@@ -107,6 +111,9 @@ where
             .map_err(|e| format!("Unverified duplicate remote file: {}", e.name))?;
 
         for file in canonical_remote {
+            if is_excluded(excluded_folders, &file.name) {
+                continue;
+            }
             if let Ok(Some(resolved)) = root.resolve_remote(&file.name) {
                 let name = file.name.clone();
                 files.entry(name).or_default().remote = Some((file, resolved));
@@ -477,6 +484,7 @@ where
                             &target.display_name,
                             &reserved,
                             target.cloud_path.as_deref(),
+                            &target.excluded_folders,
                             false,
                         )
                         .await?;

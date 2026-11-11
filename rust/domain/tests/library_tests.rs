@@ -1,6 +1,6 @@
 use emusync_domain::library::{
     Emulator, EntryCommon, NativeGame, SaveTarget, SaveTargetType, clean_game_title,
-    folder_cloud_names, normalize_game_key, scope_new_targets,
+    folder_cloud_names, is_excluded, normalize_game_key, scope_new_targets,
 };
 
 fn target(path: &str, kind: SaveTargetType, cloud: Option<&str>) -> SaveTarget {
@@ -8,6 +8,7 @@ fn target(path: &str, kind: SaveTargetType, cloud: Option<&str>) -> SaveTarget {
         path: path.into(),
         kind,
         cloud_path: cloud.map(str::to_owned),
+        excluded_folders: Vec::new(),
     }
 }
 
@@ -279,4 +280,33 @@ fn scoped_names_never_overlap_paths_already_in_use() {
             Some("blank"),
         ]
     );
+}
+
+#[test]
+fn excluded_folders_hide_only_files_strictly_inside_them() {
+    let excluded = vec!["1/CUSA/RaceReplay".to_string()];
+    for inside in [
+        "1/CUSA/RaceReplay/race.rep",
+        "1/CUSA/RaceReplay/deep/nested.rep",
+        "1\\CUSA\\RaceReplay\\race.rep",
+    ] {
+        assert!(is_excluded(&excluded, inside), "{inside}");
+    }
+    for outside in [
+        "1/CUSA/RaceReplayIndex/index.dat",
+        "1/CUSA/savedata0/SYS-DATA.sav",
+        "1/CUSA/RaceReplay",
+        "RaceReplay/race.rep",
+    ] {
+        assert!(!is_excluded(&excluded, outside), "{outside}");
+    }
+    let separators = vec!["./1\\CUSA/RaceReplay/".to_string()];
+    assert!(is_excluded(&separators, "1/CUSA/RaceReplay/race.rep"));
+}
+
+#[test]
+fn a_blank_excluded_folder_never_hides_the_whole_save() {
+    for blank in ["", "/", ".", "./"] {
+        assert!(!is_excluded(&[blank.to_string()], "save.dat"), "{blank:?}");
+    }
 }

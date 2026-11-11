@@ -55,6 +55,8 @@ struct Target {
     kind: TargetType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     cloud_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    excluded_folders: Vec<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -105,6 +107,7 @@ impl From<Target> for SaveTarget {
                 TargetType::Unknown => SaveTargetType::Unknown,
             },
             cloud_path: t.cloud_path,
+            excluded_folders: t.excluded_folders,
         }
     }
 }
@@ -118,6 +121,7 @@ impl From<SaveTarget> for Target {
                 SaveTargetType::Unknown => TargetType::Unknown,
             },
             cloud_path: t.cloud_path,
+            excluded_folders: t.excluded_folders,
         }
     }
 }

@@ -398,3 +398,52 @@ fn published_requests_carry_distinct_non_zero_ids() {
         "{first} {second} {preview}"
     );
 }
+
+#[test]
+fn excluded_folder_picker_opens_in_its_save_folder_and_keeps_the_choice_relative() {
+    let ctx = egui::Context::default();
+    let mut app = native_entry_dialog();
+    let form = app.entry_form_mut().expect("entry dialog");
+    form.saves.update_path(0, "/saves/ctr".to_string());
+    form.saves.update_type(0, SaveTargetType::Directory);
+
+    run_frames(&ctx, &mut app, vec![vec![]]);
+    scroll_dialog_to_end(&ctx, &mut app);
+    click_nth(&ctx, &mut app, "+ Add Excluded Folder", 0);
+    scroll_dialog_to_end(&ctx, &mut app);
+    // Folder buttons, top to bottom: the save path picker, its kind toggle, then the
+    // excluded folder's picker.
+    let actions = click_nth(&ctx, &mut app, "Folder", 2);
+    let [
+        UiAction::PickPath {
+            request_id,
+            target,
+            mode,
+            initial_path,
+        },
+    ] = actions.as_slice()
+    else {
+        panic!("expected exactly one PickPath, got {actions:?}");
+    };
+    assert_eq!(
+        (target, *mode, initial_path.as_str()),
+        (
+            &PathTarget::ExcludedFolder { save: 0, folder: 0 },
+            PickMode::Directory,
+            "/saves/ctr"
+        )
+    );
+
+    app.apply_picked_path(
+        *request_id,
+        target.clone(),
+        *mode,
+        "/saves/ctr/1/CUSA/RaceReplay".to_string(),
+    );
+
+    let ActiveDialog::Entry(form) = app.active_dialog() else {
+        panic!("entry dialog must stay open");
+    };
+    assert_eq!(form.saves.rows[0].path, "/saves/ctr");
+    assert_eq!(form.saves.rows[0].excluded_folders, ["1/CUSA/RaceReplay"]);
+}

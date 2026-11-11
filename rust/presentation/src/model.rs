@@ -223,6 +223,11 @@ pub enum PathTarget {
     Executable,
     RomsDirectory,
     SavePath(usize),
+    /// An excluded folder (`folder`) of the save target at `save`.
+    ExcludedFolder {
+        save: usize,
+        folder: usize,
+    },
     CoverPath,
     RestoreDestination,
 }

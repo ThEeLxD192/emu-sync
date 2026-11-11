@@ -4,7 +4,7 @@ use super::context::SyncContext;
 use super::manual::{ManualFileSync, PlannedSave, remote_to_state};
 use super::target_mapping::{directory_cloud_name, project_directory_files};
 use emusync_domain::execution::GameLauncher;
-use emusync_domain::library::{GameEntry, SaveTarget, SaveTargetType};
+use emusync_domain::library::{GameEntry, SaveTarget, SaveTargetType, is_excluded};
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, LocalSaveAccess, LocalSaveFiles, LocalSavePath,
     PostSyncFailure, RemoteFile, SyncEvent, SyncGame, canonical_cloud_files,
@@ -79,6 +79,7 @@ where
         known_file_sibling_names: &HashSet<String>,
         reserved_sibling_names: &HashSet<String>,
         cloud_path: Option<&str>,
+        excluded_folders: &[String],
     ) -> Result<PostSyncResult<A::Path>, String> {
         let drive_name = drive_name_override
             .or(cloud_path)
@@ -133,6 +134,7 @@ where
                 cloud_path,
                 known_file_sibling_names,
                 reserved_sibling_names,
+                excluded_folders,
             )
             .await
         } else {
@@ -182,6 +184,7 @@ where
         prefix: Option<&str>,
         siblings: &HashSet<String>,
         reserved: &HashSet<String>,
+        excluded_folders: &[String],
     ) -> Result<PostSyncResult<A::Path>, String> {
         let mut completed = 0;
         let mut failed = Vec::new();
@@ -202,6 +205,7 @@ where
         for file in local_files {
             if file.is_file().unwrap_or(false)
                 && let Ok(relative) = file.relative_to(root)
+                && !is_excluded(excluded_folders, &relative)
             {
                 if siblings.contains(&relative) {
                     blocked.push(format!(
@@ -445,6 +449,7 @@ where
                                 &target.reserved_drive_names,
                                 &HashSet::new(),
                                 None,
+                                &[],
                             )
                             .await
                         {
@@ -486,6 +491,7 @@ where
                             &siblings,
                             &reserved,
                             target.cloud_path.as_deref(),
+                            &target.excluded_folders,
                         )
                         .await
                     {

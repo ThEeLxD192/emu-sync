@@ -4,6 +4,7 @@ use emusync_domain::{
     library::{SaveTarget, SaveTargetType, scope_new_targets},
     sync::remote_path_segments,
 };
+use std::path::{Component, Path};
 
 /// An optional cloud path is valid when empty or relative without `..` segments.
 pub fn cloud_path_is_valid(value: &str) -> bool {
@@ -11,12 +12,42 @@ pub fn cloud_path_is_valid(value: &str) -> bool {
     trimmed.is_empty() || remote_path_segments(trimmed).is_some()
 }
 
+/// An excluded folder is valid when empty (ignored) or relative without `..` segments, so
+/// it always names a folder inside its save folder.
+pub fn excluded_folder_is_valid(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.is_empty() || remote_path_segments(trimmed).is_some()
+}
+
+/// The folder `picked` relative to the save folder `root`, with `/` separators, when it
+/// lies strictly inside it; the save folder itself cannot be excluded.
+pub fn excluded_folder_within(root: &str, picked: &str) -> Option<String> {
+    let root = root.trim();
+    if root.is_empty() {
+        return None;
+    }
+    let relative = Path::new(picked.trim()).strip_prefix(root).ok()?;
+    let segments: Vec<&str> = relative
+        .components()
+        .map(|c| match c {
+            Component::Normal(name) => name.to_str(),
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    (!segments.is_empty()).then(|| segments.join("/"))
+}
+
+pub(crate) const EXCLUDED_FOLDERS_INVALID: &str =
+    "Excluded folders must be inside their save folder.";
+
 /// An editable row representing a save target.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaveTargetRow {
     pub path: String,
     pub target_type: SaveTargetType,
     pub cloud_path: String,
+    /// Folders inside a directory save, relative to it, that are never synced.
+    pub excluded_folders: Vec<String>,
     /// Loaded from the configuration: its cloud layout is in use and is never changed
     /// automatically, even if its path is edited.
     pub established: bool,
@@ -28,8 +59,14 @@ impl SaveTargetRow {
             path,
             target_type,
             cloud_path,
+            excluded_folders: Vec::new(),
             established: false,
         }
+    }
+
+    /// Only a folder can hold excluded folders; a file save ignores them.
+    pub fn accepts_excluded_folders(&self) -> bool {
+        self.target_type != SaveTargetType::File
     }
 
     fn target(&self) -> Option<SaveTarget> {
@@ -42,6 +79,16 @@ impl SaveTargetRow {
             path: path.to_string(),
             kind: self.target_type.clone(),
             cloud_path: (!cloud.is_empty()).then(|| cloud.to_string()),
+            excluded_folders: if self.accepts_excluded_folders() {
+                self.excluded_folders
+                    .iter()
+                    .map(|f| f.trim())
+                    .filter(|f| !f.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            } else {
+                Vec::new()
+            },
         })
     }
 }
@@ -72,6 +119,7 @@ impl SaveTargetFormState {
         let rows = targets
             .iter()
             .map(|t| SaveTargetRow {
+                excluded_folders: t.excluded_folders.clone(),
                 established: true,
                 ..SaveTargetRow::new(
                     t.path.clone(),
@@ -129,6 +177,65 @@ impl SaveTargetFormState {
 
     pub fn cloud_paths_are_valid(&self) -> bool {
         self.rows.iter().all(|r| cloud_path_is_valid(&r.cloud_path))
+    }
+
+    pub fn add_excluded_folder(&mut self, index: usize) {
+        if let Some(row) = self.rows.get_mut(index) {
+            row.excluded_folders.push(String::new());
+        }
+    }
+
+    pub fn remove_excluded_folder(&mut self, index: usize, folder: usize) {
+        if let Some(row) = self.rows.get_mut(index)
+            && folder < row.excluded_folders.len()
+        {
+            row.excluded_folders.remove(folder);
+        }
+    }
+
+    pub fn update_excluded_folder(&mut self, index: usize, folder: usize, value: String) {
+        if let Some(slot) = self
+            .rows
+            .get_mut(index)
+            .and_then(|row| row.excluded_folders.get_mut(folder))
+        {
+            *slot = value;
+        }
+    }
+
+    /// Stores a folder chosen in the picker relative to the row's save folder. One
+    /// outside it is kept as picked, so the field shows it as invalid instead of
+    /// silently dropping the choice.
+    pub fn pick_excluded_folder(&mut self, index: usize, folder: usize, picked: String) {
+        let Some(row) = self.rows.get(index) else {
+            return;
+        };
+        let value = excluded_folder_within(&row.path, &picked).unwrap_or(picked);
+        self.update_excluded_folder(index, folder, value);
+    }
+
+    /// Every excluded folder of a row that is saved and accepts them names a folder
+    /// inside it; rows without a path are dropped on saving, so they never block it.
+    pub fn excluded_folders_are_valid(&self) -> bool {
+        self.rows
+            .iter()
+            .filter(|r| !r.path.trim().is_empty() && r.accepts_excluded_folders())
+            .all(|r| {
+                r.excluded_folders
+                    .iter()
+                    .all(|f| excluded_folder_is_valid(f))
+            })
+    }
+
+    /// The first problem that keeps these targets from being saved, if any.
+    pub fn validation_error(&self) -> Option<&'static str> {
+        if !self.cloud_paths_are_valid() {
+            Some("Cloud paths must be relative and cannot contain '..'.")
+        } else if !self.excluded_folders_are_valid() {
+            Some(EXCLUDED_FOLDERS_INVALID)
+        } else {
+            None
+        }
     }
 
     pub fn build_targets(&self) -> Vec<SaveTarget> {

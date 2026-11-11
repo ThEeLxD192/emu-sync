@@ -12,6 +12,7 @@ fn target(path: &std::path::Path, kind: SaveTargetType) -> SaveTarget {
         path: path.to_string_lossy().into_owned(),
         kind,
         cloud_path: Some("cloud/name".to_string()),
+        excluded_folders: Vec::new(),
     }
 }
 

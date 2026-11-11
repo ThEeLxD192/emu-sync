@@ -166,6 +166,12 @@ impl EntryFormState {
             return Err(msg.to_string());
         }
 
+        if !self.saves.excluded_folders_are_valid() {
+            let msg = super::save_targets::EXCLUDED_FOLDERS_INVALID;
+            self.error_message = Some(msg.to_string());
+            return Err(msg.to_string());
+        }
+
         let targets = self.saves.scoped_targets();
 
         let trimmed_name = self.name.trim();

@@ -40,6 +40,7 @@ fn rom_targets_prefer_exact_then_stem_then_legacy_and_resolve_types() {
         path: saves_dir.to_str().unwrap().into(),
         kind: SaveTargetType::Unknown,
         cloud_path: Some("  ".into()),
+        excluded_folders: Vec::new(),
     };
     let emulator = Emulator {
         save_targets_by_rom: vec![
@@ -50,6 +51,7 @@ fn rom_targets_prefer_exact_then_stem_then_legacy_and_resolve_types() {
                     path: "stem".into(),
                     kind: SaveTargetType::File,
                     cloud_path: None,
+                    excluded_folders: Vec::new(),
                 }],
             ),
         ],
@@ -83,6 +85,7 @@ fn rom_targets_with_blank_paths_do_not_block_stem_fallback() {
                     path: "/saves/stem_target.srm".into(),
                     kind: SaveTargetType::File,
                     cloud_path: None,
+                    excluded_folders: Vec::new(),
                 }],
             ),
         ],
@@ -143,11 +146,13 @@ fn for_entry_reconciles_stale_target_kinds_with_disk_and_strips_blank_cloud_path
                     path: actual_dir.to_str().unwrap().into(),
                     kind: SaveTargetType::File, // Contradicts disk (is dir)
                     cloud_path: Some("   ".into()),
+                    excluded_folders: Vec::new(),
                 },
                 SaveTarget {
                     path: actual_file.to_str().unwrap().into(),
                     kind: SaveTargetType::Directory, // Contradicts disk (is file)
                     cloud_path: Some("slot/file.sav".into()),
+                    excluded_folders: Vec::new(),
                 },
             ],
             ..Default::default()

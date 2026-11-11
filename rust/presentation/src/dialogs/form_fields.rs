@@ -1,7 +1,7 @@
 //! Form building blocks shared by the entry and game dialogs, styled like Kotlin's
 //! `FormField`, `PathField`, `CloudPathField` and Material filter chips.
 
-use crate::forms::save_targets::cloud_path_is_valid;
+use crate::forms::save_targets::{cloud_path_is_valid, excluded_folder_is_valid};
 use crate::{
     components::{icons::glyph_button, pill::Pill},
     forms::SaveTargetFormState,
@@ -165,6 +165,7 @@ pub(crate) fn path_field(
     value: &mut String,
     placeholder: &str,
     pickers: &[(&str, PickMode)],
+    invalid: bool,
 ) -> (Response, Option<PickMode>) {
     ui.horizontal(|ui| {
         let mut picked = None;
@@ -182,7 +183,7 @@ pub(crate) fn path_field(
             })
             .sum();
         let width = (ui.available_width() - button_width).max(120.0);
-        let field = text_field(ui, id_salt, value, placeholder, width, false);
+        let field = text_field(ui, id_salt, value, placeholder, width, invalid);
         for (label, mode) in pickers {
             if tonal_button(ui, label).clicked() {
                 picked = Some(*mode);
@@ -280,6 +281,7 @@ pub(crate) fn save_target_rows(
                     &mut saves.rows[index].path,
                     placeholder,
                     &[("File", PickMode::File), ("Folder", PickMode::Directory)],
+                    false,
                 );
                 if field.changed() {
                     on_save_path_edited(index, saves.rows[index].path.clone());
@@ -307,6 +309,10 @@ pub(crate) fn save_target_rows(
             &row.target_type,
             automatic.get(index).cloned().flatten().as_deref(),
         );
+        if saves.rows[index].accepts_excluded_folders() {
+            ui.add_space(8.0);
+            excluded_folder_rows(ui, id_prefix, saves, index, on_pick_path);
+        }
         ui.add_space(12.0);
     }
     if let Some(index) = remove {
@@ -321,6 +327,70 @@ pub(crate) fn save_target_rows(
                 saves.add_row();
             }
         },
+    );
+}
+
+/// The folders inside save folder `index` that are never synced: one picker row per
+/// folder with a remove button, followed by "+ Add Excluded Folder".
+fn excluded_folder_rows(
+    ui: &mut Ui,
+    id_prefix: &str,
+    saves: &mut SaveTargetFormState,
+    index: usize,
+    on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
+) {
+    field_label(ui, "Excluded folders (optional)");
+    let mut remove = None;
+    for folder in 0..saves.rows[index].excluded_folders.len() {
+        let value = &mut saves.rows[index].excluded_folders[folder];
+        let invalid = !excluded_folder_is_valid(value);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.scope(|ui| {
+                ui.set_width(ui.available_width() - FIELD_HEIGHT - 4.0);
+                let (_, picked) = path_field(
+                    ui,
+                    (id_prefix, "excluded", index, folder),
+                    value,
+                    "Folder inside this save folder",
+                    &[("Folder", PickMode::Directory)],
+                    invalid,
+                );
+                if picked.is_some() {
+                    on_pick_path(
+                        PathTarget::ExcludedFolder {
+                            save: index,
+                            folder,
+                        },
+                        PickMode::Directory,
+                    );
+                }
+            });
+            if remove_button(ui, (id_prefix, "remove_excluded", index, folder)).clicked() {
+                remove = Some(folder);
+            }
+        });
+        if invalid {
+            field_hint(ui, "Choose a folder inside this save folder.", ERROR);
+        }
+        ui.add_space(8.0);
+    }
+    if let Some(folder) = remove {
+        saves.remove_excluded_folder(index, folder);
+    }
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), FIELD_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            if text_button(ui, "+ Add Excluded Folder", PRIMARY).clicked() {
+                saves.add_excluded_folder(index);
+            }
+        },
+    );
+    field_hint(
+        ui,
+        "Files in these folders are never uploaded or downloaded.",
+        ON_SURFACE_DIM,
     );
 }
 

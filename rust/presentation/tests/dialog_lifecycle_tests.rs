@@ -327,6 +327,7 @@ fn editing_an_entry_sends_the_entry_captured_when_the_dialog_opened() {
         path: "/saves/a".to_string(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     }];
     let original = GameEntry::Emulator(original);
     app.state.config = Some(config_with(vec![original.clone()], None));
@@ -444,6 +445,7 @@ fn invalid_cloud_path_disables_game_save() {
             path: "/s".to_string(),
             kind: SaveTargetType::File,
             cloud_path: Some("/abs".to_string()),
+            excluded_folders: Vec::new(),
         }],
     );
     app.take_actions();

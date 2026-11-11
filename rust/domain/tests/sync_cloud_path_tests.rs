@@ -6,6 +6,7 @@ fn target(path: &str, kind: SaveTargetType, cloud: Option<&str>) -> SaveTarget {
         path: path.into(),
         kind,
         cloud_path: cloud.map(str::to_owned),
+        excluded_folders: Vec::new(),
     }
 }
 

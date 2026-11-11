@@ -210,6 +210,7 @@ where
                             &prepared.item.effective_title,
                             &reserved,
                             target.cloud_path.as_deref(),
+                            &target.excluded_folders,
                             true,
                         )
                         .await

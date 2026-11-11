@@ -47,6 +47,7 @@ fn target_resolver_get_save_targets_for_native_and_emulator() {
                 path: "/saves/native.sav".into(),
                 kind: SaveTargetType::File,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             }],
             ..Default::default()
         },
@@ -68,6 +69,7 @@ fn target_resolver_get_save_targets_for_native_and_emulator() {
                 path: "/saves/global.sav".into(),
                 kind: SaveTargetType::File,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             }],
             ..Default::default()
         },
@@ -78,6 +80,7 @@ fn target_resolver_get_save_targets_for_native_and_emulator() {
                     path: "/saves/game1.srm".into(),
                     kind: SaveTargetType::File,
                     cloud_path: None,
+                    excluded_folders: Vec::new(),
                 }],
             ),
             (
@@ -88,6 +91,7 @@ fn target_resolver_get_save_targets_for_native_and_emulator() {
                         path: "/saves/global.sav".into(),
                         kind: SaveTargetType::File,
                         cloud_path: None,
+                        excluded_folders: Vec::new(),
                     },
                 ],
             ),
@@ -121,6 +125,7 @@ fn resolved_save_target_configured_preserves_target_properties() {
                 path: "/saves/game.sav".into(),
                 kind: SaveTargetType::File,
                 cloud_path: Some("custom.sav".into()),
+                excluded_folders: Vec::new(),
             }],
             ..Default::default()
         },
@@ -164,6 +169,7 @@ fn emulator_save_targets_merges_legacy_save_paths_by_rom_and_deduplicates_by_nor
                     path: "/saves/special_b.srm".into(),
                     kind: SaveTargetType::File,
                     cloud_path: None,
+                    excluded_folders: Vec::new(),
                 }],
             ),
             (
@@ -172,6 +178,7 @@ fn emulator_save_targets_merges_legacy_save_paths_by_rom_and_deduplicates_by_nor
                     path: "/saves/shared_duplicate.srm".into(),
                     kind: SaveTargetType::File,
                     cloud_path: None,
+                    excluded_folders: Vec::new(),
                 }],
             ),
             (
@@ -180,6 +187,7 @@ fn emulator_save_targets_merges_legacy_save_paths_by_rom_and_deduplicates_by_nor
                     path: "/saves/shared_duplicate.srm".into(),
                     kind: SaveTargetType::File,
                     cloud_path: Some("custom.srm".into()),
+                    excluded_folders: Vec::new(),
                 }],
             ),
         ],

@@ -11,6 +11,31 @@ pub struct SaveTarget {
     pub path: String,
     pub kind: SaveTargetType,
     pub cloud_path: Option<String>,
+    /// Folders inside a directory target, relative to it, whose files are never synced.
+    pub excluded_folders: Vec<String>,
+}
+impl SaveTarget {
+    /// Whether the file at `relative` (relative to this directory target) lies inside
+    /// one of its excluded folders.
+    pub fn excludes(&self, relative: &str) -> bool {
+        is_excluded(&self.excluded_folders, relative)
+    }
+}
+
+/// Whether the file at `relative` lies inside one of `excluded_folders`, both relative to
+/// the same save folder and separated by `/` or `\`. A folder with no named segment
+/// excludes nothing, so a blank entry never hides the whole save.
+pub fn is_excluded(excluded_folders: &[String], relative: &str) -> bool {
+    let file = relative_segments(relative);
+    excluded_folders.iter().any(|folder| {
+        let folder = relative_segments(folder);
+        !folder.is_empty() && file.len() > folder.len() && file.starts_with(&folder)
+    })
+}
+fn relative_segments(path: &str) -> Vec<&str> {
+    path.split(['/', '\\'])
+        .filter(|s| !s.is_empty() && *s != ".")
+        .collect()
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

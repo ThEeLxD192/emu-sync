@@ -300,6 +300,7 @@ fn sample_native(name: &str, save_path: &str) -> GameEntry {
                 path: save_path.to_string(),
                 kind: SaveTargetType::File,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             }],
             ..EntryCommon::default()
         },
@@ -425,6 +426,7 @@ async fn directory_sync_mixed_upload_and_download_decisions_prompts_single_confl
                 path: "/saves/dir".to_string(),
                 kind: SaveTargetType::Directory,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             }],
             ..EntryCommon::default()
         },

@@ -339,6 +339,7 @@ fn pick_cover_file(request_id: u64) -> UiAction {
         request_id,
         target: PathTarget::CoverPath,
         mode: PickMode::File,
+        initial_path: String::new(),
     }
 }
 

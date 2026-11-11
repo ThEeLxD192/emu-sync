@@ -124,11 +124,13 @@ async fn multiple_directory_targets_sharing_folder_evaluates_to_in_sync() {
         path: "/game/saves/savedata".into(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
     let target2 = SaveTarget {
         path: "/game/saves/trophies".into(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
 
     let entry = GameEntry::Native(NativeGame {
@@ -284,6 +286,7 @@ async fn cross_file_upload_and_download_in_same_entry_reports_conflict_instead_o
         path: "/saves/gamedir".into(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
     let entry = GameEntry::Native(NativeGame {
         common: EntryCommon {
@@ -346,6 +349,7 @@ async fn unresolvable_or_traversal_remote_file_in_directory_reports_error_status
         path: "/saves/dir".into(),
         kind: SaveTargetType::Directory,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
     let entry = GameEntry::Native(NativeGame {
         common: EntryCommon {

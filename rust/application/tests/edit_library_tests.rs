@@ -372,6 +372,7 @@ fn build_game_entry_applies_overrides() {
             path: "/saves/smw.srm".into(),
             kind: SaveTargetType::File,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         }],
         cover_path: Some("/covers/smw.png".into()),
         title: Some("SMW Customized".into()),
@@ -400,6 +401,7 @@ fn build_game_entry_clears_overrides_and_handles_native_games() {
             path: "/saves/smw.srm".into(),
             kind: SaveTargetType::File,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         }],
     )];
 
@@ -442,6 +444,7 @@ fn build_game_entry_clears_overrides_and_handles_native_games() {
             path: "/saves/native.dat".into(),
             kind: SaveTargetType::File,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         }],
         cover_path: Some("/covers/native.jpg".into()),
         title: Some("Renamed Native Game".into()),
@@ -470,6 +473,7 @@ fn build_game_entry_updates_existing_rom_overrides_and_resolves_rom_name() {
             path: "/saves/old.mcd".into(),
             kind: SaveTargetType::File,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         }],
     )];
 
@@ -486,6 +490,7 @@ fn build_game_entry_updates_existing_rom_overrides_and_resolves_rom_name() {
             path: "/saves/new.mcd".into(),
             kind: SaveTargetType::File,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         }],
         cover_path: Some("/covers/ps2.png".into()),
         title: Some("New ISO Title".into()),
@@ -649,11 +654,13 @@ fn build_game_entry_sanitizes_targets_and_filters_empty_in_emulator_and_native()
                 path: "   ".into(),
                 kind: SaveTargetType::File,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             },
             SaveTarget {
                 path: "  /saves/smw.srm  ".into(),
                 kind: SaveTargetType::File,
                 cloud_path: Some("  smw_cloud.srm  ".into()),
+                excluded_folders: Vec::new(),
             },
         ],
         cover_path: None,
@@ -693,6 +700,41 @@ fn build_game_entry_sanitizes_targets_and_filters_empty_in_emulator_and_native()
     } else {
         panic!("expected native");
     }
+}
+
+#[test]
+fn build_game_entry_keeps_excluded_folders_trimmed_and_without_repeats() {
+    let game = SyncGame {
+        entry: make_native("CTR"),
+        name: "CTR".into(),
+        effective_title: "CTR".into(),
+        rom_path: None,
+        save_targets: Vec::new(),
+    };
+    let changes = GameOverrideChanges {
+        targets: vec![SaveTarget {
+            path: "/saves/ctr".into(),
+            kind: SaveTargetType::Directory,
+            cloud_path: Some("Savedata".into()),
+            excluded_folders: vec![
+                " 1/CUSA/RaceReplay ".into(),
+                "  ".into(),
+                "1/CUSA/RaceReplay".into(),
+                "cache".into(),
+            ],
+        }],
+        cover_path: None,
+        title: None,
+    };
+
+    let GameEntry::Native(updated) = build_game_entry(&game, &changes) else {
+        panic!("expected native");
+    };
+
+    assert_eq!(
+        updated.common.save_targets[0].excluded_folders,
+        ["1/CUSA/RaceReplay", "cache"]
+    );
 }
 
 trait CommonMutHelper {
@@ -846,6 +888,7 @@ async fn edit_game_override_merges_onto_latest_config_entry_instead_of_stale_syn
                 path: "/saves/rom_a.srm".into(),
                 kind: SaveTargetType::File,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             }],
         )],
         title_by_rom: vec![("rom_a.sfc".into(), "Title A".into())],
@@ -888,6 +931,7 @@ async fn edit_game_override_merges_onto_latest_config_entry_instead_of_stale_syn
             path: "/saves/rom_b.srm".into(),
             kind: SaveTargetType::File,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         }],
         cover_path: None,
     };

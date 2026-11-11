@@ -236,6 +236,7 @@ where
                         new_title,
                         &reserved,
                         target.cloud_path.as_deref(),
+                        &target.excluded_folders,
                         false,
                     )
                     .await?;

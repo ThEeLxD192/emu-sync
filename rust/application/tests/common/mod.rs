@@ -237,6 +237,7 @@ impl LocalSaveAccess for MockFs {
                     path: p.clone(),
                     kind: SaveTargetType::File,
                     cloud_path: None,
+                    excluded_folders: Vec::new(),
                 });
             }
         }
@@ -550,6 +551,7 @@ pub fn sample_native_game(name: &str, save_path: &str) -> SyncGame {
         path: save_path.to_string(),
         kind: SaveTargetType::File,
         cloud_path: None,
+        excluded_folders: Vec::new(),
     };
     let entry = GameEntry::Native(NativeGame {
         common: EntryCommon {

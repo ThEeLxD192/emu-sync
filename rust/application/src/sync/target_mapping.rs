@@ -550,6 +550,7 @@ where
                     for file in walked {
                         if file.is_file().unwrap_or(false)
                             && let Ok(rel) = file.relative_to(&root)
+                            && !target.excludes(&rel)
                         {
                             *local_names_count.entry(rel).or_default() += 1;
                         }
@@ -562,8 +563,11 @@ where
                 .map(|(name, _)| name)
                 .collect();
 
+            // These cloud names carry no folder, so only a name every folder excludes is
+            // certainly unwanted; any other may still belong to a folder that keeps it.
             let unassigned_names: Vec<_> = legacy_files
                 .iter()
+                .filter(|remote| !legacy.iter().all(|t| t.excludes(&remote.name)))
                 .filter(|remote| {
                     !legacy.iter().any(|t| {
                         self.files

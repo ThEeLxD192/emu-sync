@@ -49,6 +49,7 @@ Ninguna validación Linux cierra Windows. Pendiente de validación nativa (no co
 - CI Windows de `cargo xtask check` y pruebas de scripts; nunca se ha ejecutado en remoto.
 - Rutas UNC, nombres cortos 8.3, dispositivos reservados (`CON`, `PRN`, `NUL`) y bloqueos de archivos en persistencia local y restauración.
 - `RecoveryStore::has_unresolved` compara rutas locales distinguiendo mayúsculas; en Windows `C:\Saves` y `c:\saves` son la misma partida y una subida incierta podría no bloquear la siguiente si la ruta configurada cambia de grafía.
+- Carpetas excluidas: la carpeta elegida se convierte en relativa con `Path::strip_prefix`, que distingue mayúsculas; si la ruta de guardado escrita difiere en grafía (`C:\Saves` frente a `c:\saves`), la exclusión elegida queda marcada como inválida.
 - Procesos: `tasklist` con `CREATE_NO_WINDOW` y sondeos en `spawn_blocking`; PID exacto leyendo el segundo campo CSV de `tasklist /FO CSV /NH`; seguimiento de procesos de juego.
 - Selector `rfd` sin ventana padre (que no quede detrás de la app).
 - Lanzadores Steam con PowerShell y manifiesto JSON.

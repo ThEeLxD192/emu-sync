@@ -132,7 +132,7 @@ fn concurrent_config_updates_merge_and_legacy_targets_keep_paths() {
 fn literal_config_preserves_all_nondefault_fields_and_ordered_titles() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.json");
-    let literal = r#"{"googleDrive":{"clientId":"client","clientSecret":"secret","refreshToken":"refresh"},"entries":[{"type":"emulator","name":"System","executablePath":"/bin/emu","arguments":["--game","{ROM}"],"romsDirectory":"/roms","extensions":["iso","bin"],"savePaths":["/synthetic/system-file"],"saveTargets":[{"path":"/synthetic/system-file","type":"file","cloudPath":"slot/save.dat"},{"path":"/synthetic/system-dir","type":"directory","cloudPath":"profile"},{"path":"/synthetic/unknown","type":"unknown","cloudPath":"legacy"}],"savePathsByRom":{"Game.iso":["/synthetic/game-file"]},"saveTargetsByRom":{"Game.iso":[{"path":"/synthetic/game-file","type":"file","cloudPath":"game.sav"}]},"coverPathByRom":{"Game.iso":"/covers/game.png"},"titleByRom":{"first":"One","second":"Two"},"group":"Console","cloudFolder":"Existing saves","driveFileId":"remote-system","steamAppId":-123,"steamProcessName":"emu-process","fullscreenArgs":"--fullscreen","coversDirectory":"/covers"},{"type":"native","name":"Native","executablePath":"/bin/game","arguments":["--safe"],"savePaths":["/synthetic/native-file"],"saveTargets":[{"path":"/synthetic/native-file","type":"file","cloudPath":"native.sav"}],"waitForProcess":"game-process","group":"PC","cloudFolder":"Native saves","driveFileId":"remote-native","steamAppId":456,"coverPath":"/covers/native.png"}]}"#;
+    let literal = r#"{"googleDrive":{"clientId":"client","clientSecret":"secret","refreshToken":"refresh"},"entries":[{"type":"emulator","name":"System","executablePath":"/bin/emu","arguments":["--game","{ROM}"],"romsDirectory":"/roms","extensions":["iso","bin"],"savePaths":["/synthetic/system-file"],"saveTargets":[{"path":"/synthetic/system-file","type":"file","cloudPath":"slot/save.dat"},{"path":"/synthetic/system-dir","type":"directory","cloudPath":"profile","excludedFolders":["replays","cache/tmp"]},{"path":"/synthetic/unknown","type":"unknown","cloudPath":"legacy"}],"savePathsByRom":{"Game.iso":["/synthetic/game-file"]},"saveTargetsByRom":{"Game.iso":[{"path":"/synthetic/game-file","type":"file","cloudPath":"game.sav"}]},"coverPathByRom":{"Game.iso":"/covers/game.png"},"titleByRom":{"first":"One","second":"Two"},"group":"Console","cloudFolder":"Existing saves","driveFileId":"remote-system","steamAppId":-123,"steamProcessName":"emu-process","fullscreenArgs":"--fullscreen","coversDirectory":"/covers"},{"type":"native","name":"Native","executablePath":"/bin/game","arguments":["--safe"],"savePaths":["/synthetic/native-file"],"saveTargets":[{"path":"/synthetic/native-file","type":"file","cloudPath":"native.sav"}],"waitForProcess":"game-process","group":"PC","cloudFolder":"Native saves","driveFileId":"remote-native","steamAppId":456,"coverPath":"/covers/native.png"}]}"#;
     fs::write(&path, literal).unwrap();
     let store = ConfigManager::new(&path).unwrap();
     let config = store.load().unwrap();
@@ -146,6 +146,11 @@ fn literal_config_preserves_all_nondefault_fields_and_ordered_titles() {
     };
     assert_eq!(emu.title_by_rom[0].0, "first");
     assert_eq!(emu.title_by_rom[1].0, "second");
+    assert_eq!(
+        emu.common.save_targets[1].excluded_folders,
+        ["replays", "cache/tmp"]
+    );
+    assert!(emu.common.save_targets[0].excluded_folders.is_empty());
 }
 
 #[test]

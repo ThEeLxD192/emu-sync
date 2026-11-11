@@ -152,6 +152,7 @@ fn desktop_save_path_handles_pre_epoch_timestamps_normalization_and_rom_targets(
                 path: retro_str.into(),
                 kind: SaveTargetType::Unknown,
                 cloud_path: None,
+                excluded_folders: Vec::new(),
             }],
         )],
         ..Emulator::default()

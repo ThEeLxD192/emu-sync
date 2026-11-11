@@ -417,6 +417,7 @@ fn restore_fields(
         &mut form.restore_destination_folder,
         "Choose a destination folder with the Folder button",
         &[("Folder", PickMode::Directory)],
+        false,
     );
     if let Some(mode) = picked {
         on_pick_path(PathTarget::RestoreDestination, mode);

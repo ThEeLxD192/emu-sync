@@ -482,6 +482,7 @@ async fn complete_save_setup_cancels_bridge_when_category_deleted_or_persists_an
         path: "/saves/zelda.sav".into(),
         cloud_path: Some("zelda.sav".into()),
         kind: SaveTargetType::File,
+        excluded_folders: Vec::new(),
     };
     harness
         .coordinator
@@ -542,6 +543,7 @@ async fn complete_save_setup_without_a_pending_request_writes_nothing() {
                 path: "/saves/orphan.sav".into(),
                 cloud_path: None,
                 kind: SaveTargetType::File,
+                excluded_folders: Vec::new(),
             }],
             title: Some("Orphan".into()),
             cover_path: None,

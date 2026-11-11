@@ -1,6 +1,6 @@
 //! Save target rows and cloud path validation.
 
-use emusync_domain::library::SaveTargetType;
+use emusync_domain::library::{SaveTarget, SaveTargetType};
 use emusync_presentation::SaveTargetFormState;
 
 #[test]
@@ -114,4 +114,71 @@ fn rows_without_local_path_are_dropped_from_targets() {
 
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].path, "/real");
+}
+
+fn ctr_folder() -> SaveTargetFormState {
+    let mut form = SaveTargetFormState::default();
+    form.update_path(0, "/saves/ctr/".to_string());
+    form.update_type(0, SaveTargetType::Directory);
+    form
+}
+
+#[test]
+fn picked_excluded_folder_is_stored_relative_to_its_save_folder() {
+    let mut form = ctr_folder();
+    form.add_excluded_folder(0);
+    form.add_excluded_folder(0);
+
+    form.pick_excluded_folder(0, 0, "/saves/ctr/1/CUSA/RaceReplay".to_string());
+    form.pick_excluded_folder(0, 1, "/saves/ctr/cache/".to_string());
+
+    assert_eq!(
+        form.rows[0].excluded_folders,
+        ["1/CUSA/RaceReplay", "cache"]
+    );
+    assert_eq!(form.validation_error(), None);
+    assert_eq!(
+        form.build_targets()[0].excluded_folders,
+        ["1/CUSA/RaceReplay", "cache"]
+    );
+}
+
+#[test]
+fn a_folder_outside_the_save_folder_or_the_save_folder_itself_blocks_saving() {
+    for picked in ["/saves/other/replays", "/saves/ctr", "/saves/ctrl/replays"] {
+        let mut form = ctr_folder();
+        form.add_excluded_folder(0);
+        form.pick_excluded_folder(0, 0, picked.to_string());
+
+        assert_eq!(form.rows[0].excluded_folders, [picked], "{picked}");
+        assert!(form.validation_error().is_some(), "{picked}");
+    }
+    let mut typed = ctr_folder();
+    typed.add_excluded_folder(0);
+    typed.update_excluded_folder(0, 0, "../replays".to_string());
+    assert!(typed.validation_error().is_some());
+}
+
+#[test]
+fn excluded_folders_survive_loading_and_are_dropped_for_files_and_blanks() {
+    let loaded = SaveTargetFormState::from_targets(&[SaveTarget {
+        path: "/saves/ctr".into(),
+        kind: SaveTargetType::Directory,
+        cloud_path: None,
+        excluded_folders: vec!["replays".into()],
+    }]);
+    assert_eq!(loaded.build_targets()[0].excluded_folders, ["replays"]);
+
+    let mut form = ctr_folder();
+    form.add_excluded_folder(0);
+    form.add_excluded_folder(0);
+    form.update_excluded_folder(0, 1, "replays".to_string());
+    assert_eq!(form.build_targets()[0].excluded_folders, ["replays"]);
+
+    form.remove_excluded_folder(0, 1);
+    form.update_excluded_folder(0, 0, "/not/inside".to_string());
+    form.toggle_type(0);
+    assert_eq!(form.rows[0].target_type, SaveTargetType::File);
+    assert_eq!(form.validation_error(), None);
+    assert!(form.build_targets()[0].excluded_folders.is_empty());
 }

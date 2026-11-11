@@ -19,6 +19,7 @@ fn legacy_targets() -> Vec<SaveTarget> {
             path: path.into(),
             kind: SaveTargetType::Directory,
             cloud_path: None,
+            excluded_folders: Vec::new(),
         })
         .collect()
 }

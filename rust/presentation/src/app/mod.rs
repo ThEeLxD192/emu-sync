@@ -144,6 +144,9 @@ impl EmuSyncApp {
                 form.saves.update_path(index, path);
                 form.saves.update_type(index, picked_kind);
             }
+            (ActiveDialog::Entry(form), PathTarget::ExcludedFolder { save, folder }) => {
+                form.saves.pick_excluded_folder(save, folder, path);
+            }
             (ActiveDialog::GameEdit { form, .. }, PathTarget::CoverPath) => form.cover_path = path,
             (ActiveDialog::GameEdit { form, .. }, PathTarget::RestoreDestination) => {
                 form.restore_destination_folder = path
@@ -151,6 +154,9 @@ impl EmuSyncApp {
             (ActiveDialog::GameEdit { form, .. }, PathTarget::SavePath(index)) => {
                 form.saves.update_path(index, path);
                 form.saves.update_type(index, picked_kind);
+            }
+            (ActiveDialog::GameEdit { form, .. }, PathTarget::ExcludedFolder { save, folder }) => {
+                form.saves.pick_excluded_folder(save, folder, path);
             }
             _ => {}
         }

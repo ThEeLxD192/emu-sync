@@ -93,6 +93,7 @@ impl SaveTargetAccess for LocalSaveTargets {
                     path,
                     kind: SaveTargetType::File,
                     cloud_path: Some(name.clone()),
+                    excluded_folders: Vec::new(),
                 });
             }
         }

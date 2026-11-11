@@ -93,6 +93,7 @@ async fn taking_the_request_closes_it_once_and_lets_the_caller_answer() {
         path: "/saves/zelda.sav".to_string(),
         kind: SaveTargetType::File,
         cloud_path: Some("zelda.sav".to_string()),
+        excluded_folders: Vec::new(),
     };
     pending.complete(emusync_domain::sync::SaveSetupResult {
         game: test_game("Zelda"),

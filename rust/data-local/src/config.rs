@@ -235,6 +235,7 @@ pub(crate) fn infer(path: &str) -> SaveTarget {
             Err(_) => SaveTargetType::Unknown,
         },
         cloud_path: None,
+        excluded_folders: Vec::new(),
     }
 }
 pub(crate) fn resolve(target: &mut SaveTarget) {

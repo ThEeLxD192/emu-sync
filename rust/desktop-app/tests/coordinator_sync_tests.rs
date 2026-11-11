@@ -251,6 +251,7 @@ async fn execute_sync_entry_retains_uncertain_upload_error_and_blocks_close() {
                 path: save_path.to_string_lossy().to_string(),
                 cloud_path: Some("save.dat".to_string()),
                 kind: SaveTargetType::File,
+                excluded_folders: Vec::new(),
             }],
             ..Default::default()
         },
