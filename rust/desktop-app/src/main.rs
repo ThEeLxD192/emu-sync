@@ -4,7 +4,7 @@ use emusync_desktop_app::{
     apply_entry_games_scanned, apply_steam_state_refreshed,
 };
 use emusync_domain::config::ConfigurationStore;
-use emusync_platform_desktop::SteamShortcutManager;
+use emusync_platform_desktop::{SteamShortcutManager, is_gamescope_session};
 use emusync_presentation::{
     EmuSyncApp, actions::UiAction, model::AppStatus, theme::configure_egui_theme,
 };
@@ -21,7 +21,7 @@ use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::{Window, WindowId},
+    window::{Fullscreen, Window, WindowId},
 };
 
 struct App {
@@ -47,13 +47,15 @@ impl ApplicationHandler for App {
             return;
         }
         let result = (|| -> Result<_, Box<dyn std::error::Error>> {
-            let window = Arc::new(
-                event_loop.create_window(
-                    Window::default_attributes()
-                        .with_title("EmuSync")
-                        .with_inner_size(winit::dpi::LogicalSize::new(1080.0, 720.0)),
-                )?,
-            );
+            let mut attributes = Window::default_attributes()
+                .with_title("EmuSync")
+                .with_inner_size(winit::dpi::LogicalSize::new(1080.0, 720.0));
+            if is_gamescope_session() {
+                // Gamescope letterboxes smaller windows and pointer/touch input then misses
+                // what is drawn; filling its output keeps both in the same coordinates.
+                attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
+            }
+            let window = Arc::new(event_loop.create_window(attributes)?);
             let context = egui::Context::default();
             configure_egui_theme(&context);
 
