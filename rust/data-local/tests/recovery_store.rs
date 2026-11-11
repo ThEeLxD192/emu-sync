@@ -16,8 +16,13 @@ fn snapshot(dir: &Path, bytes: &[u8]) -> UploadSnapshot {
     fs::write(&source, bytes).unwrap();
     UploadSnapshot::prepare(&source).unwrap()
 }
+/// Absolute on each platform, as recorded paths always are.
 fn dir_local() -> String {
-    "/saves/save.dat".into()
+    if cfg!(windows) {
+        r"C:\saves\save.dat".into()
+    } else {
+        "/saves/save.dat".into()
+    }
 }
 fn record(snapshot: &UploadSnapshot) -> RecoveryRecord {
     RecoveryRecord {

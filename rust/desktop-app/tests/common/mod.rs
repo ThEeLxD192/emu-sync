@@ -143,8 +143,13 @@ pub fn test_native_entry(name: &str) -> GameEntry {
     GameEntry::Native(NativeGame {
         common: EntryCommon {
             name: name.to_string(),
-            executable_path: "/bin/sh".to_string(),
-            arguments: vec!["-c".to_string(), "exit 0".to_string()],
+            // A process that exits at once on each platform.
+            executable_path: if cfg!(windows) { "cmd" } else { "/bin/sh" }.to_string(),
+            arguments: if cfg!(windows) {
+                vec!["/C".to_string(), "exit 0".to_string()]
+            } else {
+                vec!["-c".to_string(), "exit 0".to_string()]
+            },
             save_paths: vec!["/save.dat".to_string()],
             save_targets: vec![SaveTarget {
                 path: "/save.dat".to_string(),

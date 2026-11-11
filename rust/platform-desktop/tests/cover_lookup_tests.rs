@@ -306,7 +306,12 @@ fn uppercase_extension_and_case_insensitive_stem_are_found_adjacent() {
             &GameEntry::Emulator(emu),
             Some(rom_file.to_str().unwrap()),
         )
-        .unwrap();
+        .unwrap()
+        .expect("the cover is found");
 
-    assert_eq!(found, Some(cover.to_str().unwrap().to_string()));
+    // Same file; Windows may return the requested spelling of a case-insensitive name.
+    assert_eq!(
+        fs::canonicalize(found).unwrap(),
+        fs::canonicalize(&cover).unwrap()
+    );
 }

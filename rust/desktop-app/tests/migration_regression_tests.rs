@@ -4,7 +4,9 @@ use common::{
     read_http_request_async, test_native_entry, wait_for_active_tasks, write_http_json_async,
 };
 use emusync_data_local::ConfigManager;
-use emusync_desktop_app::{AppEvent, CloseState, DesktopCoordinator, DriveEndpoints};
+#[cfg(unix)]
+use emusync_desktop_app::CloseState;
+use emusync_desktop_app::{AppEvent, DesktopCoordinator, DriveEndpoints};
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore, Credentials},
     library::{Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType},
@@ -249,6 +251,8 @@ async fn connected_edits_do_not_change_paths_without_cloud_migration() {
     assert_eq!(manager.load().unwrap(), original);
 }
 
+// The local save failure is injected with a read-only Unix directory.
+#[cfg(unix)]
 #[tokio::test]
 async fn cloud_migration_entry_records_pending_recovery_when_local_config_save_fails_after_remote_rename()
  {
@@ -279,9 +283,6 @@ async fn cloud_migration_entry_records_pending_recovery_when_local_config_save_f
                                     use std::os::unix::fs::PermissionsExt;
                                     let _ = std::fs::set_permissions(&dir_for_perm, std::fs::Permissions::from_mode(0o555));
                                 }
-                                // Read-only directories are a Unix concept here.
-                                #[cfg(not(unix))]
-                                let _ = &dir_for_perm;
                                 let body = r#"{"id":"folder_id","name":"NewCat"}"#;
                                 let _ = write_http_json_async(&mut stream, 200, "OK", body).await;
                             }

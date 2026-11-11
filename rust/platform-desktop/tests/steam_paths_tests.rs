@@ -13,10 +13,12 @@ use std::{
 use tempfile::tempdir;
 
 fn set_mtime(dir: &Path, seconds: u64) {
-    fs::File::open(dir)
-        .unwrap()
-        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds))
-        .unwrap();
+    // `File::open` cannot open a directory on Windows; filetime handles both platforms.
+    filetime::set_file_mtime(
+        dir,
+        filetime::FileTime::from_system_time(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds)),
+    )
+    .unwrap();
 }
 
 fn userdata_manager(userdata: &Path) -> SteamShortcutManager {
