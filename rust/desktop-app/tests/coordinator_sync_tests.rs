@@ -109,7 +109,7 @@ async fn failed_game_process_emits_error_and_does_not_send_idle() {
     let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
     let mut entry = test_native_entry("Game");
     if let GameEntry::Native(ref mut n) = entry {
-        n.common.arguments = vec!["-c".to_string(), "exit 1".to_string()];
+        (n.common.executable_path, n.common.arguments) = common::shell_exit(1);
     }
     manager
         .update(|_| AppConfig {
@@ -154,7 +154,7 @@ async fn connected_launch_with_game_exit_error_preserves_error_and_does_not_send
     let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
     let mut entry = test_native_entry("Game");
     if let GameEntry::Native(ref mut n) = entry {
-        n.common.arguments = vec!["-c".to_string(), "exit 1".to_string()];
+        (n.common.executable_path, n.common.arguments) = common::shell_exit(1);
     }
     manager
         .update(|_| AppConfig {

@@ -139,17 +139,27 @@ pub fn synthetic_credentials(root: &std::path::Path) -> RecoveryCredentials<Conf
     RecoveryCredentials::new(store, snapshot, config)
 }
 
+/// Executable and arguments of a process that exits at once with `code` on each platform.
+pub fn shell_exit(code: i32) -> (String, Vec<String>) {
+    if cfg!(windows) {
+        (
+            "cmd".to_string(),
+            vec!["/C".to_string(), format!("exit {code}")],
+        )
+    } else {
+        (
+            "/bin/sh".to_string(),
+            vec!["-c".to_string(), format!("exit {code}")],
+        )
+    }
+}
+
 pub fn test_native_entry(name: &str) -> GameEntry {
     GameEntry::Native(NativeGame {
         common: EntryCommon {
             name: name.to_string(),
-            // A process that exits at once on each platform.
-            executable_path: if cfg!(windows) { "cmd" } else { "/bin/sh" }.to_string(),
-            arguments: if cfg!(windows) {
-                vec!["/C".to_string(), "exit 0".to_string()]
-            } else {
-                vec!["-c".to_string(), "exit 0".to_string()]
-            },
+            executable_path: shell_exit(0).0,
+            arguments: shell_exit(0).1,
             save_paths: vec!["/save.dat".to_string()],
             save_targets: vec![SaveTarget {
                 path: "/save.dat".to_string(),
