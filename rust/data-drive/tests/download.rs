@@ -51,7 +51,9 @@ async fn cancellation_of_stalled_download_preserves_destination_and_cleans_stage
                         .file_name()
                         .to_string_lossy()
                         .starts_with(".emusync-download-")
-                        && entry.metadata().is_ok_and(|m| m.len() == 7)
+                        // Not `entry.metadata()`: on Windows the directory entry keeps a
+                        // stale size while the staging file is open for writing.
+                        && std::fs::metadata(entry.path()).is_ok_and(|m| m.len() == 7)
                 });
             if staged {
                 break;

@@ -215,7 +215,9 @@ async fn cancelled_tracked_download_waits_for_staging_cleanup_and_keeps_save() {
                     e.file_name()
                         .to_string_lossy()
                         .starts_with(".emusync-download-")
-                        && e.metadata().is_ok_and(|m| m.len() == 7)
+                        // Not `e.metadata()`: on Windows the directory entry keeps a stale
+                        // size while the staging file is open for writing.
+                        && std::fs::metadata(e.path()).is_ok_and(|m| m.len() == 7)
                 });
             if staged {
                 break;
