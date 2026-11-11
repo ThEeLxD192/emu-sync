@@ -323,6 +323,14 @@ impl ApplicationHandler for App {
                             self.emusync_app
                                 .apply_detected_save_type(index, &path, kind);
                         }
+                        AppEvent::ExitRequested => {
+                            self.close_notice = false;
+                            self.closing = true;
+                            if let Some(coordinator) = &self.coordinator {
+                                coordinator.begin_close();
+                            }
+                            self.operations.begin_close();
+                        }
                         AppEvent::CloseNotice(notice) => {
                             self.close_notice = true;
                             self.emusync_app.state.status = AppStatus::Error { message: notice };

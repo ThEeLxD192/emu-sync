@@ -37,6 +37,8 @@ pub enum AppEvent {
     StatusChanged(AppStatus),
     Toast(String),
     UpdateStateChanged(UpdateState),
+    /// An installed update asks the application to close normally.
+    ExitRequested,
     PathPicked {
         /// The id of the `PickPath` request this answers.
         request_id: u64,

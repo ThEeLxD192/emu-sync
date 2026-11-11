@@ -63,7 +63,8 @@ async fn invalid_drive_connect_is_rejected_and_preserves_credentials() {
     assert!(events.iter().any(
         |event| matches!(event, AppEvent::Toast(message) if message.contains("cannot be empty"))
     ));
-    assert!(events.iter().any(|event| matches!(event, AppEvent::Toast(message) if message.contains("Updates are not yet available"))));
+    // Development builds without a controlled release server never contact GitHub.
+    assert!(events.iter().any(|event| matches!(event, AppEvent::Toast(message) if message.contains("disabled in development builds"))));
 }
 
 #[tokio::test]

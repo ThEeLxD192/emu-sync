@@ -5,11 +5,13 @@ pub mod interaction;
 pub mod library;
 pub mod platform;
 pub mod sync;
+pub mod updates;
 
 pub use composition::DriveEndpoints;
 pub use interaction::{ConflictResolver, InteractionControls, PendingSaveSetup, RetryRunner};
 pub use platform::PlatformServices;
 pub use sync::resolve_effective_targets;
+pub use updates::{UpdateServices, UpdateSourceConfig};
 
 use crate::{
     AuthorizedTransferFailure, CloseState, OperationFailure, OperationSupervisor,
@@ -22,7 +24,7 @@ use crate::{
     target_types::{resolve_entry_target_kinds, resolve_target_kinds},
 };
 use composition::{BuiltOrchestrator, drive_connected, format_epoch_ms};
-use emusync_application::library::LoadLibrary;
+use emusync_application::{UpdateState, library::LoadLibrary};
 use emusync_data_drive::{DriveHttpPolicy, InteractiveOAuth, ResumableUpload, TransferProgress};
 use emusync_data_local::{
     ConfigManager, LocalSaveTargets, RecoveryCredentials, RecoveryStore, TrackedError,
@@ -51,6 +53,8 @@ use std::sync::{
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 
+const UPDATES_DISABLED: &str = "Updates are disabled in development builds. Set EMUSYNC_UPDATE_BASE_URL to a test release server.";
+
 /// Desktop application coordinator managing async operations and state events.
 #[derive(Clone)]
 pub struct DesktopCoordinator {
@@ -67,6 +71,7 @@ pub struct DesktopCoordinator {
     pub active_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     pub pending_recovery: Arc<Mutex<Option<String>>>,
     pub is_admitted: Arc<AtomicBool>,
+    pub updates: UpdateServices,
 }
 
 impl DesktopCoordinator {
@@ -94,6 +99,12 @@ impl DesktopCoordinator {
         };
 
         let interaction = InteractionControls::new(event_tx.clone(), redraw.clone());
+        let updates = UpdateServices::new(
+            UpdateSourceConfig::for_this_build(),
+            event_tx.clone(),
+            redraw.clone(),
+            tokio_handle.clone(),
+        );
 
         Self {
             config_manager,
@@ -108,7 +119,19 @@ impl DesktopCoordinator {
             active_tasks: Arc::new(Mutex::new(Vec::new())),
             pending_recovery: Arc::new(Mutex::new(None)),
             is_admitted: Arc::new(AtomicBool::new(false)),
+            updates,
         }
+    }
+
+    /// Replaces where releases are checked and downloaded from.
+    pub fn with_update_source(mut self, source: UpdateSourceConfig) -> Self {
+        self.updates = UpdateServices::new(
+            source,
+            self.event_tx.clone(),
+            self.redraw.clone(),
+            self.tokio_handle.clone(),
+        );
+        self
     }
 
     pub fn with_endpoints(mut self, endpoints: DriveEndpoints) -> Self {
@@ -216,8 +239,48 @@ impl DesktopCoordinator {
         }
     }
 
+    /// Checks for a newer release; a manual check also reports when there is none.
+    pub fn check_for_updates(&self, manual: bool) {
+        if !self.updates.is_enabled() {
+            if manual {
+                self.send_toast(UPDATES_DISABLED);
+            }
+            return;
+        }
+        let coordinator = self.clone();
+        self.updates.check(move |state| {
+            if !manual {
+                return;
+            }
+            match state {
+                UpdateState::Idle => coordinator.send_toast("EmuSync is up to date."),
+                UpdateState::Error(message) => coordinator.send_toast(message),
+                _ => {}
+            }
+        });
+    }
+
+    /// Installs the downloaded update and closes; never while a sync is running.
+    pub fn restart_for_update(&self, path: std::path::PathBuf) {
+        if !self.try_acquire_admission() {
+            self.send_toast("Finish the current operation before restarting to update.");
+            return;
+        }
+        let coordinator = self.clone();
+        let handle = self.tokio_handle.spawn(async move {
+            // When it is not applied the update state already explains why.
+            coordinator
+                .updates
+                .restart(path.to_string_lossy().into_owned())
+                .await;
+            coordinator.release_admission();
+        });
+        self.track_task(handle);
+    }
+
     pub fn begin_close(&self) {
         self.closing.store(true, Ordering::SeqCst);
+        self.updates.abort();
         self.interaction.cancel_active();
         if let Ok(guard) = self.supervisor.try_lock() {
             guard.cancel();
@@ -264,6 +327,8 @@ impl DesktopCoordinator {
 
     /// Loads initial config, scans ROMs, verifies Steam registrations, and checks RecoveryStore.
     pub fn initialize(&self) {
+        // Startup check, silent unless a newer release exists.
+        self.check_for_updates(false);
         let loader = LoadLibrary::new(self.config_manager.clone(), self.platform.steam.clone());
         match loader.load() {
             Ok(config) => {
@@ -491,11 +556,15 @@ impl DesktopCoordinator {
             UiAction::UnlinkDrive => {
                 self.unlink_drive();
             }
-            UiAction::CheckForUpdates { .. }
-            | UiAction::DownloadUpdate(_)
-            | UiAction::RestartApp(_) => {
-                self.send_toast("Updates are not yet available in this development build.");
+            UiAction::CheckForUpdates { manual } => self.check_for_updates(manual),
+            UiAction::DownloadUpdate(info) => {
+                if self.updates.is_enabled() {
+                    self.updates.download(info);
+                } else {
+                    self.send_toast(UPDATES_DISABLED);
+                }
             }
+            UiAction::RestartApp(path) => self.restart_for_update(path),
             UiAction::ResolveConflict(decision) => {
                 self.interaction.resolve_conflict(decision);
             }
