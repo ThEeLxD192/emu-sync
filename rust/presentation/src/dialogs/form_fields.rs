@@ -319,3 +319,53 @@ fn text_width(ui: &Ui, text: &str) -> f32 {
         .size()
         .x
 }
+
+/// Masked text field with an eye button that reveals the value while toggled.
+pub(crate) fn secret_field(
+    ui: &mut Ui,
+    id_salt: impl egui::AsIdSalt,
+    value: &mut String,
+    placeholder: &str,
+    revealed: &mut bool,
+) -> Response {
+    let id = ui.make_persistent_id(id_salt);
+    let focused = ui.memory(|m| m.has_focus(id));
+    let frame = Frame::new()
+        .fill(Color32::TRANSPARENT)
+        .stroke(Stroke::new(1.0, if focused { PRIMARY } else { DIVIDER }))
+        .corner_radius(FIELD_RADIUS)
+        .inner_margin(Margin::symmetric(12, 10));
+    let mut field = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let width = (ui.available_width() - FIELD_HEIGHT - 4.0).max(120.0);
+        field = Some(
+            ui.add(
+                TextEdit::singleline(value)
+                    .id(id)
+                    .frame(frame)
+                    .password(!*revealed)
+                    .hint_text(RichText::new(placeholder).color(ON_SURFACE_DIM.gamma_multiply(0.5)))
+                    .text_color(if focused { ON_BACKGROUND } else { ON_SURFACE })
+                    .font(FontId::proportional(13.0))
+                    .desired_width(width)
+                    .min_size(vec2(width, FIELD_HEIGHT)),
+            ),
+        );
+        let (rect, _) =
+            ui.allocate_exact_size(vec2(FIELD_HEIGHT, FIELD_HEIGHT), egui::Sense::hover());
+        let (icon, tip) = if *revealed {
+            (glyph::EYE_OFF, "Hide")
+        } else {
+            (glyph::EYE, "Show")
+        };
+        let eye = ui.make_persistent_id(("reveal", id));
+        if glyph_button(ui, eye, rect, icon, 20.0, ON_SURFACE_DIM)
+            .on_hover_text(tip)
+            .clicked()
+        {
+            *revealed = !*revealed;
+        }
+    });
+    field.expect("field is always rendered")
+}

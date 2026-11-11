@@ -61,6 +61,10 @@ pub mod glyph {
     pub const HOURGLASS: &str = "\u{F051F}";
     pub const COMPUTER: &str = "\u{F0379}";
     pub const ERROR_OUTLINE: &str = "\u{F05D6}";
+    pub const INFO: &str = "\u{F02FD}";
+    pub const LINK_OFF: &str = "\u{F0338}";
+    pub const EYE: &str = "\u{F0208}";
+    pub const EYE_OFF: &str = "\u{F0209}";
 }
 
 /// Font family rendering the bold weight of the application font.

@@ -391,6 +391,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut emusync_app = EmuSyncApp::new();
     emusync_app.fullscreen_detector = SteamShortcutManager::detect_fullscreen_args;
+    emusync_app.state.config_path = path.display().to_string();
     let mut app = App {
         window: None,
         state: None,

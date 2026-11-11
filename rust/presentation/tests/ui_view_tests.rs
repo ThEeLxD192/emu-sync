@@ -90,35 +90,6 @@ fn app_opens_and_submits_add_category_modal() {
 }
 
 #[test]
-fn app_opens_drive_setup_and_emits_connect_action() {
-    let mut app = EmuSyncApp::new();
-
-    app.open_drive_setup();
-    assert!(matches!(app.active_dialog, ActiveDialog::DriveSetup(_)));
-
-    if let ActiveDialog::DriveSetup(state) = &mut app.active_dialog {
-        state.client_id = "test-client-id".to_string();
-        state.client_secret = "test-secret".to_string();
-    }
-
-    // Simulate saving credentials
-    app.pending_actions.push(UiAction::ConnectDrive {
-        client_id: "test-client-id".to_string(),
-        client_secret: "test-secret".to_string(),
-    });
-    app.close_dialog();
-
-    let actions = app.take_actions();
-    assert_eq!(
-        actions,
-        vec![UiAction::ConnectDrive {
-            client_id: "test-client-id".to_string(),
-            client_secret: "test-secret".to_string(),
-        }]
-    );
-}
-
-#[test]
 fn app_opens_update_dialog_and_emits_download_action() {
     let mut app = EmuSyncApp::new();
     let info = UpdateInfo {
@@ -491,5 +462,66 @@ fn post_sync_failure_message_reports_partial_progress() {
     assert_eq!(
         post_sync_failed_message("Celeste", "Quota", 1, 2),
         "Celeste closed normally. 1 save(s) synced successfully; 2 save(s) still need to be uploaded.\n\nQuota"
+    );
+}
+
+#[test]
+fn drive_setup_sends_trimmed_credentials_and_flags_blank_ones() {
+    use emusync_presentation::dialogs::DriveSetupDialogState;
+
+    let mut state = DriveSetupDialogState::new("  id.apps  ".into(), "   ".into(), false);
+    assert!(!state.secret_revealed, "the secret starts masked");
+
+    assert_eq!(state.submit(), None, "a blank secret must not connect");
+    assert_eq!(
+        state.error_message.as_deref(),
+        Some("Please enter both Client ID and Client Secret.")
+    );
+
+    state.field_edited();
+    assert_eq!(state.error_message, None, "editing clears the error");
+
+    state.client_secret = " GOCSPX-secret ".into();
+    assert_eq!(
+        state.submit(),
+        Some(("id.apps".to_string(), "GOCSPX-secret".to_string()))
+    );
+}
+
+#[test]
+fn drive_setup_opens_with_stored_credentials_and_closes_on_escape() {
+    use emusync_domain::config::Credentials;
+
+    let ctx = Context::default();
+    let mut app = EmuSyncApp::new();
+    app.state.config_path = "/home/user/.config/emusync/config.json".into();
+    app.state.config = Some(AppConfig {
+        credentials: Some(Credentials {
+            client_id: "id".into(),
+            client_secret: "secret".into(),
+            refresh_token: Some("token".into()),
+        }),
+        entries: Vec::new(),
+    });
+
+    app.open_drive_setup();
+    let ActiveDialog::DriveSetup(state) = &app.active_dialog else {
+        panic!("drive dialog must open");
+    };
+    assert_eq!(
+        (state.client_id.as_str(), state.client_secret.as_str()),
+        ("id", "secret")
+    );
+    assert!(
+        state.is_linked,
+        "a stored refresh token shows the unlink action"
+    );
+
+    run_frames(&ctx, &mut app, vec![Vec::new(), escape()]);
+
+    assert!(matches!(app.active_dialog, ActiveDialog::None));
+    assert!(
+        app.take_actions().is_empty(),
+        "closing must not connect or unlink"
     );
 }

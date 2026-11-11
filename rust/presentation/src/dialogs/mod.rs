@@ -9,7 +9,7 @@ pub mod status_overlay;
 pub mod update_dialog;
 
 pub use confirm_delete::{ConfirmDeleteOutcome, render_confirm_delete_dialog};
-pub use drive_setup::{DriveSetupDialogState, render_drive_setup_dialog};
+pub use drive_setup::{DriveSetupDialogState, DriveSetupEvents, render_drive_setup_dialog};
 pub use entry_dialog::{EntryDialogEvents, render_entry_dialog};
 pub use game_edit_dialog::{GameEditDialogEvents, render_game_edit_dialog};
 pub use status_overlay::{

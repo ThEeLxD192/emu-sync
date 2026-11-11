@@ -8,9 +8,10 @@ use crate::{
     },
     cover_cache::CoverCache,
     dialogs::{
-        ConfirmDeleteOutcome, DriveSetupDialogState, EntryDialogEvents, GameEditDialogEvents,
-        StatusOverlayEvents, render_confirm_delete_dialog, render_drive_setup_dialog,
-        render_entry_dialog, render_game_edit_dialog, render_status_overlay, render_update_dialog,
+        ConfirmDeleteOutcome, DriveSetupDialogState, DriveSetupEvents, EntryDialogEvents,
+        GameEditDialogEvents, StatusOverlayEvents, render_confirm_delete_dialog,
+        render_drive_setup_dialog, render_entry_dialog, render_game_edit_dialog,
+        render_status_overlay, render_update_dialog,
     },
     forms::{EntryFormState, GameEditFormState, entry_form::existing_groups},
     model::{AppStatus, GameItem, PathTarget, PickMode, SaveSetupRequest},
@@ -440,10 +441,13 @@ impl EmuSyncApp {
                 render_drive_setup_dialog(
                     &ctx,
                     drive_state,
-                    &mut |id, sec| connect_args = Some((id, sec)),
-                    &mut || unlink_clicked = true,
-                    &mut || open_cfg = true,
-                    &mut || close_dialog = true,
+                    &self.state.config_path,
+                    DriveSetupEvents {
+                        on_save_connect: &mut |id, sec| connect_args = Some((id, sec)),
+                        on_unlink: &mut || unlink_clicked = true,
+                        on_open_config: &mut || open_cfg = true,
+                        on_close: &mut || close_dialog = true,
+                    },
                 );
 
                 if let Some((client_id, client_secret)) = connect_args {
