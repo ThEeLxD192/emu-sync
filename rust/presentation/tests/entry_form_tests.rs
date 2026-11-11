@@ -327,3 +327,22 @@ fn native_switch_removes_only_the_bare_rom_placeholder() {
     form.apply_type_defaults();
     assert_eq!(form.arguments, "");
 }
+
+// Parity with Kotlin: `EntryFormState.buildEntry` (EntryFormState.kt:55-60) validates
+// only `saves.buildTargets()`, i.e. rows with a local path, so an invalid cloud path on
+// a row without one is dropped with the row instead of rejecting the form.
+#[test]
+fn entry_form_ignores_invalid_cloud_path_on_a_row_without_local_path_like_kotlin() {
+    let mut form = EntryFormState::new(None, &[]);
+    form.entry_type = EntryType::Native;
+    form.name = "Game".to_string();
+    form.executable_path = "/games/game".to_string();
+    form.saves.update_path(0, "/saves".to_string());
+    form.saves.add_row();
+    form.saves.update_cloud_path(1, "../escape".to_string());
+
+    let entry = form.build_entry().expect("the empty row is dropped");
+
+    assert_eq!(entry.common().save_targets.len(), 1);
+    assert_eq!(entry.common().save_targets[0].cloud_path, None);
+}

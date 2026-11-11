@@ -211,3 +211,15 @@ fn blank_title_and_cover_become_none() {
     assert_eq!(result.title, None);
     assert_eq!(result.cover_path, None);
 }
+
+// Parity with Kotlin: `GameEditFormState.canSave` (GameEditFormState.kt:35) checks
+// `saves.cloudPathsAreValid` over every row, so an invalid cloud path blocks saving even
+// on a row without local path. The entry form deliberately differs (EntryFormState.kt:55-60).
+#[test]
+fn game_edit_form_blocks_invalid_cloud_path_on_a_row_without_local_path_like_kotlin() {
+    let item = GameItem::new("Game", native_entry("Game"), None);
+    let mut form = GameEditFormState::new(&item, &[]);
+    form.saves.update_cloud_path(0, "../escape".to_string());
+
+    assert!(!form.can_save(&[]));
+}
