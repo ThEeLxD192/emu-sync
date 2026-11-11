@@ -31,7 +31,7 @@ A modern, offline-first save synchronization manager and universal launcher for 
 
 ### Prerequisites
 
-- **Rust** with the toolchain pinned in `rust-toolchain.toml` (installed automatically by `rustup`), or **Docker** to build the Linux AppImage.
+- **Rust** with the toolchain pinned in `rust-toolchain.toml` (installed automatically by `rustup`) for development, or only **Docker** and **Git** to build the Linux AppImage.
 - **Linux x86_64** (SteamOS, Ubuntu, Arch, Fedora, Debian) or **Windows 10/11 x86_64**
 
 ---
@@ -244,17 +244,21 @@ Use `--config` with a synthetic configuration and isolated save data while devel
 
 #### Linux AppImage (Docker)
 
-Provide an `appimagetool` executable and a new output path:
+Only Docker and Git are needed; Rust and the packaging tools run inside the container:
 
 ```bash
-APPIMAGETOOL=/path/to/appimagetool \
-  ./scripts/build-appimage-container.sh ./EmuSync-x86_64.AppImage
+./scripts/build-appimage-container.sh ./EmuSync-x86_64.AppImage
 ./EmuSync-x86_64.AppImage
 ```
 
-The binary is built on Debian Bookworm. The AppImage carries window-system libraries
-that the host may lack and uses the host's graphics drivers. `scripts/build-appimage.sh`
-packages a binary built on the host instead.
+The output path must not exist yet. Set `CARGO_BUILD_JOBS` to limit compilation
+parallelism. The binary is built on Debian Bookworm with pinned `appimagetool` and
+AppImage runtime versions. The AppImage carries window-system libraries that the host
+may lack and uses the host's graphics drivers.
+
+With Rust, `appimagetool` and `appstreamcli` installed locally,
+`APPIMAGETOOL=/path/to/appimagetool ./scripts/build-appimage.sh <output>` packages a
+binary built on the host instead.
 
 #### Windows installers
 

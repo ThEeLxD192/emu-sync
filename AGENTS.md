@@ -38,7 +38,7 @@ El hook valida una exportación aislada del índice con `cargo xtask quality` y 
 
 ## Empaquetado y publicación
 
-- Linux: `scripts/build-appimage-container.sh` compila en Debian Bookworm (`Dockerfile`) y genera `EmuSync-x86_64.AppImage` con `scripts/build-appimage.sh` y `packaging/linux/AppRun`. Recursos en `packaging/assets/` y `packaging/linux/`.
+- Linux: `scripts/build-appimage-container.sh` genera `EmuSync-x86_64.AppImage` íntegramente en Docker (Debian Bookworm, `Dockerfile` por etapas `build`, `tools` y `package`; `appimagetool` y runtime fijados por versión y SHA-256). El anfitrión solo necesita Docker y Git. `scripts/build-appimage.sh` empaqueta dentro del contenedor o con herramientas locales; usa `packaging/linux/AppRun`. Recursos en `packaging/assets/` y `packaging/linux/`.
 - Windows: `scripts/build-windows-installers.sh` (WiX 4, `packaging/windows/`) es un borrador sin validar; no forma parte de la release.
 - `scripts/bump-version.sh` actualiza `workspace.package.version` y `Cargo.lock`. El workflow de release publica solo el AppImage. Conservar `io.github.ThEeLxD192.EmuSync`, el UpgradeCode Windows `a7b3c291-5f4e-4b28-98e1-d63f5e824c90` y los nombres de artefactos que busca el actualizador.
 

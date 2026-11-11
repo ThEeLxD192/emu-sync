@@ -61,7 +61,11 @@ Terminal=false
 DESKTOP
 cp "$appdir/$app_id.desktop" "$appdir/usr/share/applications/"
 appstreamcli validate --no-net "$appdir/usr/share/metainfo/$app_id.appdata.xml"
-ARCH=x86_64 "$appimagetool" "$appdir" "$tmp/EmuSync-x86_64.AppImage"
+runtime_args=()
+if [[ -n ${APPIMAGE_RUNTIME_FILE:-} ]]; then
+    runtime_args=(--runtime-file "$APPIMAGE_RUNTIME_FILE")
+fi
+ARCH=x86_64 "$appimagetool" "${runtime_args[@]}" "$appdir" "$tmp/EmuSync-x86_64.AppImage"
 # Avoid overwriting any artifact created while the build was running.
 ln "$tmp/EmuSync-x86_64.AppImage" "$output"
 chmod 755 "$output"

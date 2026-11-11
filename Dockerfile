@@ -1,5 +1,8 @@
-# Builds the EmuSync binary and Linux runtime fallback libraries on Debian Bookworm.
-FROM rust:1.99.1-bookworm@sha256:e6f2cff35d0f309acf8433b4f05878ed77092602c5065cc81801177da0bb3a9c
+# Builds the Linux AppImage on Debian Bookworm; only Docker is required on the host.
+# Stage "build": EmuSync binary and runtime fallback libraries.
+FROM rust:1.99.1-bookworm@sha256:e6f2cff35d0f309acf8433b4f05878ed77092602c5065cc81801177da0bb3a9c AS build
+# Optional: limits Cargo parallelism when passed with --build-arg.
+ARG CARGO_BUILD_JOBS
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY rust ./rust
@@ -38,3 +41,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libxau6 libxdmcp6 libbsd0 libmd0 libffi8 \
       > /opt/emusync-runtime/usr/share/doc/emusync-runtime/debian-packages.txt && \
     rm -rf /var/lib/apt/lists/*
+
+# Stage "tools": pinned packaging tools, cached independently of the sources.
+FROM rust:1.99.1-bookworm@sha256:e6f2cff35d0f309acf8433b4f05878ed77092602c5065cc81801177da0bb3a9c AS tools
+ARG APPIMAGETOOL_VERSION=1.9.1
+ARG APPIMAGETOOL_SHA256=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+ARG APPIMAGE_RUNTIME_VERSION=20251108
+ARG APPIMAGE_RUNTIME_SHA256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+RUN apt-get update && apt-get install -y --no-install-recommends appstream && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /opt/appimage && cd /opt/appimage && \
+    curl -fsSL -o appimagetool.AppImage \
+      "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage" && \
+    curl -fsSL -o runtime-x86_64 \
+      "https://github.com/AppImage/type2-runtime/releases/download/${APPIMAGE_RUNTIME_VERSION}/runtime-x86_64" && \
+    printf '%s  %s\n' "$APPIMAGETOOL_SHA256" appimagetool.AppImage "$APPIMAGE_RUNTIME_SHA256" runtime-x86_64 | \
+      sha256sum -c - && \
+    chmod +x appimagetool.AppImage && \
+    ./appimagetool.AppImage --appimage-extract >/dev/null && \
+    mv squashfs-root appimagetool && rm appimagetool.AppImage
+
+# Stage "package": assembles /out/EmuSync-x86_64.AppImage.
+FROM tools AS package
+WORKDIR /src
+COPY --from=build /usr/local/bin/EmuSync /usr/local/bin/EmuSync
+COPY --from=build /opt/emusync-runtime /opt/emusync-runtime
+COPY packaging ./packaging
+COPY scripts/build-appimage.sh ./scripts/build-appimage.sh
+RUN mkdir /out && \
+    EMUSYNC_BINARY=/usr/local/bin/EmuSync EMUSYNC_RUNTIME_DIR=/opt/emusync-runtime \
+    APPIMAGETOOL=/opt/appimage/appimagetool/AppRun APPIMAGE_RUNTIME_FILE=/opt/appimage/runtime-x86_64 \
+      bash scripts/build-appimage.sh /out/EmuSync-x86_64.AppImage
