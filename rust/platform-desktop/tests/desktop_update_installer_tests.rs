@@ -74,7 +74,17 @@ fn apply_windows_update_and_restart_launches_msiexec_for_msi() {
     assert!(success);
 
     let recorded = executed_command.lock().unwrap().clone();
-    assert_eq!(recorded, vec!["msiexec", "/i", msi_file.to_str().unwrap()]);
+    assert_eq!(
+        recorded,
+        vec![
+            "msiexec",
+            "/i",
+            msi_file.to_str().unwrap(),
+            "/passive",
+            "/norestart",
+            "AUTOLAUNCH=1"
+        ]
+    );
 }
 
 #[test]
@@ -264,7 +274,13 @@ fn windows_installer_exit_follows_launcher_and_uppercase_extensions_are_recogniz
     fs::write(&exe, b"").unwrap();
 
     for (file, expected_launch) in [
-        (&msi, format!("launch:msiexec /i {}", msi.display())),
+        (
+            &msi,
+            format!(
+                "launch:msiexec /i {} /passive /norestart AUTOLAUNCH=1",
+                msi.display()
+            ),
+        ),
         (&exe, format!("launch:{}", exe.display())),
     ] {
         let log = log();
