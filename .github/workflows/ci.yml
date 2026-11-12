@@ -80,6 +80,24 @@ jobs:
         shell: bash
         run: cargo build --release --locked -p emusync-desktop-app
 
+      - name: Verify executable properties
+        shell: pwsh
+        run: |
+          $exe = "target/release/emusync-desktop-app.exe"
+          $info = (Get-Item $exe).VersionInfo
+          if ($info.ProductName -ne "EmuSync") { throw "ProductName is '$($info.ProductName)', expected EmuSync" }
+          if (-not $info.FileVersion) { throw "the executable has no file version" }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $exe))
+          $pe = [BitConverter]::ToInt32($bytes, 0x3C)
+          # Subsystem sits 68 bytes into the optional header, after the 4-byte signature and the
+          # 20-byte COFF header: 2 is a GUI application, 3 would open a console window.
+          $subsystem = [BitConverter]::ToUInt16($bytes, $pe + 24 + 68)
+          if ($subsystem -ne 2) { throw "expected the GUI subsystem (2), found $subsystem" }
+          if ([System.Text.Encoding]::ASCII.GetString($bytes) -match "VCRUNTIME140") {
+            throw "the executable depends on the dynamic Visual C++ runtime"
+          }
+          Write-Host "Version $($info.FileVersion), GUI subsystem, static C runtime"
+
       - name: Upload executable
         uses: actions/upload-artifact@v7
         with:
