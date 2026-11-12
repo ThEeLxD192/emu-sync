@@ -1,6 +1,6 @@
 use emusync_domain::library::{
     Emulator, EntryCommon, NativeGame, SaveTarget, SaveTargetType, clean_game_title,
-    folder_cloud_names, is_excluded, normalize_game_key, scope_new_targets,
+    folder_cloud_names, is_excluded, is_excluded_with, normalize_game_key, scope_new_targets,
 };
 
 fn target(path: &str, kind: SaveTargetType, cloud: Option<&str>) -> SaveTarget {
@@ -309,4 +309,14 @@ fn a_blank_excluded_folder_never_hides_the_whole_save() {
     for blank in ["", "/", ".", "./"] {
         assert!(!is_excluded(&[blank.to_string()], "save.dat"), "{blank:?}");
     }
+}
+
+#[test]
+fn excluded_folders_ignore_case_only_where_the_local_file_system_does() {
+    let excluded = vec!["Saves/cache".to_string()];
+    assert!(is_excluded_with(&excluded, "saves/CACHE/x.bin", true));
+    assert!(!is_excluded_with(&excluded, "saves/CACHE/x.bin", false));
+    // Case folding never widens the exclusion beyond the named folder.
+    assert!(!is_excluded_with(&excluded, "saves/cache2/x.bin", true));
+    assert!(!is_excluded_with(&excluded, "SAVES/CACHE", true));
 }

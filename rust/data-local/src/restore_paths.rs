@@ -1,4 +1,4 @@
-use emusync_domain::sync::remote_path_segments;
+use emusync_domain::sync::{is_windows_file_name, remote_path_segments};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
@@ -14,6 +14,11 @@ pub fn resolve_remote_file(root: &Path, name: &str) -> io::Result<Option<PathBuf
     for (index, segment) in segments.iter().enumerate() {
         // A Windows component can contain a drive prefix even within a name.
         if !is_normal_component(segment) {
+            return Ok(None);
+        }
+        // Drive allows names Windows cannot create (`CON`, `a:b`, a trailing dot); writing
+        // one would hit a device or an alternate data stream instead of a plain file.
+        if cfg!(windows) && !is_windows_file_name(segment) {
             return Ok(None);
         }
         resolved.push(segment);

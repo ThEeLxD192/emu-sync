@@ -5,12 +5,12 @@ use crate::{
     file_sha256,
 };
 use emusync_domain::config::{AppConfig, CredentialSnapshot, CredentialTransaction};
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 use emusync_domain::sync::DirectoryDownload;
 use emusync_domain::sync::{
     CloudSaveTransfer, Decision, LocalSaveFiles, RemoteState, plan_tracked,
 };
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 use std::path::Path;
 use std::{fmt, io, path::PathBuf, sync::Arc};
 
@@ -458,7 +458,7 @@ where
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 impl<T> TrackedFileSync<T>
 where
     T: CloudSaveTransfer + Sync,
@@ -511,8 +511,8 @@ where
             folder,
             remote_name,
         } = request;
-        if crate::storage::absolute(&Path::new(root).join(relative))?
-            != crate::storage::absolute(Path::new(local))?
+        if crate::path_identity::local_identity(&Path::new(root).join(relative))?
+            != crate::path_identity::local_identity(Path::new(local))?
         {
             return Err(TrackedError::Local(io::Error::new(
                 io::ErrorKind::InvalidInput,

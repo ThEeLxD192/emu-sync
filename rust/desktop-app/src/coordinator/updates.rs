@@ -1,5 +1,6 @@
 //! Application updates: release checks, AppImage download and replacement on restart.
 
+use super::{UPDATES_DISABLED, UPDATES_PORTABLE};
 use crate::events::AppEvent;
 use emusync_application::{UpdateCoordinator, UpdateState};
 use emusync_data_updates::GitHubUpdateSource;
@@ -22,11 +23,17 @@ pub enum UpdateSourceConfig {
     Controlled(String),
     /// Development build without a controlled server: never contacts GitHub.
     Disabled,
+    /// A portable copy: the installer-based updater would install the machine-wide package
+    /// beside it, so the copy is replaced by hand instead.
+    Portable,
 }
 
 impl UpdateSourceConfig {
     /// Release builds use GitHub; development builds use `EMUSYNC_UPDATE_BASE_URL` or nothing.
     pub fn for_this_build() -> Self {
+        if emusync_data_local::portable_install_directory().is_some() {
+            return Self::Portable;
+        }
         Self::select(
             std::env::var(DEVELOPMENT_SOURCE_VARIABLE).ok(),
             cfg!(debug_assertions),
@@ -52,6 +59,7 @@ type DesktopUpdater =
 #[derive(Clone)]
 pub struct UpdateServices {
     updater: Option<Arc<DesktopUpdater>>,
+    portable: bool,
     tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
     tokio_handle: Handle,
 }
@@ -63,12 +71,14 @@ impl UpdateServices {
         redraw: Arc<dyn Fn() + Send + Sync>,
         tokio_handle: Handle,
     ) -> Self {
+        let portable = source == UpdateSourceConfig::Portable;
         let base_url = match source {
             UpdateSourceConfig::GitHub => None,
             UpdateSourceConfig::Controlled(url) => Some(url),
-            UpdateSourceConfig::Disabled => {
+            UpdateSourceConfig::Disabled | UpdateSourceConfig::Portable => {
                 return Self {
                     updater: None,
+                    portable,
                     tasks: Arc::default(),
                     tokio_handle,
                 };
@@ -102,6 +112,7 @@ impl UpdateServices {
         );
         Self {
             updater: Some(Arc::new(updater)),
+            portable: false,
             tasks: Arc::default(),
             tokio_handle,
         }
@@ -109,6 +120,15 @@ impl UpdateServices {
 
     pub fn is_enabled(&self) -> bool {
         self.updater.is_some()
+    }
+
+    /// Why updates are unavailable, for the user who asked for one.
+    pub fn disabled_message(&self) -> &'static str {
+        if self.portable {
+            UPDATES_PORTABLE
+        } else {
+            UPDATES_DISABLED
+        }
     }
 
     /// Checks for a newer release; `on_done` gets the resulting state.

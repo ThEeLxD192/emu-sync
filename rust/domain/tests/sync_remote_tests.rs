@@ -1,5 +1,6 @@
 use emusync_domain::sync::{
-    RemoteFile, UnverifiedDuplicates, canonical_cloud_files, remote_path_segments,
+    RemoteFile, UnverifiedDuplicates, canonical_cloud_files, canonical_cloud_files_with,
+    is_windows_file_name, name_key, remote_path_segments,
 };
 
 fn remote(id: &str, name: &str, modified: i128, sha: Option<&str>) -> RemoteFile {
@@ -181,4 +182,98 @@ fn verified_duplicates_keep_newest_copy_and_unique_files_need_no_hash() {
     .collect();
     assert_eq!(ids, ["1", "3", "4"]);
     assert_eq!(canonical_cloud_files(&[]), Ok(vec![]));
+}
+
+#[test]
+fn cloud_names_differing_only_in_case_collide_where_the_local_file_system_ignores_case() {
+    let upper = remote("a", "Save.dat", 1, Some("aa"));
+    let lower = remote("b", "save.dat", 2, Some("aa"));
+    let files = [upper.clone(), lower.clone()];
+
+    // Case-sensitive file system: two distinct files, both kept.
+    assert_eq!(
+        canonical_cloud_files_with(&files, false).unwrap(),
+        vec![upper.clone(), lower.clone()]
+    );
+    // Case-insensitive: one local file, so one copy, the newest.
+    assert_eq!(
+        canonical_cloud_files_with(&files, true).unwrap(),
+        vec![lower.clone()]
+    );
+
+    // Different or unverifiable content must never be resolved by guessing.
+    for other_hash in [Some("bb"), None] {
+        let conflicting = remote("b", "save.dat", 2, other_hash);
+        assert_eq!(
+            canonical_cloud_files_with(&[upper.clone(), conflicting.clone()], true),
+            unverified("Save.dat")
+        );
+        assert_eq!(
+            canonical_cloud_files_with(&[upper.clone(), conflicting], false)
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+}
+
+#[test]
+fn name_keys_fold_one_to_one_like_ntfs_and_never_merge_distinct_names() {
+    assert_eq!(name_key("Save.DAT", true), name_key("save.dat", true));
+    assert_eq!(name_key("Étoile", true), name_key("éTOILE", true));
+    // NTFS keeps these distinct: the uppercase of ß expands, so it must not fold.
+    assert_ne!(name_key("straße", true), name_key("STRASSE", true));
+    assert_ne!(name_key("a", true), name_key("b", true));
+    // Case-sensitive comparison leaves names untouched.
+    assert_ne!(name_key("Save", false), name_key("save", false));
+    assert_eq!(name_key("Save", false), "Save");
+}
+
+#[test]
+fn windows_file_names_reject_what_windows_cannot_or_will_not_create_verbatim() {
+    for invalid in [
+        "",
+        "CON",
+        "con",
+        "Nul.txt",
+        "aux.tar.gz",
+        "COM1",
+        "lpt9.log",
+        "COM0",
+        "COM\u{b9}",
+        "CON .txt",
+        "CONIN$",
+        "conout$.x",
+        "save.dat:stream",
+        "a<b",
+        "a>b",
+        "a\"b",
+        "a|b",
+        "a?b",
+        "a*b",
+        "a/b",
+        "a\\b",
+        "tab\there",
+        "ctl\u{1f}",
+        "trailing.",
+        "trailing ",
+    ] {
+        assert!(!is_windows_file_name(invalid), "{invalid:?}");
+    }
+    for valid in [
+        "save.dat",
+        "CONSOLE",
+        "COM10",
+        "LPT",
+        "COMX",
+        "nul_save",
+        "console.sav",
+        ".hidden",
+        "a b",
+        "..hidden",
+        "ÉTÉ.sav",
+        "slot-1",
+    ] {
+        assert!(is_windows_file_name(valid), "{valid:?}");
+    }
 }

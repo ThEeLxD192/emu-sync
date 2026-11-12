@@ -13,7 +13,24 @@ pub fn resolve_config_location(explicit: Option<&OsStr>) -> io::Result<PathBuf> 
         |key| std::env::var_os(key),
         &cwd,
         std::env::consts::OS,
+        portable_install_directory().as_deref(),
     )
+}
+
+/// A file with this name beside the executable makes the installation portable: its data
+/// lives in that folder instead of the user's profile.
+const PORTABLE_MARKER: &str = "portable.txt";
+
+/// The folder of the running executable when it is a portable installation, that is, it holds
+/// the marker file and can be written to. Data and updates both depend on this.
+pub fn portable_install_directory() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    portable_directory(executable.parent()?)
+}
+
+fn portable_directory(directory: &Path) -> Option<PathBuf> {
+    (directory.join(PORTABLE_MARKER).is_file() && writable(directory))
+        .then(|| directory.to_path_buf())
 }
 
 fn nonblank(value: Option<OsString>) -> Option<OsString> {
@@ -24,11 +41,15 @@ fn resolve_with(
     env: impl Fn(&str) -> Option<OsString>,
     cwd: &Path,
     os: &str,
+    portable_install: Option<&Path>,
 ) -> io::Result<PathBuf> {
     if let Some(path) =
         nonblank(explicit.map(OsStr::to_os_string)).or_else(|| nonblank(env("EMUSYNC_CONFIG")))
     {
         return Ok(path.into());
+    }
+    if let Some(directory) = portable_install {
+        return Ok(directory.join("config.json"));
     }
     if let Some(image) = nonblank(env("APPIMAGE")) {
         let image = Path::new(&image);
@@ -98,11 +119,11 @@ mod tests {
             _ => None,
         };
         assert_eq!(
-            resolve_with(Some(OsStr::new("custom.json")), env, &cwd, "linux").unwrap(),
+            resolve_with(Some(OsStr::new("custom.json")), env, &cwd, "linux", None).unwrap(),
             PathBuf::from("custom.json")
         );
         assert_eq!(
-            resolve_with(None, env, &cwd, "linux").unwrap(),
+            resolve_with(None, env, &cwd, "linux", None).unwrap(),
             PathBuf::from("environment.json")
         );
         let env = |key: &str| {
@@ -113,12 +134,12 @@ mod tests {
             }
         };
         assert_eq!(
-            resolve_with(None, env, &cwd, "linux").unwrap(),
+            resolve_with(None, env, &cwd, "linux", None).unwrap(),
             portable.join("config.json")
         );
         std::fs::remove_file(portable.join("config.json")).unwrap();
         assert_eq!(
-            resolve_with(None, env, &cwd, "linux").unwrap(),
+            resolve_with(None, env, &cwd, "linux", None).unwrap(),
             cwd.join("config.json")
         );
         std::fs::remove_file(cwd.join("config.json")).unwrap();
@@ -130,8 +151,38 @@ mod tests {
             }
         };
         assert_eq!(
-            resolve_with(None, env, &cwd, "linux").unwrap(),
+            resolve_with(None, env, &cwd, "linux", None).unwrap(),
             PathBuf::from("/synthetic/xdg/emusync/config.json")
         );
+    }
+
+    #[test]
+    fn a_portable_install_keeps_its_data_beside_the_executable_unless_overridden() {
+        let dir = tempfile::tempdir().unwrap();
+        let none = |_: &str| None;
+        assert_eq!(
+            resolve_with(None, none, dir.path(), "windows", Some(dir.path())).unwrap(),
+            dir.path().join("config.json")
+        );
+        let env = |key: &str| (key == "EMUSYNC_CONFIG").then(|| OsString::from("override.json"));
+        assert_eq!(
+            resolve_with(None, env, dir.path(), "windows", Some(dir.path())).unwrap(),
+            PathBuf::from("override.json")
+        );
+    }
+
+    #[test]
+    fn the_marker_file_alone_makes_a_folder_a_portable_install() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(portable_directory(dir.path()), None);
+        std::fs::write(dir.path().join(PORTABLE_MARKER), "").unwrap();
+        assert_eq!(
+            portable_directory(dir.path()),
+            Some(dir.path().to_path_buf())
+        );
+        // A directory with that name is not the marker.
+        let other = tempfile::tempdir().unwrap();
+        std::fs::create_dir(other.path().join(PORTABLE_MARKER)).unwrap();
+        assert_eq!(portable_directory(other.path()), None);
     }
 }

@@ -411,3 +411,35 @@ fn non_directory_root_symlink_lock_and_non_directory_entry_removal_are_rejected(
         );
     }
 }
+
+/// On Windows `C:\Saves` and `c:\saves` are one save, so an uncertain upload recorded under
+/// one spelling must still block a new write started under the other.
+#[cfg(windows)]
+#[test]
+fn has_unresolved_ignores_letter_case_of_the_local_path_on_windows() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = RecoveryStore::new(&dir.path().join("config.json")).unwrap();
+    let snapshot = snapshot(dir.path(), b"save bytes");
+    let rec = RecoveryRecord {
+        local: r"C:\Saves\Game\save.dat".into(),
+        ..record(&snapshot)
+    };
+    store.stage(&snapshot, rec.clone()).unwrap();
+    for spelling in [r"c:\saves\game\SAVE.DAT", r"C:\SAVES\game\save.dat"] {
+        assert!(
+            store
+                .has_unresolved(Path::new(spelling), &rec.folder, &rec.remote_name)
+                .unwrap(),
+            "{spelling}"
+        );
+    }
+    assert!(
+        !store
+            .has_unresolved(
+                Path::new(r"C:\Saves\Game\other.dat"),
+                &rec.folder,
+                &rec.remote_name
+            )
+            .unwrap()
+    );
+}

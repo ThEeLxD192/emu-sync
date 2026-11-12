@@ -53,6 +53,7 @@ use std::sync::{
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 
+const UPDATES_PORTABLE: &str = "This portable copy does not update itself. Download the latest portable ZIP from the project's releases and replace the folder.";
 const UPDATES_DISABLED: &str = "Updates are disabled in development builds. Set EMUSYNC_UPDATE_BASE_URL to a test release server.";
 
 /// Desktop application coordinator managing async operations and state events.
@@ -243,7 +244,7 @@ impl DesktopCoordinator {
     pub fn check_for_updates(&self, manual: bool) {
         if !self.updates.is_enabled() {
             if manual {
-                self.send_toast(UPDATES_DISABLED);
+                self.send_toast(self.updates.disabled_message());
             }
             return;
         }
@@ -561,7 +562,7 @@ impl DesktopCoordinator {
                 if self.updates.is_enabled() {
                     self.updates.download(info);
                 } else {
-                    self.send_toast(UPDATES_DISABLED);
+                    self.send_toast(self.updates.disabled_message());
                 }
             }
             UiAction::RestartApp(path) => self.restart_for_update(path),
@@ -836,19 +837,24 @@ impl DesktopCoordinator {
                 if retained.has_error()
                     && let Some(err) = retained.quarantine_and_take_error().await
                 {
+                    let detail = err.to_string();
+                    eprintln!("EmuSync: retry failed during transfer: {detail}");
                     coord.record_transfer_error(err);
                     inter
                         .event_tx
                         .send(AppEvent::StatusChanged(AppStatus::Error {
-                            message: "Sync failed during retry. Recovery is required.".into(),
+                            message: format!(
+                                "Sync failed during retry: {detail}. Recovery is required."
+                            ),
                         }))
                         .ok();
                     return;
                 }
                 if let Err(e) = retry_res {
+                    let message = retained.take_notice().unwrap_or(e);
                     inter
                         .event_tx
-                        .send(AppEvent::StatusChanged(AppStatus::Error { message: e }))
+                        .send(AppEvent::StatusChanged(AppStatus::Error { message }))
                         .ok();
                 }
             })

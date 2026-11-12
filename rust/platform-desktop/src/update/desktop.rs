@@ -144,7 +144,16 @@ impl DesktopUpdateInstaller {
         let path_str = downloaded_file.to_string_lossy();
 
         if name.ends_with(".msi") {
-            (self.windows_launcher)(&["msiexec", "/i", &path_str])?;
+            // Passive shows progress without questions, and AUTOLAUNCH makes the installed
+            // version open itself, because this process exits right after launching.
+            (self.windows_launcher)(&[
+                "msiexec",
+                "/i",
+                &path_str,
+                "/passive",
+                "/norestart",
+                "AUTOLAUNCH=1",
+            ])?;
         } else if name.ends_with(".exe") {
             (self.windows_launcher)(&[&path_str])?;
         } else {

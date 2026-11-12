@@ -1,0 +1,105 @@
+name: Windows Packages
+
+# Builds the MSI and the portable ZIP, then installs, upgrades from a previous release,
+# reinstalls and removes the MSI on the runner and checks each step. The runner is a
+# disposable machine, so touching Program Files is safe here. Run it by hand to get packages
+# from any branch; the release workflow runs it first and publishes only if it passes.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_type:
+        description: SemVer bump to apply before building; empty builds the checked-out version
+        type: string
+        default: ''
+      previous:
+        description: "'latest' upgrades from the newest release that has an MSI; anything else uses the last Kotlin release"
+        type: string
+        default: kotlin
+
+permissions:
+  contents: read
+
+jobs:
+  windows-packages:
+    name: Build and verify Windows installers
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Apply Candidate Version
+        if: inputs.release_type
+        shell: bash
+        run: |
+          chmod +x scripts/bump-version.sh
+          ./scripts/bump-version.sh "${{ inputs.release_type }}"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+
+      - name: Install WiX 4
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 4.0.5
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & "$env:USERPROFILE\.dotnet\tools\wix.exe" extension add -g WixToolset.UI.wixext/4.0.5
+
+      - name: Build the installers
+        shell: bash
+        run: |
+          mkdir -p dist
+          bash scripts/build-windows-installers.sh dist
+
+      - name: Download the release to upgrade from
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS: ${{ inputs.previous }}
+        run: |
+          set -euo pipefail
+          tag=v1.2.1
+          if [[ "$PREVIOUS" == "latest" ]]; then
+            tag=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=50" \
+              --jq 'map(select(any(.assets[]; .name == "EmuSync-x86_64.msi")))[0].tag_name')
+          fi
+          if [[ -z "$tag" || "$tag" == "null" ]]; then
+            echo "No earlier release has an MSI to upgrade from." >&2
+            exit 1
+          fi
+          echo "Upgrading from $tag"
+          mkdir -p previous
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern EmuSync-x86_64.msi --dir previous
+
+      - name: Install, upgrade, reinstall and uninstall
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          ./scripts/verify-windows-installers.ps1 `
+            -Msi (Resolve-Path dist/EmuSync-x86_64.msi).Path `
+            -Zip (Resolve-Path dist/EmuSync-x86_64-portable.zip).Path `
+            -PreviousMsi (Resolve-Path previous/EmuSync-x86_64.msi).Path `
+            -Version $version
+
+      - name: Upload installer logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: EmuSync-installer-logs
+          path: installer-logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v7
+        with:
+          name: EmuSync-windows-installers
+          path: dist
+          if-no-files-found: error
+          retention-days: 90

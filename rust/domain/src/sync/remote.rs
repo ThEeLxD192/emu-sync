@@ -1,4 +1,6 @@
 use super::decision::Timestamp;
+use super::name_case::{local_names_ignore_case, name_key};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -51,18 +53,30 @@ impl fmt::Display for UnverifiedDuplicates {
 impl std::error::Error for UnverifiedDuplicates {}
 
 /// Refuses duplicates whose equal content cannot be established; no copy is discarded.
+///
+/// Names that differ only in letter case are duplicates on file systems that ignore case
+/// (Windows), because both would be written to the same local file.
 pub fn canonical_cloud_files(
     files: &[RemoteFile],
 ) -> Result<Vec<RemoteFile>, UnverifiedDuplicates> {
-    let mut index: HashMap<&str, usize> = HashMap::new();
+    canonical_cloud_files_with(files, local_names_ignore_case())
+}
+
+/// [`canonical_cloud_files`] with the local file system's case rule given explicitly.
+pub fn canonical_cloud_files_with(
+    files: &[RemoteFile],
+    ignore_case: bool,
+) -> Result<Vec<RemoteFile>, UnverifiedDuplicates> {
+    let mut index: HashMap<Cow<'_, str>, usize> = HashMap::new();
     let mut groups: Vec<(&RemoteFile, Vec<&RemoteFile>)> = Vec::new();
     for file in files {
-        if let Some(&idx) = index.get(file.name.as_str()) {
+        let key = name_key(&file.name, ignore_case);
+        if let Some(&idx) = index.get(&key) {
             if let Some((_, rest)) = groups.get_mut(idx) {
                 rest.push(file);
             }
         } else {
-            index.insert(file.name.as_str(), groups.len());
+            index.insert(key, groups.len());
             groups.push((file, Vec::new()));
         }
     }

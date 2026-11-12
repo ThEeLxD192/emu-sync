@@ -122,10 +122,13 @@ impl LocalSavePath for DesktopSavePath {
         Ok(result)
     }
     fn relative_to(&self, root: &Self) -> io::Result<String> {
-        let p = Path::new(&self.path)
-            .strip_prefix(&root.path)
-            .map_err(io::Error::other)?;
-        Ok(string(p)?.replace('\\', "/"))
+        let p = crate::path_identity::relative_within(
+            Path::new(&self.path),
+            Path::new(&root.path),
+            emusync_domain::sync::local_names_ignore_case(),
+        )
+        .ok_or_else(|| io::Error::other("path is not inside the save directory"))?;
+        Ok(string(&p)?.replace('\\', "/"))
     }
 }
 impl LocalSaveAccess for DesktopSaveAccess {

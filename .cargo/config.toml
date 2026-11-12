@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --locked --package xtask --"
+
+# The Windows build links the C runtime statically so it runs without the Visual C++
+# Redistributable. Linux builds are unaffected.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

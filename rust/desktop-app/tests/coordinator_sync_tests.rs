@@ -531,3 +531,115 @@ async fn execute_check_sync_entry_reports_not_configured_offline_and_does_not_cl
     );
     assert!(!cancel.is_cancelled());
 }
+
+/// A download that fails changes nothing uncertain: the app must say what failed, accept new
+/// work and be closable. Only an upload with an unknown outcome may hold the app.
+#[tokio::test]
+async fn execute_sync_entry_reports_a_failed_download_without_blocking_close() {
+    let dir = tempdir().unwrap();
+    let save_path = dir.path().join("save.dat");
+    let entry = GameEntry::Native(NativeGame {
+        common: EntryCommon {
+            name: "DownloadGame".to_string(),
+            executable_path: "/bin/sh".to_string(),
+            arguments: vec!["-c".to_string(), "exit 0".to_string()],
+            save_paths: vec![save_path.to_string_lossy().to_string()],
+            save_targets: vec![SaveTarget {
+                path: save_path.to_string_lossy().to_string(),
+                cloud_path: Some("save.dat".to_string()),
+                kind: SaveTargetType::File,
+                excluded_folders: Vec::new(),
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut stop_rx => break,
+                res = listener.accept() => {
+                    let Ok((mut stream, _)) = res else { break; };
+                    tokio::spawn(async move {
+                        if let Ok((req, _)) = common::read_http_request_async(&mut stream).await {
+                            if req.contains("/token") {
+                                let body = r#"{"access_token":"mock_token","token_type":"Bearer","expires_in":3600}"#;
+                                let _ = common::write_http_json_async(&mut stream, 200, "OK", body).await;
+                            } else if req.contains("alt=media") {
+                                let _ = common::write_http_json_async(&mut stream, 500, "Internal Server Error", "{}").await;
+                            } else if req.contains("google-apps.folder") {
+                                let body = r#"{"files":[{"id":"mock_folder_id","name":"EmuSync"}]}"#;
+                                let _ = common::write_http_json_async(&mut stream, 200, "OK", body).await;
+                            } else if req.contains("parents") {
+                                let body = format!(
+                                    r#"{{"files":[{{"id":"remote1","name":"save.dat","modifiedTime":"2026-01-01T00:00:00.000Z","mimeType":"application/octet-stream","sha256Checksum":"{}","version":"1"}}]}}"#,
+                                    "ab".repeat(32)
+                                );
+                                let _ = common::write_http_json_async(&mut stream, 200, "OK", &body).await;
+                            } else {
+                                let _ = common::write_http_json_async(&mut stream, 200, "OK", "{}").await;
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    });
+
+    let endpoints = common::make_drive_endpoints(port);
+    let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
+    manager
+        .update(|_| AppConfig {
+            credentials: Some(Credentials {
+                client_id: "id".into(),
+                client_secret: "secret".into(),
+                refresh_token: Some("token".into()),
+            }),
+            entries: vec![entry.clone()],
+        })
+        .unwrap();
+
+    let (tx, rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager.clone(),
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    )
+    .with_endpoints(endpoints);
+
+    coordinator.handle_action(UiAction::SyncEntry(entry.clone()));
+    wait_for_active_tasks(&coordinator).await;
+
+    let events: Vec<_> = rx.try_iter().collect();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AppEvent::SyncStatusUpdated { status: CloudSyncStatus::Error, entry_name } if entry_name == "DownloadGame"
+    )), "{events:?}");
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            AppEvent::StatusChanged(AppStatus::Error { message })
+                if message.starts_with("Sync failed:") && !message.contains("Recovery is required")
+        )),
+        "{events:?}"
+    );
+
+    // Nothing is retained, nothing is left to recover, and the app can close.
+    assert!(coordinator.supervisor.lock().await.failure().is_none());
+    assert_eq!(coordinator.poll_close(), CloseState::Ready);
+    assert!(
+        RecoveryStore::new(manager.path())
+            .unwrap()
+            .list()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!save_path.exists());
+
+    let _ = stop_tx.send(());
+}

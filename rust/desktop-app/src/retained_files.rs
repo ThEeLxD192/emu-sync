@@ -10,8 +10,22 @@ pub enum RetainedFilesError {
     RecoveryRequired,
 }
 
+/// How the owner must treat a failed operation.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FailureClass {
+    /// The outcome is uncertain or was not recorded. The failure and its evidence stay
+    /// retained and quarantine the adapter until the owner recovers them.
+    NeedsRecovery,
+    /// Nothing is uncertain, so there is nothing to recover. Report the text and let the
+    /// owner carry on; the failure neither blocks later work nor prevents closing.
+    Plain(String),
+}
+
+type Classifier<E> = dyn Fn(&E) -> FailureClass + Send + Sync;
+
 struct RetainedState<E> {
     error: Option<E>,
+    notice: Option<String>,
     quarantined: bool,
     in_flight: usize,
 }
@@ -35,6 +49,7 @@ impl<E> Drop for InFlightGuard<E> {
 /// while this adapter and its retained failure are being recovered.
 pub struct RetainedFiles<T: LocalSaveFiles> {
     inner: Arc<T>,
+    classify: Arc<Classifier<T::Error>>,
     state: Arc<Mutex<RetainedState<T::Error>>>,
     notify: Arc<Notify>,
 }
@@ -43,6 +58,7 @@ impl<T: LocalSaveFiles> Clone for RetainedFiles<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            classify: self.classify.clone(),
             state: self.state.clone(),
             notify: self.notify.clone(),
         }
@@ -50,11 +66,28 @@ impl<T: LocalSaveFiles> Clone for RetainedFiles<T> {
 }
 
 impl<T: LocalSaveFiles> RetainedFiles<T> {
-    pub fn new(inner: T) -> Self {
+    /// Retains every failure for recovery, the safe default.
+    pub fn new(inner: T) -> Self
+    where
+        T::Error: 'static,
+    {
+        Self::with_classifier(inner, |_| FailureClass::NeedsRecovery)
+    }
+
+    /// Retains only the failures the classifier says need recovery.
+    pub fn with_classifier(
+        inner: T,
+        classify: impl Fn(&T::Error) -> FailureClass + Send + Sync + 'static,
+    ) -> Self
+    where
+        T::Error: 'static,
+    {
         Self {
             inner: Arc::new(inner),
+            classify: Arc::new(classify),
             state: Arc::new(Mutex::new(RetainedState {
                 error: None,
+                notice: None,
                 quarantined: false,
                 in_flight: 0,
             })),
@@ -70,12 +103,18 @@ impl<T: LocalSaveFiles> RetainedFiles<T> {
             Err(state) => {
                 return Err(Self {
                     inner: self.inner,
+                    classify: self.classify,
                     state,
                     notify: self.notify,
                 });
             }
         };
         Ok(state.into_inner().unwrap().error)
+    }
+
+    /// The text of a failure that needed no recovery, if one happened. Taking it clears it.
+    pub fn take_notice(&self) -> Option<String> {
+        self.state.lock().unwrap().notice.take()
     }
 
     /// Check if a transfer error has been recorded without quarantining yet.
@@ -116,9 +155,19 @@ impl<T: LocalSaveFiles> RetainedFiles<T> {
         match result {
             Ok(val) => Ok(val),
             Err(err) => {
+                let class = (self.classify)(&err);
                 let mut state = self.state.lock().unwrap();
-                if state.error.is_none() {
-                    state.error = Some(err);
+                match class {
+                    FailureClass::NeedsRecovery => {
+                        if state.error.is_none() {
+                            state.error = Some(err);
+                        }
+                    }
+                    FailureClass::Plain(text) => {
+                        if state.notice.is_none() {
+                            state.notice = Some(text);
+                        }
+                    }
                 }
                 Err(RetainedFilesError::TransferFailed)
             }

@@ -176,6 +176,30 @@ async fn development_builds_without_a_controlled_server_never_check() {
     );
 }
 
+#[tokio::test]
+async fn a_portable_copy_never_checks_and_explains_that_it_replaces_itself_by_hand() {
+    let (coordinator, rx, _dir) = coordinator(UpdateSourceConfig::Portable);
+
+    coordinator.handle_action(UiAction::CheckForUpdates { manual: false });
+    coordinator.handle_action(UiAction::CheckForUpdates { manual: true });
+
+    let events: Vec<_> = rx.try_iter().collect();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AppEvent::UpdateStateChanged(_))),
+        "{events:?}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, AppEvent::Toast(m) if m.contains("portable copy")))
+            .count(),
+        1,
+        "only the manual check explains it: {events:?}"
+    );
+}
+
 #[test]
 fn only_development_builds_honour_a_controlled_release_server() {
     let url = Some("http://127.0.0.1:9".to_string());

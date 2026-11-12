@@ -1,4 +1,4 @@
-use emusync_desktop_app::{RetainedFiles, RetainedFilesError};
+use emusync_desktop_app::{FailureClass, RetainedFiles, RetainedFilesError};
 use emusync_domain::sync::{Decision, LocalSaveFiles, RemoteState};
 use std::{
     fs,
@@ -264,4 +264,78 @@ async fn quarantine_and_take_error_waits_for_in_flight_operations_and_preserves_
     assert_eq!(dl_res2, Err(RetainedFilesError::RecoveryRequired));
 
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+struct PlainFailure(&'static str);
+struct FlakyDownload;
+
+impl LocalSaveFiles for FlakyDownload {
+    type Error = PlainFailure;
+    async fn plan(
+        &self,
+        _: &str,
+        _: Option<&RemoteState>,
+        _: &str,
+        _: &str,
+    ) -> Result<Decision, Self::Error> {
+        Ok(Decision::InSync)
+    }
+    async fn remember(
+        &self,
+        _: &str,
+        _: &RemoteState,
+        _: &str,
+        _: &str,
+    ) -> Result<(), Self::Error> {
+        unreachable!()
+    }
+    async fn download(
+        &self,
+        _: &str,
+        _: &RemoteState,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<(), Self::Error> {
+        Err(PlainFailure("download failed"))
+    }
+    async fn upload(
+        &self,
+        _: &str,
+        _: &str,
+        _: Option<&RemoteState>,
+        _: &str,
+        _: &str,
+    ) -> Result<(), Self::Error> {
+        unreachable!()
+    }
+}
+
+#[tokio::test]
+async fn a_failure_that_needs_no_recovery_is_reported_without_blocking_or_retaining() {
+    let files = RetainedFiles::with_classifier(FlakyDownload, |error: &PlainFailure| {
+        FailureClass::Plain(error.0.to_owned())
+    });
+    let remote = RemoteState {
+        id: "id".into(),
+        modified: 0,
+        sha256: None,
+        version: None,
+    };
+    assert_eq!(
+        files
+            .download("t", &remote, "local", "folder", "name")
+            .await,
+        Err(RetainedFilesError::TransferFailed)
+    );
+    // The text is available once, nothing is held for recovery, and later work is admitted.
+    assert!(!files.has_error());
+    assert_eq!(files.take_notice().as_deref(), Some("download failed"));
+    assert_eq!(files.take_notice(), None);
+    assert_eq!(
+        files.plan("local", None, "folder", "name").await,
+        Ok(Decision::InSync)
+    );
+    assert!(files.quarantine_and_take_error().await.is_none());
+    assert!(files.finish().ok().is_some_and(|error| error.is_none()));
 }

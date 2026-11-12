@@ -3,6 +3,7 @@
 use emusync_domain::library::{SaveTarget, SaveTargetType, folder_cloud_names};
 use emusync_domain::sync::{
     LocalSaveAccess, LocalSavePath, RemoteFile, SavePlacementGroup, remote_path_segments,
+    same_local_name,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Display;
@@ -234,9 +235,10 @@ where
             SaveTargetType::File => Ok(false),
             SaveTargetType::Unknown => {
                 let target_name = cloud_name.unwrap_or_else(|| path.name());
-                let matches_exact_file = cloud_files
-                    .iter()
-                    .any(|cf| cf.name == target_name && !reserved_sibling_names.contains(&cf.name));
+                let matches_exact_file = cloud_files.iter().any(|cf| {
+                    same_local_name(&cf.name, target_name)
+                        && !reserved_sibling_names.contains(&cf.name)
+                });
                 Ok(!matches_exact_file)
             }
         }

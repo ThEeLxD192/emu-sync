@@ -1,3 +1,7 @@
+// Release builds on Windows are GUI applications: no console window opens behind the app.
+// Debug builds keep the console so panics and diagnostics stay visible.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{
     AppEvent, AuthorizedTransferFailure, CloseState, DesktopCoordinator, RuntimeOwner,
@@ -56,6 +60,16 @@ impl ApplicationHandler for App {
                 // Gamescope letterboxes smaller windows and pointer/touch input then misses
                 // what is drawn; filling its output keeps both in the same coordinates.
                 attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
+            }
+            #[cfg(windows)]
+            {
+                use winit::platform::windows::IconExtWindows;
+                // The executable carries the application icon as resource 1 (see build.rs).
+                // Declaring it on the window gives the title bar its icon and keeps the
+                // taskbar button consistent; without it the window has none of its own.
+                if let Ok(icon) = winit::window::Icon::from_resource(1, None) {
+                    attributes = attributes.with_window_icon(Some(icon));
+                }
             }
             let window = Arc::new(event_loop.create_window(attributes)?);
             let context = egui::Context::default();

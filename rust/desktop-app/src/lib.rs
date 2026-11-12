@@ -3,7 +3,7 @@ mod supervisor;
 pub use supervisor::{OperationFailure, OperationSupervisor, StartError};
 
 mod retained_files;
-pub use retained_files::{RetainedFiles, RetainedFilesError};
+pub use retained_files::{FailureClass, RetainedFiles, RetainedFilesError};
 
 mod guarded_files;
 pub use guarded_files::GuardedFiles;

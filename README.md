@@ -39,7 +39,8 @@ A modern, offline-first save synchronization manager and universal launcher for 
 ### Configuration
 
 When running EmuSync for the first time, a basic `config.json` is **automatically generated** if one does not exist:
-* **Windows (.msi / .exe):** `%APPDATA%\emusync\config.json`
+* **Windows (.msi):** `%APPDATA%\emusync\config.json`
+* **Windows portable (.zip):** a `portable.txt` file next to `EmuSync.exe` keeps `config.json`, history and backups in that folder. A portable copy does not update itself; replace the folder with the newer ZIP.
 * **Linux (AppImage / package):** `~/.config/emusync/config.json`
 * **AppImage Portable Mode:** If a `config.json` exists in the same folder as your `.AppImage`, it is automatically detected and used.
 * **Development / CLI:** If a `config.json` is present in the working directory, it takes priority.
@@ -262,22 +263,23 @@ binary built on the host instead.
 
 #### Windows installers
 
-`scripts/build-windows-installers.sh` builds an MSI and an EXE bootstrapper with WiX 4
-on native Windows (Git Bash). These installers have not been validated natively yet and
-are not published in releases.
+`scripts/build-windows-installers.sh <output-dir>` builds `EmuSync-x86_64.msi` (WiX 4) and
+`EmuSync-x86_64-portable.zip` on native Windows (Git Bash). The MSI shares the UpgradeCode of
+the Kotlin installers, so it upgrades 1.x installs in place. `scripts/verify-windows-installers.ps1`
+installs, upgrades from a previous MSI, reinstalls and removes it and checks the ZIP; CI runs it
+on every change. It modifies the machine, so use it only on a disposable one.
 
 ---
 
 ## CI/CD & Automated Releases
 
 - **CI Validation (`.github/workflows/ci.yml`)**: On Linux and Windows, runs `cargo xtask check` and the script tests; on Linux it also builds the AppImage.
+- **Windows Packages (`.github/workflows/windows-packages.yml`)**: Builds the MSI and the portable ZIP, then installs, upgrades from a previous release, reinstalls and uninstalls the MSI on the runner and checks each step. Run it by hand from any branch (Actions tab) to download the packages; the release workflow runs it first.
 - **Publish Release (`.github/workflows/release.yml`)**: Manual trigger (`workflow_dispatch`) on `main` that:
   1. Prompts for the SemVer release type (`patch`, `minor`, `major`).
   2. Bumps the Cargo workspace version and creates the git tag (`vX.Y.Z`).
-  3. Builds `EmuSync-x86_64.AppImage`.
-  4. Creates the GitHub Release with automated changelogs and attaches the AppImage.
-
-Windows installers will be added to releases once they are validated natively.
+  3. Builds `EmuSync-x86_64.AppImage`, and `EmuSync-x86_64.msi` plus `EmuSync-x86_64-portable.zip` after verifying them on Windows (upgrade from the newest release with an MSI, reinstall, uninstall).
+  4. Creates the GitHub Release with automated changelogs and attaches all three. The release is not published if any build or verification fails.
 
 ---
 
