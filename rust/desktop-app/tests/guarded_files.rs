@@ -513,7 +513,7 @@ async fn non_linux_directory_download_rejection_contract() {
         remote_name: "remote_name",
     };
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         use emusync_domain::sync::LocalSaveFiles;
         let res = guarded.download_in_directory(req).await;
@@ -521,7 +521,7 @@ async fn non_linux_directory_download_rejection_contract() {
             matches!(res, Err(emusync_data_local::TrackedError::Local(e)) if e.kind() == std::io::ErrorKind::Unsupported)
         );
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     {
         let _ = guarded;
         let _ = req;

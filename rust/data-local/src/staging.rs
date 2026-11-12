@@ -79,7 +79,7 @@ pub struct StagedRestore {
     destination: PathBuf,
     logical_destination: PathBuf,
     original_digest: Option<String>,
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     pinned: Option<crate::PinnedRemoteDestination>,
 }
 impl StagedRestore {
@@ -99,12 +99,12 @@ impl StagedRestore {
             logical_destination: destination.clone(),
             destination,
             original_digest,
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", windows))]
             pinned: None,
         })
     }
     /// Prepare under a pinned root, creating missing descendant directories without following links.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     pub fn prepare_pinned(root: &Path, remote_name: &str) -> io::Result<Option<Self>> {
         let Some(pinned) = crate::PinnedRemoteDestination::open_or_create(root, remote_name)?
         else {
@@ -145,9 +145,8 @@ impl StagedRestore {
             return Err(io::Error::other("downloaded content could not be verified"));
         }
         self.temp.as_file().sync_all()?;
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         if let Some(pinned) = &self.pinned {
-            use std::os::fd::AsRawFd;
             pinned.ensure_current()?;
             let current = pinned.open_existing()?;
             let current_digest = current.as_ref().map(digest_open_file).transpose()?;
@@ -157,9 +156,11 @@ impl StagedRestore {
             if let (Some(old), Some(file)) = (&self.original_digest, current.as_ref())
                 && old != &digest
             {
-                let source = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+                let source = pinned.source_path(file);
                 history.backup_from(key, &source, pinned.logical_path(), old)?;
             }
+            // Release the handle before replacing the file it refers to.
+            drop(current);
             if self.original_digest.is_none() {
                 self.temp
                     .persist_noclobber(&self.destination)
@@ -201,4 +202,10 @@ pub(crate) fn digest_if_file(path: &Path) -> io::Result<Option<String>> {
 fn digest_open_file(file: &fs::File) -> io::Result<String> {
     use std::os::fd::AsRawFd;
     file_sha256(Path::new(&format!("/proc/self/fd/{}", file.as_raw_fd())))
+}
+
+#[cfg(windows)]
+fn digest_open_file(file: &fs::File) -> io::Result<String> {
+    let mut handle = file;
+    crate::history::reader_sha256(&mut handle)
 }

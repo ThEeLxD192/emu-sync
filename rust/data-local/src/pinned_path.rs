@@ -77,6 +77,10 @@ impl PinnedRemoteDestination {
     pub(crate) fn logical_path(&self) -> &Path {
         &self.logical
     }
+    /// A path from which the content of `file`, opened by [`Self::open_existing`], can be read.
+    pub(crate) fn source_path(&self, file: &File) -> PathBuf {
+        PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
+    }
     pub(crate) fn ensure_current(&self) -> io::Result<()> {
         let pinned = self.parent.metadata()?;
         let parent = self

@@ -112,18 +112,18 @@ where
         &self,
         request: DirectoryDownload<'_>,
     ) -> Result<(), Self::Error> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         {
             self.tracked
                 .download_directory_guarded(request, self.credentials.clone())
                 .await
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", windows)))]
         {
             let _ = request;
             Err(TrackedError::Local(io::Error::new(
                 io::ErrorKind::Unsupported,
-                "confined directory downloads are currently supported only on Linux",
+                "confined directory downloads are supported only on Linux and Windows",
             )))
         }
     }

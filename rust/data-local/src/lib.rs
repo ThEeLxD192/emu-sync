@@ -31,5 +31,8 @@ pub use tracked::{
 
 #[cfg(target_os = "linux")]
 mod pinned_path;
-#[cfg(target_os = "linux")]
+#[cfg(windows)]
+#[path = "pinned_path_windows.rs"]
+mod pinned_path;
+#[cfg(any(target_os = "linux", windows))]
 pub use pinned_path::PinnedRemoteDestination;
