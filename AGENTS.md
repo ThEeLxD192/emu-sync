@@ -53,17 +53,21 @@ El hook valida una exportación aislada del índice con `cargo xtask quality` y 
 
 Ninguna validación Linux cierra Windows. Pendiente de validación nativa (no compilado ni ejecutado en Windows nativo; Wine no cuenta):
 
-- CI Windows de `cargo xtask check` y pruebas de scripts; nunca se ha ejecutado en remoto.
-- Rutas UNC, nombres cortos 8.3, dispositivos reservados (`CON`, `PRN`, `NUL`) y bloqueos de archivos en persistencia local y restauración.
-- Identidad de rutas y mayúsculas: `data-local::path_identity` (candados, registro de `ConfigManager`, `RecoveryStore::has_unresolved`, comparación de destino de descargas de carpeta y `relative_to`), `is_excluded`, `canonical_cloud_files` y el emparejamiento local/nube de `manual.rs` pliegan mayúsculas solo cuando `cfg!(windows)`. La regla pura está probada en Linux con el parámetro explícito; el cableado con `cfg!(windows)` solo lo cubren las pruebas `#[cfg(windows)]` de `recovery_store.rs` y `restore_paths.rs`, que nunca se han ejecutado. Pendiente: la clave de `SyncHistoryStore::key` sigue dependiendo de la grafía de la ruta (cambiarla rompería el formato existente; hace falta migrar al leer) y `reserved_sibling_names` se compara con grafía exacta.
-- Nombres de Drive no válidos en Windows (`CON`, `a:b`, punto final): `resolve_remote_file` los rechaza solo en Windows; sin validar nativamente.
-- Descarga de carpetas: `PinnedRemoteDestination`, `StagedRestore::prepare_pinned` y `download_directory_guarded` existen solo en Linux (`rustix`/`openat`); en Windows `GuardedFiles::download_in_directory` devuelve `Unsupported`, así que las partidas de tipo carpeta no se descargan desde la nube. Requiere una implementación Windows confinada.
+- Rutas UNC, nombres cortos 8.3 (`PROGRA~1`: la descarga confinada no los resuelve) y bloqueos de archivos de terceros (antivirus, indexador) en persistencia local y restauración.
+- Identidad de rutas y mayúsculas: `data-local::path_identity` (candados, registro de `ConfigManager`, `RecoveryStore::has_unresolved`, comparación de destino de descargas de carpeta y `relative_to`), `is_excluded`, `canonical_cloud_files` y el emparejamiento local/nube de `manual.rs` pliegan mayúsculas solo cuando `cfg!(windows)`. Las pruebas `#[cfg(windows)]` de `recovery_store.rs` y `restore_paths.rs` pasan en CI, pero el emparejamiento de `manual.rs` y los candados no tienen prueba en Windows. Pendiente: la clave de `SyncHistoryStore::key` sigue dependiendo de la grafía de la ruta (cambiarla rompería el formato existente; hace falta migrar al leer) y `reserved_sibling_names` se compara con grafía exacta.
+- Un fallo retenido que no es una subida incierta (p. ej. una descarga fallida) deja al supervisor con un fallo que impide cerrar la app («A sync operation needs recovery before closing»); `Coordinator::reconcile_active` no tiene llamador en la interfaz y solo entiende subidas, así que hay que matar el proceso. No es específico de Windows.
+- Binario Windows: es de subsistema consola (abre una ventana negra), sin icono ni versión incrustados ni CRT estático.
 - Procesos: `tasklist` con `CREATE_NO_WINDOW` y sondeos en `spawn_blocking`; PID exacto leyendo el segundo campo CSV de `tasklist /FO CSV /NH`; seguimiento de procesos de juego.
 - Selector `rfd` sin ventana padre (que no quede detrás de la app).
 - Lanzadores Steam con PowerShell y manifiesto JSON.
 - Instaladores WiX: compilación, licencia RTF, instalación limpia, actualización desde el MSI Kotlin 1.2.0 (mismo UpgradeCode), transición MSI/EXE, desinstalación y conservación de datos en `%APPDATA%\emusync`. Al validarlo, añadir el job Windows a `release.yml`; hasta entonces los usuarios Windows no reciben actualizaciones.
 
 Registrar aquí fecha, comandos y resultado de cada validación Windows y retirar el punto cuando quede cerrado.
+
+Validaciones Windows registradas:
+
+- 2026-11-12, CI `windows-latest` (run 43304104505, commit `b3f11d5`): `cargo xtask check` y `cargo build --release --locked -p emusync-desktop-app` pasan, incluidas las pruebas `#[cfg(windows)]` de `pinned_path_windows.rs`, `recovery_store.rs`, `restore_paths.rs` y las de reemplazo del temporal de `staging.rs`. Es la primera ejecución de `xtask check` en Windows remoto.
+- 2026-11-12, Windows 11 nativo (PC de prueba), `.exe` del job `windows-exe` del mismo run, con `--config` aislado y una raíz Drive sintética: se restauran desde la nube un archivo suelto borrado en local y subcarpetas de una partida de tipo carpeta; el reemplazo conserva la copia anterior en `.sync-backups`; la app cierra sin pedir recovery. Cierra la descarga de carpetas y el reemplazo del temporal en Windows. Un archivo creado a mano en Drive con la web no se lista (alcance `drive.file`, comportamiento esperado).
 
 ## Trabajo
 
