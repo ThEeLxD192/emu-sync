@@ -240,13 +240,17 @@ impl SyncOperations {
         let transfer_err = retained.quarantine_and_take_error().await;
 
         if let Some(err) = transfer_err {
+            // Say what failed: a bare "recovery is required" hides whether the transfer was
+            // uncertain or an unrelated local error left it unfinished.
+            let detail = err.to_string();
+            eprintln!("EmuSync: sync of '{name}' failed during transfer: {detail}");
             coordinator.record_transfer_error(err);
             coordinator.send_event(AppEvent::SyncStatusUpdated {
                 entry_name: name,
                 status: CloudSyncStatus::Error,
             });
             coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                message: "Sync failed during transfer. Recovery is required.".into(),
+                message: format!("Sync failed during transfer: {detail}. Recovery is required."),
             }));
             coordinator.release_admission();
             return;

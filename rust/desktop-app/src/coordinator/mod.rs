@@ -836,11 +836,15 @@ impl DesktopCoordinator {
                 if retained.has_error()
                     && let Some(err) = retained.quarantine_and_take_error().await
                 {
+                    let detail = err.to_string();
+                    eprintln!("EmuSync: retry failed during transfer: {detail}");
                     coord.record_transfer_error(err);
                     inter
                         .event_tx
                         .send(AppEvent::StatusChanged(AppStatus::Error {
-                            message: "Sync failed during retry. Recovery is required.".into(),
+                            message: format!(
+                                "Sync failed during retry: {detail}. Recovery is required."
+                            ),
                         }))
                         .ok();
                     return;
