@@ -96,6 +96,12 @@ Assert-That (-not (Test-Path $shortcut)) 'uninstalling removes the Start menu sh
 Assert-That (Test-Path $marker) 'user data survived the uninstall'
 
 # Portable package: executable, marker and license, nothing machine-wide.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
+$backslashed = @($archive.Entries | Where-Object { $_.FullName.Contains('\') })
+$archive.Dispose()
+Assert-That ($backslashed.Count -eq 0) 'the ZIP uses forward slashes, so any extractor reads it'
+
 $extracted = Join-Path (Get-Location) 'portable-check'
 if (Test-Path $extracted) { Remove-Item -Recurse -Force $extracted }
 Expand-Archive -Path $Zip -DestinationPath $extracted

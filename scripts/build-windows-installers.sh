@@ -72,8 +72,10 @@ printf '%s\r\n' \
     'Its settings, history and backups are kept in this folder, and the application' \
     'does not install updates by itself. Delete this file to use the standard locations.' \
     > "$stage/portable.txt"
+# Compress-Archive in Windows PowerShell 5.1 stores backslash paths, which other extractors
+# read wrongly; ZipFile writes standard forward-slash entries.
 powershell -NoProfile -Command \
-    "Compress-Archive -Path '$(cygpath -w "$stage")' -DestinationPath '$(cygpath -w "$tmp/EmuSync-x86_64-portable.zip")'"
+    "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('$(cygpath -w "$stage")', '$(cygpath -w "$tmp/EmuSync-x86_64-portable.zip")', [System.IO.Compression.CompressionLevel]::Optimal, \$true)"
 
 # noclobber prevents replacing output even if another process creates it during the build.
 (set -C; cat "$tmp/EmuSync-x86_64.msi" > "$output/EmuSync-x86_64.msi")

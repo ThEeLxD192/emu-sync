@@ -61,6 +61,16 @@ impl ApplicationHandler for App {
                 // what is drawn; filling its output keeps both in the same coordinates.
                 attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
             }
+            #[cfg(windows)]
+            {
+                use winit::platform::windows::IconExtWindows;
+                // The executable carries the application icon as resource 1 (see build.rs).
+                // Declaring it on the window gives the title bar its icon and keeps the
+                // taskbar button consistent; without it the window has none of its own.
+                if let Ok(icon) = winit::window::Icon::from_resource(1, None) {
+                    attributes = attributes.with_window_icon(Some(icon));
+                }
+            }
             let window = Arc::new(event_loop.create_window(attributes)?);
             let context = egui::Context::default();
             configure_egui_theme(&context);
