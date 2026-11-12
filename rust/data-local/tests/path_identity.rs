@@ -12,16 +12,21 @@ fn spellings_differing_only_in_case_share_an_identity_where_case_is_ignored() {
     assert!(!same_path(upper, Path::new("/saves/game"), true).unwrap());
 }
 
+/// A root that is absolute on every platform: `/x` has no drive on Windows.
+fn root() -> PathBuf {
+    PathBuf::from(if cfg!(windows) { r"C:\" } else { "/" })
+}
+
 #[test]
 fn identity_collapses_dot_segments_before_folding() {
-    let messy = Path::new("/Saves/./Other/../Game/slot.dat");
+    let messy = root().join("Saves/./Other/../Game/slot.dat");
     assert_eq!(
-        path_identity(messy, true).unwrap(),
-        PathBuf::from("/SAVES/GAME/SLOT.DAT")
+        path_identity(&messy, true).unwrap(),
+        root().join("SAVES").join("GAME").join("SLOT.DAT")
     );
     assert_eq!(
-        path_identity(messy, false).unwrap(),
-        PathBuf::from("/Saves/Game/slot.dat")
+        path_identity(&messy, false).unwrap(),
+        root().join("Saves").join("Game").join("slot.dat")
     );
 }
 
