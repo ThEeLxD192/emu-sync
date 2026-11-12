@@ -105,3 +105,67 @@ jobs:
           path: target/release/emusync-desktop-app.exe
           if-no-files-found: error
           retention-days: 7
+
+  windows-installers:
+    # Builds the MSI and the portable ZIP, then installs, upgrades from the last Kotlin
+    # release (same UpgradeCode), reinstalls and removes the MSI on the runner and checks each
+    # step. The runner is a disposable machine, so touching Program Files is safe here.
+    name: Build and verify Windows installers
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+
+      - name: Install WiX 4
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 4.0.5
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & "$env:USERPROFILE\.dotnet\tools\wix.exe" extension add -g WixToolset.UI.wixext/4.0.5
+
+      - name: Build the installers
+        shell: bash
+        run: |
+          mkdir -p dist
+          bash scripts/build-windows-installers.sh dist
+
+      - name: Download the last Kotlin release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p previous
+          gh release download v1.2.1 --repo "$GITHUB_REPOSITORY" --pattern EmuSync-x86_64.msi --dir previous
+
+      - name: Install, upgrade, reinstall and uninstall
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          ./scripts/verify-windows-installers.ps1 `
+            -Msi (Resolve-Path dist/EmuSync-x86_64.msi).Path `
+            -Zip (Resolve-Path dist/EmuSync-x86_64-portable.zip).Path `
+            -PreviousMsi (Resolve-Path previous/EmuSync-x86_64.msi).Path `
+            -Version $version
+
+      - name: Upload installer logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-logs-${{ github.sha }}
+          path: installer-logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v7
+        with:
+          name: EmuSync-windows-installers-${{ github.sha }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 7

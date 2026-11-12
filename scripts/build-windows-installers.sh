@@ -1,40 +1,34 @@
 #!/usr/bin/env bash
-# Windows MSI/EXE packaging with WiX 4. Draft: native installation and upgrade are not yet validated.
+# Builds the Windows MSI installer (WiX 4) and the portable ZIP on native Windows with Git Bash.
 set -euo pipefail
-if [[ $# -ne 2 ]]; then
-    echo "Usage: $0 <license.rtf> <existing-output-directory>" >&2
+if [[ $# -ne 1 ]]; then
+    echo "Usage: $0 <existing-output-directory>" >&2
     exit 2
 fi
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) ;;
     *) echo "Native Windows with Git Bash is required." >&2; exit 1 ;;
 esac
-for tool in cargo rustc wix cygpath; do
+for tool in cargo rustc wix cygpath powershell; do
     command -v "$tool" >/dev/null || { echo "Required tool not found: $tool" >&2; exit 1; }
 done
 wix_version=$(wix --version)
 if [[ ! $wix_version =~ ^4\. ]]; then
-    echo "This draft requires WiX 4 and its UI and Bal extensions." >&2
+    echo "This script requires WiX 4 and its UI extension (found $wix_version)." >&2
     exit 1
 fi
-license=$1
-output=$2
-if [[ ! -f $license || $(head -c 5 "$license") != '{\rtf' ]]; then
-    echo "Provide an RTF license file appropriate for the project." >&2
-    exit 1
-fi
+output=$1
 if [[ ! -d $output ]]; then
     echo "Output directory does not exist: $output" >&2
     exit 1
 fi
 output=$(cd -- "$output" && pwd)
-for name in EmuSync-x86_64.msi EmuSync-x86_64.exe; do
+for name in EmuSync-x86_64.msi EmuSync-x86_64-portable.zip; do
     if [[ -e "$output/$name" ]]; then
         echo "Refusing to replace existing output: $output/$name" >&2
         exit 1
     fi
 done
-license=$(cygpath -w "$(cd -- "$(dirname -- "$license")" && pwd)/$(basename -- "$license")")
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo"
 version=$(awk '/^\[/ { section = ($0 == "[workspace.package]") } section && /^version = / { split($0,p,"\""); print p[2] }' Cargo.toml)
@@ -49,18 +43,39 @@ if (( major > 255 || minor > 255 || patch > 65535 )); then
 fi
 tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
+
+# The installer wizard shows the license as RTF; the repository keeps it as plain text.
+{
+    printf '{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Courier New;}}\\f0\\fs20 '
+    sed -e 's/\\/\\\\/g' -e 's/{/\\{/g' -e 's/}/\\}/g' -e 's/\r$//' -e 's/$/\\par/' LICENSE
+    printf '}'
+} > "$tmp/license.rtf"
+
 cargo build --release --locked --target x86_64-pc-windows-msvc -p emusync-desktop-app
-executable=$(cygpath -w "$repo/target/x86_64-pc-windows-msvc/release/emusync-desktop-app.exe")
-icon=$(cygpath -w "$repo/packaging/assets/icon.ico")
-msi=$(cygpath -w "$tmp/EmuSync-x86_64.msi")
-exe=$(cygpath -w "$tmp/EmuSync-x86_64.exe")
+built="$repo/target/x86_64-pc-windows-msvc/release/emusync-desktop-app.exe"
+
 wix build -arch x64 -ext WixToolset.UI.wixext \
-    -d "Version=$version" -d "Executable=$executable" -d "IconFile=$icon" -d "LicenseRtf=$license" \
-    -o "$msi" packaging/windows/product.wxs
-wix build -arch x64 -ext WixToolset.Bal.wixext \
-    -d "Version=$version" -d "MsiFile=$msi" -d "IconFile=$icon" \
-    -o "$exe" packaging/windows/bundle.wxs
+    -d "Version=$version" \
+    -d "Executable=$(cygpath -w "$built")" \
+    -d "IconFile=$(cygpath -w "$repo/packaging/assets/icon.ico")" \
+    -d "LicenseRtf=$(cygpath -w "$tmp/license.rtf")" \
+    -o "$(cygpath -w "$tmp/EmuSync-x86_64.msi")" packaging/windows/product.wxs
+
+# Portable layout: the marker file next to the executable keeps data beside it and turns off
+# the installer-based updater, which would otherwise install the machine-wide MSI.
+stage="$tmp/portable/EmuSync"
+mkdir -p "$stage"
+cp "$built" "$stage/EmuSync.exe"
+cp LICENSE "$stage/LICENSE"
+printf '%s\r\n' \
+    'This file marks EmuSync as portable.' \
+    'Its settings, history and backups are kept in this folder, and the application' \
+    'does not install updates by itself. Delete this file to use the standard locations.' \
+    > "$stage/portable.txt"
+powershell -NoProfile -Command \
+    "Compress-Archive -Path '$(cygpath -w "$stage")' -DestinationPath '$(cygpath -w "$tmp/EmuSync-x86_64-portable.zip")'"
+
 # noclobber prevents replacing output even if another process creates it during the build.
 (set -C; cat "$tmp/EmuSync-x86_64.msi" > "$output/EmuSync-x86_64.msi")
-(set -C; cat "$tmp/EmuSync-x86_64.exe" > "$output/EmuSync-x86_64.exe")
-echo "Draft artifacts written to $output; native installation and upgrade validation remain pending."
+(set -C; cat "$tmp/EmuSync-x86_64-portable.zip" > "$output/EmuSync-x86_64-portable.zip")
+echo "Windows artifacts written to $output"

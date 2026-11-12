@@ -39,7 +39,8 @@ A modern, offline-first save synchronization manager and universal launcher for 
 ### Configuration
 
 When running EmuSync for the first time, a basic `config.json` is **automatically generated** if one does not exist:
-* **Windows (.msi / .exe):** `%APPDATA%\emusync\config.json`
+* **Windows (.msi):** `%APPDATA%\emusync\config.json`
+* **Windows portable (.zip):** a `portable.txt` file next to `EmuSync.exe` keeps `config.json`, history and backups in that folder. A portable copy does not update itself; replace the folder with the newer ZIP.
 * **Linux (AppImage / package):** `~/.config/emusync/config.json`
 * **AppImage Portable Mode:** If a `config.json` exists in the same folder as your `.AppImage`, it is automatically detected and used.
 * **Development / CLI:** If a `config.json` is present in the working directory, it takes priority.
@@ -262,9 +263,11 @@ binary built on the host instead.
 
 #### Windows installers
 
-`scripts/build-windows-installers.sh` builds an MSI and an EXE bootstrapper with WiX 4
-on native Windows (Git Bash). These installers have not been validated natively yet and
-are not published in releases.
+`scripts/build-windows-installers.sh <output-dir>` builds `EmuSync-x86_64.msi` (WiX 4) and
+`EmuSync-x86_64-portable.zip` on native Windows (Git Bash). The MSI shares the UpgradeCode of
+the Kotlin installers, so it upgrades 1.x installs in place. `scripts/verify-windows-installers.ps1`
+installs, upgrades from a previous MSI, reinstalls and removes it and checks the ZIP; CI runs it
+on every change. It modifies the machine, so use it only on a disposable one.
 
 ---
 
@@ -277,7 +280,7 @@ are not published in releases.
   3. Builds `EmuSync-x86_64.AppImage`.
   4. Creates the GitHub Release with automated changelogs and attaches the AppImage.
 
-Windows installers will be added to releases once they are validated natively.
+Windows installers will be added to releases once they are validated natively on a clean machine.
 
 ---
 
