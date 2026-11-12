@@ -60,3 +60,30 @@ jobs:
         if: matrix.platform == 'Linux'
         shell: bash
         run: bash scripts/build-appimage-container.sh "$RUNNER_TEMP/EmuSync-x86_64.AppImage"
+
+  windows-exe:
+    # Test build for manual validation on a real Windows machine or VM. It is never
+    # published as a release, and it runs beside `validate` so it does not slow it down.
+    name: Build Windows executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+
+      - name: Build release executable
+        shell: bash
+        run: cargo build --release --locked -p emusync-desktop-app
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: EmuSync-windows-x86_64-exe-${{ github.sha }}
+          path: target/release/emusync-desktop-app.exe
+          if-no-files-found: error
+          retention-days: 7
