@@ -850,9 +850,10 @@ impl DesktopCoordinator {
                     return;
                 }
                 if let Err(e) = retry_res {
+                    let message = retained.take_notice().unwrap_or(e);
                     inter
                         .event_tx
-                        .send(AppEvent::StatusChanged(AppStatus::Error { message: e }))
+                        .send(AppEvent::StatusChanged(AppStatus::Error { message }))
                         .ok();
                 }
             })

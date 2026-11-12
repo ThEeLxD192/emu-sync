@@ -1,11 +1,14 @@
-use crate::{guarded_files::GuardedFiles, retained_files::RetainedFiles};
+use crate::{
+    guarded_files::GuardedFiles,
+    retained_files::{FailureClass, RetainedFiles},
+};
 use emusync_application::sync::{SyncOrchestrator, SyncServices};
 use emusync_data_drive::{
     DriveFolders, DriveHttpPolicy, DriveListing, DriveTransfer, InteractiveOAuth, TransferProgress,
 };
 use emusync_data_local::{
     ConfigManager, DesktopSaveAccess, RecoveryCredentials, RecoveryStore, SyncHistoryStore,
-    TrackedFileSync,
+    TrackedError, TrackedFileSync,
 };
 use emusync_domain::{
     config::{AppConfig, CredentialStore},
@@ -140,7 +143,14 @@ pub fn build_orchestrator(
         credentials.clone(),
         |e: &emusync_data_drive::TransferError| e.leaves_remote_unchanged(),
     );
-    let retained = RetainedFiles::new(guarded);
+    // Only an upload leaves an outcome to recover. A failed download or any other local
+    // error changes nothing uncertain, so it is reported without blocking the app.
+    let retained = RetainedFiles::with_classifier(guarded, |error: &TrackedError<_>| match error {
+        TrackedError::Upload { .. } | TrackedError::AfterUpload { .. } => {
+            FailureClass::NeedsRecovery
+        }
+        other => FailureClass::Plain(other.to_string()),
+    });
 
     let oauth = InteractiveOAuth::with_endpoints(
         clients.metadata,

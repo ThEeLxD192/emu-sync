@@ -270,12 +270,15 @@ impl SyncOperations {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Idle));
             }
             Err(err) => {
+                // A failure that needed no recovery is reported with its own text.
+                let reason = retained.take_notice().unwrap_or_else(|| err.to_string());
+                eprintln!("EmuSync: sync of '{name}' failed: {reason}");
                 coordinator.send_event(AppEvent::SyncStatusUpdated {
                     entry_name: name,
                     status: CloudSyncStatus::Error,
                 });
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: format!("Sync failed: {err}"),
+                    message: format!("Sync failed: {reason}"),
                 }));
             }
         }
