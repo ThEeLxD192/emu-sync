@@ -100,6 +100,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
 $backslashed = @($archive.Entries | Where-Object { $_.FullName.Contains('\') })
 $archive.Dispose()
+if ($backslashed.Count -ne 0) { $backslashed | ForEach-Object { Write-Host "  backslash in entry: $($_.FullName)" } }
 Assert-That ($backslashed.Count -eq 0) 'the ZIP uses forward slashes, so any extractor reads it'
 
 $extracted = Join-Path (Get-Location) 'portable-check'

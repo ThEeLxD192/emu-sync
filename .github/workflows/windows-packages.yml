@@ -7,6 +7,18 @@ name: Windows Packages
 
 on:
   workflow_dispatch:
+  # Only when a change touches what the packages are built from, so ordinary pull requests
+  # keep running just the Linux and Windows test jobs.
+  pull_request:
+    paths:
+      - packaging/**
+      - scripts/build-windows-installers.sh
+      - scripts/verify-windows-installers.ps1
+      - scripts/new-portable-zip.ps1
+      - .github/workflows/windows-packages.yml
+      - rust/desktop-app/build.rs
+      - rust/desktop-app/Cargo.toml
+      - .cargo/config.toml
   workflow_call:
     inputs:
       release_type:

@@ -274,7 +274,7 @@ on every change. It modifies the machine, so use it only on a disposable one.
 ## CI/CD & Automated Releases
 
 - **CI Validation (`.github/workflows/ci.yml`)**: On Linux and Windows, runs `cargo xtask check` and the script tests; on Linux it also builds the AppImage.
-- **Windows Packages (`.github/workflows/windows-packages.yml`)**: Builds the MSI and the portable ZIP, then installs, upgrades from a previous release, reinstalls and uninstalls the MSI on the runner and checks each step. Run it by hand from any branch (Actions tab) to download the packages; the release workflow runs it first.
+- **Windows Packages (`.github/workflows/windows-packages.yml`)**: Builds the MSI and the portable ZIP, then installs, upgrades from a previous release, reinstalls and uninstalls the MSI on the runner and checks each step. Run it by hand from any branch (Actions tab) to download the packages; it also runs on pull requests that touch the packaging files, and the release workflow runs it first.
 - **Publish Release (`.github/workflows/release.yml`)**: Manual trigger (`workflow_dispatch`) on `main` that:
   1. Prompts for the SemVer release type (`patch`, `minor`, `major`).
   2. Bumps the Cargo workspace version and creates the git tag (`vX.Y.Z`).
