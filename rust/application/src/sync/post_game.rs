@@ -7,7 +7,7 @@ use emusync_domain::execution::GameLauncher;
 use emusync_domain::library::{GameEntry, SaveTarget, SaveTargetType, is_excluded};
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, LocalSaveAccess, LocalSaveFiles, LocalSavePath,
-    PostSyncFailure, RemoteFile, SyncEvent, SyncGame, canonical_cloud_files,
+    PostSyncFailure, RemoteFile, SyncEvent, SyncGame, canonical_cloud_files, same_local_name,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -140,7 +140,10 @@ where
         } else {
             let planned = PlannedSave {
                 local: local_save_path.clone(),
-                remote: cloud_files.iter().find(|f| f.name == drive_name).cloned(),
+                remote: cloud_files
+                    .iter()
+                    .find(|f| same_local_name(&f.name, &drive_name))
+                    .cloned(),
                 folder_id: folder_id.to_string(),
                 drive_name,
                 directory: None,
@@ -214,7 +217,10 @@ where
                 } else if !reserved.contains(&relative) {
                     let planned = PlannedSave {
                         local: file,
-                        remote: cloud_files.iter().find(|f| f.name == relative).cloned(),
+                        remote: cloud_files
+                            .iter()
+                            .find(|f| same_local_name(&f.name, &relative))
+                            .cloned(),
                         folder_id: folder_id.to_string(),
                         drive_name: directory_cloud_name(prefix, &relative),
                         directory: Some((root_path.to_owned(), relative)),

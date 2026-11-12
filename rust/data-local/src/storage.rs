@@ -31,7 +31,8 @@ pub(crate) fn lock_for(path: &Path) -> io::Result<Arc<Mutex<()>>> {
         .get_or_init(Default::default)
         .lock()
         .map_err(|_| io::Error::other("lock registry poisoned"))?;
-    let path = absolute(path)?;
+    // Two spellings of one file must share a lock, or mutual exclusion is silently lost.
+    let path = crate::path_identity::local_identity(path)?;
     if let Some(lock) = locks.get(&path).and_then(Weak::upgrade) {
         return Ok(lock);
     }

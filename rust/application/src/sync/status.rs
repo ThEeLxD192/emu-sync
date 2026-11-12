@@ -10,7 +10,7 @@ use emusync_domain::execution::GameLauncher;
 use emusync_domain::library::{GameEntry, SaveTarget};
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, EntrySyncStatus, LocalSaveAccess, LocalSaveFiles,
-    LocalSavePath, RemoteFile, canonical_cloud_files,
+    LocalSavePath, RemoteFile, canonical_cloud_files, same_local_name,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -176,7 +176,9 @@ where
                 .await?;
         } else {
             let name = self.context.mapping.file_cloud_name(cfg);
-            let remote = cloud_files.iter().find(|cf| cf.name == name);
+            let remote = cloud_files
+                .iter()
+                .find(|cf| same_local_name(&cf.name, &name));
             let remote_state = remote.map(remote_to_state);
             let decision = self
                 .context

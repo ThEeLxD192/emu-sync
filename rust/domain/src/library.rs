@@ -1,5 +1,7 @@
 //! Library models and portable naming rules.
 
+use crate::sync::{local_names_ignore_case, name_key};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SaveTargetType {
     File,
@@ -25,11 +27,23 @@ impl SaveTarget {
 /// Whether the file at `relative` lies inside one of `excluded_folders`, both relative to
 /// the same save folder and separated by `/` or `\`. A folder with no named segment
 /// excludes nothing, so a blank entry never hides the whole save.
+///
+/// Segments are compared ignoring letter case where the local file system does (Windows),
+/// so `Cache/x` is inside an excluded `cache` there.
 pub fn is_excluded(excluded_folders: &[String], relative: &str) -> bool {
+    is_excluded_with(excluded_folders, relative, local_names_ignore_case())
+}
+
+/// [`is_excluded`] with the local file system's case rule given explicitly.
+pub fn is_excluded_with(excluded_folders: &[String], relative: &str, ignore_case: bool) -> bool {
     let file = relative_segments(relative);
     excluded_folders.iter().any(|folder| {
         let folder = relative_segments(folder);
-        !folder.is_empty() && file.len() > folder.len() && file.starts_with(&folder)
+        !folder.is_empty()
+            && file.len() > folder.len()
+            && folder.iter().zip(&file).all(|(excluded, actual)| {
+                name_key(excluded, ignore_case) == name_key(actual, ignore_case)
+            })
     })
 }
 fn relative_segments(path: &str) -> Vec<&str> {

@@ -55,8 +55,9 @@ Ninguna validación Linux cierra Windows. Pendiente de validación nativa (no co
 
 - CI Windows de `cargo xtask check` y pruebas de scripts; nunca se ha ejecutado en remoto.
 - Rutas UNC, nombres cortos 8.3, dispositivos reservados (`CON`, `PRN`, `NUL`) y bloqueos de archivos en persistencia local y restauración.
-- `RecoveryStore::has_unresolved` compara rutas locales distinguiendo mayúsculas; en Windows `C:\Saves` y `c:\saves` son la misma partida y una subida incierta podría no bloquear la siguiente si la ruta configurada cambia de grafía.
-- Carpetas excluidas: la carpeta elegida se convierte en relativa con `Path::strip_prefix`, que distingue mayúsculas; si la ruta de guardado escrita difiere en grafía (`C:\Saves` frente a `c:\saves`), la exclusión elegida queda marcada como inválida.
+- Identidad de rutas y mayúsculas: `data-local::path_identity` (candados, registro de `ConfigManager`, `RecoveryStore::has_unresolved`, comparación de destino de descargas de carpeta y `relative_to`), `is_excluded`, `canonical_cloud_files` y el emparejamiento local/nube de `manual.rs` pliegan mayúsculas solo cuando `cfg!(windows)`. La regla pura está probada en Linux con el parámetro explícito; el cableado con `cfg!(windows)` solo lo cubren las pruebas `#[cfg(windows)]` de `recovery_store.rs` y `restore_paths.rs`, que nunca se han ejecutado. Pendiente: la clave de `SyncHistoryStore::key` sigue dependiendo de la grafía de la ruta (cambiarla rompería el formato existente; hace falta migrar al leer) y `reserved_sibling_names` se compara con grafía exacta.
+- Nombres de Drive no válidos en Windows (`CON`, `a:b`, punto final): `resolve_remote_file` los rechaza solo en Windows; sin validar nativamente.
+- Descarga de carpetas: `PinnedRemoteDestination`, `StagedRestore::prepare_pinned` y `download_directory_guarded` existen solo en Linux (`rustix`/`openat`); en Windows `GuardedFiles::download_in_directory` devuelve `Unsupported`, así que las partidas de tipo carpeta no se descargan desde la nube. Requiere una implementación Windows confinada.
 - Procesos: `tasklist` con `CREATE_NO_WINDOW` y sondeos en `spawn_blocking`; PID exacto leyendo el segundo campo CSV de `tasklist /FO CSV /NH`; seguimiento de procesos de juego.
 - Selector `rfd` sin ventana padre (que no quede detrás de la app).
 - Lanzadores Steam con PowerShell y manifiesto JSON.

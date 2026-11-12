@@ -7,7 +7,7 @@ use super::target_mapping::{SaveTargetMappingError, UnplacedLegacyFiles};
 use emusync_domain::library::SaveTarget;
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, LocalSaveAccess, LocalSaveFiles, LocalSavePath,
-    RemoteFile, SyncEvent, canonical_cloud_files,
+    RemoteFile, SyncEvent, canonical_cloud_files, same_local_name,
 };
 
 const PLACEMENT_CANCELLED: &str = "Cloud saves were not restored because no folder was chosen. These folders were not synchronized.";
@@ -71,7 +71,7 @@ where
             let root_path = &unplaced.folders[folder];
             let remote = remote_files
                 .iter()
-                .find(|file| file.name == name)
+                .find(|file| same_local_name(&file.name, &name))
                 .ok_or_else(|| format!("Cloud file {name} is no longer available."))?;
             let local = self
                 .context

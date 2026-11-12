@@ -30,11 +30,12 @@ impl ConfigManager {
     pub fn new(path: &Path) -> io::Result<Self> {
         static STATES: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<State>>>>> = OnceLock::new();
         let path = absolute(path)?;
+        let identity = crate::path_identity::local_identity(&path)?;
         let mut states = STATES
             .get_or_init(Default::default)
             .lock()
             .map_err(|_| io::Error::other("configuration registry poisoned"))?;
-        let state = states.entry(path.clone()).or_default().clone();
+        let state = states.entry(identity).or_default().clone();
         Ok(Self { path, state })
     }
     pub fn path(&self) -> &Path {

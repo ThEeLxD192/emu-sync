@@ -108,3 +108,29 @@ fn storage_absolute(path: &std::path::Path) -> PathBuf {
         std::env::current_dir().unwrap().join(path)
     }
 }
+
+/// Drive accepts names Windows cannot create as plain files; they must never resolve.
+#[cfg(windows)]
+#[test]
+fn windows_refuses_cloud_names_that_would_open_devices_or_streams() {
+    let fixture = Fixture::new();
+    for name in [
+        "CON",
+        "nul.txt",
+        "slot/COM1",
+        "save.dat:stream",
+        "trailing.",
+        "a<b",
+    ] {
+        assert_eq!(
+            resolve_remote_file(&fixture.0, name).unwrap(),
+            None,
+            "{name}"
+        );
+    }
+    assert!(
+        resolve_remote_file(&fixture.0, "slot/console.sav")
+            .unwrap()
+            .is_some()
+    );
+}

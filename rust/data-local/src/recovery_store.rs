@@ -269,15 +269,19 @@ impl RecoveryStore {
         folder: &str,
         remote_name: &str,
     ) -> io::Result<bool> {
-        let local = absolute(local)?;
-        Ok(self.list()?.into_iter().any(|entry| match entry.state {
-            RecoveryState::Verified { record, .. } => {
-                Path::new(&record.local) == local
-                    && record.folder == folder
-                    && record.remote_name == remote_name
+        let local = crate::path_identity::local_identity(local)?;
+        for entry in self.list()? {
+            if let RecoveryState::Verified { record, .. } = entry.state
+                && record.folder == folder
+                && record.remote_name == remote_name
+                // A save reachable under another spelling is the same save: a case-only
+                // difference must not let a new write overtake an uncertain upload.
+                && crate::path_identity::local_identity(Path::new(&record.local))? == local
+            {
+                return Ok(true);
             }
-            RecoveryState::Unverifiable(_) => false,
-        }))
+        }
+        Ok(false)
     }
 
     /// Remove an entry after it was reconciled and recorded, or when the user

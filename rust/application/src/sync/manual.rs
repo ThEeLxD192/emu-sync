@@ -7,6 +7,7 @@ use emusync_domain::library::{GameEntry, is_excluded};
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, DirectoryDownload, LocalSaveAccess,
     LocalSaveFiles, LocalSavePath, RemoteFile, RemoteState, SyncEvent, canonical_cloud_files,
+    local_names_ignore_case, name_key, same_local_name,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -91,6 +92,9 @@ where
         prefix: Option<&str>,
         excluded_folders: &[String],
     ) -> Result<Vec<DirectoryAction<A::Path>>, String> {
+        // Keyed by the local file system's notion of identity: on Windows `Save.dat` on disk
+        // and `save.dat` in Drive are one file, not a local-only and a remote-only one.
+        let ignore_case = local_names_ignore_case();
         let mut files: BTreeMap<String, DirectoryFileEntry<A::Path>> = BTreeMap::new();
 
         if root.is_directory().unwrap_or(false)
@@ -102,7 +106,10 @@ where
                     && !reserved.contains(&rel)
                     && !is_excluded(excluded_folders, &rel)
                 {
-                    files.entry(rel).or_default().local = Some(file);
+                    files
+                        .entry(name_key(&rel, ignore_case).into_owned())
+                        .or_insert_with(|| DirectoryFileEntry::new(rel))
+                        .local = Some(file);
                 }
             }
         }
@@ -115,15 +122,20 @@ where
                 continue;
             }
             if let Ok(Some(resolved)) = root.resolve_remote(&file.name) {
-                let name = file.name.clone();
-                files.entry(name).or_default().remote = Some((file, resolved));
+                let key = name_key(&file.name, ignore_case).into_owned();
+                let spelling = file.name.clone();
+                files
+                    .entry(key)
+                    .or_insert_with(|| DirectoryFileEntry::new(spelling))
+                    .remote = Some((file, resolved));
             }
         }
 
         let mut actions = Vec::with_capacity(files.len());
         let root_path = root.path().to_owned();
 
-        for (name, entry) in files {
+        for entry in files.into_values() {
+            let name = entry.name;
             let (local, remote) = match (entry.local, entry.remote) {
                 (Some(local), Some((remote, _))) => (local, Some(remote)),
                 (Some(local), None) => (local, None),
@@ -131,7 +143,13 @@ where
                 (None, None) => continue,
             };
 
-            let drive_name = directory_cloud_name(prefix, &name);
+            // An existing cloud file keeps its own spelling; a local-only one uses the disk's.
+            let drive_name = directory_cloud_name(
+                prefix,
+                remote
+                    .as_ref()
+                    .map_or(name.as_str(), |file| file.name.as_str()),
+            );
             let remote_state = remote.as_ref().map(remote_to_state);
             let decision = self
                 .context
@@ -226,7 +244,9 @@ where
     ) -> Result<(), String> {
         let canonical_remote = canonical_cloud_files(cloud_files)
             .map_err(|e| format!("Unverified duplicate remote file: {}", e.name))?;
-        let remote = canonical_remote.into_iter().find(|f| f.name == drive_name);
+        let remote = canonical_remote
+            .into_iter()
+            .find(|f| same_local_name(&f.name, drive_name));
         let remote_state = remote.as_ref().map(remote_to_state);
         let decision = self
             .context
@@ -339,13 +359,16 @@ where
 }
 
 struct DirectoryFileEntry<P> {
+    /// Relative name as spelled by whichever side was seen first (the local file system).
+    name: String,
     local: Option<P>,
     remote: Option<(RemoteFile, P)>,
 }
 
-impl<P> Default for DirectoryFileEntry<P> {
-    fn default() -> Self {
+impl<P> DirectoryFileEntry<P> {
+    fn new(name: String) -> Self {
         Self {
+            name,
             local: None,
             remote: None,
         }
