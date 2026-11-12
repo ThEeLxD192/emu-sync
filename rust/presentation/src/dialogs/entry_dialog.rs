@@ -147,7 +147,7 @@ fn identity_fields(ui: &mut Ui, form: &mut EntryFormState, existing_groups: &[St
         ui.add_space(4.0);
         ui.label(
             RichText::new("Assign to existing folder:")
-                .size(11.0)
+                .size(12.0)
                 .color(ON_SURFACE_DIM),
         );
         ui.add_space(4.0);

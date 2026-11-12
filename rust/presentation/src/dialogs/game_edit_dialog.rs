@@ -182,7 +182,7 @@ fn small_text_button(ui: &mut Ui, text: &str, color: Color32) -> bool {
     crate::components::pill::Pill {
         text,
         text_color: color,
-        font: FontId::proportional(11.0),
+        font: FontId::proportional(12.0),
         fill: Color32::TRANSPARENT,
         padding: vec2(8.0, 4.0),
         corner_radius: 14,
@@ -233,7 +233,7 @@ fn cover_art(
                     .corner_radius(6)
                     .inner_margin(Margin::symmetric(8, 2))
                     .show(ui, |ui| {
-                        ui.label(RichText::new(text).size(11.0).color(color));
+                        ui.label(RichText::new(text).size(12.0).color(color));
                     });
             });
         },
@@ -331,7 +331,7 @@ fn paint_cover_preview(ui: &mut Ui, rect: Rect, path: Option<&str>, cover_cache:
             rect.center() + vec2(0.0, 24.0),
             egui::Align2::CENTER_CENTER,
             "No Cover Found",
-            FontId::proportional(11.0),
+            FontId::proportional(12.0),
             ON_SURFACE_DIM.gamma_multiply(0.6),
         );
     }

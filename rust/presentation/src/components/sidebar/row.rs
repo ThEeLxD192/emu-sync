@@ -163,7 +163,7 @@ fn folder_row(ui: &mut Ui, frame: &RowFrame<'_>, row: &SidebarRow, events: &mut 
     // Count badge.
     let badge_text = ui.painter().layout_no_wrap(
         count.to_string(),
-        FontId::proportional(11.0),
+        FontId::proportional(12.0),
         ON_SURFACE_DIM,
     );
     let badge = Rect::from_min_max(
@@ -333,7 +333,7 @@ fn entry_row(ui: &mut Ui, frame: &RowFrame<'_>, row: &SidebarRow, events: &mut V
         ui,
         pos2(left, rect.center().y + 9.0),
         &subtitle,
-        FontId::proportional(11.0),
+        FontId::proportional(12.0),
         ON_SURFACE_DIM,
         width,
     );

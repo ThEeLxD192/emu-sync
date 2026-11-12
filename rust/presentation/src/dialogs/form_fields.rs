@@ -28,7 +28,7 @@ pub(crate) fn field_hint(ui: &mut Ui, text: &str, color: Color32) {
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.add_space(4.0);
-        ui.label(RichText::new(text).size(11.0).color(color));
+        ui.label(RichText::new(text).size(12.0).color(color));
     });
 }
 

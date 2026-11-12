@@ -224,7 +224,7 @@ fn config_location(ui: &mut Ui, config_path: &str, on_open_config: &mut dyn FnMu
                     ui.with_layout(Layout::top_down(Align::Min), |ui| {
                         ui.label(
                             RichText::new("Config Location:")
-                                .size(11.0)
+                                .size(12.0)
                                 .color(ON_SURFACE_DIM),
                         );
                         ui.add(

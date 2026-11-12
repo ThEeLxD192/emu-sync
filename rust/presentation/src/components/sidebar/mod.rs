@@ -69,7 +69,7 @@ pub fn render_sidebar(
                 ui.set_min_height(28.0);
                 ui.label(
                     RichText::new("LIBRARY")
-                        .size(11.0)
+                        .size(12.0)
                         .color(ON_SURFACE_DIM)
                         .extra_letter_spacing(1.5),
                 );

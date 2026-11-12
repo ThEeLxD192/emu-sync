@@ -2,7 +2,9 @@
 
 use egui::{
     Color32, CornerRadius, FontData, FontFamily, FontId, Stroke, TextStyle, Visuals,
-    epaint::text::{FontInsert, FontPriority, InsertFontFamily},
+    epaint::text::{
+        FontInsert, FontPriority, FontTweak, HintingTarget, InsertFontFamily, SmoothHinting,
+    },
 };
 
 pub const BACKGROUND: Color32 = Color32::from_rgb(0x0D, 0x11, 0x17);
@@ -77,6 +79,24 @@ pub fn bold(size: f32) -> FontId {
     FontId::new(size, bold_family())
 }
 
+/// Sharpens the bundled fonts at small sizes without changing text layout.
+///
+/// JetBrains Mono ships its own TrueType hinting. egui's defaults render each
+/// glyph at fractional offsets and position-independent, which widens stems
+/// and blurs that hinting; whole-pixel placement and full grid-fitting keep
+/// the stems crisp. Glyph positions still come from the shaper's advances.
+fn crisp_font(bytes: &'static [u8]) -> FontData {
+    FontData::from_static(bytes).tweak(FontTweak {
+        hinting_target: HintingTarget::Smooth(SmoothHinting {
+            light: false,
+            symmetric_rendering: false,
+            preserve_linear_metrics: false,
+        }),
+        subpixel_binning: Some(false),
+        ..FontTweak::default()
+    })
+}
+
 /// Registers the application fonts once; later calls only compare font names.
 fn install_fonts(ctx: &egui::Context) {
     let primary = |family| InsertFontFamily {
@@ -85,7 +105,7 @@ fn install_fonts(ctx: &egui::Context) {
     };
     ctx.add_font(FontInsert::new(
         FONT_REGULAR_NAME,
-        FontData::from_static(FONT_REGULAR),
+        crisp_font(FONT_REGULAR),
         vec![
             primary(FontFamily::Proportional),
             primary(FontFamily::Monospace),
@@ -97,7 +117,7 @@ fn install_fonts(ctx: &egui::Context) {
     ));
     ctx.add_font(FontInsert::new(
         FONT_BOLD_NAME,
-        FontData::from_static(FONT_BOLD),
+        crisp_font(FONT_BOLD),
         vec![primary(bold_family())],
     ));
 }
@@ -108,7 +128,7 @@ pub fn configure_egui_theme(ctx: &egui::Context) {
 
     ctx.all_styles_mut(|style| {
         style.text_styles = [
-            (TextStyle::Small, FontId::proportional(11.0)),
+            (TextStyle::Small, FontId::proportional(12.0)),
             (TextStyle::Body, FontId::proportional(13.0)),
             (TextStyle::Button, FontId::proportional(13.0)),
             (TextStyle::Monospace, FontId::monospace(13.0)),

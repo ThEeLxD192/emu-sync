@@ -305,7 +305,7 @@ fn conflict_card(
     // Not selectable: selectable labels sense clicks and would swallow the card's.
     text_ui.add(Label::new(RichText::new(title).font(bold(13.0)).color(color)).selectable(false));
     text_ui.add_space(4.0);
-    text_ui.add(Label::new(RichText::new(date).size(11.0).color(ON_SURFACE_DIM)).selectable(false));
+    text_ui.add(Label::new(RichText::new(date).size(12.0).color(ON_SURFACE_DIM)).selectable(false));
     response.clicked()
 }
 
@@ -343,7 +343,7 @@ fn save_folders_dialog(
                 ui.label(RichText::new(&group.name).font(bold(13.0)).color(ON_BACKGROUND));
                 ui.label(
                     RichText::new(files_summary(&group.files))
-                        .size(11.0)
+                        .size(12.0)
                         .color(ON_SURFACE_DIM),
                 );
                 ui.add_space(6.0);

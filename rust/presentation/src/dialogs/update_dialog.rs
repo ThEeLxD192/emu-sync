@@ -120,7 +120,7 @@ pub fn render_update_dialog(
                     ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                         ui.label(
                             RichText::new(format!("{}%", progress_percent(*progress)))
-                                .size(11.0)
+                                .size(12.0)
                                 .color(ON_SURFACE_DIM),
                         );
                     });
