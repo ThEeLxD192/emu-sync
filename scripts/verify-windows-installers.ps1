@@ -99,7 +99,11 @@ Assert-That (Test-Path $marker) 'user data survived the uninstall'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
 $backslashed = @($archive.Entries | Where-Object { $_.FullName.Contains('\') })
+$names = @($archive.Entries | ForEach-Object { $_.FullName })
 $archive.Dispose()
+Write-Host "ZIP entries: $($names -join ', ')"
+$expectedNames = 'EmuSync/EmuSync.exe', 'EmuSync/LICENSE', 'EmuSync/portable.txt'
+Assert-That ($null -eq (Compare-Object $names $expectedNames)) 'the ZIP holds exactly EmuSync/EmuSync.exe, LICENSE and portable.txt'
 if ($backslashed.Count -ne 0) { $backslashed | ForEach-Object { Write-Host "  backslash in entry: $($_.FullName)" } }
 Assert-That ($backslashed.Count -eq 0) 'the ZIP uses forward slashes, so any extractor reads it'
 

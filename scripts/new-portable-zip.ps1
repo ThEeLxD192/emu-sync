@@ -19,10 +19,13 @@ $source = (Resolve-Path $Source).Path.TrimEnd('\')
 $root = Split-Path -Leaf $source
 $archive = [System.IO.Compression.ZipFile]::Open($Destination, [System.IO.Compression.ZipArchiveMode]::Create)
 try {
-    Get-ChildItem -Path $source -Recurse -File | ForEach-Object {
-        $name = $root + '/' + $_.FullName.Substring($source.Length + 1).Replace('\', '/')
+    # -Name yields each path relative to $source. Cutting a prefix off FullName instead breaks
+    # when the folder is given by its 8.3 short name (RUNNER~1) and the children report the
+    # long one, because the two prefixes differ in length.
+    Get-ChildItem -Path $source -Recurse -File -Name | ForEach-Object {
         [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-            $archive, $_.FullName, $name, [System.IO.Compression.CompressionLevel]::Optimal)
+            $archive, (Join-Path $source $_), ($root + '/' + $_.Replace('\', '/')),
+            [System.IO.Compression.CompressionLevel]::Optimal)
     }
 }
 finally {
