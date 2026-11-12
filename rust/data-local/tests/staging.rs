@@ -129,3 +129,33 @@ fn upload_snapshot_verifies_remote_checksum_case_insensitively_and_staged_restor
         "Backup directory must not be created for identical content replacement"
     );
 }
+
+/// The downloader publishes its finished `.part` file over the staged path. Windows refuses
+/// to replace a file that still has an open handle, so the stage must not hold one.
+#[test]
+fn a_download_can_replace_the_staged_file_before_commit() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let save = dir.path().join("save.dat");
+    fs::write(&save, b"old").unwrap();
+    let store = SyncHistoryStore::new(&dir.path().join("config.json")).unwrap();
+    let key = store.key(&save, "folder", "save.dat").unwrap();
+    let restore = StagedRestore::prepare(&save).unwrap();
+    let (mut part, part_path) = tempfile::Builder::new()
+        .prefix(".emusync-download-")
+        .suffix(".part")
+        .tempfile_in(dir.path())
+        .unwrap()
+        .into_parts();
+    part.write_all(b"remote").unwrap();
+    drop(part);
+    part_path.persist(restore.path()).unwrap();
+    restore.commit(None, &store, &key).unwrap();
+    assert_eq!(fs::read(&save).unwrap(), b"remote");
+    let leftovers: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(".emusync"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}

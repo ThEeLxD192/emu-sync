@@ -168,3 +168,29 @@ fn pinned_restore_rejects_an_original_modified_after_staging() {
     assert!(stage.commit(None, &history, &key).is_err());
     assert_eq!(fs::read(root.join("save")).unwrap(), b"edited meanwhile");
 }
+
+/// Directory downloads publish the finished `.part` file over the staged path, which
+/// Windows refuses while this process holds the staged file open.
+#[test]
+fn a_download_can_replace_the_pinned_staged_file_before_commit() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("root");
+    let history = SyncHistoryStore::new(&temp.path().join("config.json")).unwrap();
+    let key = history
+        .key(&root.join("slot/save.dat"), "folder", "slot/save.dat")
+        .unwrap();
+    let stage = StagedRestore::prepare_pinned(&root, "slot/save.dat")
+        .unwrap()
+        .unwrap();
+    let (mut part, part_path) = tempfile::Builder::new()
+        .prefix(".emusync-download-")
+        .suffix(".part")
+        .tempfile_in(stage.path().parent().unwrap())
+        .unwrap()
+        .into_parts();
+    part.write_all(b"remote").unwrap();
+    drop(part);
+    part_path.persist(stage.path()).unwrap();
+    stage.commit(None, &history, &key).unwrap();
+    assert_eq!(fs::read(root.join("slot/save.dat")).unwrap(), b"remote");
+}

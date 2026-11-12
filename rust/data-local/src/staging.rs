@@ -75,7 +75,9 @@ impl UploadSnapshot {
 
 /// Restore staging in the same directory as its destination, so replacement is atomic.
 pub struct StagedRestore {
-    temp: tempfile::NamedTempFile,
+    /// Only the path is kept: the downloader replaces the file at this path, and Windows
+    /// refuses to replace a file that still has an open handle, even this process's own.
+    temp: tempfile::TempPath,
     destination: PathBuf,
     logical_destination: PathBuf,
     original_digest: Option<String>,
@@ -93,7 +95,8 @@ impl StagedRestore {
         let temp = tempfile::Builder::new()
             .prefix(".emusync.")
             .suffix(".restore")
-            .tempfile_in(parent)?;
+            .tempfile_in(parent)?
+            .into_temp_path();
         Ok(Self {
             temp,
             logical_destination: destination.clone(),
@@ -118,7 +121,8 @@ impl StagedRestore {
         let temp = tempfile::Builder::new()
             .prefix(".emusync.")
             .suffix(".restore")
-            .tempfile_in(pinned.parent_path())?;
+            .tempfile_in(pinned.parent_path())?
+            .into_temp_path();
         let logical_destination = absolute(pinned.logical_path())?;
         Ok(Some(Self {
             temp,
@@ -129,7 +133,7 @@ impl StagedRestore {
         }))
     }
     pub fn path(&self) -> &Path {
-        self.temp.path()
+        &self.temp
     }
     pub fn logical_destination(&self) -> &Path {
         &self.logical_destination
@@ -140,11 +144,15 @@ impl StagedRestore {
         history: &SyncHistoryStore,
         key: &str,
     ) -> io::Result<String> {
-        let digest = file_sha256(self.temp.path())?;
+        let digest = file_sha256(&self.temp)?;
         if expected_remote_hash.is_some_and(|expected| !expected.eq_ignore_ascii_case(&digest)) {
             return Err(io::Error::other("downloaded content could not be verified"));
         }
-        self.temp.as_file().sync_all()?;
+        // Flush what was actually written to the staged path, whatever replaced the file.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&self.temp)?
+            .sync_all()?;
         #[cfg(any(target_os = "linux", windows))]
         if let Some(pinned) = &self.pinned {
             pinned.ensure_current()?;
