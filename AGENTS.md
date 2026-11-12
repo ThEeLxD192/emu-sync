@@ -46,8 +46,8 @@ El hook valida una exportación aislada del índice con `cargo xtask quality` y 
 ## Empaquetado y publicación
 
 - Linux: `scripts/build-appimage-container.sh` genera `EmuSync-x86_64.AppImage` íntegramente en Docker (Debian Bookworm, `Dockerfile` por etapas `build`, `tools` y `package`; `appimagetool` y runtime fijados por versión y SHA-256). El anfitrión solo necesita Docker y Git. `scripts/build-appimage.sh` empaqueta dentro del contenedor o con herramientas locales; usa `packaging/linux/AppRun`. Recursos en `packaging/assets/` y `packaging/linux/`.
-- Windows: `scripts/build-windows-installers.sh` (WiX 4, `packaging/windows/`) genera `EmuSync-x86_64.msi` y `EmuSync-x86_64-portable.zip`; `scripts/verify-windows-installers.ps1` los instala, actualiza desde el MSI Kotlin 1.2.1, reinstala y desinstala en el runner. Todavía no forman parte de la release.
-- `scripts/bump-version.sh` actualiza `workspace.package.version` y `Cargo.lock`. El workflow de release publica solo el AppImage. Conservar `io.github.ThEeLxD192.EmuSync`, el UpgradeCode Windows `a7b3c291-5f4e-4b28-98e1-d63f5e824c90` y los nombres de artefactos que busca el actualizador.
+- Windows: `scripts/build-windows-installers.sh` (WiX 4, `packaging/windows/`) genera `EmuSync-x86_64.msi` y `EmuSync-x86_64-portable.zip`; `scripts/verify-windows-installers.ps1` los instala, actualiza desde el MSI Kotlin 1.2.1, reinstala y desinstala en el runner. Forman parte de la release.
+- `scripts/bump-version.sh` actualiza `workspace.package.version` y `Cargo.lock`. El workflow de release publica el AppImage, `EmuSync-x86_64.msi` y `EmuSync-x86_64-portable.zip`, y no publica nada si falla la construcción o la verificación de Windows (`windows-packages.yml`). Conservar `io.github.ThEeLxD192.EmuSync`, el UpgradeCode Windows `a7b3c291-5f4e-4b28-98e1-d63f5e824c90` y los nombres de artefactos que busca el actualizador.
 
 ## Pendientes Windows
 
@@ -60,12 +60,13 @@ Ninguna validación Linux cierra Windows. Pendiente de validación nativa (no co
 - Procesos: `tasklist` con `CREATE_NO_WINDOW` y sondeos en `spawn_blocking`; PID exacto leyendo el segundo campo CSV de `tasklist /FO CSV /NH`; seguimiento de procesos de juego.
 - Selector `rfd` sin ventana padre (que no quede detrás de la app).
 - Lanzadores Steam con PowerShell y manifiesto JSON.
-- Instaladores WiX: compilación, licencia RTF, instalación limpia, actualización desde el MSI Kotlin 1.2.0 (mismo UpgradeCode), transición MSI/EXE, desinstalación y conservación de datos en `%APPDATA%\emusync`. Al validarlo, añadir el job Windows a `release.yml`; hasta entonces los usuarios Windows no reciben actualizaciones.
+- Instaladores WiX: la reapertura tras actualizar (`AUTOLAUNCH=1`) y el asistente con una versión más nueva que la instalada solo se prueban con dos versiones reales; falta firma de código (SmartScreen avisará). Nunca se ha publicado una release con el MSI nuevo.
 
 Registrar aquí fecha, comandos y resultado de cada validación Windows y retirar el punto cuando quede cerrado.
 
 Validaciones Windows registradas:
 
+- 2026-11-12, CI `windows-latest` (run 43309575999, commit `00e0662`): `scripts/verify-windows-installers.ps1` instala el MSI Kotlin 1.2.1, actualiza al MSI nuevo (un solo producto registrado, sin restos de la versión anterior), reinstala y desinstala conservando `%APPDATA%\emusync`; el ZIP portable trae `EmuSync.exe`, `portable.txt` y `LICENSE`; el ejecutable es GUI, con versión y CRT estático. En un PC Windows 11 nativo se instalaron, abrieron y desinstalaron el MSI y el ZIP portable sin problemas; la ventana carecía de icono propio (corregido en `90444d3`, sin reverificar).
 - 2026-11-12, CI `windows-latest` (run 43304104505, commit `b3f11d5`): `cargo xtask check` y `cargo build --release --locked -p emusync-desktop-app` pasan, incluidas las pruebas `#[cfg(windows)]` de `pinned_path_windows.rs`, `recovery_store.rs`, `restore_paths.rs` y las de reemplazo del temporal de `staging.rs`. Es la primera ejecución de `xtask check` en Windows remoto.
 - 2026-11-12, Windows 11 nativo (PC de prueba), `.exe` del job `windows-exe` del mismo run, con `--config` aislado y una raíz Drive sintética: se restauran desde la nube un archivo suelto borrado en local y subcarpetas de una partida de tipo carpeta; el reemplazo conserva la copia anterior en `.sync-backups`; la app cierra sin pedir recovery. Cierra la descarga de carpetas y el reemplazo del temporal en Windows. Un archivo creado a mano en Drive con la web no se lista (alcance `drive.file`, comportamiento esperado).
 

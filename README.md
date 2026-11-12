@@ -274,13 +274,12 @@ on every change. It modifies the machine, so use it only on a disposable one.
 ## CI/CD & Automated Releases
 
 - **CI Validation (`.github/workflows/ci.yml`)**: On Linux and Windows, runs `cargo xtask check` and the script tests; on Linux it also builds the AppImage.
+- **Windows Packages (`.github/workflows/windows-packages.yml`)**: Builds the MSI and the portable ZIP, then installs, upgrades from a previous release, reinstalls and uninstalls the MSI on the runner and checks each step. Run it by hand from any branch (Actions tab) to download the packages; the release workflow runs it first.
 - **Publish Release (`.github/workflows/release.yml`)**: Manual trigger (`workflow_dispatch`) on `main` that:
   1. Prompts for the SemVer release type (`patch`, `minor`, `major`).
   2. Bumps the Cargo workspace version and creates the git tag (`vX.Y.Z`).
-  3. Builds `EmuSync-x86_64.AppImage`.
-  4. Creates the GitHub Release with automated changelogs and attaches the AppImage.
-
-Windows installers will be added to releases once they are validated natively on a clean machine.
+  3. Builds `EmuSync-x86_64.AppImage`, and `EmuSync-x86_64.msi` plus `EmuSync-x86_64-portable.zip` after verifying them on Windows (upgrade from the newest release with an MSI, reinstall, uninstall).
+  4. Creates the GitHub Release with automated changelogs and attaches all three. The release is not published if any build or verification fails.
 
 ---
 

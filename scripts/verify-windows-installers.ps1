@@ -113,5 +113,15 @@ Assert-That (((Get-ChildItem $folder).Count) -eq 3) 'the portable ZIP contains n
 Assert-That ((Get-Item (Join-Path $folder 'EmuSync.exe')).VersionInfo.FileVersion.StartsWith($Version)) `
     "the portable executable reports version $Version"
 
+# The executable itself: no console window and no dependency on the Visual C++ runtime.
+$bytes = [System.IO.File]::ReadAllBytes((Join-Path $folder 'EmuSync.exe'))
+$pe = [BitConverter]::ToInt32($bytes, 0x3C)
+# Subsystem sits 68 bytes into the optional header, after the 4-byte signature and the 20-byte
+# COFF header: 2 is a GUI application, 3 would open a console window.
+$subsystem = [BitConverter]::ToUInt16($bytes, $pe + 24 + 68)
+Assert-That ($subsystem -eq 2) "the executable is a GUI application (subsystem $subsystem)"
+Assert-That (-not ([System.Text.Encoding]::ASCII.GetString($bytes) -match 'VCRUNTIME140')) `
+    'the executable links the C runtime statically'
+
 Remove-Item -Force $marker
 Write-Host 'All installer checks passed.'

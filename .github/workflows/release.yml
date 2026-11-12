@@ -65,13 +65,20 @@ jobs:
           path: dist/EmuSync-x86_64.AppImage
           retention-days: 90
 
-  # Windows installers (scripts/build-windows-installers.sh, WiX 4) are excluded
-  # from releases until they are validated natively on Windows.
+  # Builds the MSI and the portable ZIP and verifies them on the runner (install, upgrade from
+  # the newest release with an MSI, reinstall, uninstall). The release waits for it.
+  build-windows:
+    name: Build Windows Installers
+    needs: prepare-version
+    uses: ./.github/workflows/windows-packages.yml
+    with:
+      release_type: ${{ github.event.inputs.release_type }}
+      previous: latest
 
   create-release:
     name: Create GitHub Release
     if: github.ref == 'refs/heads/main'
-    needs: [prepare-version, build-linux]
+    needs: [prepare-version, build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -88,6 +95,12 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: EmuSync-${{ needs.prepare-version.outputs.new_version }}-x86_64-linux
+          path: release-assets
+
+      - name: Download Windows Installers
+        uses: actions/download-artifact@v7
+        with:
+          name: EmuSync-windows-installers
           path: release-assets
 
       - name: Publish Version Commit and Tag
