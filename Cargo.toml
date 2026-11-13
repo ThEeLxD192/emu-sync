@@ -7,3 +7,11 @@ version = "2.1.0"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
+
+# Debug builds keep file and line for backtraces but skip full debug info: it is the bulk of
+# the linker input for the many test binaries and nobody steps through dependencies.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

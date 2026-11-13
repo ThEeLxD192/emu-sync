@@ -6,8 +6,10 @@ on:
   pull_request:
 
 jobs:
-  validate:
-    name: Test & Build Check (${{ matrix.platform }})
+  # Formatting, architecture rules and Clippy. It runs on both platforms because Clippy only
+  # sees the `cfg(windows)` code when it runs on Windows.
+  quality:
+    name: Quality (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -28,6 +30,13 @@ jobs:
           toolchain: 1.99.1
           components: rustfmt, clippy
 
+      # Dependencies are restored from the cache; only pushes to main refresh it, so pull
+      # requests never evict it.
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Verify coordinated version bumps
         shell: bash
         run: bash scripts/tests/bump-version-test.sh
@@ -41,22 +50,71 @@ jobs:
         shell: bash
         run: bash scripts/tests/appimage-fallback-test.sh
 
-      - name: Check Rust architecture, quality and tests
+      - name: Check Rust architecture and quality
         shell: bash
         run: |
           set -o pipefail
-          cargo xtask check 2>&1 | tee rust-check.log
+          cargo xtask quality 2>&1 | tee rust-quality.log
 
-      - name: Upload Quality and Test Log
+      - name: Upload Quality Log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: quality-reports-${{ matrix.platform }}
+          path: rust-quality.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  tests:
+    name: Tests (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Linux
+            os: ubuntu-latest
+          - platform: Windows
+            os: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Run Rust tests
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo xtask test 2>&1 | tee rust-tests.log
+
+      - name: Upload Test Log
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: test-reports-${{ matrix.platform }}
-          path: rust-check.log
+          path: rust-tests.log
           if-no-files-found: ignore
           retention-days: 7
 
+  # Runs alongside the Rust jobs instead of after them.
+  appimage:
+    name: Linux packaging (AppImage)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
       - name: Verify Linux Packaging (AppImage)
-        if: matrix.platform == 'Linux'
         shell: bash
         run: bash scripts/build-appimage-container.sh "$RUNNER_TEMP/EmuSync-x86_64.AppImage"
