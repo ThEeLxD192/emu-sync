@@ -64,6 +64,22 @@ fn matching_process_ids_finds_process_by_argument_name_variants() {
         .unwrap();
     let pid = u64::from(child.id());
 
+    // `spawn` vuelve antes de que el hijo termine `exec`: hasta entonces `/proc/<pid>/cmdline`
+    // está vacío o aún muestra la línea de comandos del padre.
+    let cmdline_path = format!("/proc/{pid}/cmdline");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !std::fs::read(&cmdline_path)
+        .unwrap_or_default()
+        .windows(name.len())
+        .any(|window| window == name.as_bytes())
+    {
+        assert!(
+            Instant::now() < deadline,
+            "child never exposed its command line"
+        );
+        std::thread::yield_now();
+    }
+
     let variants = [
         name.clone(),
         format!("\"/otra/ruta/{name}\""),
