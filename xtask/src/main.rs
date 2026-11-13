@@ -53,21 +53,24 @@ fn run(args: &[&str]) -> Result<(), Box<dyn Error>> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let command = std::env::args().nth(1).unwrap_or_default();
-    if !matches!(command.as_str(), "quality" | "check") {
-        return Err("usage: cargo xtask quality|check".into());
+    if !matches!(command.as_str(), "quality" | "test" | "check") {
+        return Err("usage: cargo xtask quality|test|check".into());
     }
-    architecture()?;
-    run(&["fmt", "--all", "--", "--check"])?;
-    run(&[
-        "clippy",
-        "--workspace",
-        "--all-targets",
-        "--locked",
-        "--",
-        "-D",
-        "warnings",
-    ])?;
-    if command == "check" {
+    // `quality` and `test` are the two halves of `check`, so CI can run them in parallel.
+    if command != "test" {
+        architecture()?;
+        run(&["fmt", "--all", "--", "--check"])?;
+        run(&[
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--locked",
+            "--",
+            "-D",
+            "warnings",
+        ])?;
+    }
+    if command != "quality" {
         // Run every test binary so one failure does not hide the others.
         run(&["test", "--workspace", "--locked", "--no-fail-fast"])?;
     }
