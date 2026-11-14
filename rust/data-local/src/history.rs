@@ -7,7 +7,6 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::SystemTime,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,31 +54,71 @@ struct CachedHistory {
 }
 
 /// Identifies one version of the state file. Every write replaces the file by renaming a
-/// new one over it, which changes its identity (inode, or creation time on Windows) as
-/// well as its modification time, so a write by this or another process is never mistaken
-/// for the version already read.
+/// new one over it, which gives the path a new file identity (device and inode on Unix,
+/// volume and file index on Windows), so a write by this or another process is never
+/// mistaken for the version already read, even with the same size and modification time.
+/// Windows creation times cannot serve: NTFS carries the old file's over to a file that
+/// replaces it soon after.
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct FileStamp {
     len: u64,
-    modified: Option<SystemTime>,
-    #[cfg(unix)]
-    inode: (u64, u64),
-    #[cfg(not(unix))]
-    created: Option<SystemTime>,
+    modified: u128,
+    identity: (u64, u64),
 }
 
 impl FileStamp {
-    fn of(metadata: &fs::Metadata) -> Self {
-        #[cfg(unix)]
+    #[cfg(unix)]
+    fn of(file: &fs::File) -> io::Result<Self> {
         use std::os::unix::fs::MetadataExt;
-        Self {
+        let metadata = file.metadata()?;
+        Ok(Self {
             len: metadata.len(),
-            modified: metadata.modified().ok(),
-            #[cfg(unix)]
-            inode: (metadata.dev(), metadata.ino()),
-            #[cfg(not(unix))]
-            created: metadata.created().ok(),
+            modified: (i128::from(metadata.mtime()) * 1_000_000_000
+                + i128::from(metadata.mtime_nsec())) as u128,
+            identity: (metadata.dev(), metadata.ino()),
+        })
+    }
+
+    #[cfg(windows)]
+    fn of(file: &fs::File) -> io::Result<Self> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{
+            Foundation::FILETIME,
+            Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle},
+        };
+        let never = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let mut info = BY_HANDLE_FILE_INFORMATION {
+            dwFileAttributes: 0,
+            ftCreationTime: never,
+            ftLastAccessTime: never,
+            ftLastWriteTime: never,
+            dwVolumeSerialNumber: 0,
+            nFileSizeHigh: 0,
+            nFileSizeLow: 0,
+            nNumberOfLinks: 0,
+            nFileIndexHigh: 0,
+            nFileIndexLow: 0,
+        };
+        // SAFETY: the handle belongs to `file`, which stays open for the call, and `info`
+        // is a valid, writable BY_HANDLE_FILE_INFORMATION the call fills in.
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+            return Err(io::Error::last_os_error());
         }
+        let wide = |high: u32, low: u32| (u64::from(high) << 32) | u64::from(low);
+        Ok(Self {
+            len: wide(info.nFileSizeHigh, info.nFileSizeLow),
+            modified: u128::from(wide(
+                info.ftLastWriteTime.dwHighDateTime,
+                info.ftLastWriteTime.dwLowDateTime,
+            )),
+            identity: (
+                u64::from(info.dwVolumeSerialNumber),
+                wide(info.nFileIndexHigh, info.nFileIndexLow),
+            ),
+        })
     }
 }
 impl SyncHistoryStore {
@@ -144,8 +183,8 @@ impl SyncHistoryStore {
     }
     /// The history on disk, parsed again only when the file changed since the last read.
     fn current<'a>(&self, cache: &'a mut Option<CachedHistory>) -> io::Result<&'a History> {
-        let stamp = match fs::metadata(&self.state_file) {
-            Ok(metadata) => Some(FileStamp::of(&metadata)),
+        let stamp = match fs::File::open(&self.state_file) {
+            Ok(file) => Some(FileStamp::of(&file)?),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
@@ -171,7 +210,7 @@ impl SyncHistoryStore {
             }
             Err(error) => return Err(error),
         };
-        let stamp = FileStamp::of(&file.metadata()?);
+        let stamp = FileStamp::of(&file)?;
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
         let history: History = serde_json::from_slice(&contents)?;
