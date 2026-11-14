@@ -15,6 +15,7 @@ tokio = { version = "1", features = ["macros", "process", "rt", "sync", "time"] 
 
 [target.'cfg(windows)'.dependencies]
 rfd = { version = "0.18", default-features = false }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp"] }
 
 [dev-dependencies]
 filetime = "0.2.29"

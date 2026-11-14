@@ -2,7 +2,9 @@
 use crate::util::AppImageEnvironment;
 #[cfg(target_os = "linux")]
 use std::fs;
-use std::{collections::HashSet, path::Path, process::Command};
+#[cfg(not(target_os = "windows"))]
+use std::process::Command;
+use std::{collections::HashSet, path::Path};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProcessMonitor;
@@ -32,7 +34,7 @@ impl ProcessMonitor {
             return HashSet::new();
         }
 
-        // Windows matches the image name through `tasklist`; other systems compare stems.
+        // Windows matches the image name in a process snapshot; other systems compare stems.
         #[cfg(not(target_os = "windows"))]
         let target_stem = Path::new(&clean_name)
             .file_stem()
@@ -51,7 +53,7 @@ impl ProcessMonitor {
 
         #[cfg(target_os = "windows")]
         {
-            Self::scan_tasklist_windows(&clean_name)
+            Self::scan_snapshot_windows(&clean_name)
         }
 
         #[cfg(not(any(target_os = "linux", target_os = "windows")))]
@@ -79,15 +81,9 @@ impl ProcessMonitor {
         }
         #[cfg(windows)]
         {
-            let mut command = Command::new("tasklist");
-            command.args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]);
-            hide_console_window(&mut command);
-            match command.output() {
-                Ok(out) => String::from_utf8_lossy(&out.stdout)
-                    .lines()
-                    .any(|line| csv_pid(line) == Some(pid)),
-                Err(_) => false,
-            }
+            // As `tasklist` did: alive while the snapshot lists it; unknown counts as gone.
+            super::windows_processes::running_processes()
+                .is_some_and(|processes| processes.iter().any(|p| u64::from(p.pid) == pid))
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -168,57 +164,17 @@ impl ProcessMonitor {
     }
 
     #[cfg(target_os = "windows")]
-    fn scan_tasklist_windows(clean_name: &str) -> HashSet<u64> {
+    fn scan_snapshot_windows(clean_name: &str) -> HashSet<u64> {
         let target_exe = if clean_name.to_lowercase().ends_with(".exe") {
             clean_name.to_string()
         } else {
             format!("{clean_name}.exe")
         };
-
-        let mut command = Command::new("tasklist");
-        command.args([
-            "/FI",
-            &format!("IMAGENAME eq {target_exe}"),
-            "/NH",
-            "/FO",
-            "CSV",
-        ]);
-        hide_console_window(&mut command);
-        let output = match command.output() {
-            Ok(out) => out,
-            Err(_) => return HashSet::new(),
-        };
-
-        let mut pids = HashSet::new();
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            // CSV output format: "Image Name","PID","Session Name","Session#","Mem Usage"
-            let parts: Vec<&str> = line
-                .split(',')
-                .map(|s| s.trim().trim_matches('"'))
-                .collect();
-            if parts.len() >= 2
-                && parts[0].eq_ignore_ascii_case(&target_exe)
-                && let Ok(pid) = parts[1].parse::<u64>()
-            {
-                pids.insert(pid);
-            }
-        }
-        pids
+        super::windows_processes::running_processes()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|process| process.exe.eq_ignore_ascii_case(&target_exe))
+            .map(|process| u64::from(process.pid))
+            .collect()
     }
-}
-
-/// Evita que `tasklist` abra una ventana de consola (CREATE_NO_WINDOW).
-#[cfg(windows)]
-fn hide_console_window(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    command.creation_flags(0x0800_0000);
-}
-
-/// Segundo campo CSV (`"Image Name","PID",...`) interpretado como PID exacto.
-#[cfg(windows)]
-fn csv_pid(line: &str) -> Option<u64> {
-    line.split(',')
-        .nth(1)
-        .and_then(|field| field.trim().trim_matches('"').parse::<u64>().ok())
 }
