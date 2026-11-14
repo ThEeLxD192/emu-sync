@@ -585,6 +585,7 @@ pub fn sample_remote_file(id: &str, name: &str, modified: i64) -> RemoteFile {
 
 pub fn sample_app_config() -> AppConfig {
     AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client_id".into(),
             client_secret: "client_secret".into(),

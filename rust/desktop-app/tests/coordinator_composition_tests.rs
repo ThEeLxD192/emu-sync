@@ -12,12 +12,14 @@ use tokio_util::sync::CancellationToken;
 fn format_epoch_ms_and_drive_connected_handle_boundary_inputs() {
     // 1. drive_connected checks
     let cfg_none = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: vec![],
     };
     assert!(!drive_connected(&cfg_none));
 
     let cfg_no_token = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -28,6 +30,7 @@ fn format_epoch_ms_and_drive_connected_handle_boundary_inputs() {
     assert!(!drive_connected(&cfg_no_token));
 
     let cfg_blank_token = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -38,6 +41,7 @@ fn format_epoch_ms_and_drive_connected_handle_boundary_inputs() {
     assert!(!drive_connected(&cfg_blank_token));
 
     let cfg_valid = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -58,6 +62,7 @@ fn format_epoch_ms_and_drive_connected_handle_boundary_inputs() {
 async fn build_orchestrator_progress_callback_guards_zero_total_and_wires_conflict_and_retry() {
     let harness = TestHarness::new();
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),

@@ -3,10 +3,11 @@
 use crate::{
     actions::UiAction,
     components::pill::{LABEL_SIZE, Pill, pill},
+    i18n::{self, Language, fill, tr},
     state::AppUiState,
     theme::{DIVIDER, ERROR, ON_SURFACE_DIM, PRIMARY, SUCCESS, SURFACE_VARIANT, bold, glyph},
 };
-use egui::{Align, Color32, FontId, Layout, RichText, Stroke, Ui, vec2};
+use egui::{Align, Color32, FontId, Layout, Popup, RichText, Stroke, Ui, vec2};
 use emusync_application::UpdateState;
 
 /// Renders the header: branding on the left; Drive status, update chip, version and
@@ -18,6 +19,7 @@ pub fn render_header(
     on_show_drive: &mut impl FnMut(),
     on_show_update: &mut impl FnMut(),
 ) {
+    let t = tr(ui.ctx());
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.label(
@@ -32,7 +34,7 @@ pub fn render_header(
             if pill(
                 ui,
                 &Pill {
-                    text: "Safe Close",
+                    text: t.safe_close,
                     text_color: Color32::WHITE,
                     font: FontId::proportional(14.0),
                     fill: ERROR,
@@ -46,6 +48,9 @@ pub fn render_header(
             {
                 on_action(UiAction::Exit);
             }
+
+            ui.add_space(12.0);
+            render_language_selector(ui, on_action);
 
             ui.add_space(16.0);
             ui.label(
@@ -85,7 +90,7 @@ fn render_drive_status(
     if state.is_drive_connected() {
         let chip = Pill {
             icon: Some((glyph::CLOUD, SUCCESS)),
-            text: "Drive Linked",
+            text: tr(ui.ctx()).drive_linked,
             fill: SURFACE_VARIANT,
             ..Pill::default()
         };
@@ -97,7 +102,7 @@ fn render_drive_status(
 
     let button = Pill {
         icon: Some((glyph::CLOUD_SYNC, PRIMARY)),
-        text: "Connect Drive",
+        text: tr(ui.ctx()).connect_drive,
         text_color: PRIMARY,
         fill: Color32::TRANSPARENT,
         stroke: Stroke::new(1.0, DIVIDER),
@@ -119,10 +124,11 @@ fn render_update_slot(
     on_action: &mut impl FnMut(UiAction),
     on_show_update: &mut impl FnMut(),
 ) {
+    let t = tr(ui.ctx());
     let chip = match update_state {
         UpdateState::Available(info) => Pill {
             icon: Some((glyph::UPDATE, Color32::WHITE)),
-            text: &format!("Update v{}", info.version),
+            text: &fill(t.update_to, &[("version", &info.version)]),
             text_color: Color32::WHITE,
             font: bold(LABEL_SIZE),
             fill: PRIMARY,
@@ -131,7 +137,7 @@ fn render_update_slot(
         .show(ui),
         UpdateState::ReadyToRestart { .. } => Pill {
             icon: Some((glyph::RESTART, Color32::WHITE)),
-            text: "Restart EmuSync",
+            text: t.restart_app,
             text_color: Color32::WHITE,
             font: bold(LABEL_SIZE),
             fill: SUCCESS,
@@ -141,9 +147,12 @@ fn render_update_slot(
         // Rust-only extras: Kotlin shows nothing in these states.
         UpdateState::Downloading { progress, .. } => Pill {
             icon: Some((glyph::DOWNLOAD, PRIMARY)),
-            text: &format!(
-                "Downloading {}%",
-                crate::dialogs::update_dialog::progress_percent(*progress)
+            text: &fill(
+                t.downloading_percent,
+                &[(
+                    "percent",
+                    &crate::dialogs::update_dialog::progress_percent(*progress),
+                )],
             ),
             text_color: PRIMARY,
             fill: SURFACE_VARIANT,
@@ -152,7 +161,7 @@ fn render_update_slot(
         .show(ui),
         UpdateState::Checking => {
             ui.label(
-                RichText::new("Checking updates…")
+                RichText::new(t.checking_updates)
                     .size(LABEL_SIZE)
                     .color(ON_SURFACE_DIM),
             );
@@ -160,7 +169,7 @@ fn render_update_slot(
         }
         UpdateState::Idle | UpdateState::Error(_) => {
             let check = Pill {
-                text: "Check Updates",
+                text: t.check_updates,
                 text_color: ON_SURFACE_DIM,
                 fill: Color32::TRANSPARENT,
                 stroke: Stroke::new(1.0, DIVIDER),
@@ -175,4 +184,30 @@ fn render_update_slot(
     if chip.clicked() {
         on_show_update();
     }
+}
+
+/// The language chip: shows the current language and opens the list to choose another.
+fn render_language_selector(ui: &mut Ui, on_action: &mut impl FnMut(UiAction)) {
+    let current = i18n::language(ui.ctx());
+    let code = current.code().to_uppercase();
+    let chip = Pill {
+        icon: Some((glyph::TRANSLATE, ON_SURFACE_DIM)),
+        text: &code,
+        text_color: ON_SURFACE_DIM,
+        fill: Color32::TRANSPARENT,
+        stroke: Stroke::new(1.0, DIVIDER),
+        ..Pill::default()
+    };
+    let response = pill(ui, &chip).on_hover_text(tr(ui.ctx()).language);
+    Popup::menu(&response).show(|ui| {
+        for language in Language::ALL {
+            if ui
+                .selectable_label(language == current, language.native_name())
+                .clicked()
+                && language != current
+            {
+                on_action(UiAction::SetLanguage(language));
+            }
+        }
+    });
 }

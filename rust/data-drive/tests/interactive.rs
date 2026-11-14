@@ -39,6 +39,7 @@ fn setup(refresh: Option<&str>) -> (tempfile::TempDir, Arc<ConfigManager>, AppCo
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(ConfigManager::new(&dir.path().join("config.json")).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "secret".into(),

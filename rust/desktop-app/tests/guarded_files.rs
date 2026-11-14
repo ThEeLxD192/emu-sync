@@ -49,6 +49,7 @@ async fn guarded_upload_retains_uncertain_snapshot_and_persistent_recovery() {
     let config_path = dir.path().join("config.json");
     let store = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -94,6 +95,7 @@ async fn changed_connection_prevents_upload_before_remote_write() {
     let config_path = dir.path().join("config.json");
     let store = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -172,6 +174,7 @@ async fn changed_connection_during_download_preserves_save_and_history() {
     let config_path = dir.path().join("config.json");
     let store = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -236,6 +239,7 @@ async fn changed_connection_cannot_record_in_sync_history() {
     let config_path = dir.path().join("config.json");
     let store = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -277,6 +281,7 @@ async fn current_connection_commits_download_and_records_history() {
     let config_path = dir.path().join("config.json");
     let store = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -337,6 +342,7 @@ async fn directory_download_rejects_parent_replacement_and_preserves_both_saves(
     let config_path = dir.path().join("config.json");
     let store = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -439,6 +445,7 @@ async fn definitive_failure_classifier_removes_recovery_record_while_uncertain_k
     let config_path = dir.path().join("config.json");
     let store = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),

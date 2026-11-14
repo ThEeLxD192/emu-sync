@@ -36,6 +36,7 @@ async fn invalid_drive_connect_is_rejected_and_preserves_credentials() {
     let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
     let entry = test_native_entry("Game");
     let original = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "existing-id".into(),
             client_secret: "existing-secret".into(),
@@ -76,6 +77,7 @@ async fn coordinator_initializes_and_scans_library() {
     let entry = test_emulator_entry("SNES");
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![entry.clone()],
         })
@@ -127,6 +129,7 @@ fn app_processes_events_and_renders_cleanly() {
     let games = scan_entry_games(&entry);
 
     app.state.config = Some(AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: vec![entry.clone()],
     });
@@ -304,6 +307,7 @@ async fn reconcile_active_and_reconcile_persisted_recover_uploads_and_clear_pend
     harness
         .manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: Some(Credentials {
                 client_id: "id".into(),
                 client_secret: "secret".into(),
@@ -396,6 +400,7 @@ async fn complete_save_setup_cancels_bridge_when_category_deleted_or_persists_an
     harness
         .manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![entry.clone()],
         })
@@ -523,6 +528,7 @@ async fn complete_save_setup_without_a_pending_request_writes_nothing() {
     harness
         .manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![entry.clone()],
         })

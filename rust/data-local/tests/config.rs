@@ -1,6 +1,6 @@
 use emusync_data_local::ConfigManager;
 use emusync_domain::{
-    config::{ConfigurationStore, CredentialStore, Credentials},
+    config::{ConfigurationStore, CredentialStore, Credentials, Language},
     library::{EntryCommon, GameEntry, NativeGame, SaveTargetType},
 };
 use std::{
@@ -349,4 +349,66 @@ fn library_store_and_emulator_rom_migration_populate_only_empty_rom_targets() {
     let reloaded = store.load_entries().unwrap();
     assert_eq!(reloaded.len(), 2);
     assert_eq!(reloaded[1].common().name, "NativeAdded");
+}
+
+#[test]
+fn a_configuration_written_before_languages_reads_as_english_and_is_not_rewritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    let written =
+        r#"{"entries":[{"type":"native","name":"Game","executablePath":"game","arguments":[]}]}"#;
+    fs::write(&path, written).unwrap();
+    let store = ConfigManager::new(&path).unwrap();
+
+    assert_eq!(store.load().unwrap().language, Language::English);
+    assert_eq!(fs::read_to_string(&path).unwrap(), written);
+}
+
+#[test]
+fn the_language_is_stored_by_code_and_english_adds_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    fs::write(
+        &path,
+        r#"{"googleDrive":{"clientId":"id","clientSecret":"secret"},"entries":[{"type":"native","name":"Game","executablePath":"game","arguments":[]}]}"#,
+    )
+    .unwrap();
+    let store = ConfigManager::new(&path).unwrap();
+    let before = store.load().unwrap();
+
+    store
+        .update(|mut config| {
+            config.language = Language::Spanish;
+            config
+        })
+        .unwrap();
+    let stored: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(stored["language"], "es");
+    let spanish = store.load().unwrap();
+    assert_eq!(spanish.language, Language::Spanish);
+    assert_eq!(
+        (spanish.credentials, spanish.entries),
+        (before.credentials, before.entries),
+        "only the language changed"
+    );
+
+    store
+        .update(|mut config| {
+            config.language = Language::English;
+            config
+        })
+        .unwrap();
+    let stored: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert!(stored.get("language").is_none(), "English is the default");
+}
+
+#[test]
+fn an_unknown_language_reads_as_english() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    fs::write(&path, r#"{"language":"fr"}"#).unwrap();
+
+    let config = ConfigManager::new(&path).unwrap().load().unwrap();
+
+    assert_eq!(config.language, Language::English);
 }

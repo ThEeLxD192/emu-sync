@@ -196,6 +196,7 @@ pub fn update_info(version: &str) -> UpdateInfo {
 
 pub fn config_with(entries: Vec<GameEntry>, credentials: Option<Credentials>) -> AppConfig {
     AppConfig {
+        language: Default::default(),
         credentials,
         entries,
     }

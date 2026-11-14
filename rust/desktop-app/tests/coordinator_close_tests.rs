@@ -34,6 +34,7 @@ async fn coordinator_close_with_in_flight_operation_and_recovery_flow() {
         wait_for_process: None,
     });
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),

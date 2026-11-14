@@ -5,6 +5,7 @@ use crate::{
     model::{GameItem, PathTarget, PickMode, SaveSetupRequest},
 };
 use emusync_domain::{
+    config::Language,
     library::{Emulator, GameEntry, SaveTarget},
     sync::Decision,
     update::UpdateInfo,
@@ -85,6 +86,8 @@ pub enum UiAction {
         path: String,
     },
     Exit,
+    /// Shows the interface in this language and remembers it.
+    SetLanguage(Language),
 }
 
 /// Hand-written so the Drive client secret never reaches logs.
@@ -181,6 +184,7 @@ impl std::fmt::Debug for UiAction {
                 .field("path", path)
                 .finish(),
             Self::Exit => f.write_str("Exit"),
+            Self::SetLanguage(v) => f.debug_tuple("SetLanguage").field(v).finish(),
         }
     }
 }

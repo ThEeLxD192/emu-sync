@@ -288,6 +288,7 @@ fn make_harness(
     };
 
     let config = AppConfig {
+        language: Default::default(),
         credentials,
         entries,
     };

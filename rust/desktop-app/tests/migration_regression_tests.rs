@@ -70,6 +70,7 @@ async fn token_server_failure_leaves_config_intact_and_emits_error() {
     let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
     let entry = test_native("OriginalGame", None, None);
     let initial_config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -127,6 +128,7 @@ async fn cloud_folder_change_without_name_change_triggers_migration() {
     let entry_new = test_native("SameName", None, Some("custom_folder"));
 
     let original_config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -171,6 +173,7 @@ async fn renaming_grouped_native_game_triggers_migration() {
     let entry_new = test_native("NewGame", Some("GroupG"), None);
 
     let original_config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -213,6 +216,7 @@ async fn connected_edits_do_not_change_paths_without_cloud_migration() {
     let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
     let entry = test_native_entry("Game");
     let original = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),
@@ -298,6 +302,7 @@ async fn cloud_migration_entry_records_pending_recovery_when_local_config_save_f
     let old_entry = test_native("OldCat", None, None);
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: Some(Credentials {
                 client_id: "id".into(),
                 client_secret: "secret".into(),
@@ -376,6 +381,7 @@ async fn cloud_migration_game_override_retains_transfer_error_and_leaves_config_
     };
     let entry = GameEntry::Emulator(emu);
     let initial_config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "id".into(),
             client_secret: "secret".into(),

@@ -86,6 +86,7 @@ async fn sync_check_freshness_invalidation_matrix() {
 
     let entry = sample_entry("Metroid");
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client-id".into(),
             client_secret: "secret".into(),
@@ -122,6 +123,7 @@ async fn sync_check_freshness_invalidation_matrix() {
 
     // 5. Stale when entry is removed from current configuration
     let config_without_entry = AppConfig {
+        language: Default::default(),
         credentials: config.credentials.clone(),
         entries: Vec::new(),
     };
@@ -141,6 +143,7 @@ async fn sync_check_freshness_invalidation_matrix() {
         n.common.executable_path = "/games/Metroid_v2".into();
     }
     let config_with_edited_entry = AppConfig {
+        language: Default::default(),
         credentials: config.credentials.clone(),
         entries: vec![modified_entry],
     };
@@ -156,6 +159,7 @@ async fn sync_check_stale_while_operation_is_busy_and_supports_independent_entri
     let game_b = sample_entry("Mario");
 
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "c".into(),
             client_secret: "s".into(),

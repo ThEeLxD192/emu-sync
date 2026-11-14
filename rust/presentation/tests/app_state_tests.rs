@@ -15,6 +15,7 @@ fn app_ui_state_drive_connection_and_sync_queries() {
     assert!(!state.is_drive_connected());
 
     state.config = Some(AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client-id".to_string(),
             client_secret: "secret".to_string(),

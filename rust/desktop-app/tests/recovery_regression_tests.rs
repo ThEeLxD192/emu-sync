@@ -43,6 +43,7 @@ async fn foreign_connection_record_is_preserved_without_removal() {
     let manager = ConfigManager::new(&config_path).unwrap();
 
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client-id".into(),
             client_secret: "secret".into(),
@@ -92,6 +93,7 @@ async fn typed_error_blocks_second_mutation_and_retains_supervisor_exclusion() {
     let manager = ConfigManager::new(&config_path).unwrap();
 
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client-id".into(),
             client_secret: "secret".into(),
@@ -162,6 +164,7 @@ async fn pending_recovery_allows_connect_drive_and_clears_on_recovery() {
     let manager = ConfigManager::new(&config_path).unwrap();
 
     let config = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: vec![],
     };

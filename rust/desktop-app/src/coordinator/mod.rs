@@ -32,7 +32,7 @@ use emusync_data_local::{
     ConfigManager, LocalSaveTargets, RecoveryCredentials, RecoveryStore, TrackedError,
 };
 use emusync_domain::{
-    config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
+    config::{AppConfig, ConfigurationStore, CredentialStore, Credentials, Language},
     execution::PathPicker,
     library::{GameEntry, SaveTarget, SteamLibrary},
     sync::{
@@ -135,6 +135,26 @@ impl DesktopCoordinator {
         self.updates =
             UpdateServices::new(source, self.event_tx.clone(), self.tokio_handle.clone());
         self
+    }
+
+    /// Remembers the interface language, which the UI already shows. Only the language
+    /// changes: the rest of the configuration is kept as stored, and nothing is reloaded.
+    fn save_language(&self, language: Language) {
+        let config = self.config_manager.clone();
+        let coordinator = self.clone();
+        let handle = self.tokio_handle.spawn(async move {
+            let saved = tokio::task::spawn_blocking(move || {
+                config.update(|mut current| {
+                    current.language = language;
+                    current
+                })
+            })
+            .await;
+            if !matches!(saved, Ok(Ok(_))) {
+                coordinator.send_toast("Could not save the language.");
+            }
+        });
+        self.track_task(handle);
     }
 
     /// The shared Drive HTTP clients, built on first use. A failed build is not kept, so
@@ -477,6 +497,7 @@ impl DesktopCoordinator {
                 };
                 library.delete_entry(self, entry);
             }
+            UiAction::SetLanguage(language) => self.save_language(language),
             UiAction::ReorderEntries(entries) => {
                 if !self.try_acquire_admission() {
                     self.send_toast("Cannot reorder categories: another operation is in progress.");

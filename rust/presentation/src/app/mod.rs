@@ -395,6 +395,13 @@ impl EmuSyncApp {
     /// Processes one frame of UI layout, updates and event collection within a given Ui.
     pub fn update(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        let language = self
+            .state
+            .config
+            .as_ref()
+            .map(|config| config.language)
+            .unwrap_or_default();
+        crate::i18n::set_language(&ctx, language);
 
         // The flag means "the update dialog should be visible" (Kotlin
         // `dismissUpdateDialog`): if that dialog is already open the request is

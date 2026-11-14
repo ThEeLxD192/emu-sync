@@ -302,6 +302,7 @@ async fn test_play_without_drive_launches_directly_and_returns_idle() {
     let events_clone = Arc::clone(&events);
 
     let config = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: Vec::new(),
     };

@@ -14,6 +14,7 @@ fn generic_config_writes_invalidate_credential_aba_but_library_edits_do_not() {
     let dir = tempfile::tempdir().unwrap();
     let store = ConfigManager::new(&dir.path().join("config.json")).unwrap();
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),
@@ -58,6 +59,7 @@ fn connection_change_waits_for_guarded_action_and_stale_revision_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(ConfigManager::new(&dir.path().join("config.json")).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "synthetic".into(),
             client_secret: "secret".into(),
@@ -114,6 +116,7 @@ async fn guarded_reconciliation_rejects_connection_aba_without_writing_history()
     let config_path = dir.path().join("config.json");
     let store = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "synthetic".into(),
             client_secret: "secret".into(),

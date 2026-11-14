@@ -439,6 +439,13 @@ impl ApplicationHandler for App {
                 // Drain and dispatch UI actions
                 let actions = self.emusync_app.take_actions();
                 for action in actions {
+                    // Shown at once; the coordinator stores it in the background.
+                    if let UiAction::SetLanguage(language) = action {
+                        if let Some(config) = &mut self.emusync_app.state.config {
+                            config.language = language;
+                        }
+                        window.request_redraw();
+                    }
                     if let UiAction::SelectEntry(ref entry) = action {
                         self.emusync_app.state.selected_entry = entry.clone();
                         if entry.is_none() {

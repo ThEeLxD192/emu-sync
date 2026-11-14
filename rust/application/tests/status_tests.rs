@@ -17,6 +17,7 @@ async fn status_reports_errors_instead_of_claiming_unverified_saves_are_in_sync(
     let auth = MockAuth::default();
     *auth.token.lock().unwrap() = Some("synthetic-token".into());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "secret".into(),
@@ -65,6 +66,7 @@ async fn status_reports_errors_instead_of_claiming_unverified_saves_are_in_sync(
     assert_eq!(sync.check_entry(&entry).await, Ok(EntrySyncStatus::Error));
 
     let blank = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             refresh_token: Some("  ".into()),
             ..config.credentials.unwrap()
@@ -145,6 +147,7 @@ async fn multiple_directory_targets_sharing_folder_evaluates_to_in_sync() {
     });
 
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "secret".into(),
@@ -180,6 +183,7 @@ async fn test_check_entry_sync_status_idle_out_of_sync_and_conflict() {
     let auth = MockAuth::default();
     *auth.token.lock().unwrap() = Some("synthetic-token".into());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "secret".into(),

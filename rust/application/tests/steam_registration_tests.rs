@@ -101,6 +101,7 @@ fn registration_uses_latest_entry_and_retains_concurrent_edits() {
 
     let store = MemoryStore {
         config: Arc::new(Mutex::new(AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![latest.clone()],
         })),
@@ -164,6 +165,7 @@ fn unregister_clears_only_target_app_id_leaving_others_intact() {
 
     let store = MemoryStore {
         config: Arc::new(Mutex::new(AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![game1.clone(), game2.clone()],
         })),
@@ -191,6 +193,7 @@ fn failed_steam_registration_does_not_mutate_store() {
     let game = sample_native("Game", "/games/g.exe", None);
     let store = MemoryStore {
         config: Arc::new(Mutex::new(AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![game.clone()],
         })),
@@ -218,6 +221,7 @@ fn category_not_found_when_game_does_not_exist_in_store() {
     let game = sample_native("NonExistent", "/games/none.exe", None);
     let store = MemoryStore {
         config: Arc::new(Mutex::new(AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: Vec::new(),
         })),
@@ -240,6 +244,7 @@ fn concurrent_deletion_of_category_during_steam_register_returns_category_not_fo
 
     let store = MemoryStore {
         config: Arc::new(Mutex::new(AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![target_game.clone(), survivor_game.clone()],
         })),

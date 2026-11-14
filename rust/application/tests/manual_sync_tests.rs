@@ -277,6 +277,7 @@ fn make_context(
     };
 
     let config = AppConfig {
+        language: Default::default(),
         credentials,
         entries: Vec::new(),
     };
