@@ -68,7 +68,7 @@ pub fn render_sidebar(
             ui.allocate_ui_with_layout(row, centered, |ui| {
                 ui.set_min_height(28.0);
                 ui.label(
-                    RichText::new("LIBRARY")
+                    RichText::new(crate::i18n::tr(ui.ctx()).library)
                         .size(12.0)
                         .color(ON_SURFACE_DIM)
                         .extra_letter_spacing(1.5),
@@ -83,7 +83,7 @@ pub fn render_sidebar(
                         18.0,
                         ON_SURFACE_DIM,
                     )
-                    .on_hover_text("Add entry")
+                    .on_hover_text(crate::i18n::tr(ui.ctx()).add_category)
                     .clicked()
                     {
                         on_open_add();

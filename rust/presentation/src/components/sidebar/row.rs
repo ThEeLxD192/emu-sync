@@ -141,7 +141,11 @@ fn folder_row(ui: &mut Ui, frame: &RowFrame<'_>, row: &SidebarRow, events: &mut 
         18.0,
         ON_SURFACE_DIM,
     )
-    .on_hover_text(if *is_collapsed { "Expand" } else { "Collapse" })
+    .on_hover_text(if *is_collapsed {
+        crate::i18n::tr(ui.ctx()).expand
+    } else {
+        crate::i18n::tr(ui.ctx()).collapse
+    })
     .clicked()
     {
         events.push(RowEvent::ToggleCollapse);
@@ -280,9 +284,9 @@ fn entry_row(ui: &mut Ui, frame: &RowFrame<'_>, row: &SidebarRow, events: &mut V
             color,
         )
         .on_hover_text(if registered {
-            "Unregister from Steam"
+            crate::i18n::tr(ui.ctx()).unregister_steam
         } else {
-            "Register in Steam"
+            crate::i18n::tr(ui.ctx()).register_steam
         })
         .clicked()
         {
@@ -319,7 +323,7 @@ fn entry_row(ui: &mut Ui, frame: &RowFrame<'_>, row: &SidebarRow, events: &mut V
             .map(|ext| format!(".{ext}"))
             .collect::<Vec<_>>()
             .join(", "),
-        GameEntry::Native(_) => "Native".to_string(),
+        GameEntry::Native(_) => crate::i18n::tr(ui.ctx()).native.to_string(),
     };
     paint_truncated(
         ui,

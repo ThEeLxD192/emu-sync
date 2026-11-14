@@ -10,6 +10,10 @@ use emusync_presentation::{
     dialogs::{conflict_card_id, post_sync_failed_message, save_folder_option_id},
 };
 
+fn english() -> &'static emusync_presentation::i18n::Texts {
+    emusync_presentation::i18n::texts(emusync_presentation::i18n::Language::English)
+}
+
 fn conflict() -> AppStatus {
     AppStatus::Conflict {
         local_date: "today".to_string(),
@@ -110,11 +114,11 @@ fn error_notice_closes_on_escape_like_kotlin() {
 #[test]
 fn post_sync_failure_message_reports_partial_progress() {
     assert_eq!(
-        post_sync_failed_message("Celeste", "Network unavailable", 0, 2),
+        post_sync_failed_message(english(), "Celeste", "Network unavailable", 0, 2),
         "Celeste closed normally. Google Drive was not updated.\n\nNetwork unavailable"
     );
     assert_eq!(
-        post_sync_failed_message("Celeste", "Quota", 1, 2),
+        post_sync_failed_message(english(), "Celeste", "Quota", 1, 2),
         "Celeste closed normally. 1 save(s) synced successfully; 2 save(s) still need to be uploaded.\n\nQuota"
     );
 }

@@ -43,8 +43,9 @@ pub fn render_game_grid(
     on_edit_category: &mut impl FnMut(GameEntry),
     on_delete_category: &mut impl FnMut(GameEntry),
 ) {
+    let t = crate::i18n::tr(ui.ctx());
     let Some(selected) = &state.selected_entry else {
-        empty_state(ui, "Select a category", None);
+        empty_state(ui, t.select_category, None);
         return;
     };
 
@@ -69,10 +70,13 @@ pub fn render_game_grid(
         match selected {
             GameEntry::Emulator(emulator) => empty_state(
                 ui,
-                "No ROMs found",
-                Some(&format!("Add ROMs to: {}", emulator.roms_directory)),
+                t.no_roms_found,
+                Some(&crate::i18n::fill(
+                    t.add_roms_to,
+                    &[("folder", &emulator.roms_directory)],
+                )),
             ),
-            GameEntry::Native(_) => empty_state(ui, "Select a category", None),
+            GameEntry::Native(_) => empty_state(ui, t.select_category, None),
         }
         return;
     }
@@ -129,9 +133,15 @@ fn render_category_toolbar(
         ui.spacing_mut().item_spacing.x = 0.0;
         // Actions are laid out first (from the right) so the title only takes what is left.
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let t = crate::i18n::tr(ui.ctx());
             let count = state.game_items.len();
+            let games = if count == 1 {
+                t.game_count_one.to_string()
+            } else {
+                crate::i18n::fill(t.game_count_other, &[("count", &count)])
+            };
             Pill {
-                text: &format!("{count} game{}", if count == 1 { "" } else { "s" }),
+                text: &games,
                 text_color: PRIMARY,
                 font: FontId::proportional(12.0),
                 fill: PRIMARY_CONTAINER,
@@ -143,10 +153,10 @@ fn render_category_toolbar(
             .show(ui);
             ui.add_space(8.0);
 
-            if toolbar_icon(ui, "category_delete", glyph::DELETE, "Delete Category").clicked() {
+            if toolbar_icon(ui, "category_delete", glyph::DELETE, t.delete_category).clicked() {
                 on_delete_category(selected.clone());
             }
-            if toolbar_icon(ui, "category_edit", glyph::PENCIL, "Edit Category").clicked() {
+            if toolbar_icon(ui, "category_edit", glyph::PENCIL, t.edit_category).clicked() {
                 on_edit_category(selected.clone());
             }
             ui.add_space(8.0);
@@ -163,7 +173,7 @@ fn render_category_toolbar(
                 ui.add_space(8.0);
                 let open = Pill {
                     icon: Some((glyph::COG, PRIMARY)),
-                    text: "Open Emulator",
+                    text: t.open_emulator,
                     text_color: PRIMARY,
                     font: FontId::proportional(13.0),
                     fill: Color32::TRANSPARENT,
@@ -203,6 +213,7 @@ enum SyncChipAction {
 
 /// Cloud status chip with Kotlin's per-state presentation.
 fn sync_chip(ui: &mut Ui, status: CloudSyncStatus) -> Option<SyncChipAction> {
+    let t = crate::i18n::tr(ui.ctx());
     let button = |icon, color, text, fill, stroke| Pill {
         icon: Some((icon, color)),
         text,
@@ -219,10 +230,10 @@ fn sync_chip(ui: &mut Ui, status: CloudSyncStatus) -> Option<SyncChipAction> {
                 let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
                 let id = ui.make_persistent_id("sync_check");
                 check = glyph_button(ui, id, rect, glyph::REFRESH, 13.0, ON_SURFACE_DIM)
-                    .on_hover_text("Check sync")
+                    .on_hover_text(t.check_sync)
                     .clicked();
                 ui.add_space(4.0);
-                ui.label(RichText::new("In Sync").size(LABEL_SIZE).color(ON_SURFACE));
+                ui.label(RichText::new(t.in_sync).size(LABEL_SIZE).color(ON_SURFACE));
                 icon_slot(ui, glyph::CLOUD_CHECK, crate::theme::SUCCESS);
             });
             check.then_some(SyncChipAction::Check)
@@ -230,7 +241,7 @@ fn sync_chip(ui: &mut Ui, status: CloudSyncStatus) -> Option<SyncChipAction> {
         CloudSyncStatus::OutOfSync => button(
             glyph::CLOUD_DOWNLOAD,
             PRIMARY,
-            "Out of sync • Sync All",
+            t.out_of_sync_sync_all,
             PRIMARY_CONTAINER,
             Stroke::NONE,
         )
@@ -240,7 +251,7 @@ fn sync_chip(ui: &mut Ui, status: CloudSyncStatus) -> Option<SyncChipAction> {
         CloudSyncStatus::Conflict => button(
             glyph::ALERT,
             WARNING,
-            "Conflict • Sync",
+            t.conflict_sync,
             WARNING.gamma_multiply(0.2),
             Stroke::NONE,
         )
@@ -249,9 +260,9 @@ fn sync_chip(ui: &mut Ui, status: CloudSyncStatus) -> Option<SyncChipAction> {
         .then_some(SyncChipAction::Sync),
         CloudSyncStatus::Checking | CloudSyncStatus::Syncing => {
             let text = if status == CloudSyncStatus::Syncing {
-                "Syncing..."
+                t.syncing
             } else {
-                "Checking..."
+                t.checking
             };
             // Right to left: label, then the spinner.
             status_frame(ui, |ui| {
@@ -264,7 +275,7 @@ fn sync_chip(ui: &mut Ui, status: CloudSyncStatus) -> Option<SyncChipAction> {
         CloudSyncStatus::Idle | CloudSyncStatus::Error => button(
             glyph::CLOUD_SYNC,
             PRIMARY,
-            "Sync All",
+            t.sync_all,
             Color32::TRANSPARENT,
             Stroke::new(1.0, DIVIDER),
         )
@@ -383,7 +394,7 @@ fn render_game_card(
         let edit = ui
             .interact(edit_rect, edit_id, Sense::click())
             .on_hover_cursor(CursorIcon::PointingHand)
-            .on_hover_text("Edit Saves");
+            .on_hover_text(crate::i18n::tr(ui.ctx()).edit_saves);
         let alpha = if edit.hovered() { 200 } else { 140 };
         ui.painter()
             .circle_filled(edit_rect.center(), 11.0, Color32::from_black_alpha(alpha));

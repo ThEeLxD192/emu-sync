@@ -88,6 +88,7 @@ pub fn render_status_overlay(
     folder_selection: &mut SaveFolderSelection,
     events: StatusOverlayEvents<'_>,
 ) {
+    let t = crate::i18n::tr(ctx);
     match status {
         AppStatus::Idle => {}
         AppStatus::Syncing { message } => {
@@ -96,21 +97,16 @@ pub fn render_status_overlay(
         AppStatus::Playing => status_dialog(
             ctx,
             glyph::CONTROLLER,
-            "Playing...",
-            Some("The game is running. This window will update when you close it."),
+            t.playing,
+            Some(t.playing_hint),
             false,
             SUCCESS,
         ),
-        AppStatus::Loading => status_dialog(
-            ctx,
-            glyph::HOURGLASS,
-            "Loading...",
-            None,
-            true,
-            ON_SURFACE_DIM,
-        ),
+        AppStatus::Loading => {
+            status_dialog(ctx, glyph::HOURGLASS, t.loading, None, true, ON_SURFACE_DIM)
+        }
         AppStatus::Conflict { .. } if conflict_resolved => {
-            status_dialog(ctx, glyph::CLOUD_SYNC, "Syncing...", None, true, PRIMARY)
+            status_dialog(ctx, glyph::CLOUD_SYNC, t.syncing, None, true, PRIMARY)
         }
         AppStatus::Conflict {
             local_date,
@@ -124,7 +120,7 @@ pub fn render_status_overlay(
             events.on_resolve_conflict,
         ),
         AppStatus::ChooseSaveFolders { .. } if folder_selection.is_answered() => {
-            status_dialog(ctx, glyph::CLOUD_SYNC, "Syncing...", None, true, PRIMARY)
+            status_dialog(ctx, glyph::CLOUD_SYNC, t.syncing, None, true, PRIMARY)
         }
         AppStatus::ChooseSaveFolders {
             game_name,
@@ -146,6 +142,7 @@ pub fn render_status_overlay(
         } => post_sync_failed_dialog(
             ctx,
             &post_sync_failed_message(
+                t,
                 game_name,
                 reason,
                 *completed_save_count,
@@ -160,24 +157,37 @@ pub fn render_status_overlay(
 
 /// Body of the post-sync failure notice (Kotlin's `PostSyncFailedDialog`).
 pub fn post_sync_failed_message(
+    t: &crate::i18n::Texts,
     game_name: &str,
     reason: &str,
     completed_save_count: usize,
     pending_save_count: usize,
 ) -> String {
     let progress = if completed_save_count == 0 {
-        "Google Drive was not updated.".to_string()
+        t.drive_not_updated.to_string()
     } else {
-        format!(
-            "{completed_save_count} save(s) synced successfully; {pending_save_count} save(s) still need to be uploaded."
+        crate::i18n::fill(
+            t.post_sync_progress,
+            &[
+                ("completed", &completed_save_count),
+                ("pending", &pending_save_count),
+            ],
         )
     };
-    format!("{game_name} closed normally. {progress}\n\n{reason}")
+    crate::i18n::fill(
+        t.post_sync_message,
+        &[
+            ("game", &game_name),
+            ("progress", &progress),
+            ("reason", &reason),
+        ],
+    )
 }
 
-/// Stable id of a conflict option card ("Local Save" / "Cloud Save").
-pub fn conflict_card_id(title: &str) -> Id {
-    Id::unique(("conflict_card", title))
+/// Stable id of a conflict option card ("Local Save" / "Cloud Save"), the same in every
+/// language.
+pub fn conflict_card_id(key: &str) -> Id {
+    Id::unique(("conflict_card", key))
 }
 
 fn overlay(id: &str, border: Color32) -> Modal {
@@ -239,30 +249,35 @@ fn conflict_dialog(
     cloud_date: &str,
     on_resolve: &mut dyn FnMut(Decision),
 ) {
+    let t = crate::i18n::tr(ctx);
     overlay("conflict_dialog", WARNING.gamma_multiply(0.5)).show(ctx, |ui| {
         ui.set_width(420.0);
         ui.vertical_centered(|ui| {
             alert_icon(ui, glyph::ALERT, WARNING);
-            ui.label(RichText::new("Save Conflict").font(bold(20.0)).color(WARNING));
+            ui.label(
+                RichText::new(t.save_conflict)
+                    .font(bold(20.0))
+                    .color(WARNING),
+            );
             ui.add_space(4.0);
             ui.label(RichText::new(game_name).size(13.0).color(ON_SURFACE_DIM));
             ui.add_space(12.0);
         });
         ui.label(
-            RichText::new(
-                "Both copies changed, or their shared history could not be verified. Choose which progress to keep. Restoring from the cloud preserves a local recovery copy.",
-            )
-            .size(12.0)
-            .color(ON_SURFACE_DIM),
+            RichText::new(t.save_conflict_hint)
+                .size(12.0)
+                .color(ON_SURFACE_DIM),
         );
         ui.add_space(20.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
             let width = (ui.available_width() - 12.0) / 2.0;
-            if conflict_card(ui, width, "Local Save", local_date, glyph::COMPUTER, PRIMARY) {
+            let local = ("Local Save", t.local_save);
+            if conflict_card(ui, width, local, local_date, glyph::COMPUTER, PRIMARY) {
                 on_resolve(Decision::UploadLocal);
             }
-            if conflict_card(ui, width, "Cloud Save", cloud_date, glyph::CLOUD, SECONDARY) {
+            let cloud = ("Cloud Save", t.cloud_save);
+            if conflict_card(ui, width, cloud, cloud_date, glyph::CLOUD, SECONDARY) {
                 on_resolve(Decision::DownloadCloud);
             }
         });
@@ -272,14 +287,14 @@ fn conflict_dialog(
 fn conflict_card(
     ui: &mut Ui,
     width: f32,
-    title: &str,
+    (key, title): (&str, &str),
     date: &str,
     icon: &str,
     color: Color32,
 ) -> bool {
     let (rect, _) = ui.allocate_exact_size(vec2(width, 112.0), Sense::hover());
     let response = ui
-        .interact(rect, conflict_card_id(title), Sense::click())
+        .interact(rect, conflict_card_id(key), Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     let fill = if response.hovered() {
         color.gamma_multiply(0.16)
@@ -322,12 +337,13 @@ fn save_folders_dialog(
     selection: &mut SaveFolderSelection,
     on_choose: &mut dyn FnMut(Option<Vec<usize>>),
 ) {
+    let t = crate::i18n::tr(ctx);
     overlay("save_folders_dialog", PRIMARY.gamma_multiply(0.5)).show(ctx, |ui| {
         ui.set_width(460.0);
         ui.vertical_centered(|ui| {
             alert_icon(ui, glyph::CLOUD_DOWNLOAD, PRIMARY);
             ui.label(
-                RichText::new("Choose Save Folders")
+                RichText::new(t.choose_save_folders)
                     .font(bold(18.0))
                     .color(PRIMARY),
             );
@@ -336,18 +352,20 @@ fn save_folders_dialog(
             ui.add_space(12.0);
         });
         ui.label(
-            RichText::new(
-                "These cloud saves are not in any of this game's save folders on this device yet. Choose the folder each one belongs to; it will be downloaded there and no local file is overwritten.",
-            )
-            .size(12.0)
-            .color(ON_SURFACE_DIM),
+            RichText::new(t.choose_save_folders_hint)
+                .size(12.0)
+                .color(ON_SURFACE_DIM),
         );
         ui.add_space(16.0);
         ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
             for (group_index, group) in groups.iter().enumerate() {
-                ui.label(RichText::new(&group.name).font(bold(13.0)).color(ON_BACKGROUND));
                 ui.label(
-                    RichText::new(files_summary(&group.files))
+                    RichText::new(&group.name)
+                        .font(bold(13.0))
+                        .color(ON_BACKGROUND),
+                );
+                ui.label(
+                    RichText::new(files_summary(t, &group.files))
                         .size(12.0)
                         .color(ON_SURFACE_DIM),
                 );
@@ -372,7 +390,7 @@ fn save_folders_dialog(
                 ui.spacing_mut().item_spacing.x = 10.0;
                 let chosen = selection.chosen();
                 let restore = ui
-                    .add_enabled_ui(chosen.is_some(), |ui| primary_button(ui, "Restore"))
+                    .add_enabled_ui(chosen.is_some(), |ui| primary_button(ui, t.restore))
                     .inner;
                 if restore.clicked()
                     && let Some(chosen) = chosen
@@ -381,7 +399,7 @@ fn save_folders_dialog(
                     on_choose(Some(chosen));
                 }
                 let cancel = Pill {
-                    text: "Cancel",
+                    text: t.cancel,
                     text_color: PRIMARY,
                     font: FontId::proportional(13.0),
                     fill: Color32::TRANSPARENT,
@@ -401,7 +419,7 @@ fn save_folders_dialog(
 }
 
 /// "1 file: a" or "3 files: a, b, …".
-fn files_summary(files: &[String]) -> String {
+fn files_summary(t: &crate::i18n::Texts, files: &[String]) -> String {
     let shown: Vec<&str> = files.iter().take(2).map(String::as_str).collect();
     let more = if files.len() > shown.len() {
         ", …"
@@ -409,9 +427,9 @@ fn files_summary(files: &[String]) -> String {
         ""
     };
     let count = if files.len() == 1 {
-        "1 file".to_string()
+        t.file_count_one.to_string()
     } else {
-        format!("{} files", files.len())
+        crate::i18n::fill(t.file_count_other, &[("count", &files.len())])
     };
     format!("{count}: {}{more}", shown.join(", "))
 }
@@ -478,13 +496,14 @@ fn post_sync_failed_dialog(
     on_retry: &mut dyn FnMut(),
     on_dismiss: &mut dyn FnMut(),
 ) {
+    let t = crate::i18n::tr(ctx);
     overlay("post_sync_failed_dialog", ERROR.gamma_multiply(0.5)).show(ctx, |ui| {
         ui.set_min_width(320.0);
         ui.set_max_width(460.0);
         ui.vertical_centered(|ui| {
             alert_icon(ui, glyph::ALERT, ERROR);
             ui.label(
-                RichText::new("Save kept locally")
+                RichText::new(t.save_kept_locally)
                     .font(bold(15.0))
                     .color(ERROR),
             );
@@ -497,11 +516,11 @@ fn post_sync_failed_dialog(
             Layout::right_to_left(Align::Center),
             |ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
-                if primary_button(ui, "Retry upload").clicked() {
+                if primary_button(ui, t.retry_upload).clicked() {
                     on_retry();
                 }
                 let keep_local = Pill {
-                    text: "Keep local",
+                    text: t.keep_local,
                     text_color: PRIMARY,
                     font: FontId::proportional(13.0),
                     fill: Color32::TRANSPARENT,
@@ -520,19 +539,20 @@ fn post_sync_failed_dialog(
 }
 
 fn error_dialog(ctx: &egui::Context, message: &str, on_dismiss: &mut dyn FnMut()) {
+    let t = crate::i18n::tr(ctx);
     let modal = overlay("error_dialog", ERROR.gamma_multiply(0.5)).show(ctx, |ui| {
         ui.set_min_width(300.0);
         ui.set_max_width(420.0);
         ui.vertical_centered(|ui| {
             alert_icon(ui, glyph::ERROR_OUTLINE, ERROR);
-            ui.label(RichText::new("Sync Notice").font(bold(15.0)).color(ERROR));
+            ui.label(RichText::new(t.sync_notice).font(bold(15.0)).color(ERROR));
             ui.add_space(8.0);
         });
         ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
             ui.label(RichText::new(message).size(13.0).color(ON_SURFACE));
         });
         ui.add_space(20.0);
-        ui.vertical_centered(|ui| primary_button(ui, "Close").clicked())
+        ui.vertical_centered(|ui| primary_button(ui, t.close).clicked())
             .inner
     });
     if modal.inner || modal.should_close() {

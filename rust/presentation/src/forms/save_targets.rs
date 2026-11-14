@@ -37,9 +37,6 @@ pub fn excluded_folder_within(root: &str, picked: &str) -> Option<String> {
     (!segments.is_empty()).then(|| segments.join("/"))
 }
 
-pub(crate) const EXCLUDED_FOLDERS_INVALID: &str =
-    "Excluded folders must be inside their save folder.";
-
 /// An editable row representing a save target.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaveTargetRow {
@@ -228,11 +225,11 @@ impl SaveTargetFormState {
     }
 
     /// The first problem that keeps these targets from being saved, if any.
-    pub fn validation_error(&self) -> Option<&'static str> {
+    pub fn validation_error(&self) -> Option<super::FormError> {
         if !self.cloud_paths_are_valid() {
-            Some("Cloud paths must be relative and cannot contain '..'.")
+            Some(super::FormError::CloudPathInvalid)
         } else if !self.excluded_folders_are_valid() {
-            Some(EXCLUDED_FOLDERS_INVALID)
+            Some(super::FormError::ExcludedFolderOutside)
         } else {
             None
         }

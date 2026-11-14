@@ -258,7 +258,7 @@ fn cloud_path_error_wins_over_missing_required_fields() {
 
     assert_eq!(
         form.build_entry(),
-        Err("Cloud paths must be relative and cannot contain '..'.".to_string())
+        Err(emusync_presentation::forms::FormError::CloudPathInvalid)
     );
 }
 

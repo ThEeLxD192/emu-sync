@@ -38,12 +38,12 @@ fn drive_setup_sends_trimmed_credentials_and_flags_blank_ones() {
 
     assert_eq!(state.submit(), None, "a blank secret must not connect");
     assert_eq!(
-        state.error_message.as_deref(),
-        Some("Please enter both Client ID and Client Secret.")
+        state.error,
+        Some(emusync_presentation::dialogs::DriveSetupError::MissingCredentials)
     );
 
     state.field_edited();
-    assert_eq!(state.error_message, None, "editing clears the error");
+    assert_eq!(state.error, None, "editing clears the error");
 
     state.client_secret = " GOCSPX-secret ".into();
     assert_eq!(
@@ -113,8 +113,8 @@ fn blank_credentials_click_keeps_dialog_with_error() {
         panic!("the drive dialog must stay open");
     };
     assert_eq!(
-        state.error_message.as_deref(),
-        Some("Please enter both Client ID and Client Secret.")
+        state.error,
+        Some(emusync_presentation::dialogs::DriveSetupError::MissingCredentials)
     );
 }
 

@@ -23,12 +23,13 @@ pub(crate) fn field_label(ui: &mut Ui, text: &str) {
     ui.add_space(4.0);
 }
 
-/// Helper text shown below a field.
+/// Helper text shown below a field, wrapped to the field's width: a hint can be longer
+/// than one line, more so in some languages.
 pub(crate) fn field_hint(ui: &mut Ui, text: &str, color: Color32) {
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.add_space(4.0);
-        ui.label(RichText::new(text).size(12.0).color(color));
+        ui.add(egui::Label::new(RichText::new(text).size(12.0).color(color)).wrap());
     });
 }
 
@@ -202,13 +203,14 @@ pub(crate) fn cloud_path_field(
     kind: &SaveTargetType,
     automatic: Option<&str>,
 ) -> Response {
+    let t = crate::i18n::tr(ui.ctx());
     let invalid = !cloud_path_is_valid(value);
     let placeholder = if *kind == SaveTargetType::Directory {
-        "Folder prefix shared across devices"
+        t.cloud_prefix_placeholder
     } else {
-        "File name, including any subfolders"
+        t.cloud_name_placeholder
     };
-    field_label(ui, "Cloud path (optional)");
+    field_label(ui, t.cloud_path_label);
     let response = text_field(
         ui,
         id_salt,
@@ -218,31 +220,25 @@ pub(crate) fn cloud_path_field(
         invalid,
     );
     if invalid {
-        field_hint(ui, "Use a relative path without '..'.", ERROR);
+        field_hint(ui, t.cloud_path_invalid, ERROR);
     } else if let Some(automatic) = automatic {
         field_hint(
             ui,
-            &format!(
-                "Saved in the cloud as \u{201c}{automatic}\u{201d} so this folder's files stay apart. Use the same cloud path on each device."
-            ),
+            &crate::i18n::fill(t.cloud_path_automatic, &[("automatic", &automatic)]),
             ON_SURFACE_DIM,
         );
     } else {
-        field_hint(
-            ui,
-            "Use the same cloud path for this save on each device.",
-            ON_SURFACE_DIM,
-        );
+        field_hint(ui, t.cloud_path_same, ON_SURFACE_DIM);
     }
     response
 }
 
 /// Label for a save target kind's toggle button.
-pub fn save_kind_label(kind: &SaveTargetType) -> &'static str {
+pub fn save_kind_label(kind: &SaveTargetType, t: &crate::i18n::Texts) -> &'static str {
     match kind {
-        SaveTargetType::File => "File",
-        SaveTargetType::Directory => "Folder",
-        SaveTargetType::Unknown => "Choose type",
+        SaveTargetType::File => t.file,
+        SaveTargetType::Directory => t.folder,
+        SaveTargetType::Unknown => t.choose_type,
     }
 }
 
@@ -250,7 +246,8 @@ pub fn save_kind_label(kind: &SaveTargetType) -> &'static str {
 pub(crate) fn remove_button(ui: &mut Ui, id_salt: impl egui::AsIdSalt) -> Response {
     let (rect, _) = ui.allocate_exact_size(vec2(FIELD_HEIGHT, FIELD_HEIGHT), egui::Sense::hover());
     let id = ui.make_persistent_id(("remove_row", id_salt));
-    glyph_button(ui, id, rect, glyph::DELETE, 20.0, ERROR).on_hover_text("Remove Path")
+    glyph_button(ui, id, rect, glyph::DELETE, 20.0, ERROR)
+        .on_hover_text(crate::i18n::tr(ui.ctx()).remove_path)
 }
 
 /// Editable save target rows (path with File/Folder pickers, kind toggle, remove button
@@ -263,6 +260,7 @@ pub(crate) fn save_target_rows(
     on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
     on_save_path_edited: &mut dyn FnMut(usize, String),
 ) {
+    let t = crate::i18n::tr(ui.ctx());
     let removable = saves.rows.len() > 1;
     let automatic = saves.automatic_cloud_paths();
     let mut remove = None;
@@ -270,7 +268,7 @@ pub(crate) fn save_target_rows(
         let mut toggle = false;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            let kind_label = save_kind_label(&saves.rows[index].target_type);
+            let kind_label = save_kind_label(&saves.rows[index].target_type, t);
             let tail = if removable { FIELD_HEIGHT + 4.0 } else { 0.0 };
             let toggle_width = text_width(ui, kind_label) + 24.0 + 4.0;
             ui.scope(|ui| {
@@ -280,7 +278,7 @@ pub(crate) fn save_target_rows(
                     (id_prefix, "path", index),
                     &mut saves.rows[index].path,
                     placeholder,
-                    &[("File", PickMode::File), ("Folder", PickMode::Directory)],
+                    &[(t.file, PickMode::File), (t.folder, PickMode::Directory)],
                     false,
                 );
                 if field.changed() {
@@ -323,7 +321,7 @@ pub(crate) fn save_target_rows(
         vec2(ui.available_width(), FIELD_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            if text_button(ui, "+ Add Another Path", PRIMARY).clicked() {
+            if text_button(ui, t.add_another_path, PRIMARY).clicked() {
                 saves.add_row();
             }
         },
@@ -339,7 +337,8 @@ fn excluded_folder_rows(
     index: usize,
     on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
 ) {
-    field_label(ui, "Excluded folders (optional)");
+    let t = crate::i18n::tr(ui.ctx());
+    field_label(ui, t.excluded_folders_label);
     let mut remove = None;
     for folder in 0..saves.rows[index].excluded_folders.len() {
         let value = &mut saves.rows[index].excluded_folders[folder];
@@ -352,8 +351,8 @@ fn excluded_folder_rows(
                     ui,
                     (id_prefix, "excluded", index, folder),
                     value,
-                    "Folder inside this save folder",
-                    &[("Folder", PickMode::Directory)],
+                    t.excluded_folder_placeholder,
+                    &[(t.folder, PickMode::Directory)],
                     invalid,
                 );
                 if picked.is_some() {
@@ -371,7 +370,7 @@ fn excluded_folder_rows(
             }
         });
         if invalid {
-            field_hint(ui, "Choose a folder inside this save folder.", ERROR);
+            field_hint(ui, t.excluded_folder_outside, ERROR);
         }
         ui.add_space(8.0);
     }
@@ -382,16 +381,12 @@ fn excluded_folder_rows(
         vec2(ui.available_width(), FIELD_HEIGHT),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            if text_button(ui, "+ Add Excluded Folder", PRIMARY).clicked() {
+            if text_button(ui, t.add_excluded_folder, PRIMARY).clicked() {
                 saves.add_excluded_folder(index);
             }
         },
     );
-    field_hint(
-        ui,
-        "Files in these folders are never uploaded or downloaded.",
-        ON_SURFACE_DIM,
-    );
+    field_hint(ui, t.excluded_folders_hint, ON_SURFACE_DIM);
 }
 
 fn text_width(ui: &Ui, text: &str) -> f32 {
@@ -433,9 +428,9 @@ pub(crate) fn secret_field(
         let (rect, _) =
             ui.allocate_exact_size(vec2(FIELD_HEIGHT, FIELD_HEIGHT), egui::Sense::hover());
         let (icon, tip) = if *revealed {
-            (glyph::EYE_OFF, "Hide")
+            (glyph::EYE_OFF, crate::i18n::tr(ui.ctx()).hide)
         } else {
-            (glyph::EYE, "Show")
+            (glyph::EYE, crate::i18n::tr(ui.ctx()).show)
         };
         let eye = ui.make_persistent_id(("reveal", id));
         if glyph_button(ui, eye, rect, icon, 20.0, ON_SURFACE_DIM)

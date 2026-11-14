@@ -34,21 +34,25 @@ pub fn render_confirm_delete_dialog(
                 .inner_margin(Margin::same(24)),
         )
         .show(ctx, |ui| {
+            let t = crate::i18n::tr(ui.ctx());
             ui.set_width(380.0);
             ui.label(
-                RichText::new(format!("Delete \"{entry_name}\"?"))
-                    .font(bold(15.0))
-                    .color(ON_BACKGROUND),
+                RichText::new(crate::i18n::fill(
+                    t.delete_entry_title,
+                    &[("name", &entry_name)],
+                ))
+                .font(bold(15.0))
+                .color(ON_BACKGROUND),
             );
             ui.add_space(8.0);
-            let mut detail = String::from("The category is removed from EmuSync.");
+            let mut detail = String::from(t.delete_entry_detail);
             if steam_registered {
-                detail.push_str(" Its Steam shortcut is removed too.");
+                detail.push_str(t.delete_entry_steam);
             }
             ui.label(RichText::new(detail).size(12.0).color(ON_SURFACE));
             ui.add_space(4.0);
             ui.label(
-                RichText::new("Saves, ROMs and Google Drive files are not deleted.")
+                RichText::new(t.delete_entry_kept)
                     .size(12.0)
                     .color(ON_SURFACE_DIM),
             );
@@ -59,7 +63,7 @@ pub fn render_confirm_delete_dialog(
                 Layout::right_to_left(Align::Center),
                 |ui| {
                     let delete = Pill {
-                        text: "Delete",
+                        text: t.delete,
                         text_color: Color32::WHITE,
                         font: bold(13.0),
                         fill: ERROR,
@@ -73,7 +77,7 @@ pub fn render_confirm_delete_dialog(
                     }
                     ui.add_space(8.0);
                     let cancel = Pill {
-                        text: "Cancel",
+                        text: t.cancel,
                         text_color: ON_SURFACE,
                         font: FontId::proportional(13.0),
                         fill: Color32::TRANSPARENT,

@@ -32,6 +32,7 @@ pub fn render_entry_dialog(
     detect_fullscreen: fn(&str) -> String,
     events: EntryDialogEvents<'_>,
 ) {
+    let t = crate::i18n::tr(ctx);
     let is_editing = form.initial_entry.is_some();
     let max_height = (ctx.content_rect().height() - 160.0).max(240.0);
 
@@ -48,9 +49,9 @@ pub fn render_entry_dialog(
             ui.set_width(560.0);
             ui.label(
                 RichText::new(if is_editing {
-                    "Edit Entry"
+                    t.edit_entry
                 } else {
-                    "Add New Entry"
+                    t.add_entry
                 })
                 .font(bold(20.0))
                 .color(ON_BACKGROUND),
@@ -72,9 +73,9 @@ pub fn render_entry_dialog(
                         EntryType::Native => native_fields(ui, form, events.on_pick_path),
                     }
                     save_fields(ui, form, events.on_pick_path, events.on_save_path_edited);
-                    if let Some(message) = &form.error_message {
+                    if let Some(error) = form.error_message {
                         ui.add_space(8.0);
-                        ui.label(RichText::new(message).size(12.0).color(ERROR));
+                        ui.label(RichText::new(error.message(t)).size(12.0).color(ERROR));
                     }
                 });
 
@@ -84,13 +85,13 @@ pub fn render_entry_dialog(
                 Layout::right_to_left(Align::Center),
                 |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    if primary_button(ui, if is_editing { "Save" } else { "Add" }).clicked()
+                    if primary_button(ui, if is_editing { t.save } else { t.add }).clicked()
                         && let Ok(entry) = form.build_entry()
                     {
                         (events.on_save)(entry);
                         (events.on_close)();
                     }
-                    if text_button(ui, "Cancel", PRIMARY).clicked() {
+                    if text_button(ui, t.cancel, PRIMARY).clicked() {
                         (events.on_close)();
                     }
                 },
@@ -102,14 +103,15 @@ pub fn render_entry_dialog(
 }
 
 fn type_selector(ui: &mut Ui, form: &mut EntryFormState) {
-    field_label(ui, "Type");
+    let t = crate::i18n::tr(ui.ctx());
+    field_label(ui, t.entry_type);
     ui.add_space(2.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let half = (ui.available_width() - 8.0) / 2.0;
         for (kind, label, icon) in [
-            (EntryType::Emulator, "Emulator", glyph::CONTROLLER),
-            (EntryType::Native, "Native", glyph::GAMEPAD),
+            (EntryType::Emulator, t.emulator, glyph::CONTROLLER),
+            (EntryType::Native, t.native, glyph::GAMEPAD),
         ] {
             let selected = form.entry_type == kind;
             if filter_chip(ui, label, Some(icon), selected, half).clicked() && !selected {
@@ -122,31 +124,32 @@ fn type_selector(ui: &mut Ui, form: &mut EntryFormState) {
 }
 
 fn identity_fields(ui: &mut Ui, form: &mut EntryFormState, existing_groups: &[String]) {
+    let t = crate::i18n::tr(ui.ctx());
     let emulator = form.entry_type == EntryType::Emulator;
     labelled_field(
         ui,
-        "Name",
+        t.name,
         "entry_name",
         &mut form.name,
         if emulator {
-            "e.g. Yuzu or Eden"
+            t.emulator_name_placeholder
         } else {
-            "e.g. Spelunky Classic"
+            t.native_name_placeholder
         },
     );
     ui.add_space(12.0);
 
     labelled_field(
         ui,
-        "Folder / Platform Group (Optional)",
+        t.group_label,
         "entry_group",
         &mut form.group,
-        "e.g. Switch, PlayStation (shares cloud saves folder)",
+        t.group_placeholder,
     );
     if !existing_groups.is_empty() {
         ui.add_space(4.0);
         ui.label(
-            RichText::new("Assign to existing folder:")
+            RichText::new(t.assign_existing_group)
                 .size(12.0)
                 .color(ON_SURFACE_DIM),
         );
@@ -167,9 +170,9 @@ fn identity_fields(ui: &mut Ui, form: &mut EntryFormState, existing_groups: &[St
     };
     field_hint(
         ui,
-        &format!(
-            "☁️ Google Drive saves folder: \"{}\"",
-            form.cloud_folder_preview()
+        &crate::i18n::fill(
+            t.drive_folder_preview,
+            &[("folder", &form.cloud_folder_preview())],
         ),
         preview_color,
     );
@@ -181,13 +184,14 @@ fn launch_fields(
     form: &mut EntryFormState,
     on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
 ) {
+    let t = crate::i18n::tr(ui.ctx());
     let emulator = form.entry_type == EntryType::Emulator;
     field_label(
         ui,
         if emulator {
-            "Emulator Executable Path"
+            t.emulator_executable
         } else {
-            "Executable Path"
+            t.executable
         },
     );
     let (_, picked) = path_field(
@@ -199,7 +203,7 @@ fn launch_fields(
         } else {
             "/opt/spelunky/spelunky"
         },
-        &[("Browse", PickMode::File)],
+        &[(t.browse, PickMode::File)],
         false,
     );
     if let Some(mode) = picked {
@@ -209,7 +213,7 @@ fn launch_fields(
 
     labelled_field(
         ui,
-        "Arguments (quote values that contain spaces)",
+        t.arguments_label,
         "entry_arguments",
         &mut form.arguments,
         if emulator {
@@ -218,17 +222,9 @@ fn launch_fields(
             "--fullscreen --no-intro"
         },
     );
-    field_hint(
-        ui,
-        "Example: --profile \"My Profile\" keeps My Profile as one argument.",
-        ON_SURFACE_DIM,
-    );
+    field_hint(ui, t.arguments_example, ON_SURFACE_DIM);
     if emulator {
-        field_hint(
-            ui,
-            "Use {ROM} to insert the requested game's path.",
-            ON_SURFACE_DIM,
-        );
+        field_hint(ui, t.rom_placeholder_hint, ON_SURFACE_DIM);
     }
     ui.add_space(12.0);
 }
@@ -239,13 +235,14 @@ fn emulator_fields(
     detect_fullscreen: fn(&str) -> String,
     on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
 ) {
-    field_label(ui, "ROMs Directory");
+    let t = crate::i18n::tr(ui.ctx());
+    field_label(ui, t.roms_directory);
     let (_, picked) = path_field(
         ui,
         "entry_roms",
         &mut form.roms_directory,
         "/home/user/roms/gba",
-        &[("Browse", PickMode::Directory)],
+        &[(t.browse, PickMode::Directory)],
         false,
     );
     if let Some(mode) = picked {
@@ -255,7 +252,7 @@ fn emulator_fields(
 
     labelled_field(
         ui,
-        "File Extensions (comma-separated)",
+        t.extensions_label,
         "entry_extensions",
         &mut form.extensions,
         "gba, gbc",
@@ -264,26 +261,29 @@ fn emulator_fields(
 
     let detected = detect_fullscreen(&form.executable_path);
     let placeholder = if detected.is_empty() {
-        "e.g. -bigpicture -fullscreen"
+        t.fullscreen_placeholder
     } else {
         &detected
     };
     labelled_field(
         ui,
-        "Fullscreen / Big Picture Flags (auto-detected if empty)",
+        t.fullscreen_label,
         "entry_fullscreen",
         &mut form.fullscreen_args,
         placeholder,
     );
     field_hint(
         ui,
-        &format!(
-            "Forces the emulator to bypass its Qt GUI. Auto-detected: \"{}\"",
-            if detected.is_empty() {
-                "(none)"
-            } else {
-                &detected
-            }
+        &crate::i18n::fill(
+            t.fullscreen_hint,
+            &[(
+                "detected",
+                &if detected.is_empty() {
+                    t.none
+                } else {
+                    &detected
+                },
+            )],
         ),
         ON_SURFACE_DIM,
     );
@@ -295,27 +295,24 @@ fn native_fields(
     form: &mut EntryFormState,
     on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
 ) {
+    let t = crate::i18n::tr(ui.ctx());
     labelled_field(
         ui,
-        "Wait for Process Name (Optional)",
+        t.wait_process_label,
         "entry_wait_process",
         &mut form.wait_for_process,
         "Spelunky.exe",
     );
-    field_hint(
-        ui,
-        "Useful for Steam games: EmuSync will wait for this process to close.",
-        ON_SURFACE_DIM,
-    );
+    field_hint(ui, t.wait_process_hint, ON_SURFACE_DIM);
     ui.add_space(12.0);
 
-    field_label(ui, "Cover Image (Optional)");
+    field_label(ui, t.cover_image_optional);
     let (_, picked) = path_field(
         ui,
         "entry_cover",
         &mut form.cover_path,
         "/path/to/game_cover.png",
-        &[("Browse", PickMode::File)],
+        &[(t.browse, PickMode::File)],
         false,
     );
     if let Some(mode) = picked {
@@ -335,7 +332,7 @@ fn save_fields(
     } else {
         "/home/user/.local/share/save.dat"
     };
-    field_label(ui, "Save Files/Directories Paths");
+    field_label(ui, crate::i18n::tr(ui.ctx()).save_paths_title);
     save_target_rows(
         ui,
         "entry_save",
