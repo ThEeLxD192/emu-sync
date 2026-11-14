@@ -15,6 +15,7 @@ use emusync_domain::{
     sync::{SaveSynchronizerFactory, SyncEvent},
 };
 use emusync_platform_desktop::{DesktopBrowserLauncher, DesktopSteamLibrary, GameRunner};
+use emusync_presentation::i18n::fill;
 use reqwest::Url;
 use std::{
     net::SocketAddr,
@@ -96,6 +97,7 @@ pub struct BuiltOrchestrator {
 
 #[allow(clippy::too_many_arguments)]
 pub fn build_orchestrator(
+    t: &emusync_presentation::i18n::Texts,
     clients: DriveHttpClients,
     config_manager: &ConfigManager,
     steam: &DesktopSteamLibrary,
@@ -121,17 +123,17 @@ pub fn build_orchestrator(
 
     let history = Arc::new(
         SyncHistoryStore::new(config_manager.path())
-            .map_err(|e| format!("Failed to open sync history: {e}"))?,
+            .map_err(|e| fill(t.msg_history_open_failed, &[("error", &e)]))?,
     );
     let recovery = Arc::new(
         RecoveryStore::new(config_manager.path())
-            .map_err(|e| format!("Failed to open recovery store: {e}"))?,
+            .map_err(|e| fill(t.msg_recovery_open_failed, &[("error", &e)]))?,
     );
     let tracked = Arc::new(TrackedFileSync::new(drive_transfer, history).with_recovery(recovery));
 
     let snapshot = config_manager
         .snapshot(config)
-        .map_err(|e| format!("Failed to snapshot credentials: {e}"))?;
+        .map_err(|e| fill(t.msg_credentials_snapshot_failed, &[("error", &e)]))?;
     let credentials =
         RecoveryCredentials::new(Arc::new(config_manager.clone()), snapshot, config.clone());
 

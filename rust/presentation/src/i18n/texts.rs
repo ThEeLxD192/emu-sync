@@ -249,4 +249,99 @@ texts! {
     sync_unmatched_cloud_files: "Cloud files with no matching local save", "Archivos de la nube sin partida local";
     sync_more_items: "… ({count} more)", "… ({count} más)";
     sync_local_access_failed: "Local access error: {detail}", "Error de acceso local: {detail}";
+
+    // Desktop messages
+    msg_updates_portable: "This portable copy does not update itself. Download the latest portable ZIP from the project's releases and replace the folder.", "Esta copia portable no se actualiza sola. Descarga el ZIP portable más reciente de las versiones del proyecto y sustituye la carpeta.";
+    msg_updates_disabled: "Updates are disabled in development builds. Set EMUSYNC_UPDATE_BASE_URL to a test release server.", "Las actualizaciones están desactivadas en las compilaciones de desarrollo. Define EMUSYNC_UPDATE_BASE_URL con un servidor de versiones de prueba.";
+    msg_language_not_saved: "Could not save the language.", "No se pudo guardar el idioma.";
+    msg_up_to_date: "EmuSync is up to date.", "EmuSync está al día.";
+    msg_finish_before_update: "Finish the current operation before restarting to update.", "Termina la operación en curso antes de reiniciar para actualizar.";
+    msg_pending_recovery: "Pending recovery of {count} unconfirmed upload(s).", "Recuperación pendiente de {count} subida(s) sin confirmar.";
+    msg_found_recovery_records: "Found {count} pending sync recovery record(s).", "Se encontraron {count} registro(s) de recuperación de sincronización pendientes.";
+    msg_config_load_failed: "Failed to load config: {error}", "No se pudo cargar la configuración: {error}";
+    msg_busy_launch_game: "Cannot launch game: another operation is in progress or requires recovery.", "No se puede abrir el juego: hay otra operación en curso o pendiente de recuperación.";
+    msg_busy_launch_emulator: "Cannot launch emulator: another operation is in progress.", "No se puede abrir el emulador: hay otra operación en curso.";
+    msg_busy_sync: "Cannot synchronize: another operation is in progress or requires recovery.", "No se puede sincronizar: hay otra operación en curso o pendiente de recuperación.";
+    msg_busy_add_category: "Cannot add category: another operation is in progress or requires recovery.", "No se puede añadir la categoría: hay otra operación en curso o pendiente de recuperación.";
+    msg_busy_edit_category: "Cannot edit category: another operation is in progress or requires recovery.", "No se puede editar la categoría: hay otra operación en curso o pendiente de recuperación.";
+    msg_busy_delete_category: "Cannot delete category: another operation is in progress.", "No se puede eliminar la categoría: hay otra operación en curso.";
+    msg_busy_reorder: "Cannot reorder categories: another operation is in progress.", "No se pueden reordenar las categorías: hay otra operación en curso.";
+    msg_busy_edit_game: "Cannot edit game: another operation is in progress or requires recovery.", "No se puede editar el juego: hay otra operación en curso o pendiente de recuperación.";
+    msg_no_restore_location: "No valid restore location for the cloud files in that folder.", "No hay un destino de restauración válido para los archivos de la nube en esa carpeta.";
+    msg_busy_toggle_steam: "Cannot toggle Steam: another operation is in progress or requires recovery.", "No se puede cambiar Steam: hay otra operación en curso o pendiente de recuperación.";
+    msg_busy_retry: "Cannot retry sync: operation in progress or recovery required.", "No se puede reintentar la sincronización: hay una operación en curso o pendiente de recuperación.";
+    msg_category_missing: "Category no longer exists.", "La categoría ya no existe.";
+    msg_game_setup_failed: "Failed to save game setup: {error}", "No se pudo guardar la configuración del juego: {error}";
+    msg_syncing_file_percent: "Syncing {name} ({percent}%)", "Sincronizando {name} ({percent} %)";
+    msg_syncing_file: "Syncing {name}", "Sincronizando {name}";
+    msg_http_config_failed: "HTTP client configuration failed: {error}", "Falló la configuración del cliente HTTP: {error}";
+    msg_retry_failed: "Sync failed during retry: {detail}. Recovery is required.", "La sincronización falló al reintentar: {detail}. Hace falta una recuperación.";
+    msg_busy_connect_drive: "Cannot connect Drive: another operation is in progress.", "No se puede conectar Drive: hay otra operación en curso.";
+    msg_credentials_empty: "Client ID and Client Secret cannot be empty.", "El Client ID y el Client Secret no pueden estar vacíos.";
+    msg_credentials_not_saved: "Failed to save credentials: {error}", "No se pudieron guardar las credenciales: {error}";
+    msg_opening_browser: "Opening browser for Google Drive authorization...", "Abriendo el navegador para autorizar Google Drive...";
+    msg_http_client_error: "HTTP client error: {error}", "Error del cliente HTTP: {error}";
+    msg_drive_connected: "Google Drive connected successfully.", "Google Drive se conectó correctamente.";
+    msg_drive_authorization_failed: "Google Drive authorization failed: {error}", "Falló la autorización de Google Drive: {error}";
+    msg_busy_disconnect_drive: "Cannot disconnect Drive: an operation is currently active.", "No se puede desconectar Drive: hay una operación en curso.";
+    msg_drive_disconnected: "Google Drive disconnected.", "Google Drive se desconectó.";
+    msg_drive_disconnect_failed: "Failed to disconnect Drive: {error}", "No se pudo desconectar Drive: {error}";
+
+    // Library messages
+    msg_category_name_unique: "Choose a unique, non-empty category name.", "Elige un nombre de categoría único y no vacío.";
+    msg_category_added: "Category added successfully.", "Categoría añadida correctamente.";
+    msg_category_add_failed: "Failed to add category: {error}", "No se pudo añadir la categoría: {error}";
+    msg_category_name_empty: "Category name cannot be empty.", "El nombre de la categoría no puede estar vacío.";
+    msg_category_name_taken: "Category name is already in use.", "Ese nombre de categoría ya está en uso.";
+    msg_category_updated: "Category updated.", "Categoría actualizada.";
+    msg_category_update_failed: "Failed to update category: {error}", "No se pudo actualizar la categoría: {error}";
+    msg_migrating_folder: "Migrating cloud folder from '{old}' to '{new}'...", "Moviendo la carpeta en la nube de '{old}' a '{new}'...";
+    msg_migration_failed: "Cloud migration failed: {error}", "Falló el traslado en la nube: {error}";
+    msg_migration_failed_transfer: "Cloud migration failed during transfer.", "El traslado en la nube falló durante la transferencia.";
+    msg_category_renamed: "Category updated and cloud folders renamed.", "Categoría actualizada y carpetas en la nube renombradas.";
+    msg_remote_renamed_local_failed: "Remote cloud folder was renamed to '{new}', but saving local configuration failed: {error}", "La carpeta en la nube se renombró a '{new}', pero no se pudo guardar la configuración local: {error}";
+    msg_renamed_save_failed: "Cloud folder was renamed, but local configuration save failed: {error}. Recovery is required.", "La carpeta en la nube se renombró, pero no se pudo guardar la configuración local: {error}. Hace falta una recuperación.";
+    msg_migration_failed_unchanged: "Cloud migration failed. Category was not modified.", "Falló el traslado en la nube. La categoría no se modificó.";
+    msg_migration_error_unchanged: "Cloud migration failed: {error}. Category was not modified.", "Falló el traslado en la nube: {error}. La categoría no se modificó.";
+    msg_steam_unregister_failed: "Failed to unregister from Steam: {error}", "No se pudo quitar de Steam: {error}";
+    msg_category_deleted: "Category '{name}' deleted.", "Categoría '{name}' eliminada.";
+    msg_category_delete_failed: "Failed to delete category: {error}", "No se pudo eliminar la categoría: {error}";
+    msg_reorder_failed: "Failed to reorder: {error}", "No se pudo reordenar: {error}";
+    msg_overrides_saved: "Game overrides saved.", "Ajustes del juego guardados.";
+    msg_overrides_failed: "Failed to save overrides: {error}", "No se pudieron guardar los ajustes del juego: {error}";
+    msg_overrides_renamed: "Game overrides saved and cloud folder renamed.", "Ajustes del juego guardados y carpeta en la nube renombrada.";
+    msg_game_remote_renamed_local_failed: "Remote cloud folder for game was renamed to '{new}', but saving local configuration failed: {error}", "La carpeta en la nube del juego se renombró a '{new}', pero no se pudo guardar la configuración local: {error}";
+    msg_game_migration_failed_unchanged: "Cloud folder migration failed. Game overrides were not saved.", "Falló el traslado de la carpeta en la nube. Los ajustes del juego no se guardaron.";
+    msg_game_migration_error_unchanged: "Cloud folder migration failed: {error}. Game overrides were not saved.", "Falló el traslado de la carpeta en la nube: {error}. Los ajustes del juego no se guardaron.";
+
+    // Game and sync messages
+    msg_configuration_load_failed: "Failed to load configuration: {error}", "No se pudo cargar la configuración: {error}";
+    msg_game_category_missing: "Game category no longer exists in configuration.", "La categoría del juego ya no existe en la configuración.";
+    msg_targets_failed: "Failed to resolve save targets: {error}", "No se pudieron resolver las rutas de partida: {error}";
+    msg_preparing_game: "Preparing {game}...", "Preparando {game}...";
+    msg_game_exit_code: "{game} did not start or exited with error code {code}.", "{game} no se inició o terminó con el código de error {code}.";
+    msg_session_finished: "Session finished ({seconds}s)", "Sesión terminada ({seconds} s)";
+    msg_launch_failed: "Launch failed: {error}", "No se pudo abrir: {error}";
+    msg_sync_init_failed: "Failed to initialize cloud synchronization: {error}", "No se pudo iniciar la sincronización con la nube: {error}";
+    msg_sync_failed_session: "Sync failed during game session.", "La sincronización falló durante la partida.";
+    msg_sync_error: "Synchronization error: {error}", "Error de sincronización: {error}";
+    msg_drive_not_configured: "Google Drive is not configured.", "Google Drive no está configurado.";
+    msg_synchronizing_entry: "Synchronizing '{name}'...", "Sincronizando '{name}'...";
+    msg_sync_failed_transfer: "Sync failed during transfer: {detail}. Recovery is required.", "La sincronización falló durante la transferencia: {detail}. Hace falta una recuperación.";
+    msg_entry_synchronized: "'{name}' synchronized.", "'{name}' sincronizado.";
+    msg_sync_failed: "Sync failed: {reason}", "La sincronización falló: {reason}";
+    msg_no_emulator: "No emulator executable configured.", "No hay ningún ejecutable de emulador configurado.";
+    msg_emulator_launch_failed: "Failed to launch emulator: {error}", "No se pudo abrir el emulador: {error}";
+
+    // Platform messages
+    msg_steam_added: "Added '{name}' to Steam.", "'{name}' añadido a Steam.";
+    msg_steam_removed: "Removed '{name}' from Steam.", "'{name}' quitado de Steam.";
+    msg_steam_failed: "Steam operation failed: {error}", "Falló la operación de Steam: {error}";
+    select_path: "Select path", "Seleccionar ruta";
+    msg_file_chooser_failed: "Could not open file chooser: {error}", "No se pudo abrir el selector de archivos: {error}";
+    msg_save_paths_unreadable: "Could not read save paths: {error}", "No se pudieron leer las rutas de partida: {error}";
+    msg_history_open_failed: "Failed to open sync history: {error}", "No se pudo abrir el historial de sincronización: {error}";
+    msg_recovery_open_failed: "Failed to open recovery store: {error}", "No se pudo abrir el almacén de recuperación: {error}";
+    msg_credentials_snapshot_failed: "Failed to snapshot credentials: {error}", "No se pudo leer el estado de las credenciales: {error}";
+    msg_recovery_before_close: "A sync operation needs recovery before closing.", "Una sincronización necesita recuperarse antes de cerrar.";
 }

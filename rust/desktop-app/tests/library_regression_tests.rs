@@ -605,3 +605,34 @@ async fn messages_follow_the_configured_and_the_chosen_language() {
         "the next message is already in the chosen language"
     );
 }
+
+#[tokio::test]
+async fn notices_are_written_in_the_current_language() {
+    let dir = tempdir().unwrap();
+    let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
+    let (tx, rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager,
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
+    coordinator.language.set(Language::Spanish);
+
+    coordinator.handle_action(UiAction::ConnectDrive {
+        client_id: " ".into(),
+        client_secret: String::new(),
+    });
+
+    let toasts: Vec<String> = rx
+        .try_iter()
+        .filter_map(|event| match event {
+            AppEvent::Toast(message) => Some(message),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        toasts,
+        vec!["El Client ID y el Client Secret no pueden estar vacíos.".to_string()]
+    );
+}

@@ -14,6 +14,8 @@ Interfaz con egui, winit y wgpu; Tokio para coordinación fuera de dominio, reqw
 
 La interfaz solo se dibuja cuando egui (`repaint_delay`) o un evento lo pide. Enviar los eventos de fondo con `EventSender`, que despierta la ventana; un envío que no la despierta espera a una entrada ajena. No pedir un redibujado en cada frame ni hacer en el hilo de la interfaz trabajo de disco o de decodificación (las portadas se decodifican en hilos propios).
 
+La interfaz está en inglés y español (`config.json` guarda `"language"`; sin la clave, inglés). Todo texto visible se define con ambas traducciones en `presentation/src/i18n/texts.rs` y se lee con `i18n::tr(ctx)`; no escribir literales visibles en el código. `application` emite `SyncMessage` del dominio, no texto, y `desktop-app` pone en palabras sus avisos y esos mensajes al enviarlos, con `CurrentLanguage` (`coordinator.t()`). Los detalles de capas inferiores (sistema operativo, Drive, diagnósticos) se muestran tal cual dentro de un texto traducido. Pendiente: los errores que `application` encadena como `Result<_, String>` (p. ej. cancelar la elección de carpetas en la restauración de carpetas antiguas, o errores de mapeo durante una migración) llegan en inglés; traducirlos exige tiparlos.
+
 Cancelación de operaciones debe esperar limpieza y rollback asíncrono antes de liberar exclusión o cerrar recursos. No asumir que abortar un futuro o `Drop` realiza rollback remoto.
 
 ## Skills

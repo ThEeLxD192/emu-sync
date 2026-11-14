@@ -169,7 +169,14 @@ impl ApplicationHandler for App {
                 self.closing = false;
                 self.close_notice = true;
                 self.emusync_app.state.status = AppStatus::Error {
-                    message: "A sync operation needs recovery before closing.".into(),
+                    message: self
+                        .coordinator
+                        .as_ref()
+                        .map_or(emusync_presentation::i18n::texts(Default::default()), |c| {
+                            c.t()
+                        })
+                        .msg_recovery_before_close
+                        .into(),
                 };
                 event_loop.set_control_flow(ControlFlow::Wait);
                 if let Some(window) = &self.window {

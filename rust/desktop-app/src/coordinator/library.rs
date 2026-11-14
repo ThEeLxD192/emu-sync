@@ -13,6 +13,7 @@ use emusync_domain::{
     library::{GameEntry, SaveTarget, SteamLibrary},
     sync::{SaveSynchronizer, SyncGame},
 };
+use emusync_presentation::i18n::fill;
 use emusync_presentation::model::{AppStatus, GameItem};
 
 pub struct LibraryManager {
@@ -25,7 +26,10 @@ impl LibraryManager {
         let current = match self.config_manager.load() {
             Ok(c) => c,
             Err(e) => {
-                coordinator.send_toast(format!("Failed to load config: {e}"));
+                coordinator.send_toast(fill(
+                    coordinator.t().msg_config_load_failed,
+                    &[("error", &e)],
+                ));
                 return;
             }
         };
@@ -36,7 +40,7 @@ impl LibraryManager {
                 .iter()
                 .any(|e| e.common().name == entry.common().name)
         {
-            coordinator.send_toast("Choose a unique, non-empty category name.");
+            coordinator.send_toast(coordinator.t().msg_category_name_unique);
             return;
         }
 
@@ -50,10 +54,13 @@ impl LibraryManager {
             Ok(updated) => {
                 coordinator.send_event(AppEvent::ConfigReloaded(updated));
                 let _ = self.platform.scan_entry_games_async(entry);
-                coordinator.send_toast("Category added successfully.");
+                coordinator.send_toast(coordinator.t().msg_category_added);
             }
             Err(err) => {
-                coordinator.send_toast(format!("Failed to add category: {err}"));
+                coordinator.send_toast(fill(
+                    coordinator.t().msg_category_add_failed,
+                    &[("error", &err)],
+                ));
             }
         }
     }
@@ -63,7 +70,10 @@ impl LibraryManager {
         let config = match coordinator.config_manager.load() {
             Ok(c) => c,
             Err(e) => {
-                coordinator.send_toast(format!("Failed to load config: {e}"));
+                coordinator.send_toast(fill(
+                    coordinator.t().msg_config_load_failed,
+                    &[("error", &e)],
+                ));
                 coordinator.release_admission();
                 return;
             }
@@ -71,13 +81,13 @@ impl LibraryManager {
 
         // 1. Validate presence and uniqueness
         let Some(current_old) = config.entries.iter().find(|e| e.common().name == old_name) else {
-            coordinator.send_toast("Category no longer exists.");
+            coordinator.send_toast(coordinator.t().msg_category_missing);
             coordinator.release_admission();
             return;
         };
         let new_name = new.common().name.trim().to_string();
         if new_name.is_empty() {
-            coordinator.send_toast("Category name cannot be empty.");
+            coordinator.send_toast(coordinator.t().msg_category_name_empty);
             coordinator.release_admission();
             return;
         }
@@ -86,7 +96,7 @@ impl LibraryManager {
             .iter()
             .any(|e| e.common().name != old_name && e.common().name == new_name)
         {
-            coordinator.send_toast("Category name is already in use.");
+            coordinator.send_toast(coordinator.t().msg_category_name_taken);
             coordinator.release_admission();
             return;
         }
@@ -114,10 +124,13 @@ impl LibraryManager {
                         .platform
                         .scan_entry_games_async(normalized_new.clone());
                     coordinator.send_event(AppEvent::ConfigReloaded(updated));
-                    coordinator.send_toast("Category updated.");
+                    coordinator.send_toast(coordinator.t().msg_category_updated);
                 }
                 Err(err) => {
-                    coordinator.send_toast(format!("Failed to update category: {err}"));
+                    coordinator.send_toast(fill(
+                        coordinator.t().msg_category_update_failed,
+                        &[("error", &err)],
+                    ));
                 }
             }
             coordinator.release_admission();
@@ -125,7 +138,10 @@ impl LibraryManager {
         }
 
         coordinator.send_event(AppEvent::StatusChanged(AppStatus::Syncing {
-            message: format!("Migrating cloud folder from '{old_name}' to '{new_name}'..."),
+            message: fill(
+                coordinator.t().msg_migrating_folder,
+                &[("old", &old_name), ("new", &new_name)],
+            ),
         }));
 
         let coord = coordinator.clone();
@@ -149,7 +165,7 @@ impl LibraryManager {
             Ok(b) => b,
             Err(e) => {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: format!("Cloud migration failed: {e}"),
+                    message: fill(coordinator.t().msg_migration_failed, &[("error", &e)]),
                 }));
                 coordinator.release_admission();
                 return;
@@ -168,7 +184,7 @@ impl LibraryManager {
         if let Some(err) = transfer_err {
             coordinator.record_transfer_error(err);
             coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                message: "Cloud migration failed during transfer.".into(),
+                message: coordinator.t().msg_migration_failed_transfer.into(),
             }));
             coordinator.release_admission();
             return;
@@ -192,15 +208,17 @@ impl LibraryManager {
                             .scan_entry_games_async(normalized_new.clone());
                         coordinator.send_event(AppEvent::ConfigReloaded(updated));
                         coordinator.send_event(AppEvent::StatusChanged(AppStatus::Idle));
-                        coordinator.send_toast("Category updated and cloud folders renamed.");
+                        coordinator.send_toast(coordinator.t().msg_category_renamed);
                     }
                     Err(err) => {
-                        coordinator.record_pending_recovery(format!(
-                            "Remote cloud folder was renamed to '{new_name}', but saving local configuration failed: {err}"
+                        coordinator.record_pending_recovery(fill(
+                            coordinator.t().msg_remote_renamed_local_failed,
+                            &[("new", &new_name), ("error", &err)],
                         ));
                         coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                            message: format!(
-                                "Cloud folder was renamed, but local configuration save failed: {err}. Recovery is required."
+                            message: fill(
+                                coordinator.t().msg_renamed_save_failed,
+                                &[("error", &err)],
                             ),
                         }));
                     }
@@ -208,12 +226,15 @@ impl LibraryManager {
             }
             Ok(false) => {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: "Cloud migration failed. Category was not modified.".into(),
+                    message: coordinator.t().msg_migration_failed_unchanged.into(),
                 }));
             }
             Err(err) => {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: format!("Cloud migration failed: {err}. Category was not modified."),
+                    message: fill(
+                        coordinator.t().msg_migration_error_unchanged,
+                        &[("error", &err)],
+                    ),
                 }));
             }
         }
@@ -231,7 +252,10 @@ impl LibraryManager {
             .unwrap_or(entry.common().steam_app_id.is_some());
         if is_registered {
             if let Err(err) = self.platform.steam.unregister(&entry) {
-                coordinator.send_toast(format!("Failed to unregister from Steam: {err}"));
+                coordinator.send_toast(fill(
+                    coordinator.t().msg_steam_unregister_failed,
+                    &[("error", &err)],
+                ));
                 coordinator.release_admission();
                 return;
             }
@@ -247,10 +271,16 @@ impl LibraryManager {
         }) {
             Ok(updated) => {
                 coordinator.send_event(AppEvent::ConfigReloaded(updated));
-                coordinator.send_toast(format!("Category '{name}' deleted."));
+                coordinator.send_toast(fill(
+                    coordinator.t().msg_category_deleted,
+                    &[("name", &name)],
+                ));
             }
             Err(err) => {
-                coordinator.send_toast(format!("Failed to delete category: {err}"));
+                coordinator.send_toast(fill(
+                    coordinator.t().msg_category_delete_failed,
+                    &[("error", &err)],
+                ));
             }
         }
         coordinator.release_admission();
@@ -286,7 +316,8 @@ impl LibraryManager {
                 coordinator.send_event(AppEvent::ConfigReloaded(updated));
             }
             Err(err) => {
-                coordinator.send_toast(format!("Failed to reorder: {err}"));
+                coordinator
+                    .send_toast(fill(coordinator.t().msg_reorder_failed, &[("error", &err)]));
             }
         }
         coordinator.release_admission();
@@ -303,7 +334,10 @@ impl LibraryManager {
         let config = match coordinator.config_manager.load() {
             Ok(c) => c,
             Err(e) => {
-                coordinator.send_toast(format!("Failed to load config: {e}"));
+                coordinator.send_toast(fill(
+                    coordinator.t().msg_config_load_failed,
+                    &[("error", &e)],
+                ));
                 coordinator.release_admission();
                 return;
             }
@@ -314,7 +348,7 @@ impl LibraryManager {
             .iter()
             .find(|e| e.common().name == entry_name)
         else {
-            coordinator.send_toast("Category no longer exists.");
+            coordinator.send_toast(coordinator.t().msg_category_missing);
             coordinator.release_admission();
             return;
         };
@@ -357,7 +391,7 @@ impl LibraryManager {
             let new_name = updated_entry.common().name.clone();
             if new_name != entry_name && config.entries.iter().any(|e| e.common().name == new_name)
             {
-                coordinator.send_toast("Category name is already in use.");
+                coordinator.send_toast(coordinator.t().msg_category_name_taken);
                 coordinator.release_admission();
                 return;
             }
@@ -394,10 +428,13 @@ impl LibraryManager {
                         .platform
                         .scan_entry_games_async(updated_entry.clone());
                     coordinator.send_event(AppEvent::ConfigReloaded(updated));
-                    coordinator.send_toast("Game overrides saved.");
+                    coordinator.send_toast(coordinator.t().msg_overrides_saved);
                 }
                 Err(err) => {
-                    coordinator.send_toast(format!("Failed to save overrides: {err}"));
+                    coordinator.send_toast(fill(
+                        coordinator.t().msg_overrides_failed,
+                        &[("error", &err)],
+                    ));
                 }
             }
             coordinator.release_admission();
@@ -405,8 +442,9 @@ impl LibraryManager {
         }
 
         coordinator.send_event(AppEvent::StatusChanged(AppStatus::Syncing {
-            message: format!(
-                "Migrating cloud folder from '{old_effective_title}' to '{new_effective_title}'..."
+            message: fill(
+                coordinator.t().msg_migrating_folder,
+                &[("old", &old_effective_title), ("new", &new_effective_title)],
             ),
         }));
 
@@ -446,7 +484,7 @@ impl LibraryManager {
             Ok(b) => b,
             Err(e) => {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: format!("Cloud migration failed: {e}"),
+                    message: fill(coordinator.t().msg_migration_failed, &[("error", &e)]),
                 }));
                 coordinator.release_admission();
                 return;
@@ -484,7 +522,7 @@ impl LibraryManager {
         if let Some(err) = transfer_err {
             coordinator.record_transfer_error(err);
             coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                message: "Cloud migration failed during transfer.".into(),
+                message: coordinator.t().msg_migration_failed_transfer.into(),
             }));
             coordinator.release_admission();
             return;
@@ -508,15 +546,17 @@ impl LibraryManager {
                             .scan_entry_games_async(updated_entry.clone());
                         coordinator.send_event(AppEvent::ConfigReloaded(updated));
                         coordinator.send_event(AppEvent::StatusChanged(AppStatus::Idle));
-                        coordinator.send_toast("Game overrides saved and cloud folder renamed.");
+                        coordinator.send_toast(coordinator.t().msg_overrides_renamed);
                     }
                     Err(err) => {
-                        coordinator.record_pending_recovery(format!(
-                            "Remote cloud folder for game was renamed to '{new_effective_title}', but saving local configuration failed: {err}"
+                        coordinator.record_pending_recovery(fill(
+                            coordinator.t().msg_game_remote_renamed_local_failed,
+                            &[("new", &new_effective_title), ("error", &err)],
                         ));
                         coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                            message: format!(
-                                "Cloud folder was renamed, but local configuration save failed: {err}. Recovery is required."
+                            message: fill(
+                                coordinator.t().msg_renamed_save_failed,
+                                &[("error", &err)],
                             ),
                         }));
                     }
@@ -524,13 +564,14 @@ impl LibraryManager {
             }
             Ok(false) => {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: "Cloud folder migration failed. Game overrides were not saved.".into(),
+                    message: coordinator.t().msg_game_migration_failed_unchanged.into(),
                 }));
             }
             Err(err) => {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: format!(
-                        "Cloud folder migration failed: {err}. Game overrides were not saved."
+                    message: fill(
+                        coordinator.t().msg_game_migration_error_unchanged,
+                        &[("error", &err)],
                     ),
                 }));
             }
