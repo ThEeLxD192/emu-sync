@@ -25,7 +25,9 @@ use crate::{
 };
 use composition::{BuiltOrchestrator, drive_connected, format_epoch_ms};
 use emusync_application::{UpdateState, library::LoadLibrary};
-use emusync_data_drive::{DriveHttpPolicy, InteractiveOAuth, ResumableUpload, TransferProgress};
+use emusync_data_drive::{
+    DriveHttpClients, DriveHttpPolicy, InteractiveOAuth, ResumableUpload, TransferProgress,
+};
 use emusync_data_local::{
     ConfigManager, LocalSaveTargets, RecoveryCredentials, RecoveryStore, TrackedError,
 };
@@ -46,7 +48,7 @@ use emusync_presentation::{
     model::{AppStatus, SaveSetupRequest as UiSaveSetupRequest},
 };
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, OnceLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::Sender,
 };
@@ -73,6 +75,9 @@ pub struct DesktopCoordinator {
     pub pending_recovery: Arc<Mutex<Option<String>>>,
     pub is_admitted: Arc<AtomicBool>,
     pub updates: UpdateServices,
+    /// Drive HTTP clients, built on first use and shared by every operation so their
+    /// connections are reused instead of opened again for each check or sync.
+    drive_http: Arc<OnceLock<DriveHttpClients>>,
 }
 
 impl DesktopCoordinator {
@@ -121,6 +126,7 @@ impl DesktopCoordinator {
             pending_recovery: Arc::new(Mutex::new(None)),
             is_admitted: Arc::new(AtomicBool::new(false)),
             updates,
+            drive_http: Arc::new(OnceLock::new()),
         }
     }
 
@@ -129,6 +135,16 @@ impl DesktopCoordinator {
         self.updates =
             UpdateServices::new(source, self.event_tx.clone(), self.tokio_handle.clone());
         self
+    }
+
+    /// The shared Drive HTTP clients, built on first use. A failed build is not kept, so
+    /// the next operation tries again.
+    fn drive_clients(&self) -> Result<DriveHttpClients, reqwest::Error> {
+        if let Some(clients) = self.drive_http.get() {
+            return Ok(clients.clone());
+        }
+        let clients = DriveHttpPolicy::default().build()?;
+        Ok(self.drive_http.get_or_init(|| clients).clone())
     }
 
     pub fn with_endpoints(mut self, endpoints: DriveEndpoints) -> Self {
@@ -795,6 +811,8 @@ impl DesktopCoordinator {
         };
 
         let built = composition::build_orchestrator(
+            self.drive_clients()
+                .map_err(|e| format!("HTTP client configuration failed: {e}"))?,
             &self.config_manager,
             &self.platform.steam,
             &self.platform.browser,
@@ -870,6 +888,8 @@ impl DesktopCoordinator {
         let on_status = |_| {};
 
         composition::build_orchestrator(
+            self.drive_clients()
+                .map_err(|e| format!("HTTP client configuration failed: {e}"))?,
             &self.config_manager,
             &self.platform.steam,
             &self.platform.browser,
@@ -913,7 +933,7 @@ impl DesktopCoordinator {
         self.send_event(AppEvent::ConfigReloaded(config.clone()));
         self.send_toast("Opening browser for Google Drive authorization...");
 
-        let clients = match DriveHttpPolicy::default().build() {
+        let clients = match self.drive_clients() {
             Ok(c) => c,
             Err(e) => {
                 self.send_toast(format!("HTTP client error: {e}"));
@@ -989,8 +1009,8 @@ impl DesktopCoordinator {
             return Err(RecoveryError::NoFailure);
         }
 
-        let clients = DriveHttpPolicy::default()
-            .build()
+        let clients = self
+            .drive_clients()
             .map_err(|_| RecoveryError::UnsupportedFailure)?;
         let oauth = InteractiveOAuth::with_endpoints(
             clients.metadata.clone(),
@@ -1068,8 +1088,8 @@ impl DesktopCoordinator {
             return Err(RecoveryError::NoFailure);
         }
 
-        let clients = DriveHttpPolicy::default()
-            .build()
+        let clients = self
+            .drive_clients()
             .map_err(|_| RecoveryError::UnsupportedFailure)?;
         let oauth = InteractiveOAuth::with_endpoints(
             clients.metadata.clone(),

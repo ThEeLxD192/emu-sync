@@ -4,7 +4,7 @@ use crate::{
 };
 use emusync_application::sync::{SyncOrchestrator, SyncServices};
 use emusync_data_drive::{
-    DriveFolders, DriveHttpPolicy, DriveListing, DriveTransfer, InteractiveOAuth, TransferProgress,
+    DriveFolders, DriveHttpClients, DriveListing, DriveTransfer, InteractiveOAuth, TransferProgress,
 };
 use emusync_data_local::{
     ConfigManager, DesktopSaveAccess, RecoveryCredentials, RecoveryStore, SyncHistoryStore,
@@ -96,6 +96,7 @@ pub struct BuiltOrchestrator {
 
 #[allow(clippy::too_many_arguments)]
 pub fn build_orchestrator(
+    clients: DriveHttpClients,
     config_manager: &ConfigManager,
     steam: &DesktopSteamLibrary,
     browser: &Arc<DesktopBrowserLauncher>,
@@ -105,10 +106,6 @@ pub fn build_orchestrator(
     transfer_progress: Arc<dyn Fn(TransferProgress) + Send + Sync>,
     on_status: impl Fn(SyncEvent) + Send + Sync + 'static,
 ) -> Result<BuiltOrchestrator, String> {
-    let clients = DriveHttpPolicy::default()
-        .build()
-        .map_err(|e| format!("HTTP client configuration failed: {e}"))?;
-
     let listing = DriveListing::new(clients.metadata.clone(), endpoints.files_v3.clone());
     let folders = DriveFolders::new(clients.metadata.clone(), endpoints.files_v3.clone());
 
