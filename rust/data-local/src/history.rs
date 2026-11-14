@@ -7,6 +7,7 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::SystemTime,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +43,44 @@ pub struct SyncHistoryStore {
     state_file: PathBuf,
     backup_directory: PathBuf,
     lock: Arc<Mutex<()>>,
+    /// The history as last read, so a synchronization does not parse the whole file for
+    /// every save it checks. Only used while `lock` is held.
+    cache: Arc<Mutex<Option<CachedHistory>>>,
+}
+
+/// A parsed history and the identity of the file it was read from.
+struct CachedHistory {
+    stamp: Option<FileStamp>,
+    history: History,
+}
+
+/// Identifies one version of the state file. Every write replaces the file by renaming a
+/// new one over it, which changes its identity (inode, or creation time on Windows) as
+/// well as its modification time, so a write by this or another process is never mistaken
+/// for the version already read.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FileStamp {
+    len: u64,
+    modified: Option<SystemTime>,
+    #[cfg(unix)]
+    inode: (u64, u64),
+    #[cfg(not(unix))]
+    created: Option<SystemTime>,
+}
+
+impl FileStamp {
+    fn of(metadata: &fs::Metadata) -> Self {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+            #[cfg(unix)]
+            inode: (metadata.dev(), metadata.ino()),
+            #[cfg(not(unix))]
+            created: metadata.created().ok(),
+        }
+    }
 }
 impl SyncHistoryStore {
     pub fn new(config: &Path) -> io::Result<Self> {
@@ -60,6 +99,7 @@ impl SyncHistoryStore {
             state_file,
             backup_directory,
             lock,
+            cache: Arc::default(),
         })
     }
     pub fn state_file(&self) -> &Path {
@@ -83,31 +123,57 @@ impl SyncHistoryStore {
             .lock
             .lock()
             .map_err(|_| io::Error::other("history lock poisoned"))?;
-        Ok(self.read()?.saves.remove(key))
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(self.current(&mut cache)?.saves.get(key).cloned())
     }
     pub fn record(&self, key: &str, checkpoint: HistoryCheckpoint) -> io::Result<()> {
         let _guard = self
             .lock
             .lock()
             .map_err(|_| io::Error::other("history lock poisoned"))?;
-        let mut history = self.read()?;
-        if history.saves.get(key) != Some(&checkpoint) {
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        if self.current(&mut cache)?.saves.get(key) != Some(&checkpoint) {
+            // Taken out of the cache: the next read parses the file again, because the
+            // stamp of the new file cannot be taken without racing another process that
+            // replaces it meanwhile.
+            let mut history = cache.take().expect("read above").history;
             history.saves.insert(key.to_owned(), checkpoint);
             atomic_write(&self.state_file, &serde_json::to_vec_pretty(&history)?)?;
         }
         Ok(())
     }
-    fn read(&self) -> io::Result<History> {
-        let contents = match fs::read(&self.state_file) {
-            Ok(contents) => contents,
+    /// The history on disk, parsed again only when the file changed since the last read.
+    fn current<'a>(&self, cache: &'a mut Option<CachedHistory>) -> io::Result<&'a History> {
+        let stamp = match fs::metadata(&self.state_file) {
+            Ok(metadata) => Some(FileStamp::of(&metadata)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        if cache.as_ref().is_none_or(|cached| cached.stamp != stamp) {
+            *cache = None;
+            let read = self.read()?;
+            *cache = Some(read);
+        }
+        Ok(&cache.as_ref().expect("filled above").history)
+    }
+    /// Reads the history and the stamp of the version read, both from one open file.
+    fn read(&self) -> io::Result<CachedHistory> {
+        let mut file = match fs::File::open(&self.state_file) {
+            Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(History {
-                    format_version: 1,
-                    saves: BTreeMap::new(),
+                return Ok(CachedHistory {
+                    stamp: None,
+                    history: History {
+                        format_version: 1,
+                        saves: BTreeMap::new(),
+                    },
                 });
             }
             Err(error) => return Err(error),
         };
+        let stamp = FileStamp::of(&file.metadata()?);
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents)?;
         let history: History = serde_json::from_slice(&contents)?;
         if history.format_version != 1 {
             return Err(io::Error::new(
@@ -115,7 +181,10 @@ impl SyncHistoryStore {
                 "unsupported synchronization history format",
             ));
         }
-        Ok(history)
+        Ok(CachedHistory {
+            stamp: Some(stamp),
+            history,
+        })
     }
     /// Preserve a verified copy before replacement. `key` and `digest` must be SHA-256 hex.
     pub fn backup(&self, key: &str, file: &Path, digest: &str) -> io::Result<()> {

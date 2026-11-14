@@ -238,3 +238,67 @@ fn backup_rejects_non_regular_existing_copy_and_maintains_strict_permissions() {
         assert_eq!(fs::read(&external_file).unwrap(), b"data");
     }
 }
+
+/// Replaces the state file the way every writer does, by renaming a new file over it.
+fn replace_by_rename(state_file: &std::path::Path, contents: &str) {
+    let temp = state_file.with_extension("replacing");
+    fs::write(&temp, contents).unwrap();
+    fs::rename(&temp, state_file).unwrap();
+}
+
+#[test]
+fn a_history_replaced_with_the_same_size_and_time_is_read_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = SyncHistoryStore::new(&dir.path().join("config.json")).unwrap();
+    let old = r#"{"saves":{"k":{"localSha256":"aaaa","remoteId":"r","remoteModifiedTime":"t"}}}"#;
+    let new = r#"{"saves":{"k":{"localSha256":"bbbb","remoteId":"r","remoteModifiedTime":"t"}}}"#;
+    assert_eq!(old.len(), new.len());
+    replace_by_rename(store.state_file(), old);
+    let modified = fs::metadata(store.state_file())
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert_eq!(store.get("k").unwrap().unwrap().local_sha256, "aaaa");
+
+    // Another process writes a history of the same size, and the time even matches.
+    replace_by_rename(store.state_file(), new);
+    filetime::set_file_mtime(
+        store.state_file(),
+        filetime::FileTime::from_system_time(modified),
+    )
+    .unwrap();
+
+    assert_eq!(store.get("k").unwrap().unwrap().local_sha256, "bbbb");
+}
+
+#[test]
+fn recording_keeps_what_another_store_wrote_after_this_one_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    let first = SyncHistoryStore::new(&path).unwrap();
+    let second = SyncHistoryStore::new(&path).unwrap();
+    first.record("a", checkpoint("1")).unwrap();
+    assert_eq!(first.get("a").unwrap(), Some(checkpoint("1")));
+
+    second.record("b", checkpoint("2")).unwrap();
+    first.record("c", checkpoint("3")).unwrap();
+
+    let fresh = SyncHistoryStore::new(&path).unwrap();
+    assert_eq!(fresh.get("a").unwrap(), Some(checkpoint("1")));
+    assert_eq!(fresh.get("b").unwrap(), Some(checkpoint("2")));
+    assert_eq!(fresh.get("c").unwrap(), Some(checkpoint("3")));
+}
+
+#[test]
+fn a_history_corrupted_after_it_was_read_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = SyncHistoryStore::new(&dir.path().join("config.json")).unwrap();
+    store.record("k", checkpoint("1")).unwrap();
+    assert_eq!(store.get("k").unwrap(), Some(checkpoint("1")));
+
+    fs::write(store.state_file(), b"{ truncated").unwrap();
+
+    assert!(store.get("k").is_err(), "the earlier read is not served");
+    assert!(store.record("k", checkpoint("2")).is_err());
+    assert_eq!(fs::read(store.state_file()).unwrap(), b"{ truncated");
+}
