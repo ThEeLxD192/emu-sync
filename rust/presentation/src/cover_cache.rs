@@ -64,6 +64,8 @@ struct Decoders {
 /// loaded is remembered so it is not read again every frame.
 pub struct CoverCache {
     textures: HashMap<String, Slot>,
+    /// Memory held by the loaded textures, in bytes.
+    texture_bytes: usize,
     next_job: u64,
     decoders: Option<Decoders>,
 }
@@ -78,6 +80,7 @@ impl CoverCache {
     pub fn new() -> Self {
         Self {
             textures: HashMap::new(),
+            texture_bytes: 0,
             next_job: 0,
             decoders: None,
         }
@@ -108,7 +111,10 @@ impl CoverCache {
 
     /// Explicitly inserts a texture into the cache.
     pub fn insert(&mut self, key: impl Into<String>, handle: TextureHandle) {
-        self.textures.insert(key.into(), Slot::Ready(handle));
+        self.texture_bytes += texture_size(&handle);
+        if let Some(Slot::Ready(old)) = self.textures.insert(key.into(), Slot::Ready(handle)) {
+            self.texture_bytes -= texture_size(&old);
+        }
     }
 
     /// Forgets remembered failures so a cover created later is tried again.
@@ -125,6 +131,11 @@ impl CoverCache {
             .count()
     }
 
+    /// Memory held by the loaded covers, in bytes (RGBA, as uploaded to the GPU).
+    pub fn texture_bytes(&self) -> usize {
+        self.texture_bytes
+    }
+
     /// Number of covers still being loaded.
     pub fn pending_count(&self) -> usize {
         self.textures
@@ -136,6 +147,7 @@ impl CoverCache {
     /// Clears the cache. Covers still loading are discarded when they finish.
     pub fn clear(&mut self) {
         self.textures.clear();
+        self.texture_bytes = 0;
     }
 
     /// Stores the covers decoded since the last frame.
@@ -154,7 +166,9 @@ impl CoverCache {
             }
             *slot = match decoded.image {
                 Some(image) => {
-                    Slot::Ready(ctx.load_texture(&decoded.path, image, TextureOptions::LINEAR))
+                    let texture = ctx.load_texture(&decoded.path, image, TextureOptions::LINEAR);
+                    self.texture_bytes += texture_size(&texture);
+                    Slot::Ready(texture)
                 }
                 None => Slot::Failed,
             };
@@ -239,6 +253,11 @@ fn decode_jobs(queue: &Queue, results: &Sender<Decoded>, ctx: &Context) {
         }
         ctx.request_repaint();
     }
+}
+
+fn texture_size(texture: &TextureHandle) -> usize {
+    let [width, height] = texture.size();
+    width * height * 4
 }
 
 fn decode(path: &str) -> Option<ColorImage> {

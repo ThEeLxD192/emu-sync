@@ -77,6 +77,11 @@ fn large_covers_are_scaled_down_keeping_their_shape() {
         Some([300, 450]),
         "small covers keep their size"
     );
+    assert_eq!(
+        cache.texture_bytes(),
+        (360 * 900 + 600 * 150 + 300 * 450) * 4,
+        "the reported memory is that of the RGBA textures held"
+    );
 }
 
 #[test]
