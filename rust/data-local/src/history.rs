@@ -192,7 +192,8 @@ pub fn file_sha256(path: &Path) -> io::Result<String> {
 }
 pub(crate) fn reader_sha256(file: &mut impl Read) -> io::Result<String> {
     let mut hash = Sha256::new();
-    let mut buffer = [0u8; 8192];
+    // Large reads keep the hash, not system calls, the bottleneck on big saves.
+    let mut buffer = vec![0u8; 64 * 1024];
     loop {
         let count = file.read(&mut buffer)?;
         if count == 0 {
