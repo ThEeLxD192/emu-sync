@@ -52,6 +52,8 @@ struct App {
     current_steam_revision: u64,
     /// Frame metrics, only when `EMUSYNC_PERF_LOG` is set.
     perf: Option<perf::PerfLog>,
+    /// When egui asked to be drawn again (an animation or a delayed repaint).
+    repaint_at: Option<Instant>,
 }
 
 impl ApplicationHandler for App {
@@ -129,8 +131,10 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let repaint_at = self.due_repaint();
         if !self.closing {
-            event_loop.set_control_flow(ControlFlow::Wait);
+            event_loop
+                .set_control_flow(repaint_at.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
             return;
         }
         let coord_close = self
@@ -147,9 +151,12 @@ impl ApplicationHandler for App {
             (CloseState::Ready, CloseState::Ready) => CloseState::Ready,
         };
         match close_state {
-            CloseState::Pending => event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(50),
-            )),
+            CloseState::Pending => {
+                let poll = Instant::now() + Duration::from_millis(50);
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    repaint_at.map_or(poll, |at| at.min(poll)),
+                ));
+            }
             CloseState::RecoveryRequired => {
                 self.closing = false;
                 self.close_notice = true;
@@ -175,7 +182,9 @@ impl ApplicationHandler for App {
             return;
         }
         let response = state.on_window_event(window, &event);
-        if response.repaint {
+        // egui-winit also asks to repaint after a redraw; following that would redraw
+        // forever. What a frame needs next comes from its own `repaint_delay`.
+        if response.repaint && !matches!(event, WindowEvent::RedrawRequested) {
             window.request_redraw();
         }
         match event {
@@ -414,6 +423,10 @@ impl ApplicationHandler for App {
                     self.emusync_app.update(ui);
                 });
                 let ui_done = Instant::now();
+                let repaint_delay = output
+                    .viewport_output
+                    .get(&egui::ViewportId::ROOT)
+                    .map_or(Duration::MAX, |viewport| viewport.repaint_delay);
 
                 // Drain and dispatch UI actions
                 let actions = self.emusync_app.take_actions();
@@ -437,8 +450,18 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                // Asked before presenting, so the next frame is not one refresh late.
+                if repaint_delay.is_zero() || perf_needs_frame {
+                    window.request_redraw();
+                    self.repaint_at = None;
+                } else {
+                    // `Duration::MAX` (nothing to animate) overflows: no repaint is due.
+                    self.repaint_at = Instant::now().checked_add(repaint_delay);
+                }
+
                 state.handle_platform_output(window, output.platform_output);
                 let primitives = context.tessellate(output.shapes, output.pixels_per_point);
+                window.pre_present_notify();
                 painter.paint_and_update_textures(
                     egui::ViewportId::ROOT,
                     output.pixels_per_point,
@@ -456,13 +479,25 @@ impl ApplicationHandler for App {
                         covers: self.emusync_app.cover_cache.loaded_count(),
                         status: status_name(&self.emusync_app.state.status),
                     });
-                    if perf_needs_frame {
-                        window.request_redraw();
-                    }
                 }
             }
             _ => {}
         }
+    }
+}
+
+impl App {
+    /// Requests the repaint egui asked for once it is due, and returns when the next one is.
+    fn due_repaint(&mut self) -> Option<Instant> {
+        let at = self.repaint_at?;
+        if at > Instant::now() {
+            return Some(at);
+        }
+        self.repaint_at = None;
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+        None
     }
 }
 
@@ -608,6 +643,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         current_scan_revision: 0,
         current_steam_revision: 0,
         perf,
+        repaint_at: None,
     };
     event_loop.run_app(&mut app)?;
     if let Some(error) = app.error {

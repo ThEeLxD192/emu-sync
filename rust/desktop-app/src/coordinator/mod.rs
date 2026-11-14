@@ -20,7 +20,7 @@ use crate::{
         reconcile_conditional_upload, reconcile_created_upload, reconcile_persisted_uploads,
         reconcile_tracked_upload_with_listing,
     },
-    events::AppEvent,
+    events::{AppEvent, EventSender},
     target_types::{resolve_entry_target_kinds, resolve_target_kinds},
 };
 use composition::{BuiltOrchestrator, drive_connected, format_epoch_ms};
@@ -60,7 +60,7 @@ const UPDATES_DISABLED: &str = "Updates are disabled in development builds. Set 
 #[derive(Clone)]
 pub struct DesktopCoordinator {
     pub config_manager: ConfigManager,
-    pub event_tx: Sender<AppEvent>,
+    pub event_tx: EventSender,
     pub redraw: Arc<dyn Fn() + Send + Sync>,
     pub tokio_handle: Handle,
     pub endpoints: DriveEndpoints,
@@ -86,6 +86,8 @@ impl DesktopCoordinator {
         let browser = Arc::new(DesktopBrowserLauncher);
         let picker = Arc::new(FilePicker);
         let scan_revision = Arc::new(AtomicU64::new(0));
+        let interaction = InteractionControls::new(event_tx.clone(), redraw.clone());
+        let event_tx = EventSender::new(event_tx, redraw.clone());
 
         let platform = PlatformServices {
             config_manager: config_manager.clone(),
@@ -99,11 +101,9 @@ impl DesktopCoordinator {
             steam_revision: Arc::new(AtomicU64::new(0)),
         };
 
-        let interaction = InteractionControls::new(event_tx.clone(), redraw.clone());
         let updates = UpdateServices::new(
             UpdateSourceConfig::for_this_build(),
             event_tx.clone(),
-            redraw.clone(),
             tokio_handle.clone(),
         );
 
@@ -126,12 +126,8 @@ impl DesktopCoordinator {
 
     /// Replaces where releases are checked and downloaded from.
     pub fn with_update_source(mut self, source: UpdateSourceConfig) -> Self {
-        self.updates = UpdateServices::new(
-            source,
-            self.event_tx.clone(),
-            self.redraw.clone(),
-            self.tokio_handle.clone(),
-        );
+        self.updates =
+            UpdateServices::new(source, self.event_tx.clone(), self.tokio_handle.clone());
         self
     }
 

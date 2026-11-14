@@ -22,6 +22,11 @@ use egui::{
     Sense, Stroke, Ui, vec2,
 };
 use emusync_domain::sync::{Decision, SavePlacementGroup};
+use std::time::Duration;
+
+/// Time between spinner frames: about 30 per second turns it smoothly without
+/// redrawing at the display's full rate for a whole transfer.
+const SPINNER_FRAME: Duration = Duration::from_millis(33);
 
 /// Callbacks the status overlay reports to the application.
 pub struct StatusOverlayEvents<'a> {
@@ -207,7 +212,7 @@ fn status_dialog(
                 let time = ui.input(|i| i.time) as f32;
                 let angle = time / 1.2 * std::f32::consts::TAU;
                 paint_glyph_rotated(ui, rect.center(), icon, 32.0, color, angle);
-                ui.ctx().request_repaint();
+                ui.ctx().request_repaint_after(SPINNER_FRAME);
             } else {
                 paint_glyph(ui, rect.center(), icon, 32.0, color);
             }

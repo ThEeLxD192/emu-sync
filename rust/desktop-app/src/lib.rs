@@ -22,7 +22,7 @@ pub mod coordinator;
 pub use coordinator::{DesktopCoordinator, DriveEndpoints, resolve_effective_targets};
 
 pub mod events;
-pub use events::{AppEvent, apply_entry_games_scanned, apply_steam_state_refreshed};
+pub use events::{AppEvent, EventSender, apply_entry_games_scanned, apply_steam_state_refreshed};
 
 pub mod scanner_helper;
 pub mod target_types;
