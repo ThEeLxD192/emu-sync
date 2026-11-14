@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "emusync-application"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "emusync-domain",
  "tokio",
@@ -856,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "emusync-desktop-app"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -901,7 +901,7 @@ dependencies = [
 
 [[package]]
 name = "emusync-presentation"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "criterion",
  "egui",
