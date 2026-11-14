@@ -59,9 +59,10 @@ pub(super) fn reorder_buttons(
     events: &mut Vec<RowEvent>,
 ) {
     // Laid out right to left: down sits closest to the edge, as in Kotlin's Row.
+    let t = crate::i18n::tr(ui.ctx());
     for (enabled, direction, glyph, label) in [
-        (can_move_down, 1, glyph::CHEVRON_DOWN, "Move down"),
-        (can_move_up, -1, glyph::CHEVRON_UP, "Move up"),
+        (can_move_down, 1, glyph::CHEVRON_DOWN, t.move_down),
+        (can_move_up, -1, glyph::CHEVRON_UP, t.move_up),
     ] {
         if !enabled {
             continue;

@@ -31,7 +31,7 @@ pub struct GameEditFormState {
     pub restore_destination_folder: String,
     pub restore_whole_folder: bool,
     pub saves: SaveTargetFormState,
-    pub error_message: Option<String>,
+    pub error_message: Option<super::FormError>,
     /// Restore paths resolved for a destination, and the destination last requested.
     restore_preview: Option<(String, Vec<String>)>,
     requested_preview: Option<String>,
@@ -103,14 +103,17 @@ impl GameEditFormState {
             && self.saves.validation_error().is_none()
     }
 
-    pub fn build_result(&mut self, cloud_file_names: &[String]) -> Result<GameEditResult, String> {
+    pub fn build_result(
+        &mut self,
+        cloud_file_names: &[String],
+    ) -> Result<GameEditResult, super::FormError> {
         if !self.can_save(cloud_file_names) {
             let msg = self
                 .saves
                 .validation_error()
-                .unwrap_or("Select a destination folder before saving.");
-            self.error_message = Some(msg.to_string());
-            return Err(msg.to_string());
+                .unwrap_or(super::FormError::DestinationMissing);
+            self.error_message = Some(msg);
+            return Err(msg);
         }
 
         let (targets, restore) = if cloud_file_names.is_empty() {

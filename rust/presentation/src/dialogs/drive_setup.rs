@@ -13,7 +13,20 @@ use egui::{
     vec2,
 };
 
-const MISSING_CREDENTIALS: &str = "Please enter both Client ID and Client Secret.";
+/// Why the Drive dialog cannot connect yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DriveSetupError {
+    /// The Client ID or the Client Secret is blank.
+    MissingCredentials,
+}
+
+impl DriveSetupError {
+    pub fn message(self, t: &crate::i18n::Texts) -> &'static str {
+        match self {
+            Self::MissingCredentials => t.missing_credentials,
+        }
+    }
+}
 
 /// State for the drive setup dialog.
 #[derive(Clone, PartialEq)]
@@ -21,7 +34,7 @@ pub struct DriveSetupDialogState {
     pub client_id: String,
     pub client_secret: String,
     pub is_linked: bool,
-    pub error_message: Option<String>,
+    pub error: Option<DriveSetupError>,
     /// Rust-only: the secret is masked unless the user reveals it.
     pub secret_revealed: bool,
 }
@@ -32,7 +45,7 @@ impl std::fmt::Debug for DriveSetupDialogState {
             .field("client_id", &self.client_id)
             .field("client_secret", &"<redacted>")
             .field("is_linked", &self.is_linked)
-            .field("error_message", &self.error_message)
+            .field("error", &self.error)
             .field("secret_revealed", &self.secret_revealed)
             .finish()
     }
@@ -44,7 +57,7 @@ impl DriveSetupDialogState {
             client_id,
             client_secret,
             is_linked,
-            error_message: None,
+            error: None,
             secret_revealed: false,
         }
     }
@@ -53,10 +66,10 @@ impl DriveSetupDialogState {
     /// one of them is blank (Kotlin checks `isBlank`, then trims).
     pub fn submit(&mut self) -> Option<(String, String)> {
         if self.client_id.trim().is_empty() || self.client_secret.trim().is_empty() {
-            self.error_message = Some(MISSING_CREDENTIALS.to_string());
+            self.error = Some(DriveSetupError::MissingCredentials);
             return None;
         }
-        self.error_message = None;
+        self.error = None;
         Some((
             self.client_id.trim().to_string(),
             self.client_secret.trim().to_string(),
@@ -65,7 +78,7 @@ impl DriveSetupDialogState {
 
     /// Editing a field clears the previous error, as in Kotlin.
     pub fn field_edited(&mut self) {
-        self.error_message = None;
+        self.error = None;
     }
 }
 
@@ -94,6 +107,7 @@ pub fn render_drive_setup_dialog(
                 .inner_margin(Margin::same(24)),
         )
         .show(ctx, |ui| {
+            let t = crate::i18n::tr(ui.ctx());
             ui.set_width(520.0);
             ui.spacing_mut().item_spacing.y = 0.0;
             header(ui, state.is_linked);
@@ -127,9 +141,9 @@ pub fn render_drive_setup_dialog(
             {
                 state.field_edited();
             }
-            if let Some(error) = &state.error_message {
+            if let Some(error) = state.error {
                 ui.add_space(8.0);
-                ui.label(RichText::new(error).size(12.0).color(ERROR));
+                ui.label(RichText::new(error.message(t)).size(12.0).color(ERROR));
             }
             ui.add_space(16.0);
 
@@ -143,6 +157,7 @@ pub fn render_drive_setup_dialog(
 }
 
 fn header(ui: &mut Ui, is_linked: bool) {
+    let t = crate::i18n::tr(ui.ctx());
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::hover());
         let (icon, color) = if is_linked {
@@ -154,17 +169,14 @@ fn header(ui: &mut Ui, is_linked: bool) {
         ui.add_space(12.0);
         ui.vertical(|ui| {
             ui.label(
-                RichText::new("Google Drive Sync")
+                RichText::new(t.drive_sync_title)
                     .font(bold(20.0))
                     .color(ON_SURFACE),
             );
             let (status, color) = if is_linked {
-                ("Account linked and active", SUCCESS)
+                (t.account_linked, SUCCESS)
             } else {
-                (
-                    "Configure cross-device save synchronization",
-                    ON_SURFACE_DIM,
-                )
+                (t.drive_setup_subtitle, ON_SURFACE_DIM)
             };
             ui.label(RichText::new(status).size(12.0).color(color));
         });
@@ -184,11 +196,9 @@ fn info_banner(ui: &mut Ui) {
                 ui.add_space(10.0);
                 ui.add(
                     Label::new(
-                        RichText::new(
-                            "Requires an OAuth 2.0 Client ID (Desktop App) from Google Cloud Console with the Google Drive API enabled.",
-                        )
-                        .size(12.0)
-                        .color(ON_SURFACE_DIM),
+                        RichText::new(crate::i18n::tr(ui.ctx()).drive_setup_info)
+                            .size(12.0)
+                            .color(ON_SURFACE_DIM),
                     )
                     .wrap(),
                 );
@@ -207,7 +217,7 @@ fn config_location(ui: &mut Ui, config_path: &str, on_open_config: &mut dyn FnMu
             ui.horizontal(|ui| {
                 let open = Pill {
                     icon: Some((glyph::FOLDER_OPEN, PRIMARY)),
-                    text: "Open Folder",
+                    text: crate::i18n::tr(ui.ctx()).open_folder,
                     text_color: PRIMARY,
                     fill: Color32::TRANSPARENT,
                     stroke: Stroke::new(1.0, DIVIDER),
@@ -223,7 +233,7 @@ fn config_location(ui: &mut Ui, config_path: &str, on_open_config: &mut dyn FnMu
                     ui.add_space(8.0);
                     ui.with_layout(Layout::top_down(Align::Min), |ui| {
                         ui.label(
-                            RichText::new("Config Location:")
+                            RichText::new(crate::i18n::tr(ui.ctx()).config_location)
                                 .size(12.0)
                                 .color(ON_SURFACE_DIM),
                         );
@@ -243,6 +253,7 @@ fn config_location(ui: &mut Ui, config_path: &str, on_open_config: &mut dyn FnMu
 }
 
 fn actions(ui: &mut Ui, state: &mut DriveSetupDialogState, events: &mut DriveSetupEvents<'_>) {
+    let t = crate::i18n::tr(ui.ctx());
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), 40.0),
         Layout::left_to_right(Align::Center),
@@ -250,7 +261,7 @@ fn actions(ui: &mut Ui, state: &mut DriveSetupDialogState, events: &mut DriveSet
             if state.is_linked {
                 let unlink = Pill {
                     icon: Some((glyph::LINK_OFF, ERROR)),
-                    text: "Unlink Account",
+                    text: t.unlink_account,
                     text_color: ERROR,
                     font: FontId::proportional(13.0),
                     fill: Color32::TRANSPARENT,
@@ -268,7 +279,7 @@ fn actions(ui: &mut Ui, state: &mut DriveSetupDialogState, events: &mut DriveSet
                 ui.spacing_mut().item_spacing.x = 8.0;
                 let connect = Pill {
                     icon: Some((glyph::CLOUD_SYNC, Color32::WHITE)),
-                    text: "Save & Connect",
+                    text: t.save_and_connect,
                     text_color: Color32::WHITE,
                     font: FontId::proportional(13.0),
                     fill: PRIMARY,
@@ -283,7 +294,7 @@ fn actions(ui: &mut Ui, state: &mut DriveSetupDialogState, events: &mut DriveSet
                     (events.on_save_connect)(client_id, client_secret);
                     (events.on_close)();
                 }
-                if text_button(ui, "Cancel", ON_SURFACE_DIM).clicked() {
+                if text_button(ui, t.cancel, ON_SURFACE_DIM).clicked() {
                     (events.on_close)();
                 }
             });

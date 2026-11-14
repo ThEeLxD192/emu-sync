@@ -30,6 +30,7 @@ async fn stale_authorization_never_starts_transfer() {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(ConfigManager::new(&dir.path().join("config.json")).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),
@@ -71,6 +72,7 @@ async fn connection_change_during_successful_upload_cannot_record_old_history() 
     let config_path = dir.path().join("config.json");
     let manager = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),
@@ -162,6 +164,7 @@ async fn changed_connection_during_pinned_download_preserves_save_and_history() 
     let config_path = dir.path().join("config.json");
     let manager = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),

@@ -379,8 +379,8 @@ fn invalid_entry_form_keeps_dialog_open_and_emits_nothing() {
         panic!("the entry dialog must stay open");
     };
     assert_eq!(
-        form.error_message.as_deref(),
-        Some("Cloud paths must be relative and cannot contain '..'.")
+        form.error_message,
+        Some(emusync_presentation::forms::FormError::CloudPathInvalid)
     );
 }
 

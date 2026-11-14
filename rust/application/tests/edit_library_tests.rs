@@ -6,6 +6,7 @@ use emusync_domain::config::{AppConfig, ConfigurationStore, Credentials};
 use emusync_domain::library::{
     Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType, SteamLibrary,
 };
+use emusync_domain::sync::SyncMessage;
 use emusync_domain::sync::{
     Decision, EntrySyncStatus, PostSyncFailure, SaveConflict, SavePlacementRequest, SaveSetup,
     SaveSynchronizer, SaveSynchronizerFactory, SyncEvent, SyncGame,
@@ -191,6 +192,7 @@ async fn reordering_and_mutations_preserve_library_invariants() {
     let e3 = make_native("Gamma");
 
     let initial = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: vec![e1.clone(), e2.clone(), e3.clone()],
     };
@@ -239,6 +241,7 @@ async fn reorder_by_index_and_validation_guards() {
     let e3 = make_native("Gamma");
 
     let initial = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: vec![e1.clone(), e2.clone(), e3.clone()],
     };
@@ -288,6 +291,7 @@ async fn edit_entry_triggers_cloud_rename_and_updates_configuration() {
     e1.common_mut_test_helper().cloud_folder = Some("CloudOld".into());
 
     let initial = AppConfig {
+        language: Default::default(),
         credentials: Some(emusync_domain::config::Credentials {
             client_id: "c".into(),
             client_secret: "s".into(),
@@ -330,6 +334,7 @@ fn shared_cloud_root_is_preserved_when_shared_by_another_entry() {
     emu2.common.cloud_folder = Some("SharedFolder".into());
 
     let config = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: vec![GameEntry::Emulator(emu1.clone()), GameEntry::Emulator(emu2)],
     };
@@ -543,6 +548,7 @@ fn preserve_shared_cloud_root_respects_explicit_override_or_unshared_root() {
     emu2.common.cloud_folder = Some("CloudRoot".into());
 
     let config = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: vec![GameEntry::Emulator(emu1.clone()), GameEntry::Emulator(emu2)],
     };
@@ -562,6 +568,7 @@ fn preserve_shared_cloud_root_respects_explicit_override_or_unshared_root() {
     let mut solo = Emulator::new("Solo", "/bin/solo", "/roms", vec![]);
     solo.common.cloud_folder = Some("UniqueCloudFolder".into());
     let solo_config = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: vec![GameEntry::Emulator(solo.clone())],
     };
@@ -577,6 +584,7 @@ fn preserve_shared_cloud_root_respects_explicit_override_or_unshared_root() {
 async fn steam_registration_registers_and_unregisters_shortcuts() {
     let entry = make_native("SteamGame");
     let initial = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: vec![entry.clone()],
     };
@@ -608,6 +616,7 @@ async fn edit_entry_forwards_synchronizer_events_to_on_status() {
     e1.common_mut_test_helper().cloud_folder = Some("CloudOld".into());
 
     let initial = AppConfig {
+        language: Default::default(),
         credentials: Some(emusync_domain::config::Credentials {
             client_id: "c".into(),
             client_secret: "s".into(),
@@ -620,7 +629,9 @@ async fn edit_entry_forwards_synchronizer_events_to_on_status() {
     };
     let steam = MockSteam::default();
     let factory = SpyFactory::default();
-    *factory.status_emitter.lock().unwrap() = Some(SyncEvent::Error("Cloud sync failure".into()));
+    *factory.status_emitter.lock().unwrap() = Some(SyncEvent::Error(SyncMessage::Detail(
+        "Cloud sync failure".into(),
+    )));
 
     let received_events = Arc::new(Mutex::new(Vec::new()));
     let rx_clone = Arc::clone(&received_events);
@@ -634,7 +645,12 @@ async fn edit_entry_forwards_synchronizer_events_to_on_status() {
     let _ = editor.edit_entry(&initial, &e1, &edited).await;
 
     let events = received_events.lock().unwrap().clone();
-    assert_eq!(events, vec![SyncEvent::Error("Cloud sync failure".into())]);
+    assert_eq!(
+        events,
+        vec![SyncEvent::Error(SyncMessage::Detail(
+            "Cloud sync failure".into()
+        ))]
+    );
 }
 
 #[test]
@@ -767,6 +783,7 @@ async fn edit_entry_and_edit_game_override_abort_without_store_or_steam_mutation
     }
 
     let initial_config = AppConfig {
+        language: Default::default(),
         credentials: creds,
         entries: vec![initial_entry.clone()],
     };
@@ -833,6 +850,7 @@ async fn edit_entry_and_edit_game_override_abort_without_store_or_steam_mutation
         ..Default::default()
     });
     *store.config.lock().unwrap() = AppConfig {
+        language: Default::default(),
         credentials: initial_config.credentials.clone(),
         entries: vec![emu_entry.clone()],
     };
@@ -896,6 +914,7 @@ async fn edit_game_override_merges_onto_latest_config_entry_instead_of_stale_syn
     });
 
     let config = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: vec![latest_emu.clone()],
     };
@@ -1009,6 +1028,7 @@ fn preserve_shared_cloud_root_does_not_force_cloud_folder_on_grouped_native_game
     });
 
     let config = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: vec![old_entry.clone(), sibling_entry],
     };

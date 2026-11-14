@@ -6,6 +6,7 @@ pub mod components;
 pub mod cover_cache;
 pub mod dialogs;
 pub mod forms;
+pub mod i18n;
 pub mod model;
 pub mod state;
 pub mod theme;

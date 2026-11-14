@@ -55,6 +55,7 @@ pub mod glyph {
     pub const PENCIL: &str = "\u{F03EB}";
     pub const DELETE: &str = "\u{F01B4}";
     pub const COG: &str = "\u{F0493}";
+    pub const TRANSLATE: &str = "\u{F05CA}";
     pub const CLOUD_CHECK: &str = "\u{F0160}";
     pub const CLOUD_DOWNLOAD: &str = "\u{F0162}";
     pub const ALERT: &str = "\u{F0026}";

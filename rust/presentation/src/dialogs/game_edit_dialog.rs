@@ -1,6 +1,7 @@
 //! Edit game dialog (title, cover art and save targets, or cloud restore destination),
 //! laid out like Kotlin's `EditGameDialog`.
 
+use crate::i18n::{fill, tr};
 use crate::{
     components::icons::paint_glyph,
     cover_cache::CoverCache,
@@ -40,6 +41,7 @@ pub fn render_game_edit_dialog(
     cover_cache: &mut CoverCache,
     events: GameEditDialogEvents<'_>,
 ) {
+    let t = tr(ctx);
     let max_height = (ctx.content_rect().height() - 160.0).clamp(240.0, 640.0);
     let modal = Modal::new(Id::unique("game_edit_dialog_modal"))
         .backdrop_color(Color32::from_black_alpha(160))
@@ -58,7 +60,7 @@ pub fn render_game_edit_dialog(
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.label(
-                        RichText::new("Edit Game")
+                        RichText::new(t.edit_game)
                             .font(bold(22.0))
                             .color(ON_SURFACE),
                     );
@@ -69,11 +71,9 @@ pub fn render_game_edit_dialog(
                             .color(PRIMARY),
                     );
                     ui.label(
-                        RichText::new(
-                            "Configure custom title, cover art, and specific save files/folders.",
-                        )
-                        .size(12.0)
-                        .color(ON_SURFACE_DIM),
+                        RichText::new(t.edit_game_subtitle)
+                            .size(12.0)
+                            .color(ON_SURFACE_DIM),
                     );
                     ui.add_space(18.0);
 
@@ -90,9 +90,9 @@ pub fn render_game_edit_dialog(
                         events.on_pick_path,
                         events.on_save_path_edited,
                     );
-                    if let Some(message) = &form.error_message {
+                    if let Some(error) = form.error_message {
                         ui.add_space(8.0);
-                        ui.label(RichText::new(message).size(12.0).color(ERROR));
+                        ui.label(RichText::new(error.message(t)).size(12.0).color(ERROR));
                     }
                 });
 
@@ -103,14 +103,14 @@ pub fn render_game_edit_dialog(
                 Layout::right_to_left(Align::Center),
                 |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    let save = ui.add_enabled_ui(can_save, |ui| primary_button(ui, "Save"));
+                    let save = ui.add_enabled_ui(can_save, |ui| primary_button(ui, t.save));
                     if save.inner.clicked()
                         && let Ok(result) = form.build_result(cloud_files)
                     {
                         (events.on_save)(result);
                         (events.on_close)();
                     }
-                    if text_button(ui, "Cancel", PRIMARY).clicked() {
+                    if text_button(ui, t.cancel, PRIMARY).clicked() {
                         (events.on_close)();
                     }
                 },
@@ -146,18 +146,19 @@ fn section_title(ui: &mut Ui, text: &str) {
 }
 
 fn title_fields(ui: &mut Ui, form: &mut GameEditFormState, game: &GameItem) {
+    let t = tr(ui.ctx());
     let raw = game.raw_name();
     let clean = clean_game_title(&raw);
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), 32.0),
         Layout::left_to_right(Align::Center),
         |ui| {
-            section_title(ui, "Game Title");
+            section_title(ui, t.game_title);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if form.custom_title != raw && small_text_button(ui, "Raw Name", ON_SURFACE_DIM) {
+                if form.custom_title != raw && small_text_button(ui, t.raw_name, ON_SURFACE_DIM) {
                     form.custom_title = raw.clone();
                 }
-                if form.custom_title != clean && small_text_button(ui, "Auto-Clean", PRIMARY) {
+                if form.custom_title != clean && small_text_button(ui, t.auto_clean, PRIMARY) {
                     form.custom_title = clean.clone();
                 }
             });
@@ -173,7 +174,7 @@ fn title_fields(ui: &mut Ui, form: &mut GameEditFormState, game: &GameItem) {
         false,
     );
     if let Some(rom) = game.rom_file_name() {
-        field_hint(ui, &format!("ROM File: {rom}"), ON_SURFACE_DIM);
+        field_hint(ui, &fill(t.rom_file, &[("rom", &rom)]), ON_SURFACE_DIM);
     }
     ui.add_space(18.0);
 }
@@ -199,6 +200,7 @@ fn cover_art(
     cover_cache: &mut CoverCache,
     on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
 ) {
+    let t = tr(ui.ctx());
     let is_custom = !form.cover_path.trim().is_empty();
     // The scanned cover already prefers the saved custom one, as Kotlin's preview does.
     let detected = game
@@ -219,14 +221,14 @@ fn cover_art(
         vec2(ui.available_width(), 24.0),
         Layout::left_to_right(Align::Center),
         |ui| {
-            section_title(ui, "Cover Art");
+            section_title(ui, t.cover_art);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let (text, color) = if is_custom {
-                    ("Custom Cover", PRIMARY)
+                    (t.custom_cover, PRIMARY)
                 } else if is_auto {
-                    ("Auto-detected", SUCCESS)
+                    (t.auto_detected, SUCCESS)
                 } else {
-                    ("No Cover", ON_SURFACE_DIM)
+                    (t.no_cover, ON_SURFACE_DIM)
                 };
                 Frame::new()
                     .fill(color.gamma_multiply(0.15))
@@ -239,11 +241,7 @@ fn cover_art(
         },
     );
     ui.add_space(4.0);
-    ui.label(
-        RichText::new("Individual cover image for this game, or empty for automatic detection.")
-            .size(12.0)
-            .color(ON_SURFACE_DIM),
-    );
+    ui.label(RichText::new(t.cover_hint).size(12.0).color(ON_SURFACE_DIM));
     ui.add_space(12.0);
 
     ui.horizontal(|ui| {
@@ -255,9 +253,9 @@ fn cover_art(
             ui.spacing_mut().item_spacing.y = 10.0;
             ui.label(
                 RichText::new(if is_custom {
-                    "Custom Image File:"
+                    t.custom_image_file
                 } else {
-                    "Detected Image File:"
+                    t.detected_image_file
                 })
                 .size(12.0)
                 .color(ON_SURFACE_DIM),
@@ -266,7 +264,7 @@ fn cover_art(
                 .as_deref()
                 .and_then(|p| Path::new(p).file_name())
                 .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "Auto-detecting...".to_string());
+                .unwrap_or_else(|| t.auto_detecting.to_string());
             text_field(
                 ui,
                 "game_cover",
@@ -277,11 +275,11 @@ fn cover_art(
             );
             ui.label(
                 RichText::new(if is_custom {
-                    "Using your specific custom image for this game."
+                    t.using_custom_image
                 } else if is_auto {
-                    "Found automatically next to ROM or emulator covers."
+                    t.found_cover_automatically
                 } else {
-                    "Select an image file to display as box art."
+                    t.select_cover_hint
                 })
                 .size(12.0)
                 .color(ON_SURFACE_DIM.gamma_multiply(0.75)),
@@ -289,14 +287,14 @@ fn cover_art(
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 let label = if is_custom {
-                    "Change Image..."
+                    t.change_image
                 } else {
-                    "Select Image..."
+                    t.select_image
                 };
                 if tonal_button(ui, label).clicked() {
                     on_pick_path(PathTarget::CoverPath, PickMode::File);
                 }
-                if is_custom && text_button(ui, "Reset to Auto", PRIMARY).clicked() {
+                if is_custom && text_button(ui, t.reset_to_auto, PRIMARY).clicked() {
                     form.cover_path.clear();
                 }
             });
@@ -330,7 +328,7 @@ fn paint_cover_preview(ui: &mut Ui, rect: Rect, path: Option<&str>, cover_cache:
         ui.painter().text(
             rect.center() + vec2(0.0, 24.0),
             egui::Align2::CENTER_CENTER,
-            "No Cover Found",
+            tr(ui.ctx()).no_cover_found,
             FontId::proportional(12.0),
             ON_SURFACE_DIM.gamma_multiply(0.6),
         );
@@ -345,22 +343,23 @@ fn save_fields(
     on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
     on_save_path_edited: &mut dyn FnMut(usize, String),
 ) {
+    let t = tr(ui.ctx());
     let restoring = !cloud_files.is_empty();
     section_title(
         ui,
         if restoring {
-            "Cloud Save Destination"
+            t.cloud_save_destination
         } else {
-            "Save Files/Directories Paths"
+            t.save_paths_title
         },
     );
     ui.add_space(4.0);
     let description = if restoring {
-        "Choose one folder. The cloud files below will be restored as individual files; other files in this folder will not be synced."
+        t.restore_destination_hint
     } else if matches!(game.entry, GameEntry::Emulator(_)) {
-        "Only paths specific to this game. Emulator-wide paths are configured in the system settings."
+        t.emulator_game_paths_hint
     } else {
-        "Specific save files or directories synchronized for this game."
+        t.native_game_paths_hint
     };
     ui.add(egui::Label::new(RichText::new(description).size(12.0).color(ON_SURFACE_DIM)).wrap());
     ui.add_space(10.0);
@@ -386,22 +385,23 @@ fn restore_fields(
     cloud_files: &[String],
     on_pick_path: &mut dyn FnMut(PathTarget, PickMode),
 ) {
+    let t = tr(ui.ctx());
     ui.spacing_mut().item_spacing.y = 6.0;
     ui.radio_value(
         &mut form.restore_whole_folder,
         false,
-        RichText::new("Only the cloud files listed below").color(ON_SURFACE),
+        RichText::new(t.restore_only_listed).color(ON_SURFACE),
     );
     ui.radio_value(
         &mut form.restore_whole_folder,
         true,
-        RichText::new("The entire folder").color(ON_SURFACE),
+        RichText::new(t.restore_whole_folder).color(ON_SURFACE),
     );
     ui.spacing_mut().item_spacing.y = 0.0;
     let explanation = if form.restore_whole_folder {
-        "Every file in this folder will be synchronized. Use a dedicated folder if it contains saves from other games."
+        t.restore_whole_folder_hint
     } else {
-        "Only the cloud files listed below will be synchronized; other files in the folder will be left alone."
+        t.restore_only_listed_hint
     };
     ui.horizontal(|ui| {
         ui.add_space(8.0);
@@ -415,8 +415,8 @@ fn restore_fields(
         ui,
         "game_restore_destination",
         &mut form.restore_destination_folder,
-        "Choose a destination folder with the Folder button",
-        &[("Folder", PickMode::Directory)],
+        t.choose_destination_placeholder,
+        &[(t.folder, PickMode::Directory)],
         false,
     );
     if let Some(mode) = picked {
@@ -425,7 +425,7 @@ fn restore_fields(
     if form.selected_restore_paths(cloud_files).is_empty() {
         ui.add_space(6.0);
         ui.label(
-            RichText::new("Select a destination folder before saving.")
+            RichText::new(t.select_destination_first)
                 .size(12.0)
                 .color(ERROR),
         );

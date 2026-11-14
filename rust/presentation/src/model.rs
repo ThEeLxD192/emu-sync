@@ -21,16 +21,16 @@ pub enum CloudSyncStatus {
 }
 
 impl CloudSyncStatus {
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self, t: &crate::i18n::Texts) -> &'static str {
         match self {
-            Self::Idle => "Idle",
-            Self::Checking => "Checking...",
-            Self::InSync => "Up to date",
-            Self::OutOfSync => "Out of sync",
-            Self::Syncing => "Syncing...",
-            Self::Conflict => "Conflict",
-            Self::NotConfigured => "Not configured",
-            Self::Error => "Sync error",
+            Self::Idle => t.status_idle,
+            Self::Checking => t.checking,
+            Self::InSync => t.status_up_to_date,
+            Self::OutOfSync => t.status_out_of_sync,
+            Self::Syncing => t.syncing,
+            Self::Conflict => t.status_conflict,
+            Self::NotConfigured => t.status_not_configured,
+            Self::Error => t.status_error,
         }
     }
 

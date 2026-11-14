@@ -2,6 +2,7 @@ mod common;
 
 use common::*;
 use emusync_application::{SyncOrchestratorFactory, SyncServices};
+use emusync_domain::sync::SyncMessage;
 use emusync_domain::sync::{Decision, EntrySyncStatus, PostSyncFailure, RequestId, SyncEvent};
 use std::sync::Arc;
 
@@ -131,7 +132,7 @@ async fn test_orchestrator_delegates_play_check_conflict_and_retry() {
     let failure = PostSyncFailure {
         request_id: RequestId(12345),
         game_name: "Game".into(),
-        reason: "Test".into(),
+        reason: SyncMessage::Detail("Test".into()),
         completed_save_count: 0,
         pending_save_count: 1,
     };

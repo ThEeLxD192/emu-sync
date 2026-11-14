@@ -1,6 +1,6 @@
 //! Form state for creating and editing library categories (emulators and native games).
 
-use super::save_targets::SaveTargetFormState;
+use super::{FormError, save_targets::SaveTargetFormState};
 use crate::model::EntryType;
 use emusync_domain::{
     execution::{format_arguments, parse_arguments},
@@ -24,7 +24,7 @@ pub struct EntryFormState {
     pub covers_directory: String,
     pub cover_path: String,
     pub saves: SaveTargetFormState,
-    pub error_message: Option<String>,
+    pub error_message: Option<FormError>,
     pub initial_entry: Option<GameEntry>,
 }
 
@@ -153,7 +153,7 @@ impl EntryFormState {
         }
     }
 
-    pub fn build_entry(&mut self) -> Result<GameEntry, String> {
+    pub fn build_entry(&mut self) -> Result<GameEntry, FormError> {
         let raw_targets = self.saves.build_targets();
 
         if raw_targets.iter().any(|t| {
@@ -161,15 +161,15 @@ impl EntryFormState {
                 .as_deref()
                 .is_some_and(|p| remote_path_segments(p.trim()).is_none())
         }) {
-            let msg = "Cloud paths must be relative and cannot contain '..'.";
-            self.error_message = Some(msg.to_string());
-            return Err(msg.to_string());
+            let msg = FormError::CloudPathInvalid;
+            self.error_message = Some(msg);
+            return Err(msg);
         }
 
         if !self.saves.excluded_folders_are_valid() {
-            let msg = super::save_targets::EXCLUDED_FOLDERS_INVALID;
-            self.error_message = Some(msg.to_string());
-            return Err(msg.to_string());
+            let msg = FormError::ExcludedFolderOutside;
+            self.error_message = Some(msg);
+            return Err(msg);
         }
 
         let targets = self.saves.scoped_targets();
@@ -178,17 +178,17 @@ impl EntryFormState {
         let trimmed_exec = self.executable_path.trim();
 
         if trimmed_name.is_empty() || trimmed_exec.is_empty() {
-            let msg = "Please fill in all required fields.";
-            self.error_message = Some(msg.to_string());
-            return Err(msg.to_string());
+            let msg = FormError::RequiredFieldsMissing;
+            self.error_message = Some(msg);
+            return Err(msg);
         }
 
         let parsed_args = match parse_arguments(self.arguments.trim()) {
             Some(args) => args,
             None => {
-                let msg = "Arguments format is invalid (unclosed quotes or escapes).";
-                self.error_message = Some(msg.to_string());
-                return Err(msg.to_string());
+                let msg = FormError::ArgumentsInvalid;
+                self.error_message = Some(msg);
+                return Err(msg);
             }
         };
 
@@ -227,9 +227,9 @@ impl EntryFormState {
                     .collect();
 
                 if trimmed_roms.is_empty() || ext_list.is_empty() {
-                    let msg = "Please specify the ROMs directory and at least one extension.";
-                    self.error_message = Some(msg.to_string());
-                    return Err(msg.to_string());
+                    let msg = FormError::EmulatorFieldsMissing;
+                    self.error_message = Some(msg);
+                    return Err(msg);
                 }
 
                 let opt_fulls = if self.fullscreen_args.trim().is_empty() {
@@ -276,9 +276,9 @@ impl EntryFormState {
             }
             EntryType::Native => {
                 if common.save_targets.is_empty() {
-                    let msg = "Native PC games require at least one save target path.";
-                    self.error_message = Some(msg.to_string());
-                    return Err(msg.to_string());
+                    let msg = FormError::NativeSaveTargetMissing;
+                    self.error_message = Some(msg);
+                    return Err(msg);
                 }
 
                 let opt_wait = if self.wait_for_process.trim().is_empty() {

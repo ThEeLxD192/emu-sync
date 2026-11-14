@@ -66,6 +66,7 @@ async fn connected_launch_runs_under_sync_lifecycle() {
     let entry = test_native_entry("Game");
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: Some(Credentials {
                 client_id: "id".into(),
                 client_secret: "secret".into(),
@@ -113,6 +114,7 @@ async fn failed_game_process_emits_error_and_does_not_send_idle() {
     }
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![entry.clone()],
         })
@@ -158,6 +160,7 @@ async fn connected_launch_with_game_exit_error_preserves_error_and_does_not_send
     }
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: Some(Credentials {
                 client_id: "id".into(),
                 client_secret: "secret".into(),
@@ -205,6 +208,7 @@ async fn coordinator_launch_game_session() {
     let native = test_native_entry("QuickRunner");
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![native.clone()],
         })
@@ -304,6 +308,7 @@ async fn execute_sync_entry_retains_uncertain_upload_error_and_blocks_close() {
     let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: Some(Credentials {
                 client_id: "id".into(),
                 client_secret: "secret".into(),
@@ -496,6 +501,7 @@ async fn execute_check_sync_entry_reports_not_configured_offline_and_does_not_cl
     harness
         .manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: Some(Credentials {
                 client_id: "id".into(),
                 client_secret: "secret".into(),
@@ -594,6 +600,7 @@ async fn execute_sync_entry_reports_a_failed_download_without_blocking_close() {
     let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: Some(Credentials {
                 client_id: "id".into(),
                 client_secret: "secret".into(),

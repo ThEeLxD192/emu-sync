@@ -3,6 +3,7 @@ mod common;
 use common::*;
 use emusync_application::{SyncOrchestratorFactory, SyncServices};
 use emusync_domain::library::{EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType};
+use emusync_domain::sync::SyncMessage;
 use emusync_domain::sync::{Decision, RequestId, SyncEvent, SyncGame};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -131,7 +132,7 @@ async fn test_post_sync_directory_with_conflicting_file_emits_error() {
     let evs = events.lock().unwrap().clone();
     assert!(evs.iter().any(|ev| matches!(
         ev,
-        SyncEvent::Error(msg) if msg.contains("conflicts with another configured file target")
+        SyncEvent::Error(msg) if mentions(msg, |m| matches!(m, SyncMessage::DirectorySaveConflict { .. }))
     )));
 }
 
@@ -258,15 +259,17 @@ async fn post_sync_partial_failure_with_blocked_sibling_reports_exact_counts_and
         "Pending save count must be 2 (flaky.sav + collision.sav)"
     );
     assert!(
-        failure
-            .reason
-            .contains("Upload error for /saves/dir/flaky.sav"),
+        mentions(&failure.reason, |m| matches!(
+            m,
+            SyncMessage::Detail(detail) if detail.contains("Upload error for /saves/dir/flaky.sav")
+        )),
         "Failure reason must include network upload error"
     );
     assert!(
-        failure
-            .reason
-            .contains("conflicts with another configured file target"),
+        mentions(&failure.reason, |m| matches!(
+            m,
+            SyncMessage::DirectorySaveConflict { .. }
+        )),
         "Failure reason must include collision message"
     );
 
@@ -290,7 +293,7 @@ async fn post_sync_partial_failure_with_blocked_sibling_reports_exact_counts_and
     assert!(
         retry_events.iter().any(|e| matches!(
             e,
-            SyncEvent::Error(msg) if msg.contains("conflicts with another configured file target")
+            SyncEvent::Error(msg) if mentions(msg, |m| matches!(m, SyncMessage::DirectorySaveConflict { .. }))
         )),
         "Must emit remaining blocked reason as SyncEvent::Error on retry completion"
     );
@@ -400,7 +403,10 @@ async fn post_sync_prepare_cloud_state_failure_marks_all_configured_and_retry_ta
         failure.pending_save_count, 2,
         "All configured targets must be marked as pending"
     );
-    assert!(failure.reason.contains("listing failed"));
+    assert!(mentions(&failure.reason, |m| matches!(
+        m,
+        SyncMessage::Detail(detail) if detail.contains("listing failed")
+    )));
 
     // Now restore list_files in drive and retry
     drive.fail_list.store(false, Ordering::SeqCst);
@@ -416,4 +422,12 @@ async fn post_sync_prepare_cloud_state_failure_marks_all_configured_and_retry_ta
 
     let retry_events = events.lock().unwrap().clone();
     assert!(retry_events.contains(&SyncEvent::Idle));
+}
+
+/// Whether `message`, or one of several it groups, satisfies `matches`.
+fn mentions(message: &SyncMessage, matches: impl Fn(&SyncMessage) -> bool + Copy) -> bool {
+    match message {
+        SyncMessage::Several(messages) => messages.iter().any(|m| mentions(m, matches)),
+        other => matches(other),
+    }
 }

@@ -4,6 +4,7 @@ use common::*;
 use emusync_application::{SyncOrchestratorFactory, SyncServices};
 use emusync_domain::config::AppConfig;
 use emusync_domain::library::{SaveTarget, SaveTargetType};
+use emusync_domain::sync::SyncMessage;
 use emusync_domain::sync::{Decision, RemoteFile, SaveSetupResult, SyncEvent};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -160,7 +161,7 @@ async fn test_pre_sync_mapping_error_aborts_launch() {
     assert!(
         recorded
             .iter()
-            .any(|e| matches!(e, SyncEvent::Error(msg) if msg.contains("escaped")))
+            .any(|e| matches!(e, SyncEvent::Error(SyncMessage::Failed { detail }) if detail.contains("escaped")))
     );
 }
 
@@ -284,7 +285,7 @@ async fn test_process_exit_code_failure_emits_error_and_does_not_upload() {
     let evs = events.lock().unwrap().clone();
     assert!(evs.iter().any(|ev| matches!(
         ev,
-        SyncEvent::Error(msg) if msg.contains("CrashGame did not start")
+        SyncEvent::Error(SyncMessage::GameNotTracked { game }) if game == "CrashGame"
     )));
 }
 
@@ -302,6 +303,7 @@ async fn test_play_without_drive_launches_directly_and_returns_idle() {
     let events_clone = Arc::clone(&events);
 
     let config = AppConfig {
+        language: Default::default(),
         credentials: None,
         entries: Vec::new(),
     };
@@ -453,7 +455,7 @@ async fn pre_sync_unverified_duplicate_or_mid_download_failure_aborts_game_launc
         assert!(
             recorded.iter().any(|e| matches!(
                 e,
-                SyncEvent::Error(msg) if msg == "Error: Unverified duplicate remote file: save.sav"
+                SyncEvent::Error(SyncMessage::Failed { detail }) if detail == "Unverified duplicate remote file: save.sav"
             )),
             "Expected exact error event for duplicate remote file, got: {:?}",
             recorded
@@ -528,8 +530,9 @@ async fn pre_sync_unverified_duplicate_or_mid_download_failure_aborts_game_launc
         assert!(
             recorded.iter().any(|e| matches!(
                 e,
-                SyncEvent::Error(msg) if msg.contains("Error: Could not finish preparing saves for DownloadFailGame")
-                    && msg.contains("checksum mismatch / disk full")
+                SyncEvent::Error(SyncMessage::Failed { detail })
+                    if detail.contains("Could not finish preparing saves for DownloadFailGame")
+                        && detail.contains("checksum mismatch / disk full")
             )),
             "Expected error event mentioning failure preparing saves, got: {:?}",
             recorded
@@ -599,7 +602,7 @@ async fn save_setup_before_and_after_play_updates_cloud_path_or_aborts_when_canc
         assert!(
             recorded.iter().any(|e| matches!(
                 e,
-                SyncEvent::Error(msg) if msg == "Error: Save setup failed"
+                SyncEvent::Error(SyncMessage::Failed { detail }) if detail == "Save setup failed"
             )),
             "Expected exact SyncEvent::Error(\"Error: Save setup failed\"), got: {:?}",
             recorded

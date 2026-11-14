@@ -169,7 +169,14 @@ impl ApplicationHandler for App {
                 self.closing = false;
                 self.close_notice = true;
                 self.emusync_app.state.status = AppStatus::Error {
-                    message: "A sync operation needs recovery before closing.".into(),
+                    message: self
+                        .coordinator
+                        .as_ref()
+                        .map_or(emusync_presentation::i18n::texts(Default::default()), |c| {
+                            c.t()
+                        })
+                        .msg_recovery_before_close
+                        .into(),
                 };
                 event_loop.set_control_flow(ControlFlow::Wait);
                 if let Some(window) = &self.window {
@@ -218,6 +225,9 @@ impl ApplicationHandler for App {
                 while let Ok(app_event) = self.event_rx.try_recv() {
                     match app_event {
                         AppEvent::ConfigReloaded(cfg) => {
+                            if let Some(coordinator) = &self.coordinator {
+                                coordinator.language.set(cfg.language);
+                            }
                             let was_empty = self.emusync_app.state.selected_entry.is_none();
                             self.emusync_app.state.config = Some(cfg.clone());
                             if was_empty || self.emusync_app.state.selected_entry.is_none() {
@@ -439,6 +449,13 @@ impl ApplicationHandler for App {
                 // Drain and dispatch UI actions
                 let actions = self.emusync_app.take_actions();
                 for action in actions {
+                    // Shown at once; the coordinator stores it in the background.
+                    if let UiAction::SetLanguage(language) = action {
+                        if let Some(config) = &mut self.emusync_app.state.config {
+                            config.language = language;
+                        }
+                        window.request_redraw();
+                    }
                     if let UiAction::SelectEntry(ref entry) = action {
                         self.emusync_app.state.selected_entry = entry.clone();
                         if entry.is_none() {

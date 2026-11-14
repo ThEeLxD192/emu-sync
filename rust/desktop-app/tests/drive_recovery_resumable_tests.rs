@@ -478,6 +478,7 @@ async fn recovery_rejects_reconnected_credentials_and_retains_snapshot_and_exclu
     let config_path = dir.path().join("config.json");
     let manager = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),
@@ -551,6 +552,7 @@ async fn reconcile_tracked_upload_rejects_unsupported_failure_variants_without_r
     let config_path = dir.path().join("config.json");
     let manager = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),
@@ -599,6 +601,7 @@ async fn reconcile_tracked_upload_returns_failure_still_referenced_when_external
     let config_path = dir.path().join("config.json");
     let manager = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),

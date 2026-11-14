@@ -4,7 +4,7 @@ use common::{test_emulator_entry, test_native_entry};
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{AppEvent, DesktopCoordinator};
 use emusync_domain::{
-    config::{AppConfig, ConfigurationStore},
+    config::{AppConfig, ConfigurationStore, Language},
     library::{Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType},
 };
 use emusync_presentation::{actions::UiAction, model::GameItem};
@@ -65,6 +65,7 @@ async fn renaming_b_to_existing_a_is_rejected_with_toast() {
     let entry_b = test_native("CategoryB");
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![entry_a.clone(), entry_b.clone()],
         })
@@ -132,6 +133,7 @@ async fn old_game_item_does_not_wipe_other_rom_overrides() {
 
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![entry.clone()],
         })
@@ -235,6 +237,7 @@ async fn renaming_native_game_override_to_existing_entry_is_rejected_with_toast(
     let entry_b = test_native("GameB");
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![entry_a.clone(), entry_b.clone()],
         })
@@ -317,6 +320,7 @@ async fn coordinator_reorder_entries() {
     let e2 = test_emulator_entry("N64");
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![e1.clone(), e2.clone()],
         })
@@ -373,6 +377,7 @@ async fn reorder_is_reloaded_before_handle_action_returns() {
     );
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![a.clone(), b.clone(), c.clone()],
         })
@@ -421,6 +426,7 @@ async fn coordinator_edit_game_override() {
     let native = test_native_entry("MyGame");
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![native.clone()],
         })
@@ -471,6 +477,7 @@ async fn reorder_entries_deduplicates_payload_and_appends_concurrently_added_cat
     let ec = test_native("C");
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![ea.clone(), eb.clone(), ec.clone()],
         })
@@ -519,4 +526,113 @@ async fn reorder_entries_deduplicates_payload_and_appends_concurrently_added_cat
         .map(|e| e.common().name.as_str())
         .collect();
     assert_eq!(loaded_names, vec!["B", "A", "C"]);
+}
+
+#[tokio::test]
+async fn choosing_a_language_stores_only_the_language() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    let manager = ConfigManager::new(&path).unwrap();
+    manager
+        .save(&AppConfig {
+            language: Default::default(),
+            credentials: None,
+            entries: vec![test_native("Game")],
+        })
+        .unwrap();
+    let before = manager.load().unwrap();
+    let (tx, rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager.clone(),
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
+
+    coordinator.handle_action(UiAction::SetLanguage(Language::Spanish));
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while manager.load().unwrap().language != Language::Spanish {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "language never stored"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let stored = manager.load().unwrap();
+    assert_eq!(
+        stored,
+        AppConfig {
+            language: Language::Spanish,
+            ..before
+        },
+        "only the language changed"
+    );
+    assert!(
+        rx.try_iter()
+            .all(|event| !matches!(event, AppEvent::ConfigReloaded(_))),
+        "choosing a language reloads nothing"
+    );
+}
+
+#[tokio::test]
+async fn messages_follow_the_configured_and_the_chosen_language() {
+    let dir = tempdir().unwrap();
+    let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
+    manager
+        .save(&AppConfig {
+            language: Language::Spanish,
+            credentials: None,
+            entries: Vec::new(),
+        })
+        .unwrap();
+    let (tx, _rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager,
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
+    assert_eq!(coordinator.language.get(), Language::English);
+
+    coordinator.initialize();
+    assert_eq!(coordinator.language.get(), Language::Spanish);
+
+    coordinator.handle_action(UiAction::SetLanguage(Language::English));
+    assert_eq!(
+        coordinator.language.get(),
+        Language::English,
+        "the next message is already in the chosen language"
+    );
+}
+
+#[tokio::test]
+async fn notices_are_written_in_the_current_language() {
+    let dir = tempdir().unwrap();
+    let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
+    let (tx, rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager,
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
+    coordinator.language.set(Language::Spanish);
+
+    coordinator.handle_action(UiAction::ConnectDrive {
+        client_id: " ".into(),
+        client_secret: String::new(),
+    });
+
+    let toasts: Vec<String> = rx
+        .try_iter()
+        .filter_map(|event| match event {
+            AppEvent::Toast(message) => Some(message),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        toasts,
+        vec!["El Client ID y el Client Secret no pueden estar vacíos.".to_string()]
+    );
 }

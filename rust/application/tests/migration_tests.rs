@@ -4,6 +4,7 @@ use emusync_domain::execution::{GameLaunchRequest, GameLauncher, GameResult};
 use emusync_domain::library::{
     Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType,
 };
+use emusync_domain::sync::SyncMessage;
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, LocalSaveAccess, LocalSaveFiles, LocalSavePath,
     RemoteFile, RemoteState, SyncEvent,
@@ -288,6 +289,7 @@ fn make_harness(
     };
 
     let config = AppConfig {
+        language: Default::default(),
         credentials,
         entries,
     };
@@ -341,10 +343,10 @@ async fn rename_entry_aborts_when_cloud_folder_is_shared() {
     assert!(!res);
 
     let evs = events.lock().unwrap().clone();
-    assert!(evs.iter().any(|e| matches!(
-        e,
-        SyncEvent::Error(msg) if msg.contains("is shared with another entry")
-    )));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, SyncEvent::Error(SyncMessage::SharedCloudFolder { .. })))
+    );
 }
 
 #[tokio::test]
@@ -513,7 +515,7 @@ async fn rename_entry_aborts_when_old_path_is_used_by_another_entry_save_targets
     assert!(
         evs.iter().any(|e| matches!(
             e,
-            SyncEvent::Error(msg) if msg.contains("The cloud folder 'SharedRoot/SubGame' is shared with another entry.")
+            SyncEvent::Error(SyncMessage::SharedCloudFolder { folder }) if folder == "SharedRoot/SubGame"
         )),
         "Must emit error about shared cloud folder, got: {:?}",
         evs
@@ -651,7 +653,7 @@ async fn rename_game_cloud_data_with_drive_connected_relocates_merges_and_aborts
         assert!(
             evs.iter().any(|e| matches!(
                 e,
-                SyncEvent::Error(msg) if msg.contains("Cloud rename error: Duplicate cloud file: save.srm")
+                SyncEvent::Error(SyncMessage::CloudRenameFailed { detail }) if detail.contains("Duplicate cloud file: save.srm")
             )),
             "Expected Cloud rename error for duplicate cloud file, got: {:?}",
             evs

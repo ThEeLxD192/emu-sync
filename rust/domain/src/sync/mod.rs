@@ -12,7 +12,7 @@ pub use decision::{
 };
 pub use events::{
     EntrySyncStatus, PostSyncFailure, RequestId, SaveConflict, SavePlacementGroup,
-    SavePlacementRequest, SaveSetupRequest, SaveSetupResult, SyncEvent, SyncGame,
+    SavePlacementRequest, SaveSetupRequest, SaveSetupResult, SyncEvent, SyncGame, SyncMessage,
 };
 pub use name_case::{is_windows_file_name, local_names_ignore_case, name_key, same_local_name};
 pub use ports::{

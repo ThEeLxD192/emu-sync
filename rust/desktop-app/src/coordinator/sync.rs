@@ -12,6 +12,7 @@ use emusync_domain::{
     sync::{EntrySyncStatus, LocalSaveAccess, SaveSynchronizer, SyncEvent, SyncGame},
 };
 use emusync_platform_desktop::GameRunner;
+use emusync_presentation::i18n::fill;
 use emusync_presentation::model::{AppStatus, CloudSyncStatus, GameItem};
 use std::{io, path::Path, sync::Arc};
 
@@ -44,7 +45,10 @@ impl SyncOperations {
             Ok(c) => c,
             Err(e) => {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: format!("Failed to load configuration: {e}"),
+                    message: fill(
+                        coordinator.t().msg_configuration_load_failed,
+                        &[("error", &e)],
+                    ),
                 }));
                 coordinator.release_admission();
                 return;
@@ -60,7 +64,7 @@ impl SyncOperations {
             Some(e) => e.clone(),
             None => {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: "Game category no longer exists in configuration.".into(),
+                    message: coordinator.t().msg_game_category_missing.into(),
                 }));
                 coordinator.release_admission();
                 return;
@@ -72,7 +76,7 @@ impl SyncOperations {
             Ok(t) => t,
             Err(e) => {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: format!("Failed to resolve save targets: {e}"),
+                    message: fill(coordinator.t().msg_targets_failed, &[("error", &e)]),
                 }));
                 coordinator.release_admission();
                 return;
@@ -85,7 +89,10 @@ impl SyncOperations {
             let runner = GameRunner::new(steam_launches);
 
             coordinator.send_event(AppEvent::StatusChanged(AppStatus::Syncing {
-                message: format!("Preparing {effective_title}..."),
+                message: fill(
+                    coordinator.t().msg_preparing_game,
+                    &[("game", &effective_title)],
+                ),
             }));
 
             let req = GameLaunchRequest {
@@ -103,22 +110,25 @@ impl SyncOperations {
                 Ok(result) => {
                     if result.exit_code != 0 {
                         coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                            message: format!(
-                                "{effective_title} did not start or exited with error code {}.",
-                                result.exit_code
+                            message: fill(
+                                coordinator.t().msg_game_exit_code,
+                                &[("game", &effective_title), ("code", &result.exit_code)],
                             ),
                         }));
                     } else {
                         coordinator.send_event(AppEvent::StatusChanged(AppStatus::Idle));
-                        coordinator.send_toast(format!(
-                            "Session finished ({}s)",
-                            result.duration_ms / 1000
+                        coordinator.send_toast(fill(
+                            coordinator.t().msg_session_finished,
+                            &[("seconds", &(result.duration_ms / 1000))],
                         ));
                     }
                 }
                 Err(err) => {
                     coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                        message: format!("Launch failed: {err:?}"),
+                        message: fill(
+                            coordinator.t().msg_launch_failed,
+                            &[("error", &format!("{err:?}"))],
+                        ),
                     }));
                 }
             }
@@ -141,7 +151,7 @@ impl SyncOperations {
             Ok(b) => b,
             Err(e) => {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: format!("Failed to initialize cloud synchronization: {e}"),
+                    message: fill(coordinator.t().msg_sync_init_failed, &[("error", &e)]),
                 }));
                 coordinator.release_admission();
                 return;
@@ -168,7 +178,7 @@ impl SyncOperations {
         {
             coordinator.record_transfer_error(err);
             coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                message: "Sync failed during game session.".into(),
+                message: coordinator.t().msg_sync_failed_session.into(),
             }));
             coordinator.release_admission();
             return;
@@ -182,7 +192,7 @@ impl SyncOperations {
             }
             Err(err) => {
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: format!("Synchronization error: {err}"),
+                    message: fill(coordinator.t().msg_sync_error, &[("error", &err)]),
                 }));
             }
         }
@@ -195,14 +205,17 @@ impl SyncOperations {
         let config = match coordinator.config_manager.load() {
             Ok(c) => c,
             Err(e) => {
-                coordinator.send_toast(format!("Failed to load config: {e}"));
+                coordinator.send_toast(fill(
+                    coordinator.t().msg_config_load_failed,
+                    &[("error", &e)],
+                ));
                 coordinator.release_admission();
                 return;
             }
         };
 
         if !drive_connected(&config) {
-            coordinator.send_toast("Google Drive is not configured.");
+            coordinator.send_toast(coordinator.t().msg_drive_not_configured);
             coordinator.release_admission();
             return;
         }
@@ -212,7 +225,7 @@ impl SyncOperations {
             status: CloudSyncStatus::Syncing,
         });
         coordinator.send_event(AppEvent::StatusChanged(AppStatus::Syncing {
-            message: format!("Synchronizing '{name}'..."),
+            message: fill(coordinator.t().msg_synchronizing_entry, &[("name", &name)]),
         }));
 
         let built = match coordinator.build_orchestrator(&config) {
@@ -223,7 +236,7 @@ impl SyncOperations {
                     status: CloudSyncStatus::Error,
                 });
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: format!("Failed to initialize cloud synchronization: {e}"),
+                    message: fill(coordinator.t().msg_sync_init_failed, &[("error", &e)]),
                 }));
                 coordinator.release_admission();
                 return;
@@ -250,7 +263,10 @@ impl SyncOperations {
                 status: CloudSyncStatus::Error,
             });
             coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                message: format!("Sync failed during transfer: {detail}. Recovery is required."),
+                message: fill(
+                    coordinator.t().msg_sync_failed_transfer,
+                    &[("detail", &detail)],
+                ),
             }));
             coordinator.release_admission();
             return;
@@ -263,7 +279,10 @@ impl SyncOperations {
                     status: CloudSyncStatus::InSync,
                 });
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Idle));
-                coordinator.send_toast(format!("'{name}' synchronized."));
+                coordinator.send_toast(fill(
+                    coordinator.t().msg_entry_synchronized,
+                    &[("name", &name)],
+                ));
             }
             Ok(false) => {
                 coordinator.check_sync_entry_background(entry);
@@ -278,7 +297,7 @@ impl SyncOperations {
                     status: CloudSyncStatus::Error,
                 });
                 coordinator.send_event(AppEvent::StatusChanged(AppStatus::Error {
-                    message: format!("Sync failed: {reason}"),
+                    message: fill(coordinator.t().msg_sync_failed, &[("reason", &reason)]),
                 }));
             }
         }
@@ -336,7 +355,7 @@ impl SyncOperations {
     pub async fn execute_open_emulator(coordinator: DesktopCoordinator, emulator: Emulator) {
         let exec = emulator.common.executable_path.trim().to_string();
         if exec.is_empty() {
-            coordinator.send_toast("No emulator executable configured.");
+            coordinator.send_toast(coordinator.t().msg_no_emulator);
             coordinator.release_admission();
             return;
         }
@@ -345,7 +364,10 @@ impl SyncOperations {
         let runner = GameRunner::new(steam_launches);
 
         if let Err(e) = runner.open_emulator(&emulator).await {
-            coordinator.send_toast(format!("Failed to launch emulator: {e}"));
+            coordinator.send_toast(fill(
+                coordinator.t().msg_emulator_launch_failed,
+                &[("error", &e)],
+            ));
         }
 
         coordinator.release_admission();

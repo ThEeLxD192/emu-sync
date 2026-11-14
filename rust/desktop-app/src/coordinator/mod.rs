@@ -32,7 +32,7 @@ use emusync_data_local::{
     ConfigManager, LocalSaveTargets, RecoveryCredentials, RecoveryStore, TrackedError,
 };
 use emusync_domain::{
-    config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
+    config::{AppConfig, ConfigurationStore, CredentialStore, Credentials, Language},
     execution::PathPicker,
     library::{GameEntry, SaveTarget, SteamLibrary},
     sync::{
@@ -45,6 +45,7 @@ use emusync_platform_desktop::{
 };
 use emusync_presentation::{
     actions::UiAction,
+    i18n::{fill, sync_text},
     model::{AppStatus, SaveSetupRequest as UiSaveSetupRequest},
 };
 use std::sync::{
@@ -54,9 +55,6 @@ use std::sync::{
 };
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
-
-const UPDATES_PORTABLE: &str = "This portable copy does not update itself. Download the latest portable ZIP from the project's releases and replace the folder.";
-const UPDATES_DISABLED: &str = "Updates are disabled in development builds. Set EMUSYNC_UPDATE_BASE_URL to a test release server.";
 
 /// Desktop application coordinator managing async operations and state events.
 #[derive(Clone)]
@@ -78,6 +76,8 @@ pub struct DesktopCoordinator {
     /// Drive HTTP clients, built on first use and shared by every operation so their
     /// connections are reused instead of opened again for each check or sync.
     drive_http: Arc<OnceLock<DriveHttpClients>>,
+    /// The interface language, for the messages this coordinator sends.
+    pub language: crate::CurrentLanguage,
 }
 
 impl DesktopCoordinator {
@@ -91,6 +91,7 @@ impl DesktopCoordinator {
         let browser = Arc::new(DesktopBrowserLauncher);
         let picker = Arc::new(FilePicker);
         let scan_revision = Arc::new(AtomicU64::new(0));
+        let language = crate::CurrentLanguage::default();
         let interaction = InteractionControls::new(event_tx.clone(), redraw.clone());
         let event_tx = EventSender::new(event_tx, redraw.clone());
 
@@ -104,6 +105,7 @@ impl DesktopCoordinator {
             tokio_handle: tokio_handle.clone(),
             scan_revision,
             steam_revision: Arc::new(AtomicU64::new(0)),
+            language: language.clone(),
         };
 
         let updates = UpdateServices::new(
@@ -127,6 +129,7 @@ impl DesktopCoordinator {
             is_admitted: Arc::new(AtomicBool::new(false)),
             updates,
             drive_http: Arc::new(OnceLock::new()),
+            language,
         }
     }
 
@@ -135,6 +138,32 @@ impl DesktopCoordinator {
         self.updates =
             UpdateServices::new(source, self.event_tx.clone(), self.tokio_handle.clone());
         self
+    }
+
+    /// The texts of the current interface language, for the messages this sends.
+    pub fn t(&self) -> &'static emusync_presentation::i18n::Texts {
+        self.language.texts()
+    }
+
+    /// Remembers the interface language, which the UI already shows. Only the language
+    /// changes: the rest of the configuration is kept as stored, and nothing is reloaded.
+    fn save_language(&self, language: Language) {
+        self.language.set(language);
+        let config = self.config_manager.clone();
+        let coordinator = self.clone();
+        let handle = self.tokio_handle.spawn(async move {
+            let saved = tokio::task::spawn_blocking(move || {
+                config.update(|mut current| {
+                    current.language = language;
+                    current
+                })
+            })
+            .await;
+            if !matches!(saved, Ok(Ok(_))) {
+                coordinator.send_toast(coordinator.t().msg_language_not_saved);
+            }
+        });
+        self.track_task(handle);
     }
 
     /// The shared Drive HTTP clients, built on first use. A failed build is not kept, so
@@ -256,7 +285,7 @@ impl DesktopCoordinator {
     pub fn check_for_updates(&self, manual: bool) {
         if !self.updates.is_enabled() {
             if manual {
-                self.send_toast(self.updates.disabled_message());
+                self.send_toast(self.updates.disabled_message(self.t()));
             }
             return;
         }
@@ -266,7 +295,7 @@ impl DesktopCoordinator {
                 return;
             }
             match state {
-                UpdateState::Idle => coordinator.send_toast("EmuSync is up to date."),
+                UpdateState::Idle => coordinator.send_toast(coordinator.t().msg_up_to_date),
                 UpdateState::Error(message) => coordinator.send_toast(message),
                 _ => {}
             }
@@ -276,7 +305,7 @@ impl DesktopCoordinator {
     /// Installs the downloaded update and closes; never while a sync is running.
     pub fn restart_for_update(&self, path: std::path::PathBuf) {
         if !self.try_acquire_admission() {
-            self.send_toast("Finish the current operation before restarting to update.");
+            self.send_toast(self.t().msg_finish_before_update);
             return;
         }
         let coordinator = self.clone();
@@ -345,6 +374,7 @@ impl DesktopCoordinator {
         let loader = LoadLibrary::new(self.config_manager.clone(), self.platform.steam.clone());
         match loader.load() {
             Ok(config) => {
+                self.language.set(config.language);
                 let first = config.entries.first().cloned();
                 self.send_event(AppEvent::ConfigReloaded(config.clone()));
 
@@ -370,13 +400,13 @@ impl DesktopCoordinator {
                     && let Ok(entries) = store.list()
                     && !entries.is_empty()
                 {
-                    self.record_pending_recovery(format!(
-                        "Pending recovery of {} unconfirmed upload(s).",
-                        entries.len()
+                    self.record_pending_recovery(fill(
+                        self.t().msg_pending_recovery,
+                        &[("count", &entries.len())],
                     ));
-                    self.send_toast(format!(
-                        "Found {} pending sync recovery record(s).",
-                        entries.len()
+                    self.send_toast(fill(
+                        self.t().msg_found_recovery_records,
+                        &[("count", &entries.len())],
                     ));
                     if drive_connected(&config) {
                         let coord = self.clone();
@@ -396,7 +426,7 @@ impl DesktopCoordinator {
                 }
             }
             Err(err) => {
-                self.send_toast(format!("Failed to load config: {err}"));
+                self.send_toast(fill(self.t().msg_config_load_failed, &[("error", &err)]));
             }
         }
     }
@@ -411,7 +441,7 @@ impl DesktopCoordinator {
             }
             UiAction::LaunchGame(item) => {
                 if !self.try_acquire_admission() {
-                    self.send_toast("Cannot launch game: another operation is in progress or requires recovery.");
+                    self.send_toast(self.t().msg_busy_launch_game);
                     return;
                 }
                 let coord = self.clone();
@@ -422,7 +452,7 @@ impl DesktopCoordinator {
             }
             UiAction::OpenEmulator(emulator) => {
                 if !self.try_acquire_admission() {
-                    self.send_toast("Cannot launch emulator: another operation is in progress.");
+                    self.send_toast(self.t().msg_busy_launch_emulator);
                     return;
                 }
                 let coord = self.clone();
@@ -433,7 +463,7 @@ impl DesktopCoordinator {
             }
             UiAction::SyncEntry(entry) => {
                 if !self.try_acquire_admission() {
-                    self.send_toast("Cannot synchronize: another operation is in progress or requires recovery.");
+                    self.send_toast(self.t().msg_busy_sync);
                     return;
                 }
                 let coord = self.clone();
@@ -447,7 +477,7 @@ impl DesktopCoordinator {
             }
             UiAction::AddEntry(entry) => {
                 if !self.try_acquire_admission() {
-                    self.send_toast("Cannot add category: another operation is in progress or requires recovery.");
+                    self.send_toast(self.t().msg_busy_add_category);
                     return;
                 }
                 let library = library::LibraryManager {
@@ -460,7 +490,7 @@ impl DesktopCoordinator {
             }
             UiAction::EditEntry { old, new } => {
                 if !self.try_acquire_admission() {
-                    self.send_toast("Cannot edit category: another operation is in progress or requires recovery.");
+                    self.send_toast(self.t().msg_busy_edit_category);
                     return;
                 }
                 let new = resolve_entry_target_kinds(*new, &LocalSaveTargets);
@@ -468,7 +498,7 @@ impl DesktopCoordinator {
             }
             UiAction::DeleteEntry(entry) => {
                 if !self.try_acquire_admission() {
-                    self.send_toast("Cannot delete category: another operation is in progress.");
+                    self.send_toast(self.t().msg_busy_delete_category);
                     return;
                 }
                 let library = library::LibraryManager {
@@ -477,9 +507,10 @@ impl DesktopCoordinator {
                 };
                 library.delete_entry(self, entry);
             }
+            UiAction::SetLanguage(language) => self.save_language(language),
             UiAction::ReorderEntries(entries) => {
                 if !self.try_acquire_admission() {
-                    self.send_toast("Cannot reorder categories: another operation is in progress.");
+                    self.send_toast(self.t().msg_busy_reorder);
                     return;
                 }
                 let library = library::LibraryManager {
@@ -495,9 +526,7 @@ impl DesktopCoordinator {
                 cover_path,
             } => {
                 if !self.try_acquire_admission() {
-                    self.send_toast(
-                        "Cannot edit game: another operation is in progress or requires recovery.",
-                    );
+                    self.send_toast(self.t().msg_busy_edit_game);
                     return;
                 }
                 let targets = resolve_target_kinds(targets, &LocalSaveTargets);
@@ -527,9 +556,7 @@ impl DesktopCoordinator {
                     ) {
                         Ok(targets) if !targets.is_empty() => targets,
                         Ok(_) | Err(_) => {
-                            self.send_toast(
-                                "No valid restore location for the cloud files in that folder.",
-                            );
+                            self.send_toast(self.t().msg_no_restore_location);
                             pending.cancel();
                             return;
                         }
@@ -554,7 +581,7 @@ impl DesktopCoordinator {
             }
             UiAction::ToggleSteam(entry) => {
                 if !self.try_acquire_admission() {
-                    self.send_toast("Cannot toggle Steam: another operation is in progress or requires recovery.");
+                    self.send_toast(self.t().msg_busy_toggle_steam);
                     return;
                 }
                 self.platform.toggle_steam(entry);
@@ -574,7 +601,7 @@ impl DesktopCoordinator {
                 if self.updates.is_enabled() {
                     self.updates.download(info);
                 } else {
-                    self.send_toast(self.updates.disabled_message());
+                    self.send_toast(self.updates.disabled_message(self.t()));
                 }
             }
             UiAction::RestartApp(path) => self.restart_for_update(path),
@@ -587,9 +614,7 @@ impl DesktopCoordinator {
             UiAction::RetryPostSync => {
                 if let Some((failure, runner)) = self.interaction.take_retry() {
                     if !self.try_acquire_admission() {
-                        self.send_toast(
-                            "Cannot retry sync: operation in progress or recovery required.",
-                        );
+                        self.send_toast(self.t().msg_busy_retry);
                         self.interaction.set_retry(failure, runner);
                         return;
                     }
@@ -661,7 +686,7 @@ impl DesktopCoordinator {
         let config = match self.config_manager.load() {
             Ok(c) => c,
             Err(e) => {
-                self.send_toast(format!("Failed to load config: {e}"));
+                self.send_toast(fill(self.t().msg_config_load_failed, &[("error", &e)]));
                 pending.cancel();
                 return;
             }
@@ -672,7 +697,7 @@ impl DesktopCoordinator {
             .iter()
             .find(|e| e.common().name == entry_name)
         else {
-            self.send_toast("Category no longer exists.");
+            self.send_toast(self.t().msg_category_missing);
             pending.cancel();
             return;
         };
@@ -726,7 +751,7 @@ impl DesktopCoordinator {
                 (self.redraw)();
             }
             Err(err) => {
-                self.send_toast(format!("Failed to save game setup: {err}"));
+                self.send_toast(fill(self.t().msg_game_setup_failed, &[("error", &err)]));
                 pending.cancel();
             }
         }
@@ -740,16 +765,21 @@ impl DesktopCoordinator {
         let redraw = self.redraw.clone();
         let transfer_progress: Arc<dyn Fn(TransferProgress) + Send + Sync> = {
             let tx = event_tx.clone();
+            let language = self.language.clone();
             let red = redraw.clone();
             Arc::new(move |progress: TransferProgress| {
                 let percent = progress
                     .total
                     .filter(|&t| t > 0)
                     .map(|total| (progress.transferred * 100) / total);
+                let t = language.texts();
                 let message = if let Some(pct) = percent {
-                    format!("Syncing {} ({}%)", progress.name, pct)
+                    fill(
+                        t.msg_syncing_file_percent,
+                        &[("name", &progress.name), ("percent", &pct)],
+                    )
                 } else {
-                    format!("Syncing {}", progress.name)
+                    fill(t.msg_syncing_file, &[("name", &progress.name)])
                 };
                 let _ = tx.send(AppEvent::StatusChanged(AppStatus::Syncing { message }));
                 (red)();
@@ -761,6 +791,7 @@ impl DesktopCoordinator {
         let retry_runner_slot_status = retry_runner_slot.clone();
         let interaction_status = interaction.clone();
 
+        let language = self.language.clone();
         let on_status = move |event: SyncEvent| {
             match &event {
                 SyncEvent::Idle => {
@@ -768,7 +799,7 @@ impl DesktopCoordinator {
                 }
                 SyncEvent::Syncing(msg) => {
                     let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::Syncing {
-                        message: msg.clone(),
+                        message: sync_text(language.texts(), msg),
                     }));
                 }
                 SyncEvent::Playing => {
@@ -776,7 +807,7 @@ impl DesktopCoordinator {
                 }
                 SyncEvent::Error(err) => {
                     let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::Error {
-                        message: err.clone(),
+                        message: sync_text(language.texts(), err),
                     }));
                 }
                 SyncEvent::Conflict(conflict) => {
@@ -801,7 +832,7 @@ impl DesktopCoordinator {
                     }
                     let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::PostSyncFailed {
                         game_name: failure.game_name.clone(),
-                        reason: failure.reason.clone(),
+                        reason: sync_text(language.texts(), &failure.reason),
                         completed_save_count: failure.completed_save_count,
                         pending_save_count: failure.pending_save_count,
                     }));
@@ -811,8 +842,9 @@ impl DesktopCoordinator {
         };
 
         let built = composition::build_orchestrator(
+            self.t(),
             self.drive_clients()
-                .map_err(|e| format!("HTTP client configuration failed: {e}"))?,
+                .map_err(|e| fill(self.t().msg_http_config_failed, &[("error", &e)]))?,
             &self.config_manager,
             &self.platform.steam,
             &self.platform.browser,
@@ -857,9 +889,7 @@ impl DesktopCoordinator {
                     inter
                         .event_tx
                         .send(AppEvent::StatusChanged(AppStatus::Error {
-                            message: format!(
-                                "Sync failed during retry: {detail}. Recovery is required."
-                            ),
+                            message: fill(coord.t().msg_retry_failed, &[("detail", &detail)]),
                         }))
                         .ok();
                     return;
@@ -888,8 +918,9 @@ impl DesktopCoordinator {
         let on_status = |_| {};
 
         composition::build_orchestrator(
+            self.t(),
             self.drive_clients()
-                .map_err(|e| format!("HTTP client configuration failed: {e}"))?,
+                .map_err(|e| fill(self.t().msg_http_config_failed, &[("error", &e)]))?,
             &self.config_manager,
             &self.platform.steam,
             &self.platform.browser,
@@ -903,14 +934,14 @@ impl DesktopCoordinator {
 
     pub fn connect_drive(&self, client_id: String, client_secret: String) {
         if !self.try_acquire_admission_for_connect() {
-            self.send_toast("Cannot connect Drive: another operation is in progress.");
+            self.send_toast(self.t().msg_busy_connect_drive);
             return;
         }
 
         let id = client_id.trim().to_string();
         let secret = client_secret.trim().to_string();
         if id.is_empty() || secret.is_empty() {
-            self.send_toast("Client ID and Client Secret cannot be empty.");
+            self.send_toast(self.t().msg_credentials_empty);
             self.release_admission();
             return;
         }
@@ -924,19 +955,19 @@ impl DesktopCoordinator {
         }) {
             Ok(cfg) => cfg,
             Err(e) => {
-                self.send_toast(format!("Failed to save credentials: {e}"));
+                self.send_toast(fill(self.t().msg_credentials_not_saved, &[("error", &e)]));
                 self.release_admission();
                 return;
             }
         };
 
         self.send_event(AppEvent::ConfigReloaded(config.clone()));
-        self.send_toast("Opening browser for Google Drive authorization...");
+        self.send_toast(self.t().msg_opening_browser);
 
         let clients = match self.drive_clients() {
             Ok(c) => c,
             Err(e) => {
-                self.send_toast(format!("HTTP client error: {e}"));
+                self.send_toast(fill(self.t().msg_http_client_error, &[("error", &e)]));
                 self.release_admission();
                 return;
             }
@@ -959,7 +990,7 @@ impl DesktopCoordinator {
                     if let Ok(updated) = coord.config_manager.load() {
                         coord.send_event(AppEvent::ConfigReloaded(updated));
                     }
-                    coord.send_toast("Google Drive connected successfully.");
+                    coord.send_toast(coord.t().msg_drive_connected);
                     // Reconcile any existing persisted uploads upon connecting
                     if let Ok(statuses) = coord.reconcile_persisted().await {
                         let all_recovered = !statuses.is_empty()
@@ -972,7 +1003,10 @@ impl DesktopCoordinator {
                     }
                 }
                 Err(err) => {
-                    coord.send_toast(format!("Google Drive authorization failed: {err}"));
+                    coord.send_toast(fill(
+                        coord.t().msg_drive_authorization_failed,
+                        &[("error", &err)],
+                    ));
                 }
             }
             coord.release_admission();
@@ -982,7 +1016,7 @@ impl DesktopCoordinator {
 
     pub fn unlink_drive(&self) {
         if !self.try_acquire_admission() {
-            self.send_toast("Cannot disconnect Drive: an operation is currently active.");
+            self.send_toast(self.t().msg_busy_disconnect_drive);
             return;
         }
 
@@ -994,10 +1028,13 @@ impl DesktopCoordinator {
         }) {
             Ok(updated) => {
                 self.send_event(AppEvent::ConfigReloaded(updated));
-                self.send_toast("Google Drive disconnected.");
+                self.send_toast(self.t().msg_drive_disconnected);
             }
             Err(err) => {
-                self.send_toast(format!("Failed to disconnect Drive: {err}"));
+                self.send_toast(fill(
+                    self.t().msg_drive_disconnect_failed,
+                    &[("error", &err)],
+                ));
             }
         }
         self.release_admission();

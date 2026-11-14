@@ -1,5 +1,5 @@
 use emusync_domain::{
-    config::{AppConfig, Credentials},
+    config::{AppConfig, Credentials, Language},
     library::{Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType},
 };
 use indexmap::IndexMap;
@@ -12,6 +12,10 @@ pub(crate) struct Document {
     google_drive: Option<Drive>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     entries: Vec<Entry>,
+    /// The interface language. Absent means English, so configurations written before the
+    /// language could be chosen are read as they were, and English adds nothing to them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -190,6 +194,11 @@ impl From<Document> for AppConfig {
                     }),
                 })
                 .collect(),
+            language: d
+                .language
+                .as_deref()
+                .and_then(Language::from_code)
+                .unwrap_or_default(),
         }
     }
 }
@@ -228,6 +237,7 @@ impl From<AppConfig> for Document {
                     })),
                 })
                 .collect(),
+            language: (d.language != Language::English).then(|| d.language.code().to_owned()),
         }
     }
 }

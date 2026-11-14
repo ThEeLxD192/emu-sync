@@ -25,6 +25,43 @@ impl std::fmt::Debug for Credentials {
 pub struct AppConfig {
     pub credentials: Option<Credentials>,
     pub entries: Vec<GameEntry>,
+    /// The language the interface is shown in.
+    pub language: Language,
+}
+
+/// A language the interface can be shown in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Language {
+    #[default]
+    English,
+    Spanish,
+}
+
+impl Language {
+    pub const ALL: [Language; 2] = [Language::English, Language::Spanish];
+
+    /// The code stored in the configuration (ISO 639-1).
+    pub const fn code(self) -> &'static str {
+        match self {
+            Language::English => "en",
+            Language::Spanish => "es",
+        }
+    }
+
+    /// The language a stored code names, if it is one the interface has.
+    pub fn from_code(code: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|language| language.code().eq_ignore_ascii_case(code.trim()))
+    }
+
+    /// The language's own name, as shown in the language selector.
+    pub const fn native_name(self) -> &'static str {
+        match self {
+            Language::English => "English",
+            Language::Spanish => "Español",
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CredentialSnapshot {

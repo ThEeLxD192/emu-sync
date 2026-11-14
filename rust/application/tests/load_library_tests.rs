@@ -94,6 +94,7 @@ fn initial_load_synchronizes_steam_app_ids_for_native_and_emulator() {
 
     let store = SpyStore {
         config: Arc::new(Mutex::new(AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![g1, g2],
         })),
@@ -127,6 +128,7 @@ fn idempotent_load_does_not_call_store_update() {
 
     let store = SpyStore {
         config: Arc::new(Mutex::new(AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![g1, g2],
         })),
@@ -155,6 +157,7 @@ fn removed_steam_shortcuts_clears_app_ids_in_store() {
 
     let store = SpyStore {
         config: Arc::new(Mutex::new(AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![g1],
         })),
@@ -178,6 +181,7 @@ fn empty_shortcuts_with_no_assigned_ids_short_circuits_instantly() {
 
     let store = SpyStore {
         config: Arc::new(Mutex::new(AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![g1],
         })),
@@ -201,6 +205,7 @@ fn steam_error_is_handled_gracefully() {
 
     let store = SpyStore {
         config: Arc::new(Mutex::new(AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![g1],
         })),
@@ -223,6 +228,7 @@ fn steam_error_is_handled_gracefully() {
 fn steam_migration_error_keeps_persisted_steam_app_ids() {
     let store = SpyStore {
         config: Arc::new(Mutex::new(AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![
                 sample_native("Hollow Knight", Some(1001)),

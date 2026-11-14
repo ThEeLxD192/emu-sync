@@ -6,8 +6,8 @@ use super::target_mapping::{directory_cloud_name, project_directory_files};
 use emusync_domain::library::{GameEntry, is_excluded};
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, DirectoryDownload, LocalSaveAccess,
-    LocalSaveFiles, LocalSavePath, RemoteFile, RemoteState, SyncEvent, canonical_cloud_files,
-    local_names_ignore_case, name_key, same_local_name,
+    LocalSaveFiles, LocalSavePath, RemoteFile, RemoteState, SyncEvent, SyncMessage,
+    canonical_cloud_files, local_names_ignore_case, name_key, same_local_name,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -470,10 +470,9 @@ where
                 .await?;
 
             for (target, configured) in folder_targets.into_iter().zip(&configured_targets) {
-                (self.context.on_status)(SyncEvent::Syncing(format!(
-                    "Syncing {}...",
-                    target.display_name
-                )));
+                (self.context.on_status)(SyncEvent::Syncing(SyncMessage::SyncingTarget {
+                    name: target.display_name.clone(),
+                }));
                 let reserved = self
                     .context
                     .mapping
@@ -535,13 +534,10 @@ where
     async fn connect(&self) -> Option<String> {
         let creds = self.context.config.credentials.as_ref();
         if creds.and_then(|c| c.refresh_token.as_ref()).is_none() {
-            (self.context.on_status)(SyncEvent::Error(
-                "Google Drive is not connected. Click 'Connect Drive' in the top bar to sign in."
-                    .into(),
-            ));
+            (self.context.on_status)(SyncEvent::Error(SyncMessage::DriveNotConnected));
             return None;
         }
-        (self.context.on_status)(SyncEvent::Syncing("Connecting to Google Drive...".into()));
+        (self.context.on_status)(SyncEvent::Syncing(SyncMessage::ConnectingDrive));
         match self
             .context
             .services
@@ -551,9 +547,9 @@ where
         {
             Ok(token) => Some(token),
             Err(err) => {
-                (self.context.on_status)(SyncEvent::Error(format!(
-                    "Could not connect to Google Drive ({err}). Please reconnect your account by clicking 'Connect Drive'."
-                )));
+                (self.context.on_status)(SyncEvent::Error(SyncMessage::DriveConnectFailed {
+                    detail: err.to_string(),
+                }));
                 None
             }
         }

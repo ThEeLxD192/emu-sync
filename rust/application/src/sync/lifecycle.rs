@@ -8,7 +8,7 @@ use super::target_mapping::project_directory_files;
 use emusync_domain::execution::{GameLaunchRequest, GameLauncher};
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, LocalSaveAccess, LocalSaveFiles, LocalSavePath, SaveSetup,
-    SaveSetupRequest, SyncEvent, SyncGame, canonical_cloud_files,
+    SaveSetupRequest, SyncEvent, SyncGame, SyncMessage, canonical_cloud_files,
 };
 use std::sync::Arc;
 
@@ -72,7 +72,9 @@ where
         let ready = match self.prepare_play(&mut prepared, has_drive, setup).await {
             Ok(r) => r,
             Err(err) => {
-                (self.context.on_status)(SyncEvent::Error(format!("Error: {err}")));
+                (self.context.on_status)(SyncEvent::Error(SyncMessage::Failed {
+                    detail: err.to_string(),
+                }));
                 return Ok(());
             }
         };
@@ -84,7 +86,9 @@ where
                 }
                 Ok(false) => {}
                 Err(err) => {
-                    (self.context.on_status)(SyncEvent::Error(format!("Error: {err}")));
+                    (self.context.on_status)(SyncEvent::Error(SyncMessage::Failed {
+                        detail: err.to_string(),
+                    }));
                 }
             }
         }
@@ -102,7 +106,7 @@ where
             return Ok(true);
         }
 
-        (self.context.on_status)(SyncEvent::Syncing("Checking cloud saves...".into()));
+        (self.context.on_status)(SyncEvent::Syncing(SyncMessage::CheckingCloudSaves));
 
         let token = match self
             .context
@@ -123,10 +127,9 @@ where
         }
 
         if !prepared.item.save_targets.is_empty() {
-            (self.context.on_status)(SyncEvent::Syncing(format!(
-                "Syncing saves for {}...",
-                prepared.item.effective_title
-            )));
+            (self.context.on_status)(SyncEvent::Syncing(SyncMessage::SyncingGameSaves {
+                game: prepared.item.effective_title.clone(),
+            }));
 
             let folder_id = match self
                 .context
@@ -324,10 +327,9 @@ where
             .map_err(|e| format!("{e:?}"))?;
 
         if result.exit_code != 0 {
-            (self.context.on_status)(SyncEvent::Error(format!(
-                "{} did not start or its process could not be tracked. Cloud upload was not attempted.",
-                prepared.item.effective_title
-            )));
+            (self.context.on_status)(SyncEvent::Error(SyncMessage::GameNotTracked {
+                game: prepared.item.effective_title.clone(),
+            }));
             return Ok(false);
         }
 

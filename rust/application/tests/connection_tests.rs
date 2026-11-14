@@ -208,6 +208,7 @@ fn unlink_clears_refresh_token() {
 async fn login_falls_back_to_input_config_when_store_reload_fails_and_credential_updates_preserve_concurrent_library_entries()
  {
     let input_cfg = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client123".into(),
             client_secret: "secret456".into(),
@@ -278,6 +279,7 @@ async fn login_falls_back_to_input_config_when_store_reload_fails_and_credential
 
         // Now test unlink with a stale snapshot that has credentials but 0 entries:
         let stale_with_creds = AppConfig {
+            language: Default::default(),
             credentials: Some(Credentials {
                 client_id: "client_1".into(),
                 client_secret: "secret_1".into(),

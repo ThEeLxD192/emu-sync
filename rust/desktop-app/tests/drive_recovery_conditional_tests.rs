@@ -457,6 +457,7 @@ async fn stale_credentials_prevent_recovery_metadata_request() {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(ConfigManager::new(&dir.path().join("config.json")).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),
@@ -521,6 +522,7 @@ async fn connection_changed_during_conditional_query_cannot_record_old_revision(
     let config_path = dir.path().join("config.json");
     let manager = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),
@@ -640,6 +642,7 @@ async fn reconcile_conditional_upload_rejects_missing_observed_state_or_created_
     let config_path = dir.path().join("config.json");
     let manager = Arc::new(ConfigManager::new(&config_path).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),

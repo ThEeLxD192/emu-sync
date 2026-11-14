@@ -48,6 +48,7 @@ async fn deleting_last_category_clears_library_cleanly() {
     let entry = test_native("OnlyCategory");
     manager
         .update(|_| AppConfig {
+            language: Default::default(),
             credentials: None,
             entries: vec![entry.clone()],
         })

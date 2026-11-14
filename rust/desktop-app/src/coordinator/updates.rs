@@ -1,6 +1,5 @@
 //! Application updates: release checks, AppImage download and replacement on restart.
 
-use super::{UPDATES_DISABLED, UPDATES_PORTABLE};
 use crate::events::{AppEvent, EventSender};
 use emusync_application::{UpdateCoordinator, UpdateState};
 use emusync_data_updates::GitHubUpdateSource;
@@ -115,11 +114,11 @@ impl UpdateServices {
     }
 
     /// Why updates are unavailable, for the user who asked for one.
-    pub fn disabled_message(&self) -> &'static str {
+    pub fn disabled_message(&self, t: &emusync_presentation::i18n::Texts) -> &'static str {
         if self.portable {
-            UPDATES_PORTABLE
+            t.msg_updates_portable
         } else {
-            UPDATES_DISABLED
+            t.msg_updates_disabled
         }
     }
 

@@ -127,6 +127,7 @@ pub fn make_drive_endpoints(port: u16) -> DriveEndpoints {
 pub fn synthetic_credentials(root: &std::path::Path) -> RecoveryCredentials<ConfigManager> {
     let store = Arc::new(ConfigManager::new(&root.join("config.json")).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),

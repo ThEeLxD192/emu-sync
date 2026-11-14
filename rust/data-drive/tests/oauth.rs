@@ -16,6 +16,7 @@ fn setup(refresh: Option<&str>) -> (tempfile::TempDir, Arc<ConfigManager>, AppCo
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(ConfigManager::new(&dir.path().join("config.json")).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "secret".into(),
@@ -336,6 +337,7 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
 
         for (id, secret) in [("", "secret"), ("client", "  "), (" ", " ")] {
             let config = AppConfig {
+                language: Default::default(),
                 credentials: Some(Credentials {
                     client_id: id.into(),
                     client_secret: secret.into(),
@@ -391,6 +393,7 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
         let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
 
         let stale_config = AppConfig {
+            language: Default::default(),
             credentials: Some(Credentials {
                 client_id: "stale-client".into(),
                 client_secret: "stale-secret".into(),

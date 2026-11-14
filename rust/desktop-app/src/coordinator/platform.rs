@@ -10,6 +10,7 @@ use emusync_domain::{
     library::{GameEntry, SaveTarget, SaveTargetAccess, SaveTargetType, SteamLibrary},
 };
 use emusync_platform_desktop::{DesktopBrowserLauncher, DesktopSteamLibrary};
+use emusync_presentation::i18n::fill;
 use emusync_presentation::model::{GameItem, PathTarget, PickMode};
 use std::{
     path::Path,
@@ -31,6 +32,8 @@ pub struct PlatformServices {
     pub tokio_handle: Handle,
     pub scan_revision: Arc<AtomicU64>,
     pub steam_revision: Arc<AtomicU64>,
+    /// The interface language, for the messages these services send.
+    pub language: crate::CurrentLanguage,
 }
 
 impl PlatformServices {
@@ -55,18 +58,20 @@ impl PlatformServices {
                     entry_name: name.clone(),
                     registered: !is_registered,
                 });
+                let t = self.language.texts();
                 let msg = if !is_registered {
-                    format!("Added '{name}' to Steam.")
+                    fill(t.msg_steam_added, &[("name", &name)])
                 } else {
-                    format!("Removed '{name}' from Steam.")
+                    fill(t.msg_steam_removed, &[("name", &name)])
                 };
                 let _ = self.event_tx.send(AppEvent::Toast(msg));
                 (self.redraw)();
             }
             Err(err) => {
-                let _ = self
-                    .event_tx
-                    .send(AppEvent::Toast(format!("Steam operation failed: {err}")));
+                let _ = self.event_tx.send(AppEvent::Toast(fill(
+                    self.language.texts().msg_steam_failed,
+                    &[("error", &err)],
+                )));
                 (self.redraw)();
             }
         }
@@ -88,8 +93,9 @@ impl PlatformServices {
             PickMode::Directory => PickerType::Directory,
         };
 
+        let t = self.language.texts();
         self.tokio_handle.spawn_blocking(move || {
-            match picker.pick("Select path", &initial_path, kind) {
+            match picker.pick(t.select_path, &initial_path, kind) {
                 Ok(Some(path)) => {
                     let _ = tx.send(AppEvent::PathPicked {
                         request_id,
@@ -101,8 +107,9 @@ impl PlatformServices {
                 }
                 Ok(None) => {}
                 Err(err) => {
-                    let _ = tx.send(AppEvent::Toast(format!(
-                        "Could not open file chooser: {err}"
+                    let _ = tx.send(AppEvent::Toast(fill(
+                        t.msg_file_chooser_failed,
+                        &[("error", &err)],
                     )));
                     (redraw)();
                 }
@@ -114,6 +121,7 @@ impl PlatformServices {
     pub fn load_game_edit(&self, item: GameItem) -> tokio::task::JoinHandle<()> {
         let tx = self.event_tx.clone();
         let redraw = self.redraw.clone();
+        let t = self.language.texts();
         self.tokio_handle.spawn_blocking(move || {
             let rom_name = item.rom_file_name();
             let event =
@@ -122,7 +130,9 @@ impl PlatformServices {
                         item: Box::new(item),
                         targets,
                     },
-                    Err(err) => AppEvent::Toast(format!("Could not read save paths: {err}")),
+                    Err(err) => {
+                        AppEvent::Toast(fill(t.msg_save_paths_unreadable, &[("error", &err)]))
+                    }
                 };
             let _ = tx.send(event);
             (redraw)();

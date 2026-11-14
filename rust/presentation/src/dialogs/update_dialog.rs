@@ -36,6 +36,7 @@ pub fn render_update_dialog(
     current_version: &str,
     events: UpdateDialogEvents<'_>,
 ) {
+    let t = crate::i18n::tr(ctx);
     let UpdateDialogEvents {
         on_download,
         on_restart,
@@ -58,11 +59,18 @@ pub fn render_update_dialog(
                     icon_header(
                         ui,
                         glyph::UPDATE,
-                        "Update Available",
-                        &format!("Version {} (current: {current_version})", info.version),
+                        t.update_available,
+                        &crate::i18n::fill(
+                            t.update_version_current,
+                            &[("version", &info.version), ("current", &current_version)],
+                        ),
                     );
                     ui.add_space(16.0);
-                    ui.label(RichText::new("Release Notes:").font(bold(12.0)).color(ON_SURFACE));
+                    ui.label(
+                        RichText::new(t.release_notes)
+                            .font(bold(12.0))
+                            .color(ON_SURFACE),
+                    );
                     ui.add_space(6.0);
                     Frame::new()
                         .fill(SURFACE_VARIANT)
@@ -85,7 +93,7 @@ pub fn render_update_dialog(
                     button_row(ui, |ui| {
                         let update_now = Pill {
                             icon: Some((glyph::DOWNLOAD, Color32::WHITE)),
-                            text: "Update Now",
+                            text: t.update_now,
                             text_color: Color32::WHITE,
                             font: FontId::proportional(13.0),
                             fill: PRIMARY,
@@ -97,22 +105,25 @@ pub fn render_update_dialog(
                         if update_now.show(ui).clicked() {
                             on_download(info.clone());
                         }
-                        if text_button(ui, "Later", PRIMARY).clicked() {
+                        if text_button(ui, t.later, PRIMARY).clicked() {
                             on_close();
                         }
                     });
                 }
                 UpdateState::Downloading { progress, info } => {
                     ui.label(
-                        RichText::new("Downloading update...")
+                        RichText::new(t.downloading_update)
                             .font(bold(15.0))
                             .color(ON_SURFACE),
                     );
                     ui.add_space(6.0);
                     ui.label(
-                        RichText::new(format!("Downloading version {} from GitHub", info.version))
-                            .size(12.0)
-                            .color(ON_SURFACE_DIM),
+                        RichText::new(crate::i18n::fill(
+                            t.downloading_from_github,
+                            &[("version", &info.version)],
+                        ))
+                        .size(12.0)
+                        .color(ON_SURFACE_DIM),
                     );
                     ui.add_space(16.0);
                     progress_bar(ui, *progress);
@@ -133,20 +144,20 @@ pub fn render_update_dialog(
                     icon_header(
                         ui,
                         glyph::RESTART,
-                        "Update Complete!",
+                        t.update_complete,
                         if steam {
-                            "The new version is ready to apply."
+                            t.update_ready_to_apply
                         } else {
-                            "The new version is ready to install."
+                            t.update_ready_to_install
                         },
                     );
                     ui.add_space(16.0);
                     ui.add(
                         Label::new(
                             RichText::new(if steam {
-                                "In Steam Deck Game Mode, closing EmuSync applies the update. You can then relaunch it from Steam to start the new version."
+                                t.update_steam_hint
                             } else {
-                                "To apply changes and enjoy the new version, restart EmuSync."
+                                t.update_restart_hint
                             })
                             .size(13.0)
                             .color(ON_SURFACE),
@@ -155,12 +166,19 @@ pub fn render_update_dialog(
                     );
                     ui.add_space(20.0);
                     button_row(ui, |ui| {
-                        if primary_button(ui, if steam { "Close to Apply" } else { "Restart Now" })
-                            .clicked()
+                        if primary_button(
+                            ui,
+                            if steam {
+                                t.close_to_apply
+                            } else {
+                                t.restart_now
+                            },
+                        )
+                        .clicked()
                         {
                             on_restart(PathBuf::from(downloaded_path));
                         }
-                        if text_button(ui, if steam { "Later" } else { "Restart Later" }, PRIMARY)
+                        if text_button(ui, if steam { t.later } else { t.restart_later }, PRIMARY)
                             .clicked()
                         {
                             on_close();
@@ -168,12 +186,12 @@ pub fn render_update_dialog(
                     });
                 }
                 UpdateState::Error(message) => {
-                    ui.label(RichText::new("Update Error").font(bold(15.0)).color(ERROR));
+                    ui.label(RichText::new(t.update_error).font(bold(15.0)).color(ERROR));
                     ui.add_space(8.0);
                     ui.add(Label::new(RichText::new(message).size(13.0).color(ON_SURFACE)).wrap());
                     ui.add_space(16.0);
                     button_row(ui, |ui| {
-                        if primary_button(ui, "Close").clicked() {
+                        if primary_button(ui, t.close).clicked() {
                             on_close();
                         }
                     });
@@ -181,20 +199,16 @@ pub fn render_update_dialog(
                 // Rust-only states, reached from the "Check Updates" extra.
                 UpdateState::Checking => {
                     ui.label(
-                        RichText::new("Checking for updates...")
+                        RichText::new(t.checking_for_updates)
                             .size(13.0)
                             .color(PRIMARY),
                     );
                 }
                 UpdateState::Idle => {
-                    ui.label(
-                        RichText::new("You are on the latest version of EmuSync.")
-                            .size(13.0)
-                            .color(ON_SURFACE),
-                    );
+                    ui.label(RichText::new(t.up_to_date).size(13.0).color(ON_SURFACE));
                     ui.add_space(16.0);
                     button_row(ui, |ui| {
-                        if primary_button(ui, "Close").clicked() {
+                        if primary_button(ui, t.close).clicked() {
                             on_close();
                         }
                     });

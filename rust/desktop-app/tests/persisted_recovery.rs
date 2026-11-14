@@ -27,6 +27,7 @@ const HASH: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f200
 fn credentials(root: &Path) -> RecoveryCredentials<ConfigManager> {
     let store = Arc::new(ConfigManager::new(&root.join("config.json")).unwrap());
     let config = AppConfig {
+        language: Default::default(),
         credentials: Some(Credentials {
             client_id: "client".into(),
             client_secret: "synthetic".into(),
