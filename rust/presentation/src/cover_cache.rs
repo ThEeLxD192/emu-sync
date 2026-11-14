@@ -48,6 +48,14 @@ impl CoverCache {
         self.textures.retain(|_, texture| texture.is_some());
     }
 
+    /// Number of covers loaded and ready to draw.
+    pub fn loaded_count(&self) -> usize {
+        self.textures
+            .values()
+            .filter(|texture| texture.is_some())
+            .count()
+    }
+
     /// Clears the cache.
     pub fn clear(&mut self) {
         self.textures.clear();

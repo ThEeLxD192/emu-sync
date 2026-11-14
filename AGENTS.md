@@ -43,6 +43,15 @@ Mantener CI y resultados por plataforma, distinguir ejecución nueva de caché o
 
 El hook valida una exportación aislada del índice con `cargo xtask quality` y no formatea, prepara archivos ni ejecuta pruebas. No usar stash ni reset para hacerlo pasar.
 
+## Rendimiento
+
+Medir antes y después de cada cambio que pueda afectar al rendimiento, en la misma máquina y sin carga pesada en paralelo. Las compilaciones siguen las limitaciones de CPU de arriba; las medidas se ejecutan sin `nice`. Comparar contra una referencia tomada con el mismo código de medición.
+
+- Benchmarks Criterion (`rust/data-local/benches/hashing.rs`, `rust/presentation/benches/library_frame.rs`): `cargo bench -p <crate> --bench <nombre> -- --save-baseline <ref>` en la referencia y `-- --baseline <ref>` con el cambio; Criterion indica el cambio y si es significativo. Siempre con `--bench`, o la opción llega también a los tests y falla. No se ejecutan en CI (los runners compartidos dan demasiado ruido); Clippy con `--all-targets` los compila.
+- App real (`cargo xtask perf`, solo Linux): `run --label <nombre> [--runs N] [--bin <binario>] [library|scroll|spinner]` compila en release (salvo con `--bin`), ejecuta cada escenario sobre una biblioteca sintética de 200 juegos con portadas y guarda la mediana en `target/perf/<label>/`; `compare <a> <b>` imprime la tabla. La ventana se abre en el escritorio y debe quedar visible y sin tocar. Métricas útiles: `cpu_in_window_pct` (reposo o spinner), `slow_frames` y `ui_max_ms` (tirones), `covers_ready_ms`, `peak_rss_mib`. Los percentiles con pocos frames (escenario `library`, que queda en reposo) no son comparables.
+- Drive real (`cargo xtask perf drive --config <config> --entry <nombre> [--files N] [--runs N]`): copia la entrada y la conexión a una configuración aislada en `target/perf/drive`, mide subida inicial, sincronización sin cambios y diez archivos cambiados, y borra de Drive los archivos `perf/…` antes y después; la configuración copiada se elimina al terminar. Usar solo la entrada de pruebas «Test»; depende de la red, repetir y usar la mediana.
+- La app solo registra métricas con `EMUSYNC_PERF_LOG=<archivo>` (una línea CSV por frame); `EMUSYNC_PERF_SCENARIO` (`spinner`, `scroll`, `sync`) la conduce para que cada build mida el mismo trabajo.
+
 ## Empaquetado y publicación
 
 - Linux: `scripts/build-appimage-container.sh` genera `EmuSync-x86_64.AppImage` íntegramente en Docker (Debian Bookworm, `Dockerfile` por etapas `build`, `tools` y `package`; `appimagetool` y runtime fijados por versión y SHA-256). El anfitrión solo necesita Docker y Git. `scripts/build-appimage.sh` empaqueta dentro del contenedor o con herramientas locales; usa `packaging/linux/AppRun`. Recursos en `packaging/assets/` y `packaging/linux/`.
