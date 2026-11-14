@@ -53,6 +53,14 @@ const SCENARIOS: &[Scenario] = &[
         run_for: Duration::from_secs(8),
         window_from: Duration::from_secs(1),
     },
+    // Crosses the whole library in 2 s, as when the scroll bar is dragged: most covers
+    // pass by before they can be decoded. Measured over the whole run.
+    Scenario {
+        name: "fling",
+        drive: "fling",
+        run_for: Duration::from_secs(4),
+        window_from: Duration::ZERO,
+    },
     // The sync status with its spinner stays on screen.
     Scenario {
         name: "spinner",
@@ -69,7 +77,7 @@ pub fn main(args: &[String]) -> Result<()> {
         Some("drive") => crate::perf_drive::main(&args[1..]),
         _ => Err(
             "usage: cargo xtask perf run [--label NAME] [--runs N] [--bin PATH] \
-                  [library|scroll|spinner...] | cargo xtask perf compare BASE NEW \
+                  [library|scroll|fling|spinner...] | cargo xtask perf compare BASE NEW \
                   | cargo xtask perf drive --config PATH --entry NAME [--label NAME] \
                   [--runs N] [--files N] [--bin PATH]"
                 .into(),
@@ -277,6 +285,9 @@ fn run_once(bin: &Path, config: &Path, scenario: &Scenario, ticks: f64) -> Resul
     ui.sort_by(f64::total_cmp);
     let mut paint: Vec<f64> = frames.iter().map(|f| f.paint_ms).collect();
     paint.sort_by(f64::total_cmp);
+    let mib = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
+    let textures_max = frames.iter().filter_map(|f| f.texture_bytes).max();
+    let textures_final = frames.last().and_then(|f| f.texture_bytes);
     Ok(json!({
         "first_frame_ms": first.t_ms,
         "frames": frames.len(),
@@ -294,6 +305,10 @@ fn run_once(bin: &Path, config: &Path, scenario: &Scenario, ticks: f64) -> Resul
         "covers_loaded": final_covers,
         "covers_ready_ms": covers_ready,
         "peak_rss_mib": rss,
+        // Cover textures, which live in GPU memory that `peak_rss_mib` does not see.
+        // Absent for builds that predate the column.
+        "texture_max_mib": textures_max.map(mib),
+        "texture_final_mib": textures_final.map(mib),
     }))
 }
 
@@ -302,6 +317,7 @@ struct Frame {
     ui_ms: f64,
     paint_ms: f64,
     covers: u64,
+    texture_bytes: Option<u64>,
 }
 
 fn read_frames(log: &Path) -> Result<Vec<Frame>> {
@@ -309,9 +325,9 @@ fn read_frames(log: &Path) -> Result<Vec<Frame>> {
     let mut frames = Vec::new();
     for line in text.lines().skip(1) {
         let fields: Vec<&str> = line.split(',').collect();
-        // Newer builds add the status; a shorter line was cut when the app was stopped,
-        // and `#` lines report events.
-        if !matches!(fields.len(), 4 | 5) || fields.last().is_some_and(|f| f.is_empty()) {
+        // Newer builds add the status and the texture memory; a shorter line was cut when
+        // the app was stopped, and `#` lines report events.
+        if !matches!(fields.len(), 4..=6) || fields.last().is_some_and(|f| f.is_empty()) {
             continue;
         }
         frames.push(Frame {
@@ -319,6 +335,7 @@ fn read_frames(log: &Path) -> Result<Vec<Frame>> {
             ui_ms: fields[1].parse::<f64>()? / 1000.0,
             paint_ms: fields[2].parse::<f64>()? / 1000.0,
             covers: fields[3].parse()?,
+            texture_bytes: fields.get(5).map(|f| f.parse()).transpose()?,
         });
     }
     Ok(frames)

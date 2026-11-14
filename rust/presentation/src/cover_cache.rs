@@ -2,7 +2,9 @@
 //!
 //! Covers are read and decoded on background threads so the UI never waits for the disk
 //! or a decoder: a cover that is not ready yet is simply not drawn, and the frame after it
-//! finishes shows it. Large images are scaled down to what a card or preview can show.
+//! finishes shows it. Large images are scaled down to what a card or preview can show, and
+//! once the loaded covers exceed a memory budget, those drawn least recently are released;
+//! they load again if they come back on screen.
 
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
 use std::{
@@ -16,16 +18,23 @@ use std::{
 
 /// Largest cover file read from disk, so a wrong path cannot tie up a decoder.
 const MAX_COVER_BYTES: u64 = 32 * 1024 * 1024;
-/// Largest cover kept in memory: covers are drawn at most a few hundred pixels tall, so
-/// this keeps them sharp on high-density screens without holding full-size art.
-const MAX_COVER_SIZE: (u32, u32) = (600, 900);
+/// Largest cover kept in memory. Cards draw covers 140 points tall and the game dialog
+/// 180, so this stays sharp up to a 3x scale without holding full-size art.
+const MAX_COVER_SIZE: (u32, u32) = (400, 600);
+/// Memory the loaded covers may hold (about a hundred covers) before the least recently
+/// drawn are released. The covers on screen are kept whatever their size.
+const TEXTURE_BUDGET: usize = 96 * 1024 * 1024;
 /// Upper bound on decoding threads; covers are decoded only while the library scrolls.
 const MAX_DECODERS: usize = 4;
 
 enum Slot {
     /// Being decoded by the job with this id.
     Loading(u64),
-    Ready(TextureHandle),
+    Ready {
+        texture: TextureHandle,
+        /// The egui pass that last asked for it.
+        last_used: u64,
+    },
     /// Could not be read or decoded; not tried again until failures are forgotten.
     Failed,
 }
@@ -64,6 +73,9 @@ struct Decoders {
 /// loaded is remembered so it is not read again every frame.
 pub struct CoverCache {
     textures: HashMap<String, Slot>,
+    /// Memory held by the loaded textures, in bytes.
+    texture_bytes: usize,
+    budget: usize,
     next_job: u64,
     decoders: Option<Decoders>,
 }
@@ -76,8 +88,15 @@ impl Default for CoverCache {
 
 impl CoverCache {
     pub fn new() -> Self {
+        Self::with_budget(TEXTURE_BUDGET)
+    }
+
+    /// A cache that releases covers not drawn recently once they hold more than `bytes`.
+    pub fn with_budget(bytes: usize) -> Self {
         Self {
             textures: HashMap::new(),
+            texture_bytes: 0,
+            budget: bytes,
             next_job: 0,
             decoders: None,
         }
@@ -86,7 +105,8 @@ impl CoverCache {
     /// Retrieves an existing texture, or starts loading it in the background. Returns
     /// `None` while the cover loads, and for a cover that cannot be loaded.
     pub fn get_or_load(&mut self, ctx: &Context, path: &str) -> Option<&TextureHandle> {
-        self.receive(ctx);
+        let pass = ctx.cumulative_pass_nr();
+        self.receive(ctx, pass);
         let trimmed = path.trim();
         if trimmed.is_empty() {
             return None;
@@ -100,15 +120,25 @@ impl CoverCache {
                 path: trimmed.to_string(),
             });
         }
-        match self.textures.get(trimmed) {
-            Some(Slot::Ready(texture)) => Some(texture),
+        match self.textures.get_mut(trimmed) {
+            Some(Slot::Ready { texture, last_used }) => {
+                *last_used = pass;
+                Some(texture)
+            }
             _ => None,
         }
     }
 
     /// Explicitly inserts a texture into the cache.
     pub fn insert(&mut self, key: impl Into<String>, handle: TextureHandle) {
-        self.textures.insert(key.into(), Slot::Ready(handle));
+        self.texture_bytes += texture_size(&handle);
+        let slot = Slot::Ready {
+            texture: handle,
+            last_used: 0,
+        };
+        if let Some(Slot::Ready { texture, .. }) = self.textures.insert(key.into(), slot) {
+            self.texture_bytes -= texture_size(&texture);
+        }
     }
 
     /// Forgets remembered failures so a cover created later is tried again.
@@ -121,8 +151,13 @@ impl CoverCache {
     pub fn loaded_count(&self) -> usize {
         self.textures
             .values()
-            .filter(|slot| matches!(slot, Slot::Ready(_)))
+            .filter(|slot| matches!(slot, Slot::Ready { .. }))
             .count()
+    }
+
+    /// Memory held by the loaded covers, in bytes (RGBA, as uploaded to the GPU).
+    pub fn texture_bytes(&self) -> usize {
+        self.texture_bytes
     }
 
     /// Number of covers still being loaded.
@@ -136,13 +171,15 @@ impl CoverCache {
     /// Clears the cache. Covers still loading are discarded when they finish.
     pub fn clear(&mut self) {
         self.textures.clear();
+        self.texture_bytes = 0;
     }
 
-    /// Stores the covers decoded since the last frame.
-    fn receive(&mut self, ctx: &Context) {
+    /// Stores the covers decoded since the last frame, then keeps the budget.
+    fn receive(&mut self, ctx: &Context, pass: u64) {
         let Some(decoders) = &self.decoders else {
             return;
         };
+        let mut loaded = false;
         while let Ok(decoded) = decoders.results.try_recv() {
             // Only the job the slot waits for may fill it: a cover cleared meanwhile and
             // requested again waits for its newer job.
@@ -154,10 +191,44 @@ impl CoverCache {
             }
             *slot = match decoded.image {
                 Some(image) => {
-                    Slot::Ready(ctx.load_texture(&decoded.path, image, TextureOptions::LINEAR))
+                    let texture = ctx.load_texture(&decoded.path, image, TextureOptions::LINEAR);
+                    self.texture_bytes += texture_size(&texture);
+                    loaded = true;
+                    Slot::Ready {
+                        texture,
+                        last_used: pass,
+                    }
                 }
                 None => Slot::Failed,
             };
+        }
+        if loaded && self.texture_bytes > self.budget {
+            self.release_least_recent(pass);
+        }
+    }
+
+    /// Releases the covers drawn least recently until the budget holds. A cover asked for
+    /// in this pass or the previous one stays: the grid asks for the covers on screen in
+    /// order every frame, so one not asked for yet in this pass may still be drawn in it.
+    fn release_least_recent(&mut self, pass: u64) {
+        let mut candidates: Vec<(u64, String)> = self
+            .textures
+            .iter()
+            .filter_map(|(path, slot)| match slot {
+                Slot::Ready { last_used, .. } if last_used.saturating_add(1) < pass => {
+                    Some((*last_used, path.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        candidates.sort_unstable();
+        for (_, path) in candidates {
+            if self.texture_bytes <= self.budget {
+                break;
+            }
+            if let Some(Slot::Ready { texture, .. }) = self.textures.remove(&path) {
+                self.texture_bytes -= texture_size(&texture);
+            }
         }
     }
 
@@ -239,6 +310,11 @@ fn decode_jobs(queue: &Queue, results: &Sender<Decoded>, ctx: &Context) {
         }
         ctx.request_repaint();
     }
+}
+
+fn texture_size(texture: &TextureHandle) -> usize {
+    let [width, height] = texture.size();
+    width * height * 4
 }
 
 fn decode(path: &str) -> Option<ColorImage> {

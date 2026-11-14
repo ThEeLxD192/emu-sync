@@ -485,6 +485,7 @@ impl ApplicationHandler for App {
                         ui: ui_done.duration_since(frame_began),
                         paint: ui_done.elapsed(),
                         covers: self.emusync_app.cover_cache.loaded_count(),
+                        texture_bytes: self.emusync_app.cover_cache.texture_bytes(),
                         status: status_name(&self.emusync_app.state.status),
                     });
                 }

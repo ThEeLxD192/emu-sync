@@ -839,6 +839,7 @@ dependencies = [
  "tempfile",
  "time",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -897,6 +898,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
