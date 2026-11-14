@@ -3,7 +3,7 @@
 mod common;
 
 use common::TempDirGuard;
-use egui::Context;
+use egui::{Context, RawInput};
 use emusync_presentation::CoverCache;
 use std::{
     fs::File,
@@ -66,11 +66,11 @@ fn large_covers_are_scaled_down_keeping_their_shape() {
 
     assert_eq!(
         settle(&mut cache, &ctx, &tall.to_string_lossy()),
-        Some([360, 900])
+        Some([240, 600])
     );
     assert_eq!(
         settle(&mut cache, &ctx, &wide.to_string_lossy()),
-        Some([600, 150])
+        Some([400, 100])
     );
     assert_eq!(
         settle(&mut cache, &ctx, &small.to_string_lossy()),
@@ -79,9 +79,69 @@ fn large_covers_are_scaled_down_keeping_their_shape() {
     );
     assert_eq!(
         cache.texture_bytes(),
-        (360 * 900 + 600 * 150 + 300 * 450) * 4,
+        (240 * 600 + 400 * 100 + 300 * 450) * 4,
         "the reported memory is that of the RGBA textures held"
     );
+}
+
+/// Ends a frame: covers asked for before it count as drawn in an earlier pass.
+fn next_frame(ctx: &Context) {
+    ctx.run_ui(RawInput::default(), |_| {})
+        .drop_without_applying_deltas();
+}
+
+/// Bytes of a 100x100 cover once loaded.
+const COVER: usize = 100 * 100 * 4;
+
+#[test]
+fn over_budget_the_cover_drawn_least_recently_is_released_and_loads_again() {
+    let ctx = Context::default();
+    let mut cache = CoverCache::with_budget(2 * COVER);
+    let dir = TempDirGuard::new("budget-cover");
+    let paths: Vec<String> = ["a", "b", "c"]
+        .iter()
+        .map(|name| {
+            let path = dir.path.join(format!("{name}.png"));
+            write_png(&path, 100, 100);
+            path.to_string_lossy().into_owned()
+        })
+        .collect();
+
+    for path in &paths {
+        assert!(settle(&mut cache, &ctx, path).is_some());
+        next_frame(&ctx);
+        next_frame(&ctx);
+    }
+
+    assert_eq!(cache.loaded_count(), 2, "the oldest cover was released");
+    assert_eq!(cache.texture_bytes(), 2 * COVER);
+    assert!(
+        settle(&mut cache, &ctx, &paths[0]).is_some(),
+        "a released cover loads again when it is drawn again"
+    );
+}
+
+#[test]
+fn covers_drawn_in_this_or_the_previous_frame_are_kept_over_budget() {
+    let ctx = Context::default();
+    let mut cache = CoverCache::with_budget(0);
+    let dir = TempDirGuard::new("visible-cover");
+    let first = dir.path.join("first.png");
+    let second = dir.path.join("second.png");
+    write_png(&first, 100, 100);
+    write_png(&second, 100, 100);
+    let first = first.to_string_lossy().into_owned();
+    let second = second.to_string_lossy().into_owned();
+
+    assert!(settle(&mut cache, &ctx, &first).is_some());
+    next_frame(&ctx);
+    // The next frame draws the second cover before reaching the first one again.
+    assert!(settle(&mut cache, &ctx, &second).is_some());
+    assert!(
+        cache.get_or_load(&ctx, &first).is_some(),
+        "a cover drawn in the previous frame is not released before it is drawn again"
+    );
+    assert_eq!(cache.texture_bytes(), 2 * COVER);
 }
 
 #[test]
