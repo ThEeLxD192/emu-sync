@@ -83,6 +83,14 @@ impl ApplicationHandler for App {
             let window = Arc::new(event_loop.create_window(attributes)?);
             let context = egui::Context::default();
             configure_egui_theme(&context);
+            // Background work (a decoded cover) asks egui for a repaint; only the window
+            // can wake the event loop. Delayed repaints come from each frame's output.
+            let repaint_window = window.clone();
+            context.set_request_repaint_callback(move |info| {
+                if info.delay.is_zero() {
+                    repaint_window.request_redraw();
+                }
+            });
 
             let state = egui_winit::State::new(
                 context.clone(),
