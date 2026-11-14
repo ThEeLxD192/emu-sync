@@ -5,7 +5,9 @@ use super::entry_edits::{
 };
 use emusync_domain::config::{AppConfig, ConfigurationStore};
 use emusync_domain::library::{GameEntry, SteamLibrary};
-use emusync_domain::sync::{SaveSynchronizer, SaveSynchronizerFactory, SyncEvent, SyncGame};
+use emusync_domain::sync::{
+    SaveSynchronizer, SaveSynchronizerFactory, SyncEvent, SyncGame, SyncMessage,
+};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,9 +89,7 @@ where
                 .iter()
                 .any(|e| e.common().name == entry.common().name)
         {
-            (self.on_status)(SyncEvent::Error(
-                "Choose a non-empty category name that is not already in use.".into(),
-            ));
+            (self.on_status)(SyncEvent::Error(SyncMessage::CategoryNameInvalid));
             return Ok(None);
         }
         let updated = self.store.update(|mut current| {
@@ -209,9 +209,7 @@ where
                     && e.common().name == new_entry.common().name
             })
         {
-            (self.on_status)(SyncEvent::Error(
-                "Choose a non-empty category name that is not already in use.".into(),
-            ));
+            (self.on_status)(SyncEvent::Error(SyncMessage::CategoryNameInvalid));
             return false;
         }
         true

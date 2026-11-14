@@ -7,7 +7,8 @@ use emusync_domain::execution::GameLauncher;
 use emusync_domain::library::{GameEntry, SaveTarget, SaveTargetType, is_excluded};
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, LocalSaveAccess, LocalSaveFiles, LocalSavePath,
-    PostSyncFailure, RemoteFile, SyncEvent, SyncGame, canonical_cloud_files, same_local_name,
+    PostSyncFailure, RemoteFile, SyncEvent, SyncGame, SyncMessage, canonical_cloud_files,
+    same_local_name,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -25,7 +26,7 @@ struct SaveUploadTarget<P> {
 struct PostSyncResult<P> {
     completed_count: usize,
     failed_targets: Vec<SaveUploadTarget<P>>,
-    blocked_reasons: Vec<String>,
+    blocked_reasons: Vec<SyncMessage>,
 }
 
 impl<P> Default for PostSyncResult<P> {
@@ -168,9 +169,9 @@ where
             return Some(PostSyncResult {
                 completed_count: 0,
                 failed_targets: Vec::new(),
-                blocked_reasons: vec![format!(
-                    "The save name '{name}' is already used by another configured file target."
-                )],
+                blocked_reasons: vec![SyncMessage::SaveNameTaken {
+                    name: name.to_string(),
+                }],
             });
         }
         None
@@ -211,9 +212,9 @@ where
                 && !is_excluded(excluded_folders, &relative)
             {
                 if siblings.contains(&relative) {
-                    blocked.push(format!(
-                        "The directory save '{relative}' conflicts with another configured file target. Rename or reconfigure one of the saves before syncing it."
-                    ));
+                    blocked.push(SyncMessage::DirectorySaveConflict {
+                        path: relative.clone(),
+                    });
                 } else if !reserved.contains(&relative) {
                     let planned = PlannedSave {
                         local: file,
@@ -310,12 +311,12 @@ struct UploadSummary<P> {
     completed_count: usize,
     configured: Vec<SaveTarget>,
     files: Vec<SaveUploadTarget<P>>,
-    blocked_reasons: Vec<String>,
+    blocked_reasons: Vec<SyncMessage>,
     first_failure_reason: Option<String>,
 }
 
 impl<P> UploadSummary<P> {
-    fn new(completed: usize, blocked: Vec<String>) -> Self {
+    fn new(completed: usize, blocked: Vec<SyncMessage>) -> Self {
         Self {
             completed_count: completed,
             configured: Vec::new(),
@@ -424,10 +425,9 @@ where
         mut summary: UploadSummary<A::Path>,
         mapping_targets: &[SaveTarget],
     ) -> Result<bool, String> {
-        (self.context.on_status)(SyncEvent::Syncing(format!(
-            "Uploading saves for {}...",
-            item.effective_title
-        )));
+        (self.context.on_status)(SyncEvent::Syncing(SyncMessage::UploadingGameSaves {
+            game: item.effective_title.clone(),
+        }));
 
         match self.prepare_batch_cloud_state(item).await {
             Ok((token, folder_id, cloud_files)) => {
@@ -436,7 +436,7 @@ where
                     .mapping
                     .validate_save_target_mappings(mapping_targets, &cloud_files)
                 {
-                    (self.context.on_status)(SyncEvent::Error(mapping_err.to_string()));
+                    (self.context.on_status)(SyncEvent::Error(mapping_err.into()));
                     return Ok(false);
                 }
 
@@ -533,7 +533,7 @@ where
 
         if summary.configured.is_empty() && summary.files.is_empty() {
             if !blocked.is_empty() {
-                (self.context.on_status)(SyncEvent::Error(blocked.join("\n")));
+                (self.context.on_status)(SyncEvent::Error(SyncMessage::several(blocked)));
                 Ok(false)
             } else {
                 (self.context.on_status)(SyncEvent::Idle);
@@ -550,23 +550,20 @@ where
         item: &SyncGame,
         summary: UploadSummary<A::Path>,
         mapping_targets: &[SaveTarget],
-        blocked: Vec<String>,
+        blocked: Vec<SyncMessage>,
     ) {
         let mut reasons = Vec::new();
         if let Some(r) = summary
             .first_failure_reason
             .filter(|s| !s.trim().is_empty())
         {
-            reasons.push(r);
+            reasons.push(SyncMessage::Detail(r));
         }
         reasons.extend(blocked.iter().cloned());
-        reasons.sort();
-        reasons.dedup();
-
         let reason = if reasons.is_empty() {
-            "Unknown Drive error".to_string()
+            SyncMessage::UnknownDriveError
         } else {
-            reasons.join("\n")
+            SyncMessage::several(reasons)
         };
 
         let failure = PostSyncFailure {

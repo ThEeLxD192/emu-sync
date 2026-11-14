@@ -141,11 +141,7 @@ texts! {
     syncing: "Syncing...", "Sincronizando...";
     drive_not_updated: "Google Drive was not updated.", "Google Drive no se actualizó.";
     post_sync_progress: "{completed} save(s) synced successfully; {pending} save(s) still need to be uploaded.", "{completed} partida(s) sincronizada(s) correctamente; faltan por subir {pending} partida(s).";
-    post_sync_message: "{game} closed normally. {progress}
-
-{reason}", "{game} se cerró con normalidad. {progress}
-
-{reason}";
+    post_sync_message: "{game} closed normally. {progress}\n\n{reason}", "{game} se cerró con normalidad. {progress}\n\n{reason}";
     save_conflict: "Save Conflict", "Conflicto de partidas";
     save_conflict_hint: "Both copies changed, or their shared history could not be verified. Choose which progress to keep. Restoring from the cloud preserves a local recovery copy.", "Las dos copias cambiaron o no se pudo comprobar su historial común. Elige qué progreso conservar. Si restauras desde la nube, se guarda una copia local de recuperación.";
     local_save: "Local Save", "Partida local";
@@ -220,4 +216,37 @@ texts! {
     register_steam: "Register in Steam", "Añadir a Steam";
     move_down: "Move down", "Bajar";
     move_up: "Move up", "Subir";
+
+    // Synchronization messages
+    sync_checking_cloud_saves: "Checking cloud saves...", "Comprobando las partidas en la nube...";
+    sync_connecting_drive: "Connecting to Google Drive...", "Conectando con Google Drive...";
+    sync_syncing_game: "Syncing saves for {game}...", "Sincronizando las partidas de {game}...";
+    sync_uploading_game: "Uploading saves for {game}...", "Subiendo las partidas de {game}...";
+    sync_restoring_game: "Restoring cloud saves for {game}...", "Restaurando las partidas de la nube de {game}...";
+    sync_syncing_target: "Syncing {name}...", "Sincronizando {name}...";
+    sync_checking_folder: "Checking cloud folder for {title}...", "Comprobando la carpeta en la nube de {title}...";
+    sync_renaming_folder: "Renaming cloud folder to {title}...", "Renombrando la carpeta en la nube a {title}...";
+    sync_checking_files: "Checking cloud files in {title}...", "Comprobando los archivos en la nube de {title}...";
+    sync_moving_saves: "Moving cloud saves for {name}...", "Moviendo las partidas en la nube de {name}...";
+    sync_failed: "Error: {detail}", "Error: {detail}";
+    sync_game_not_tracked: "{game} did not start or its process could not be tracked. Cloud upload was not attempted.", "{game} no se inició o no se pudo seguir su proceso. No se intentó subir nada a la nube.";
+    sync_category_name_invalid: "Choose a non-empty category name that is not already in use.", "Elige un nombre de categoría que no esté vacío ni en uso.";
+    sync_drive_auth_failed: "Drive authentication failed: {detail}", "Falló la autenticación con Drive: {detail}";
+    sync_cloud_rename_failed: "Cloud rename error: {detail}", "Error al renombrar en la nube: {detail}";
+    sync_shared_cloud_folder: "The cloud folder '{folder}' is shared with another entry. Keep the existing cloud folder when editing this entry to protect their saves.", "Otra categoría comparte la carpeta en la nube '{folder}'. Conserva la carpeta en la nube actual al editar esta categoría para proteger sus partidas.";
+    sync_drive_not_connected: "Google Drive is not connected. Click 'Connect Drive' in the top bar to sign in.", "Google Drive no está conectado. Pulsa 'Conectar Drive' en la barra superior para iniciar sesión.";
+    sync_drive_connect_failed: "Could not connect to Google Drive ({detail}). Please reconnect your account by clicking 'Connect Drive'.", "No se pudo conectar con Google Drive ({detail}). Vuelve a conectar tu cuenta con 'Conectar Drive'.";
+    sync_save_name_taken: "The save name '{name}' is already used by another configured file target.", "El nombre de partida '{name}' ya lo usa otro archivo configurado.";
+    sync_directory_save_conflict: "The directory save '{path}' conflicts with another configured file target. Rename or reconfigure one of the saves before syncing it.", "La partida de carpeta '{path}' choca con otro archivo configurado. Renombra o reconfigura una de las partidas antes de sincronizarla.";
+    sync_unknown_drive_error: "Unknown Drive error", "Error desconocido de Drive";
+    sync_invalid_cloud_path: "Invalid cloud path '{path}'. Use a relative path without '..' or absolute components.", "Ruta en la nube no válida: '{path}'. Usa una ruta relativa sin '..' ni partes absolutas.";
+    sync_conflicting_local_destinations: "Different cloud paths cannot restore to the same local save path. Choose separate destinations.", "Rutas distintas en la nube no pueden restaurarse en la misma ruta local. Elige destinos separados.";
+    sync_file_is_parent: "A save file cannot also be a parent directory for another save. Choose separate destinations.", "Un archivo de partida no puede ser a la vez la carpeta de otra partida. Elige destinos separados.";
+    sync_overlapping_scopes: "Each save directory needs a separate cloud path. Overlapping paths would mix their saves.", "Cada carpeta de partida necesita su propia ruta en la nube. Si se solapan, sus partidas se mezclarían.";
+    sync_conflicting_remote_paths: "Cloud files resolve to conflicting local paths. Choose separate destinations before restoring them.", "Los archivos de la nube apuntan a rutas locales que chocan. Elige destinos separados antes de restaurarlos.";
+    sync_unplaced_legacy: "Cannot safely match cloud saves to these older save folders.\n\n{folders}\n\n{files}\n\nSync this game from the library to choose the folder for each cloud file. These folders were not synchronized.", "No se pueden emparejar con seguridad las partidas de la nube con estas carpetas antiguas.\n\n{folders}\n\n{files}\n\nSincroniza este juego desde la biblioteca para elegir la carpeta de cada archivo de la nube. Estas carpetas no se sincronizaron.";
+    sync_configured_folders: "Configured save folders", "Carpetas de partida configuradas";
+    sync_unmatched_cloud_files: "Cloud files with no matching local save", "Archivos de la nube sin partida local";
+    sync_more_items: "… ({count} more)", "… ({count} más)";
+    sync_local_access_failed: "Local access error: {detail}", "Error de acceso local: {detail}";
 }

@@ -4,10 +4,12 @@
 //! cannot miss one: the tables would not compile. The language in use travels with the
 //! egui context, so any widget reads it from the `Ui` it is drawn in.
 
+mod sync;
 mod texts;
 
 use egui::{Context, Id};
 pub use emusync_domain::config::Language;
+pub use sync::sync_text;
 pub use texts::Texts;
 
 /// The texts of `language`.

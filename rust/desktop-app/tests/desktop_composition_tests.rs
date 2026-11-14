@@ -10,6 +10,7 @@ use emusync_desktop_app::{
     coordinator::interaction::{AsyncSaveSetupBridge, RetryRunner},
     scan_entry_games,
 };
+use emusync_domain::sync::SyncMessage;
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
     library::{SaveTarget, SaveTargetType},
@@ -205,7 +206,7 @@ async fn retry_post_sync_retains_transfer_error_and_restores_runner_when_busy() 
     let failure = PostSyncFailure {
         request_id: RequestId(1),
         game_name: "Metroid".into(),
-        reason: "network glitch".into(),
+        reason: SyncMessage::Detail("network glitch".into()),
         completed_save_count: 1,
         pending_save_count: 1,
     };

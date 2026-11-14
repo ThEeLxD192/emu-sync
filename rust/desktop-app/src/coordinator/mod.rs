@@ -45,6 +45,7 @@ use emusync_platform_desktop::{
 };
 use emusync_presentation::{
     actions::UiAction,
+    i18n::sync_text,
     model::{AppStatus, SaveSetupRequest as UiSaveSetupRequest},
 };
 use std::sync::{
@@ -78,6 +79,8 @@ pub struct DesktopCoordinator {
     /// Drive HTTP clients, built on first use and shared by every operation so their
     /// connections are reused instead of opened again for each check or sync.
     drive_http: Arc<OnceLock<DriveHttpClients>>,
+    /// The interface language, for the messages this coordinator sends.
+    pub language: crate::CurrentLanguage,
 }
 
 impl DesktopCoordinator {
@@ -127,6 +130,7 @@ impl DesktopCoordinator {
             is_admitted: Arc::new(AtomicBool::new(false)),
             updates,
             drive_http: Arc::new(OnceLock::new()),
+            language: crate::CurrentLanguage::default(),
         }
     }
 
@@ -140,6 +144,7 @@ impl DesktopCoordinator {
     /// Remembers the interface language, which the UI already shows. Only the language
     /// changes: the rest of the configuration is kept as stored, and nothing is reloaded.
     fn save_language(&self, language: Language) {
+        self.language.set(language);
         let config = self.config_manager.clone();
         let coordinator = self.clone();
         let handle = self.tokio_handle.spawn(async move {
@@ -365,6 +370,7 @@ impl DesktopCoordinator {
         let loader = LoadLibrary::new(self.config_manager.clone(), self.platform.steam.clone());
         match loader.load() {
             Ok(config) => {
+                self.language.set(config.language);
                 let first = config.entries.first().cloned();
                 self.send_event(AppEvent::ConfigReloaded(config.clone()));
 
@@ -782,6 +788,7 @@ impl DesktopCoordinator {
         let retry_runner_slot_status = retry_runner_slot.clone();
         let interaction_status = interaction.clone();
 
+        let language = self.language.clone();
         let on_status = move |event: SyncEvent| {
             match &event {
                 SyncEvent::Idle => {
@@ -789,7 +796,7 @@ impl DesktopCoordinator {
                 }
                 SyncEvent::Syncing(msg) => {
                     let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::Syncing {
-                        message: msg.clone(),
+                        message: sync_text(language.texts(), msg),
                     }));
                 }
                 SyncEvent::Playing => {
@@ -797,7 +804,7 @@ impl DesktopCoordinator {
                 }
                 SyncEvent::Error(err) => {
                     let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::Error {
-                        message: err.clone(),
+                        message: sync_text(language.texts(), err),
                     }));
                 }
                 SyncEvent::Conflict(conflict) => {
@@ -822,7 +829,7 @@ impl DesktopCoordinator {
                     }
                     let _ = event_tx.send(AppEvent::StatusChanged(AppStatus::PostSyncFailed {
                         game_name: failure.game_name.clone(),
-                        reason: failure.reason.clone(),
+                        reason: sync_text(language.texts(), &failure.reason),
                         completed_save_count: failure.completed_save_count,
                         pending_save_count: failure.pending_save_count,
                     }));

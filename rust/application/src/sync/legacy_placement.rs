@@ -7,7 +7,7 @@ use super::target_mapping::{SaveTargetMappingError, UnplacedLegacyFiles};
 use emusync_domain::library::SaveTarget;
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, LocalSaveAccess, LocalSaveFiles, LocalSavePath,
-    RemoteFile, SyncEvent, canonical_cloud_files, same_local_name,
+    RemoteFile, SyncEvent, SyncMessage, canonical_cloud_files, same_local_name,
 };
 
 const PLACEMENT_CANCELLED: &str = "Cloud saves were not restored because no folder was chosen. These folders were not synchronized.";
@@ -61,9 +61,9 @@ where
         };
         let placements = self.placements(&unplaced, game_name).await?;
 
-        (self.context.on_status)(SyncEvent::Syncing(format!(
-            "Restoring cloud saves for {game_name}..."
-        )));
+        (self.context.on_status)(SyncEvent::Syncing(SyncMessage::RestoringCloudSaves {
+            game: game_name.to_string(),
+        }));
         let remote_files = canonical_cloud_files(cloud_files)
             .map_err(|e| format!("Unverified duplicate remote file: {}", e.name))?;
         let manual = ManualFileSync::new(self.context);

@@ -87,6 +87,28 @@ impl Display for SaveTargetMappingError {
 
 impl std::error::Error for SaveTargetMappingError {}
 
+impl From<SaveTargetMappingError> for emusync_domain::sync::SyncMessage {
+    fn from(error: SaveTargetMappingError) -> Self {
+        use emusync_domain::sync::SyncMessage as M;
+        match error {
+            SaveTargetMappingError::InvalidCloudPath(path) => M::InvalidCloudPath { path },
+            SaveTargetMappingError::ConflictingLocalDestinations => M::ConflictingLocalDestinations,
+            SaveTargetMappingError::FileIsParentOfAnother => M::FileIsParentOfAnother,
+            SaveTargetMappingError::OverlappingDirectoryScopes => M::OverlappingDirectoryScopes,
+            SaveTargetMappingError::ConflictingRemoteToLocalPaths => {
+                M::ConflictingRemoteToLocalPaths
+            }
+            // Built from several lists in English; carried as a detail.
+            SaveTargetMappingError::AmbiguousLegacyDirectories(message) => M::Detail(message),
+            SaveTargetMappingError::UnplacedLegacyFiles(unplaced) => M::UnplacedLegacyFiles {
+                files: unplaced.file_names(),
+                folders: unplaced.folders,
+            },
+            SaveTargetMappingError::LocalAccess(detail) => M::LocalAccessFailed { detail },
+        }
+    }
+}
+
 fn strip_cloud_prefix<'a>(name: &'a str, prefix: &str) -> Option<&'a str> {
     name.strip_prefix(prefix)?.strip_prefix('/')
 }

@@ -2,6 +2,7 @@ use emusync_application::{SyncContext, SyncServices};
 use emusync_domain::config::{AppConfig, CloudAuthorization};
 use emusync_domain::execution::{GameLaunchRequest, GameLauncher, GameResult};
 use emusync_domain::library::{Emulator, GameEntry, SaveTarget};
+use emusync_domain::sync::SyncMessage;
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, LocalSaveAccess, LocalSaveFiles, LocalSavePath,
     PostSyncFailure, RemoteFile, RemoteState, RequestId, SaveConflict, SyncEvent,
@@ -367,7 +368,7 @@ async fn report_post_sync_failure_and_retry_executes_retry_future() {
     let failure = PostSyncFailure {
         request_id: RequestId(42),
         game_name: "Zelda".into(),
-        reason: "Network dropped".into(),
+        reason: SyncMessage::Detail("Network dropped".into()),
         completed_save_count: 1,
         pending_save_count: 2,
     };
@@ -393,7 +394,7 @@ async fn report_post_sync_failure_and_retry_executes_retry_future() {
     let mismatched = PostSyncFailure {
         request_id: RequestId(999),
         game_name: "Zelda".into(),
-        reason: "Network dropped".into(),
+        reason: SyncMessage::Detail("Network dropped".into()),
         completed_save_count: 1,
         pending_save_count: 2,
     };

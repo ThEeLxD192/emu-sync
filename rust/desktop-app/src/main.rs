@@ -218,6 +218,9 @@ impl ApplicationHandler for App {
                 while let Ok(app_event) = self.event_rx.try_recv() {
                     match app_event {
                         AppEvent::ConfigReloaded(cfg) => {
+                            if let Some(coordinator) = &self.coordinator {
+                                coordinator.language.set(cfg.language);
+                            }
                             let was_empty = self.emusync_app.state.selected_entry.is_none();
                             self.emusync_app.state.config = Some(cfg.clone());
                             if was_empty || self.emusync_app.state.selected_entry.is_none() {

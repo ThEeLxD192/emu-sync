@@ -7,7 +7,7 @@ use emusync_domain::execution::GameLauncher;
 use emusync_domain::library::{GameEntry, SaveTarget};
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, LocalSaveAccess, LocalSaveFiles, LocalSavePath, SyncEvent,
-    canonical_cloud_files,
+    SyncMessage, canonical_cloud_files,
 };
 
 pub struct CloudEntryMigration<'a, A, L, F, T, Auth, R>
@@ -72,9 +72,9 @@ where
             return Ok(true);
         }
 
-        (self.context.on_status)(SyncEvent::Syncing(format!(
-            "Checking cloud folder for {new_title}..."
-        )));
+        (self.context.on_status)(SyncEvent::Syncing(SyncMessage::CheckingCloudFolder {
+            title: new_title.to_string(),
+        }));
 
         let token = match self
             .context
@@ -85,9 +85,9 @@ where
         {
             Ok(tok) => tok,
             Err(err) => {
-                (self.context.on_status)(SyncEvent::Error(format!(
-                    "Drive authentication failed: {err}"
-                )));
+                (self.context.on_status)(SyncEvent::Error(SyncMessage::DriveAuthFailed {
+                    detail: err.to_string(),
+                }));
                 return Ok(false);
             }
         };
@@ -101,7 +101,9 @@ where
         {
             Ok(id) => id,
             Err(err) => {
-                (self.context.on_status)(SyncEvent::Error(format!("Cloud rename error: {err:?}")));
+                (self.context.on_status)(SyncEvent::Error(SyncMessage::CloudRenameFailed {
+                    detail: format!("{err:?}"),
+                }));
                 return Ok(false);
             }
         };
@@ -114,34 +116,36 @@ where
         {
             Ok(id) => id,
             Err(err) => {
-                (self.context.on_status)(SyncEvent::Error(format!("Cloud rename error: {err:?}")));
+                (self.context.on_status)(SyncEvent::Error(SyncMessage::CloudRenameFailed {
+                    detail: format!("{err:?}"),
+                }));
                 return Ok(false);
             }
         };
 
         match (old_folder_id, new_folder_id) {
             (Some(old_id), None) => {
-                (self.context.on_status)(SyncEvent::Syncing(format!(
-                    "Renaming cloud folder to {new_title}..."
-                )));
+                (self.context.on_status)(SyncEvent::Syncing(SyncMessage::RenamingCloudFolder {
+                    title: new_title.to_string(),
+                }));
                 if let Err(err) = self
                     .context
                     .migrator
                     .migrate_resolved(&token, &old_id, None, &old_cloud_path, &new_cloud_path)
                     .await
                 {
-                    (self.context.on_status)(SyncEvent::Error(format!(
-                        "Cloud rename error: {err}"
-                    )));
+                    (self.context.on_status)(SyncEvent::Error(SyncMessage::CloudRenameFailed {
+                        detail: err.to_string(),
+                    }));
                     return Ok(false);
                 }
                 (self.context.on_status)(SyncEvent::Idle);
                 Ok(true)
             }
             (old_id, Some(new_id)) => {
-                (self.context.on_status)(SyncEvent::Syncing(format!(
-                    "Checking cloud files in {new_title}..."
-                )));
+                (self.context.on_status)(SyncEvent::Syncing(SyncMessage::CheckingCloudFiles {
+                    title: new_title.to_string(),
+                }));
                 if let Some(old) = old_id
                     && old != new_id
                     && let Err(err) = self
@@ -156,18 +160,18 @@ where
                         )
                         .await
                 {
-                    (self.context.on_status)(SyncEvent::Error(format!(
-                        "Cloud rename error: {err}"
-                    )));
+                    (self.context.on_status)(SyncEvent::Error(SyncMessage::CloudRenameFailed {
+                        detail: err.to_string(),
+                    }));
                     return Ok(false);
                 }
                 if let Err(err) = self
                     .sync_renamed_folder(&token, new_title, local_save_targets, &new_id)
                     .await
                 {
-                    (self.context.on_status)(SyncEvent::Error(format!(
-                        "Cloud rename error: {err}"
-                    )));
+                    (self.context.on_status)(SyncEvent::Error(SyncMessage::CloudRenameFailed {
+                        detail: err.to_string(),
+                    }));
                     return Ok(false);
                 }
                 (self.context.on_status)(SyncEvent::Idle);
@@ -283,10 +287,9 @@ where
             return Ok(true);
         }
 
-        (self.context.on_status)(SyncEvent::Syncing(format!(
-            "Moving cloud saves for {}...",
-            new_entry.common().name
-        )));
+        (self.context.on_status)(SyncEvent::Syncing(SyncMessage::MovingCloudSaves {
+            name: new_entry.common().name.clone(),
+        }));
 
         let token = match self
             .context
@@ -297,9 +300,9 @@ where
         {
             Ok(tok) => tok,
             Err(err) => {
-                (self.context.on_status)(SyncEvent::Error(format!(
-                    "Drive authentication failed: {err}"
-                )));
+                (self.context.on_status)(SyncEvent::Error(SyncMessage::DriveAuthFailed {
+                    detail: err.to_string(),
+                }));
                 return Ok(false);
             }
         };
@@ -310,7 +313,9 @@ where
             .migrate(&token, &old_path, &new_path)
             .await
         {
-            (self.context.on_status)(SyncEvent::Error(format!("Cloud rename error: {err}")));
+            (self.context.on_status)(SyncEvent::Error(SyncMessage::CloudRenameFailed {
+                detail: err.to_string(),
+            }));
             return Ok(false);
         }
 
@@ -348,10 +353,9 @@ where
             });
 
         if shared {
-            (self.context.on_status)(SyncEvent::Error(format!(
-                "The cloud folder '{}' is shared with another entry. Keep the existing cloud folder when editing this entry to protect their saves.",
-                old_path.join("/")
-            )));
+            (self.context.on_status)(SyncEvent::Error(SyncMessage::SharedCloudFolder {
+                folder: old_path.join("/"),
+            }));
             return false;
         }
 

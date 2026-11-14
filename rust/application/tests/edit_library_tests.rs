@@ -6,6 +6,7 @@ use emusync_domain::config::{AppConfig, ConfigurationStore, Credentials};
 use emusync_domain::library::{
     Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType, SteamLibrary,
 };
+use emusync_domain::sync::SyncMessage;
 use emusync_domain::sync::{
     Decision, EntrySyncStatus, PostSyncFailure, SaveConflict, SavePlacementRequest, SaveSetup,
     SaveSynchronizer, SaveSynchronizerFactory, SyncEvent, SyncGame,
@@ -628,7 +629,9 @@ async fn edit_entry_forwards_synchronizer_events_to_on_status() {
     };
     let steam = MockSteam::default();
     let factory = SpyFactory::default();
-    *factory.status_emitter.lock().unwrap() = Some(SyncEvent::Error("Cloud sync failure".into()));
+    *factory.status_emitter.lock().unwrap() = Some(SyncEvent::Error(SyncMessage::Detail(
+        "Cloud sync failure".into(),
+    )));
 
     let received_events = Arc::new(Mutex::new(Vec::new()));
     let rx_clone = Arc::clone(&received_events);
@@ -642,7 +645,12 @@ async fn edit_entry_forwards_synchronizer_events_to_on_status() {
     let _ = editor.edit_entry(&initial, &e1, &edited).await;
 
     let events = received_events.lock().unwrap().clone();
-    assert_eq!(events, vec![SyncEvent::Error("Cloud sync failure".into())]);
+    assert_eq!(
+        events,
+        vec![SyncEvent::Error(SyncMessage::Detail(
+            "Cloud sync failure".into()
+        ))]
+    );
 }
 
 #[test]

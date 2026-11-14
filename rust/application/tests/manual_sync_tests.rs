@@ -8,6 +8,7 @@ use emusync_domain::execution::{GameLaunchRequest, GameLauncher, GameResult};
 use emusync_domain::library::{
     Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType,
 };
+use emusync_domain::sync::SyncMessage;
 use emusync_domain::sync::{
     CloudFileListing, CloudFolderStore, Decision, DirectoryDownload, LocalSaveAccess,
     LocalSaveFiles, LocalSavePath, RemoteFile, RemoteState, SyncEvent,
@@ -326,10 +327,10 @@ async fn sync_entry_without_drive_connection_returns_false_and_emits_error() {
     assert_eq!(res, Ok(false));
 
     let evs = events.lock().unwrap().clone();
-    assert!(evs.iter().any(|e| matches!(
-        e,
-        SyncEvent::Error(msg) if msg.contains("Google Drive is not connected")
-    )));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, SyncEvent::Error(SyncMessage::DriveNotConnected)))
+    );
 }
 
 #[tokio::test]
@@ -356,10 +357,10 @@ async fn sync_entry_auth_failure_returns_false_and_emits_error() {
     assert_eq!(res, Ok(false));
 
     let evs = events.lock().unwrap().clone();
-    assert!(evs.iter().any(|e| matches!(
-        e,
-        SyncEvent::Error(msg) if msg.contains("Could not connect to Google Drive")
-    )));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, SyncEvent::Error(SyncMessage::DriveConnectFailed { .. })))
+    );
 }
 
 #[tokio::test]

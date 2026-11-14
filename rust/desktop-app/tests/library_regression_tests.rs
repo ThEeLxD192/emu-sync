@@ -574,3 +574,34 @@ async fn choosing_a_language_stores_only_the_language() {
         "choosing a language reloads nothing"
     );
 }
+
+#[tokio::test]
+async fn messages_follow_the_configured_and_the_chosen_language() {
+    let dir = tempdir().unwrap();
+    let manager = ConfigManager::new(&dir.path().join("config.json")).unwrap();
+    manager
+        .save(&AppConfig {
+            language: Language::Spanish,
+            credentials: None,
+            entries: Vec::new(),
+        })
+        .unwrap();
+    let (tx, _rx) = channel();
+    let coordinator = DesktopCoordinator::new(
+        manager,
+        tx,
+        Arc::new(|| {}),
+        tokio::runtime::Handle::current(),
+    );
+    assert_eq!(coordinator.language.get(), Language::English);
+
+    coordinator.initialize();
+    assert_eq!(coordinator.language.get(), Language::Spanish);
+
+    coordinator.handle_action(UiAction::SetLanguage(Language::English));
+    assert_eq!(
+        coordinator.language.get(),
+        Language::English,
+        "the next message is already in the chosen language"
+    );
+}

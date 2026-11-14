@@ -1,6 +1,7 @@
 use emusync_desktop_app::coordinator::interaction::{
     ConflictResolver, InteractionControls, RetryRunner,
 };
+use emusync_domain::sync::SyncMessage;
 use emusync_domain::sync::{Decision, PostSyncFailure, RequestId, SaveConflict};
 use std::sync::{Arc, Mutex, mpsc::channel};
 use tokio_util::sync::CancellationToken;
@@ -119,7 +120,7 @@ async fn retry_failure_runner_can_be_installed_and_taken() {
     let dummy_failure = PostSyncFailure {
         request_id: RequestId(42),
         game_name: "TestGame".into(),
-        reason: "Temporary network hiccup".into(),
+        reason: SyncMessage::Detail("Temporary network hiccup".into()),
         completed_save_count: 1,
         pending_save_count: 1,
     };
