@@ -8,7 +8,35 @@ use emusync_domain::{
 use emusync_presentation::model::{
     AppStatus, CloudSyncStatus, GameItem, PathTarget, PickMode, SaveSetupRequest,
 };
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    sync::{Arc, mpsc::Sender},
+};
+
+/// Sends events to the UI and wakes it. The UI draws only when something asks it to, so
+/// an event sent without waking it would wait for unrelated input.
+#[derive(Clone)]
+pub struct EventSender {
+    tx: Sender<AppEvent>,
+    wake: Arc<dyn Fn() + Send + Sync>,
+}
+
+impl EventSender {
+    pub fn new(tx: Sender<AppEvent>, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
+        Self { tx, wake }
+    }
+
+    /// Queues `event`, then wakes the UI so the next frame receives it.
+    pub fn send(&self, event: AppEvent) -> Result<(), UiClosed> {
+        self.tx.send(event).map_err(|_| UiClosed)?;
+        (self.wake)();
+        Ok(())
+    }
+}
+
+/// The UI no longer receives events: the application is closing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UiClosed;
 
 /// Typed events dispatched from background tasks to update the UI single source of truth.
 #[derive(Clone, Debug, PartialEq)]

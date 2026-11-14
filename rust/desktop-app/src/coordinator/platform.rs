@@ -1,4 +1,7 @@
-use crate::{events::AppEvent, scanner_helper::scan_entry_games};
+use crate::{
+    events::{AppEvent, EventSender},
+    scanner_helper::scan_entry_games,
+};
 use emusync_application::library::game_specific_targets;
 use emusync_application::library::{EntryEditResult, SteamRegistration};
 use emusync_data_local::{ConfigManager, LocalSaveTargets};
@@ -13,7 +16,6 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
-        mpsc::Sender,
     },
 };
 use tokio::runtime::Handle;
@@ -24,7 +26,7 @@ pub struct PlatformServices {
     pub steam: DesktopSteamLibrary,
     pub browser: Arc<DesktopBrowserLauncher>,
     pub picker: Arc<dyn PathPicker<Error = std::io::Error> + Send + Sync>,
-    pub event_tx: Sender<AppEvent>,
+    pub event_tx: EventSender,
     pub redraw: Arc<dyn Fn() + Send + Sync>,
     pub tokio_handle: Handle,
     pub scan_revision: Arc<AtomicU64>,

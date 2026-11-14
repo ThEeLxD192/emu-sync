@@ -2,6 +2,8 @@
 // Debug builds keep the console so panics and diagnostics stay visible.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod perf;
+
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{
     AppEvent, AuthorizedTransferFailure, CloseState, DesktopCoordinator, RuntimeOwner,
@@ -10,7 +12,10 @@ use emusync_desktop_app::{
 use emusync_domain::config::ConfigurationStore;
 use emusync_platform_desktop::{SteamShortcutManager, is_gamescope_session};
 use emusync_presentation::{
-    EmuSyncApp, actions::UiAction, model::AppStatus, theme::configure_egui_theme,
+    EmuSyncApp,
+    actions::UiAction,
+    model::{AppStatus, CloudSyncStatus},
+    theme::configure_egui_theme,
 };
 use std::{
     ffi::OsString,
@@ -45,6 +50,10 @@ struct App {
     close_notice: bool,
     current_scan_revision: u64,
     current_steam_revision: u64,
+    /// Frame metrics, only when `EMUSYNC_PERF_LOG` is set.
+    perf: Option<perf::PerfLog>,
+    /// When egui asked to be drawn again (an animation or a delayed repaint).
+    repaint_at: Option<Instant>,
 }
 
 impl ApplicationHandler for App {
@@ -74,6 +83,14 @@ impl ApplicationHandler for App {
             let window = Arc::new(event_loop.create_window(attributes)?);
             let context = egui::Context::default();
             configure_egui_theme(&context);
+            // Background work (a decoded cover) asks egui for a repaint; only the window
+            // can wake the event loop. Delayed repaints come from each frame's output.
+            let repaint_window = window.clone();
+            context.set_request_repaint_callback(move |info| {
+                if info.delay.is_zero() {
+                    repaint_window.request_redraw();
+                }
+            });
 
             let state = egui_winit::State::new(
                 context.clone(),
@@ -122,8 +139,10 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let repaint_at = self.due_repaint();
         if !self.closing {
-            event_loop.set_control_flow(ControlFlow::Wait);
+            event_loop
+                .set_control_flow(repaint_at.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
             return;
         }
         let coord_close = self
@@ -140,9 +159,12 @@ impl ApplicationHandler for App {
             (CloseState::Ready, CloseState::Ready) => CloseState::Ready,
         };
         match close_state {
-            CloseState::Pending => event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(50),
-            )),
+            CloseState::Pending => {
+                let poll = Instant::now() + Duration::from_millis(50);
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    repaint_at.map_or(poll, |at| at.min(poll)),
+                ));
+            }
             CloseState::RecoveryRequired => {
                 self.closing = false;
                 self.close_notice = true;
@@ -168,7 +190,9 @@ impl ApplicationHandler for App {
             return;
         }
         let response = state.on_window_event(window, &event);
-        if response.repaint {
+        // egui-winit also asks to repaint after a redraw; following that would redraw
+        // forever. What a frame needs next comes from its own `repaint_delay`.
+        if response.repaint && !matches!(event, WindowEvent::RedrawRequested) {
             window.request_redraw();
         }
         match event {
@@ -189,6 +213,7 @@ impl ApplicationHandler for App {
                 window.request_redraw();
             }
             WindowEvent::RedrawRequested => {
+                let frame_began = Instant::now();
                 // Ingest background events
                 while let Ok(app_event) = self.event_rx.try_recv() {
                     match app_event {
@@ -303,6 +328,9 @@ impl ApplicationHandler for App {
                             );
                         }
                         AppEvent::StatusChanged(status) => {
+                            if let Some(perf) = &mut self.perf {
+                                perf.observe_status(status_name(&status));
+                            }
                             self.emusync_app.state.status = status;
                         }
                         AppEvent::Toast(message) => {
@@ -354,6 +382,34 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                if self
+                    .perf
+                    .as_ref()
+                    .is_some_and(|perf| perf.scenario() == perf::Scenario::Spinner)
+                {
+                    self.emusync_app.state.status = AppStatus::Syncing {
+                        message: "Syncing...".into(),
+                    };
+                }
+
+                if let (Some(perf), Some(coordinator)) = (&mut self.perf, &self.coordinator) {
+                    let state = &self.emusync_app.state;
+                    // The startup check of the selected entry has ended.
+                    let checked = state.selected_entry.as_ref().filter(|entry| {
+                        state
+                            .entry_sync_status
+                            .get(&entry.common().name)
+                            .is_some_and(|status| {
+                                !matches!(status, CloudSyncStatus::Idle | CloudSyncStatus::Checking)
+                            })
+                    });
+                    if perf.take_sync_request(checked.is_some())
+                        && let Some(entry) = checked
+                    {
+                        coordinator.handle_action(UiAction::SyncEntry(entry.clone()));
+                    }
+                }
+
                 let context = state.egui_ctx().clone();
                 if self.gamescope {
                     let size = window.inner_size();
@@ -365,10 +421,20 @@ impl ApplicationHandler for App {
                         }
                     }
                 }
-                let input = state.take_egui_input(window);
+                let mut input = state.take_egui_input(window);
+                let has_games = !self.emusync_app.state.game_items.is_empty();
+                let perf_needs_frame = self
+                    .perf
+                    .as_mut()
+                    .is_some_and(|perf| perf.drive(&mut input, has_games));
                 let mut output = context.run_ui(input, |ui| {
                     self.emusync_app.update(ui);
                 });
+                let ui_done = Instant::now();
+                let repaint_delay = output
+                    .viewport_output
+                    .get(&egui::ViewportId::ROOT)
+                    .map_or(Duration::MAX, |viewport| viewport.repaint_delay);
 
                 // Drain and dispatch UI actions
                 let actions = self.emusync_app.take_actions();
@@ -392,8 +458,18 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                // Asked before presenting, so the next frame is not one refresh late.
+                if repaint_delay.is_zero() || perf_needs_frame {
+                    window.request_redraw();
+                    self.repaint_at = None;
+                } else {
+                    // `Duration::MAX` (nothing to animate) overflows: no repaint is due.
+                    self.repaint_at = Instant::now().checked_add(repaint_delay);
+                }
+
                 state.handle_platform_output(window, output.platform_output);
                 let primitives = context.tessellate(output.shapes, output.pixels_per_point);
+                window.pre_present_notify();
                 painter.paint_and_update_textures(
                     egui::ViewportId::ROOT,
                     output.pixels_per_point,
@@ -403,9 +479,45 @@ impl ApplicationHandler for App {
                     Vec::new(),
                     window,
                 );
+                if let Some(perf) = &mut self.perf {
+                    perf.record(&perf::FrameSample {
+                        began: frame_began,
+                        ui: ui_done.duration_since(frame_began),
+                        paint: ui_done.elapsed(),
+                        covers: self.emusync_app.cover_cache.loaded_count(),
+                        status: status_name(&self.emusync_app.state.status),
+                    });
+                }
             }
             _ => {}
         }
+    }
+}
+
+impl App {
+    /// Requests the repaint egui asked for once it is due, and returns when the next one is.
+    fn due_repaint(&mut self) -> Option<Instant> {
+        let at = self.repaint_at?;
+        if at > Instant::now() {
+            return Some(at);
+        }
+        self.repaint_at = None;
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+        None
+    }
+}
+
+/// A short name of `status` for the frame metrics.
+fn status_name(status: &AppStatus) -> &'static str {
+    match status {
+        AppStatus::Idle => "idle",
+        AppStatus::Loading => "loading",
+        AppStatus::Syncing { .. } => "syncing",
+        AppStatus::Playing => "playing",
+        AppStatus::Error { .. } => "error",
+        _ => "waiting",
     }
 }
 
@@ -501,6 +613,8 @@ fn preview_update_state(name: &str) -> Option<emusync_application::UpdateState> 
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let started = Instant::now();
+    let perf = perf::PerfLog::from_env(started)?;
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     #[cfg(debug_assertions)]
     let (args, preview_update) = take_preview_update(args)?;
@@ -536,6 +650,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         close_notice: false,
         current_scan_revision: 0,
         current_steam_revision: 0,
+        perf,
+        repaint_at: None,
     };
     event_loop.run_app(&mut app)?;
     if let Some(error) = app.error {

@@ -1,12 +1,12 @@
 //! Application updates: release checks, AppImage download and replacement on restart.
 
 use super::{UPDATES_DISABLED, UPDATES_PORTABLE};
-use crate::events::AppEvent;
+use crate::events::{AppEvent, EventSender};
 use emusync_application::{UpdateCoordinator, UpdateState};
 use emusync_data_updates::GitHubUpdateSource;
 use emusync_domain::update::UpdateInfo;
 use emusync_platform_desktop::{DesktopUpdateInstaller, UpdateStagingFiles};
-use std::sync::{Arc, Mutex, mpsc::Sender};
+use std::sync::{Arc, Mutex};
 use tokio::{runtime::Handle, task::JoinHandle};
 
 const REPOSITORY_OWNER: &str = "ThEeLxD192";
@@ -65,12 +65,7 @@ pub struct UpdateServices {
 }
 
 impl UpdateServices {
-    pub fn new(
-        source: UpdateSourceConfig,
-        event_tx: Sender<AppEvent>,
-        redraw: Arc<dyn Fn() + Send + Sync>,
-        tokio_handle: Handle,
-    ) -> Self {
+    pub fn new(source: UpdateSourceConfig, event_tx: EventSender, tokio_handle: Handle) -> Self {
         let portable = source == UpdateSourceConfig::Portable;
         let base_url = match source {
             UpdateSourceConfig::GitHub => None,
@@ -96,10 +91,8 @@ impl UpdateServices {
         }
         // Closing goes through the normal shutdown, which waits for running operations.
         let exit_tx = event_tx.clone();
-        let exit_redraw = redraw.clone();
         let installer = DesktopUpdateInstaller::new().with_exit_application(move |_| {
             let _ = exit_tx.send(AppEvent::ExitRequested);
-            exit_redraw();
         });
         let updater = UpdateCoordinator::new(
             source,
@@ -107,7 +100,6 @@ impl UpdateServices {
             installer,
             move |state: &UpdateState| {
                 let _ = event_tx.send(AppEvent::UpdateStateChanged(state.clone()));
-                redraw();
             },
         );
         Self {

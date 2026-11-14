@@ -15,3 +15,12 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# What users run. Whole-program optimization makes each UI frame about 17% cheaper and the
+# binary a third smaller, for about 15% longer clean release builds (`cargo xtask perf`
+# and the Criterion benches measure both). Symbols are stripped: panics still report file
+# and line. Panics must keep unwinding: the supervisor and the runtime owner catch them.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

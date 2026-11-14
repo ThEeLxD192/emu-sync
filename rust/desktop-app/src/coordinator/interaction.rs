@@ -1,4 +1,4 @@
-use crate::events::AppEvent;
+use crate::events::{AppEvent, EventSender};
 use emusync_application::library::game_specific_targets;
 use emusync_data_local::LocalSaveTargets;
 use emusync_domain::sync::{
@@ -49,7 +49,7 @@ type PendingSaveSetupSlot = Arc<Mutex<Option<PendingSaveSetup>>>;
 
 #[derive(Clone)]
 pub struct InteractionControls {
-    pub event_tx: Sender<AppEvent>,
+    pub event_tx: EventSender,
     pub redraw: Arc<dyn Fn() + Send + Sync>,
     pub current_conflict: Arc<Mutex<Option<SaveConflict>>>,
     pub active_conflict_resolver: Arc<Mutex<Option<ConflictResolver>>>,
@@ -65,7 +65,7 @@ pub struct InteractionControls {
 impl InteractionControls {
     pub fn new(event_tx: Sender<AppEvent>, redraw: Arc<dyn Fn() + Send + Sync>) -> Self {
         Self {
-            event_tx,
+            event_tx: EventSender::new(event_tx, redraw.clone()),
             redraw,
             current_conflict: Arc::new(Mutex::new(None)),
             active_conflict_resolver: Arc::new(Mutex::new(None)),

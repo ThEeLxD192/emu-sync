@@ -1,3 +1,6 @@
+mod perf;
+mod perf_drive;
+
 use cargo_metadata::{DependencyKind, MetadataCommand};
 use std::{error::Error, process::Command};
 
@@ -53,8 +56,12 @@ fn run(args: &[&str]) -> Result<(), Box<dyn Error>> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let command = std::env::args().nth(1).unwrap_or_default();
+    if command == "perf" {
+        let args: Vec<String> = std::env::args().skip(2).collect();
+        return perf::main(&args);
+    }
     if !matches!(command.as_str(), "quality" | "test" | "check") {
-        return Err("usage: cargo xtask quality|test|check".into());
+        return Err("usage: cargo xtask quality|test|check|perf".into());
     }
     // `quality` and `test` are the two halves of `check`, so CI can run them in parallel.
     if command != "test" {
