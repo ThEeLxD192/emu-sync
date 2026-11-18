@@ -97,7 +97,7 @@ fn rejects_intermediate_regular_file_and_resolves_under_nonexistent_root_unless_
     let resolved = resolve_remote_file(&missing_root, "slot/save.dat").unwrap();
     assert_eq!(
         resolved,
-        Some(crate::storage_absolute(&missing_root.join("slot/save.dat")))
+        Some(storage_absolute(&missing_root.join("slot/save.dat")))
     );
 }
 

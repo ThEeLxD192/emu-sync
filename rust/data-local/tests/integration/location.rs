@@ -70,15 +70,25 @@ fn unwritable_portable_config_and_parent_fall_back_to_platform_location() {
     fs::set_permissions(&config_file, fs::Permissions::from_mode(0o400)).unwrap();
     fs::set_permissions(&ro_dir, fs::Permissions::from_mode(0o500)).unwrap();
 
-    let status = std::process::Command::new(std::env::current_exe().unwrap())
-        .arg("unwritable_portable_config_and_parent_fall_back_to_platform_location")
+    // The child runs this same test by its full name in the test binary
+    // (`location::...`); a filter that matched nothing would pass without testing.
+    let module = module_path!().split_once("::").unwrap().1;
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg(format!(
+            "{module}::unwritable_portable_config_and_parent_fall_back_to_platform_location"
+        ))
         .arg("--exact")
         .current_dir(&ro_dir)
         .env("EMUSYNC_TEST_RO_CHILD", "1")
         .env_remove("EMUSYNC_CONFIG")
         .env_remove("APPIMAGE")
-        .status()
+        .output()
         .unwrap();
 
-    assert!(status.success(), "Subprocess child failed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "Subprocess child failed: {stdout}");
+    assert!(
+        stdout.contains("test result: ok. 1 passed;"),
+        "Subprocess child did not run the test: {stdout}"
+    );
 }
