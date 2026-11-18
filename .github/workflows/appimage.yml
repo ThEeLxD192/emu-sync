@@ -1,0 +1,50 @@
+name: Linux Packaging
+
+# Builds the AppImage in Docker. Pushes always run it; pull requests only when they touch what
+# the package or its Bookworm build depends on, since CI Validation already compiles and tests
+# the code and the release builds the AppImage again before publishing.
+on:
+  push:
+    branches: [ main, develop, rewrite/rust-native ]
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - '**/Cargo.toml'
+      - '**/build.rs'
+      - packaging/**
+      - scripts/build-appimage.sh
+      - scripts/build-appimage-container.sh
+      - .github/workflows/appimage.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  appimage:
+    name: Linux packaging (AppImage)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      # The GitHub Actions cache backend needs a BuildKit container builder and the runtime
+      # token, which `run` steps do not see.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Expose GitHub Actions runtime
+        uses: crazy-max/ghaction-github-runtime@v4
+
+      # Layers come from the cache; only pushes to main refresh it, like the Cargo cache.
+      - name: Verify Linux Packaging (AppImage)
+        shell: bash
+        env:
+          EMUSYNC_DOCKER_CACHE_FROM: type=gha,scope=appimage
+          EMUSYNC_DOCKER_CACHE_TO: ${{ github.ref == 'refs/heads/main' && 'type=gha,scope=appimage,mode=max' || '' }}
+        run: bash scripts/build-appimage-container.sh "$RUNNER_TEMP/EmuSync-x86_64.AppImage"

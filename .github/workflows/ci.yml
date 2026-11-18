@@ -105,16 +105,3 @@ jobs:
           path: rust-tests.log
           if-no-files-found: ignore
           retention-days: 7
-
-  # Runs alongside the Rust jobs instead of after them.
-  appimage:
-    name: Linux packaging (AppImage)
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v7
-
-      - name: Verify Linux Packaging (AppImage)
-        shell: bash
-        run: bash scripts/build-appimage-container.sh "$RUNNER_TEMP/EmuSync-x86_64.AppImage"
