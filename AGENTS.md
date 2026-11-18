@@ -27,6 +27,7 @@ Cancelación de operaciones debe esperar limpieza y rollback asíncrono antes de
 - [rust-testing](.agents/skills/rust-testing/SKILL.md): técnicas de pruebas Rust; usar solo técnicas aplicables.
 - [rust-concurrency](.agents/skills/rust-concurrency/SKILL.md): concurrencia, cancelación y ciclo de vida.
 - [rust-style-clippy](.agents/skills/rust-style-clippy/SKILL.md): formato y análisis estático.
+- [rust-change-workflow](.agents/skills/rust-change-workflow/SKILL.md): cierre de cada cambio de código Rust con subagentes (ver «Flujo de cambios con subagentes»).
 
 Lectura obligatoria antes de editar (completa, en cada sesión y en cada subagente):
 
@@ -46,6 +47,10 @@ Al ejecutar localmente pruebas, Clippy o `cargo xtask`, limitar la CPU: antepone
 Mantener CI y resultados por plataforma, distinguir ejecución nueva de caché o informes históricos. Ejecutar pruebas y análisis afectados; ejecutar el check completo al cerrar integraciones. No agregar pruebas por movimientos mecánicos o documentación. Las pruebas deben proteger contratos y riesgos, no reflejar implementación ni cumplir cuotas.
 
 El hook valida una exportación aislada del índice con `cargo xtask quality` y no formatea, prepara archivos ni ejecuta pruebas. No usar stash ni reset para hacerlo pasar.
+
+### Flujo de cambios con subagentes
+
+Todo cambio de código Rust se cierra con `rust-change-workflow`, aunque el usuario no lo pida: `cargo fmt` y Clippy; dos revisores independientes en paralelo (lógica y datos; concurrencia y diseño) que solo reciben el diff y la intención, nunca el contexto de la sesión; el agente principal verifica cada hallazgo en el código antes de aceptarlo o descartarlo con su razón; un escritor de pruebas adversariales (dos si el riesgo es alto) que solo toca pruebas y reporta como posible bug cada prueba que falla; y `cargo xtask check`. Los cambios solo de documentación o textos se quedan en formato y Clippy. En Claude Code los subagentes son `.claude/agents/rust-reviewer.md` y `.claude/agents/rust-adversarial-tester.md`. Los nombres de variables, funciones y pruebas siguen la regla de `rust-development`.
 
 ## Rendimiento
 
