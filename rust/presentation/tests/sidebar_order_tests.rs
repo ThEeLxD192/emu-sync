@@ -282,11 +282,14 @@ fn folder_drag_accumulates_partial_movement_and_moves_whole_group() {
     let mut state = SidebarInteraction::default();
     let row = header(&state, None);
     state.start_drag(row.key());
+    // A trailing entry leaves the folder in a middle slot, where the remainder is kept.
+    let trailing = native("Trailing", None);
+    let entries = [library(), vec![trailing.clone()]].concat();
 
-    assert_eq!(state.drag_folder(&library(), &row, 25.0, 52.0), None);
+    assert_eq!(state.drag_folder(&entries, &row, 25.0, 52.0), None);
     assert_eq!(
-        state.drag_folder(&library(), &row, 35.0, 52.0),
-        Some(vec![standalone(), first(), second()])
+        state.drag_folder(&entries, &row, 35.0, 52.0),
+        Some(vec![standalone(), first(), second(), trailing])
     );
     assert_eq!(state.drag_offset_y(), 8.0);
 
@@ -305,7 +308,8 @@ fn child_drag_stays_within_group_beyond_last_sibling() {
         state.drag_entry(&library(), &row, 1_000.0, 52.0),
         Some(vec![second(), first(), standalone()])
     );
-    assert_eq!(state.drag_offset_y(), 948.0);
+    // The row stops at the last slot of its folder instead of floating past it.
+    assert_eq!(state.drag_offset_y(), 0.0);
 }
 
 #[test]

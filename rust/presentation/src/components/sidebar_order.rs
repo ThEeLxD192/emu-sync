@@ -302,9 +302,9 @@ impl SidebarInteraction {
             let current = units.iter().position(
                 |u| matches!(u, SidebarUnit::Group { name, .. } if same_group(name, group_name)),
             )?;
-            clamped_move(current, units.len() - 1, steps, |target| {
+            Some(clamped_move(current, units.len() - 1, steps, |target| {
                 move_top_level_unit(entries, current, target)
-            })
+            }))
         })
     }
 
@@ -338,17 +338,17 @@ impl SidebarInteraction {
                     });
                     let (actual_group, siblings) = siblings?;
                     let current = siblings.iter().position(|e| &e.common().name == name)?;
-                    clamped_move(current, siblings.len() - 1, steps, |target| {
+                    Some(clamped_move(current, siblings.len() - 1, steps, |target| {
                         move_child_entry(entries, actual_group, current, target)
-                    })
+                    }))
                 }
                 _ => {
                     let current = units.iter().position(
                         |u| matches!(u, SidebarUnit::Standalone(e) if &e.common().name == name),
                     )?;
-                    clamped_move(current, units.len() - 1, steps, |target| {
+                    Some(clamped_move(current, units.len() - 1, steps, |target| {
                         move_top_level_unit(entries, current, target)
-                    })
+                    }))
                 }
             }
         })
@@ -359,17 +359,28 @@ impl SidebarInteraction {
         key: &str,
         delta: f32,
         item_height: f32,
-        compute_move: impl FnOnce(isize) -> Option<(Vec<GameEntry>, isize)>,
+        compute_move: impl FnOnce(isize) -> Option<DragMove>,
     ) -> Option<Vec<GameEntry>> {
         self.drag_offset_y += delta;
-        if self.dragging_key.as_deref() != Some(key) || item_height <= 0.0 {
+        if self.dragging_key.as_deref() != Some(key)
+            || !item_height.is_finite()
+            || item_height <= 0.0
+        {
             return None;
         }
         // Truncation toward zero, as Kotlin's `Float.toInt()`.
         let steps = (self.drag_offset_y / item_height) as isize;
-        let (entries, moved) = compute_move(steps)?;
-        self.drag_offset_y -= moved as f32 * item_height;
-        Some(entries)
+        let drag_move = compute_move(steps)?;
+        self.drag_offset_y -= drag_move.moved_slots as f32 * item_height;
+        // The dragged row is painted at this offset: keep it from floating past the
+        // first or last slot it can take.
+        if drag_move.is_at_first_slot {
+            self.drag_offset_y = self.drag_offset_y.max(0.0);
+        }
+        if drag_move.is_at_last_slot {
+            self.drag_offset_y = self.drag_offset_y.min(0.0);
+        }
+        drag_move.reordered
     }
 
     fn expand_group(&mut self, name: &str) {
@@ -377,12 +388,26 @@ impl SidebarInteraction {
     }
 }
 
+/// Where a drag step leaves the dragged row within the slots it can take.
+struct DragMove {
+    /// The new order, when the row changed slot.
+    reordered: Option<Vec<GameEntry>>,
+    moved_slots: isize,
+    is_at_first_slot: bool,
+    is_at_last_slot: bool,
+}
+
 fn clamped_move(
     current: usize,
     last_index: usize,
     steps: isize,
     reorder: impl FnOnce(usize) -> Vec<GameEntry>,
-) -> Option<(Vec<GameEntry>, isize)> {
+) -> DragMove {
     let target = current.saturating_add_signed(steps).min(last_index);
-    (target != current).then(|| (reorder(target), target as isize - current as isize))
+    DragMove {
+        reordered: (target != current).then(|| reorder(target)),
+        moved_slots: target as isize - current as isize,
+        is_at_first_slot: target == 0,
+        is_at_last_slot: target == last_index,
+    }
 }
