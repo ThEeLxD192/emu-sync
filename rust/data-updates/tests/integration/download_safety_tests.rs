@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use common::{
     TestServer, assert_directory_entries, client, http_response, join_with_limit, recv_with_limit,

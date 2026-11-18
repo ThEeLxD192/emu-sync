@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::fmt;
 use std::future::Future;
 use std::net::SocketAddr;
@@ -130,10 +128,7 @@ impl TestServer {
             let request = read_request(&mut stream).await?;
             let _ = request_tx.send(request.clone());
 
-            let connection = ServerConnection {
-                stream,
-                request: request.clone(),
-            };
+            let connection = ServerConnection { stream };
             handler(connection).await?;
 
             let mut requests = vec![request];
@@ -204,10 +199,6 @@ impl ServerTask {
         }
     }
 
-    pub fn is_finished(&self) -> bool {
-        self.handle.is_finished()
-    }
-
     pub async fn finish(mut self) -> Vec<RequestRecord> {
         if let Some(finish_tx) = self.finish_tx.take() {
             let _ = finish_tx.send(());
@@ -237,10 +228,6 @@ impl ServerTask {
             Err(error) => panic!("test server task failed: {error}"),
         }
         self.finish_tx.take();
-    }
-
-    pub async fn abort_and_wait(mut self) {
-        self.abort().await;
     }
 }
 
@@ -298,27 +285,14 @@ pub async fn join_with_limit<T>(
 
 pub struct ServerConnection {
     stream: TcpStream,
-    request: RequestRecord,
 }
 
 impl ServerConnection {
-    pub fn request(&self) -> &RequestRecord {
-        &self.request
-    }
-
     pub async fn write_all(&mut self, bytes: &[u8]) -> Result<(), ServerError> {
         self.stream
             .write_all(bytes)
             .await
             .map_err(ServerError::Write)
-    }
-
-    pub async fn flush(&mut self) -> Result<(), ServerError> {
-        self.stream.flush().await.map_err(ServerError::Write)
-    }
-
-    pub async fn shutdown(&mut self) -> Result<(), ServerError> {
-        self.stream.shutdown().await.map_err(ServerError::Write)
     }
 }
 
