@@ -1,5 +1,3 @@
-#![allow(dead_code, unused_imports)]
-
 use emusync_application::{SyncOrchestrator, SyncOrchestratorFactory, SyncServices};
 use emusync_domain::config::{AppConfig, CloudAuthorization, Credentials};
 use emusync_domain::execution::{GameLaunchRequest, GameLauncher, GameResult};

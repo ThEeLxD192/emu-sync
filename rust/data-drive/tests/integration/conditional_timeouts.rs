@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use common::{read_request, reply};
 use emusync_data_drive::{ConditionalError, ConditionalUpdate, FileRevision};

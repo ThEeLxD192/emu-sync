@@ -1,3 +1,4 @@
+use crate::common;
 use emusync_data_drive::loopback_code;
 use reqwest::{Client, Url};
 use std::{sync::mpsc, time::Duration};
@@ -5,7 +6,7 @@ use tokio::net::TcpListener;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn loopback_ignores_wrong_state_and_accepts_matching_code() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = listener_outside_ephemeral_range();
     let address = listener.local_addr().unwrap();
     let (tx, rx) = mpsc::channel();
     let task = tokio::spawn(async move {
@@ -58,7 +59,7 @@ async fn loopback_ignores_wrong_state_and_accepts_matching_code() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancellation_releases_listener() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = listener_outside_ephemeral_range();
     let address = listener.local_addr().unwrap();
     let (tx, rx) = mpsc::channel();
     let task = tokio::spawn(async move {
@@ -84,7 +85,7 @@ async fn cancellation_releases_listener() {
 async fn loopback_rejects_truncated_http_request_and_continues_listening() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = listener_outside_ephemeral_range();
     let address = listener.local_addr().unwrap();
     let (tx, rx) = mpsc::channel();
     let task = tokio::spawn(async move {
@@ -138,7 +139,7 @@ async fn oauth_error_callback_with_matching_state_terminates_and_returns_provide
  {
     use emusync_data_drive::OAuthError;
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = listener_outside_ephemeral_range();
     let address = listener.local_addr().unwrap();
     let (tx, rx) = mpsc::channel();
     let task = tokio::spawn(async move {
@@ -181,7 +182,7 @@ async fn oauth_error_callback_with_matching_state_terminates_and_returns_provide
     assert!(matches!(err, OAuthError::Provider(ref msg) if msg.contains("User denied access")));
     assert!(TcpListener::bind(address).await.is_ok());
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = listener_outside_ephemeral_range();
     let address = listener.local_addr().unwrap();
     let (tx, rx) = mpsc::channel();
     let task = tokio::spawn(async move {
@@ -236,7 +237,7 @@ async fn oversized_request_headers_and_unspecified_bind_address_are_rejected_saf
     assert!(matches!(result, Err(OAuthError::Provider(ref msg)) if msg.contains("loopback")));
     assert!(!launched.load(std::sync::atomic::Ordering::SeqCst));
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = listener_outside_ephemeral_range();
     let address = listener.local_addr().unwrap();
     let (tx, rx) = mpsc::channel();
     let task = tokio::spawn(async move {
@@ -283,4 +284,12 @@ async fn oversized_request_headers_and_unspecified_bind_address_are_rejected_saf
 
     assert_eq!(task.await.unwrap().unwrap(), "good-code");
     assert!(TcpListener::bind(address).await.is_ok());
+}
+
+/// Every test here binds its listener's address again after `loopback_code` releases it;
+/// see `common::listener_outside_ephemeral_range`.
+fn listener_outside_ephemeral_range() -> TcpListener {
+    let listener = common::listener_outside_ephemeral_range();
+    listener.set_nonblocking(true).unwrap();
+    TcpListener::from_std(listener).unwrap()
 }

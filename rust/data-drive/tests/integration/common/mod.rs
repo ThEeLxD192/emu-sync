@@ -1,6 +1,32 @@
-#![allow(dead_code)]
-
 use std::io::{Read, Write};
+use std::net::{Ipv4Addr, TcpListener};
+use std::sync::atomic::{AtomicU16, Ordering};
+
+/// Binds a loopback listener on a port outside the ephemeral ranges (Linux 32768–60999,
+/// Windows and macOS 49152–65535).
+///
+/// Tests that drop a listener and later bind its address again need it: the system never
+/// hands such a port to the `bind("127.0.0.1:0")` or the outgoing connections of the tests
+/// running in parallel in this binary, so the port stays free in between. Each call tries a
+/// different port, so two of these tests never share one either.
+pub fn listener_outside_ephemeral_range() -> TcpListener {
+    const FIRST_PORT: u16 = 20_000;
+    const PORT_COUNT: u16 = 12_000;
+    static NEXT_OFFSET: AtomicU16 = AtomicU16::new(0);
+    // Separate test processes running at the same time start at different ports.
+    let process_offset = u16::try_from(std::process::id() % u32::from(PORT_COUNT)).unwrap();
+    for _ in 0..PORT_COUNT {
+        let offset = NEXT_OFFSET.fetch_add(1, Ordering::Relaxed) % PORT_COUNT;
+        let port = FIRST_PORT + (process_offset + offset) % PORT_COUNT;
+        if let Ok(listener) = TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
+            return listener;
+        }
+    }
+    panic!(
+        "no free loopback port from {FIRST_PORT} to {}",
+        FIRST_PORT + PORT_COUNT - 1
+    );
+}
 
 pub fn read_request(stream: &mut impl Read) -> (String, Vec<u8>) {
     let mut bytes = Vec::new();

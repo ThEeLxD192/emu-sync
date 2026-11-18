@@ -1,3 +1,4 @@
+use crate::common;
 use emusync_data_drive::{InteractiveOAuth, OAuthError};
 use emusync_data_local::ConfigManager;
 use emusync_domain::{
@@ -102,7 +103,7 @@ impl BrowserLauncher for FailingBrowser {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn composed_browser_callback_exchanges_and_persists_tokens() {
     let (_dir, store, config) = setup(None);
-    let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
+    let reservation = common::listener_outside_ephemeral_range();
     let callback = reservation.local_addr().unwrap();
     drop(reservation);
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -220,7 +221,7 @@ async fn occupied_loopback_port_fails_cleanly_without_opening_browser() {
 async fn browser_launcher_failure_aborts_authorization_and_releases_loopback_port() {
     let (_dir, store, config) = setup(None);
 
-    let reservation = TcpListener::bind("127.0.0.1:0").unwrap();
+    let reservation = common::listener_outside_ephemeral_range();
     let callback = reservation.local_addr().unwrap();
     drop(reservation);
 
