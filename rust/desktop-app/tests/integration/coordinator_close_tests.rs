@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use emusync_data_local::{ConfigManager, RecoveryCredentials, TrackedError};
 use emusync_desktop_app::{

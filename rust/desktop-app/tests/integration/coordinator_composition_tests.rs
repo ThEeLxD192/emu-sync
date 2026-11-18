@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use common::TestHarness;
 use emusync_desktop_app::coordinator::composition::{drive_connected, format_epoch_ms};

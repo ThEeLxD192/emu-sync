@@ -188,10 +188,13 @@ async fn killed_process_leaves_an_upload_that_a_new_process_reconciles_without_r
     let credentials = credentials(dir.path());
     let save = dir.path().join("save.dat");
     std::fs::write(&save, b"abc").unwrap();
+    // The child runs `child_uploads_and_hangs` by its full name in the test binary
+    // (`persisted_recovery::...`).
+    let module = module_path!().split_once("::").unwrap().1;
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "child_uploads_and_hangs",
+            &format!("{module}::child_uploads_and_hangs"),
             "--ignored",
             "--nocapture",
         ])

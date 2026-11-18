@@ -2,7 +2,7 @@
 //! AppImage y deja la actualización lista; las compilaciones de desarrollo nunca
 //! contactan GitHub por su cuenta.
 
-mod common;
+use crate::common;
 
 use common::{read_http_request_async, write_http_json_async};
 use emusync_application::UpdateState;

@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use common::{test_emulator_entry, test_native_entry};
 use emusync_data_local::ConfigManager;

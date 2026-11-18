@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use emusync_data_local::{ConfigManager, RecoveryCredentials};
 use emusync_desktop_app::{AppEvent, DesktopCoordinator, DriveEndpoints};
 use emusync_domain::{
@@ -7,7 +5,7 @@ use emusync_domain::{
     library::{Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType},
 };
 use std::{
-    io::{Read, Write},
+    io::Read,
     net::SocketAddr,
     sync::{Arc, mpsc::Receiver},
     time::Duration,
@@ -229,20 +227,6 @@ pub fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<(S
     }
     let body_end = (end + len).min(data.len());
     Ok((headers, data[end..body_end].to_vec()))
-}
-
-pub fn write_http_json(
-    stream: &mut std::net::TcpStream,
-    status: u16,
-    reason: &str,
-    body: &str,
-) -> std::io::Result<()> {
-    let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(response.as_bytes())?;
-    stream.flush()
 }
 
 pub async fn read_http_request_async(

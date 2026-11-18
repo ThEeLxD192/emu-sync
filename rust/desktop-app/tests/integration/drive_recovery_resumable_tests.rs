@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use common::{read_http_request, synthetic_credentials};
 use emusync_data_drive::{

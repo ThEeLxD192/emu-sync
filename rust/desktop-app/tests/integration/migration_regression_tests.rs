@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use common::{
     read_http_request_async, test_native_entry, wait_for_active_tasks, write_http_json_async,

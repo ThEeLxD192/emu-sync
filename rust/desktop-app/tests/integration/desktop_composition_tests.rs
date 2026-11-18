@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use common::{TestHarness, test_emulator_entry, test_native_entry, wait_for_active_tasks};
 use emusync_data_drive::{ConditionalError, TransferError};

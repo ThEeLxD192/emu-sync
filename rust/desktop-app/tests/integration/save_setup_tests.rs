@@ -1,5 +1,3 @@
-mod common;
-
 use emusync_desktop_app::{
     AppEvent,
     coordinator::interaction::{AsyncSaveSetupBridge, InteractionControls},
