@@ -1,6 +1,6 @@
 //! Contratos de `SteamShortcutManager` (registro, baja y consulta) sobre `shortcuts.vdf` sintéticos.
 
-mod common;
+use crate::common;
 
 use common::{dir_entries, emulator_entry, linux_manager, read_bytes, shortcut};
 use emusync_domain::library::{Emulator, GameEntry, NativeGame};

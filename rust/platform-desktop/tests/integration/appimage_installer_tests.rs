@@ -1,6 +1,6 @@
 //! `AppImageInstaller`: reemplazo atómico, rollback y limpieza de temporales con hooks de fallo.
 
-mod common;
+use crate::common;
 
 use common::dir_entries;
 use emusync_platform_desktop::AppImageInstaller;

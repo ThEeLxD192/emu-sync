@@ -3,7 +3,7 @@
 //! Los sondeos se guían por contadores (`ScriptedProbe`, `AliveProbe`); no hay `sleep` ni
 //! aserciones sobre tiempo transcurrido.
 
-mod common;
+use crate::common;
 
 use common::{AliveProbe, ScriptedProbe, fast_polling, guard, polling_with_timeout};
 use emusync_platform_desktop::{ExternalProcessTracker, ProcessLaunch};
@@ -49,8 +49,10 @@ async fn appearance_within_timeout_and_exit_tracking() {
 
 #[tokio::test]
 async fn timeout_renewed_while_shader_compilation_is_active() {
-    // Márgenes amplios (50 ms de timeout frente a 200 ms de shaders) para que la carga del
-    // host no pueda agotar el timeout entre dos iteraciones.
+    // Los shaders duran más que el timeout, así que solo hay éxito si se renueva. Márgenes
+    // amplios (120 ms de timeout frente a 300 ms de shaders): desde la última renovación hasta
+    // ver el proceso caben dos esperas de sondeo (unos 16 ms cada una en Windows) aunque otras
+    // pruebas del binario carguen el host.
     let first_call: Arc<std::sync::Mutex<Option<Instant>>> = Arc::default();
     let shader_done = Arc::new(AtomicBool::new(false));
     let shader_calls = Arc::new(AtomicUsize::new(0));
@@ -73,7 +75,7 @@ async fn timeout_renewed_while_shader_compilation_is_active() {
             Arc::new(move || {
                 shader_calls.fetch_add(1, Ordering::SeqCst);
                 let t0 = *first_call.lock().unwrap().get_or_insert_with(Instant::now);
-                if t0.elapsed() < Duration::from_millis(200) {
+                if t0.elapsed() < Duration::from_millis(300) {
                     true
                 } else {
                     shader_done.store(true, Ordering::SeqCst);
@@ -84,9 +86,10 @@ async fn timeout_renewed_while_shader_compilation_is_active() {
         )
     };
 
-    let success = guard(
-        tracker.wait_for_process(launch(&[]), polling_with_timeout(Duration::from_millis(50))),
-    )
+    let success = guard(tracker.wait_for_process(
+        launch(&[]),
+        polling_with_timeout(Duration::from_millis(120)),
+    ))
     .await;
 
     assert!(success);

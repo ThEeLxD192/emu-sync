@@ -1,6 +1,6 @@
 //! Migración de launchers legacy y puentes de renombrado (`migrate_legacy_launchers`, `bridge.rs`).
 
-mod common;
+use crate::common;
 
 use common::{linux_manager, read_bytes, shortcut};
 use emusync_domain::library::{Emulator, GameEntry};

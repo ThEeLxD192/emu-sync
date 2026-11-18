@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use emusync_platform_desktop::{BinaryVdf, SteamShortcut, VdfValue};
 use std::{

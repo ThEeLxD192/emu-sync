@@ -1,5 +1,3 @@
-mod common;
-
 use emusync_platform_desktop::scan_roms;
 use std::fs;
 use tempfile::tempdir;
@@ -131,7 +129,7 @@ fn directory_with_rom_extension_is_descended_not_listed() {
 #[test]
 fn unreadable_subdirectory_is_skipped_without_losing_other_results() {
     use std::os::unix::fs::PermissionsExt;
-    if common::permissions_are_not_enforced() {
+    if crate::common::permissions_are_not_enforced() {
         eprintln!("skipped: the test process ignores directory permissions (root?)");
         return;
     }

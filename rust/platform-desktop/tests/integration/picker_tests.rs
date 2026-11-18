@@ -2,8 +2,6 @@
 
 #![cfg(unix)]
 
-mod common;
-
 use emusync_domain::execution::{PathPicker, PickerType};
 use emusync_platform_desktop::{ExternalChooserResult, FilePicker, run_external_choosers};
 use tempfile::tempdir;

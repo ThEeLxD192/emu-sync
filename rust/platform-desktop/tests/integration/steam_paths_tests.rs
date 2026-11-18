@@ -1,6 +1,6 @@
 //! Claves de launcher, señales de ROM y localización de `shortcuts.vdf` por cuenta de Steam.
 
-mod common;
+use crate::common;
 
 use common::linux_manager;
 use emusync_domain::library::{Emulator, SteamLibrary};

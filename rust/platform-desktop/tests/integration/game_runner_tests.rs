@@ -4,7 +4,7 @@
 //! `/proc` (instantánea de PIDs previa al traspaso) devuelva siempre un conjunto vacío, y nunca
 //! se llama al lanzador de URI por defecto.
 
-mod common;
+use crate::common;
 
 use common::{
     AliveProbe, MockSteamPreparation, ScriptedProbe, fast_polling, guard, polling_with_timeout,

@@ -1,6 +1,6 @@
 //! `UpdateStagingFiles`: destino de descarga, aislamiento frente a nombres hostiles y limpieza.
 
-mod common;
+use crate::common;
 
 use emusync_domain::update::{UpdateFiles, UpdateInfo};
 use emusync_platform_desktop::UpdateStagingFiles;

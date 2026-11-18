@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Helpers compartidos por las suites de `emusync-platform-desktop`.
 //!
 //! Ninguna espera usa `sleep`: la sincronización se hace con contadores, flags y canales.
@@ -11,8 +10,7 @@ use emusync_platform_desktop::{ProcessPolling, SteamShortcut, SteamShortcutManag
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs, io,
-    path::{Path, PathBuf},
-    process::{Child, Command},
+    path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -44,33 +42,16 @@ pub fn emulator_entry(name: &str, exe: &str) -> GameEntry {
     GameEntry::Emulator(Emulator::new(name, exe, "/roms", vec![]))
 }
 
-/// Escribe `body` y lo marca como ejecutable (0o755 en Unix).
-pub fn write_script(path: &Path, body: &str) -> PathBuf {
+/// Escribe `body` y lo marca como ejecutable (0o755).
+#[cfg(unix)]
+pub fn write_script(path: &Path, body: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
     }
     fs::write(path, body).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     path.to_path_buf()
-}
-
-/// Un `fork` concurrente de otro test puede heredar el descriptor de escritura del script
-/// recién creado y provocar `ETXTBSY`: se reintenta sin dormir.
-pub fn spawn_retry(cmd: &mut Command) -> io::Result<Child> {
-    let mut attempts = 0;
-    loop {
-        match cmd.spawn() {
-            Err(err) if err.kind() == io::ErrorKind::ExecutableFileBusy && attempts < 50 => {
-                attempts += 1;
-                std::thread::yield_now();
-            }
-            other => return other,
-        }
-    }
 }
 
 /// Ejecuta un launcher generado con bash. Si el `exec` interno del script choca con `ETXTBSY`
@@ -79,7 +60,7 @@ pub fn spawn_retry(cmd: &mut Command) -> io::Result<Child> {
 pub fn run_bash(script: &Path, cwd: &Path) -> std::process::Output {
     let mut attempts = 0;
     loop {
-        let output = Command::new("bash")
+        let output = std::process::Command::new("bash")
             .arg(script)
             .current_dir(cwd)
             .output()
@@ -158,10 +139,6 @@ impl ScriptedProbe {
 
     pub fn names(&self) -> Vec<String> {
         self.names.lock().unwrap().clone()
-    }
-
-    pub fn log(&self) -> Vec<String> {
-        self.log.lock().unwrap().clone()
     }
 
     pub fn matching_fn(&self) -> ProbeFn {

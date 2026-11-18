@@ -1,6 +1,6 @@
 //! Launchers generados (`.sh`, `.bat`, `.json`, `.ps1`): inyección, argv exacto y formato estable.
 
-mod common;
+use crate::common;
 
 use common::linux_manager;
 use emusync_domain::library::Emulator;

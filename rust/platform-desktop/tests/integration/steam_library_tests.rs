@@ -1,6 +1,6 @@
 //! Adaptador `DesktopSteamLibrary` sobre `SteamShortcutManager`.
 
-mod common;
+use crate::common;
 
 use common::{emulator_entry, linux_manager, shortcut};
 use emusync_domain::{

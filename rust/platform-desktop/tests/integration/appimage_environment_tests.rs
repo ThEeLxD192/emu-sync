@@ -1,7 +1,5 @@
 //! Limpieza del entorno AppImage heredado por emuladores, selectores y navegadores hijos.
 
-mod common;
-
 use emusync_platform_desktop::AppImageEnvironment;
 use std::collections::HashMap;
 
@@ -105,8 +103,14 @@ fn appimage_environment_is_removed_from_launched_emulators() {
     ] {
         let probe_dir = dir.path().join(index.to_string());
         std::fs::create_dir(&probe_dir).unwrap();
+        // The child runs `appimage_child_process_probe` by its full name in the test binary
+        // (`appimage_environment_tests::...`).
+        let probe_test_name = format!(
+            "{}::appimage_child_process_probe",
+            module_path!().split_once("::").unwrap().1
+        );
         let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "appimage_child_process_probe", "--nocapture"])
+            .args(["--exact", &probe_test_name, "--nocapture"])
             .env("EMUSYNC_RUN_APPIMAGE_PROBE", "1")
             .env("EMUSYNC_PROBE_DIRECTORY", &probe_dir)
             .env("EMUSYNC_PRESERVED", "preserved")
@@ -142,7 +146,7 @@ async fn appimage_child_process_probe() {
     if std::env::var_os("EMUSYNC_RUN_APPIMAGE_PROBE").is_none() {
         return;
     }
-    let prep = Arc::new(common::MockSteamPreparation::new());
+    let prep = Arc::new(crate::common::MockSteamPreparation::new());
     let runner = GameRunner::new(prep);
     let directory = std::path::PathBuf::from(std::env::var_os("EMUSYNC_PROBE_DIRECTORY").unwrap());
     let rom = directory.join("game.rom");
