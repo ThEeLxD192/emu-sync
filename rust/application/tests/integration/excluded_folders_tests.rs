@@ -1,7 +1,7 @@
 //! A save folder's excluded folders never reach the cloud, never come back from it and
 //! never make the game look out of sync.
 
-mod common;
+use crate::common;
 
 use common::*;
 use emusync_domain::library::{SaveTarget, SaveTargetType};

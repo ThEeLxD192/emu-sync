@@ -22,7 +22,8 @@ Reglas:
 - Lee el código de producción afectado y las pruebas existentes antes de escribir, para no duplicar lo que ya está cubierto.
 - Cada prueba defiende un contrato observable con un esperado independiente (literal, fixture o especificación), nunca recalculado con el código bajo prueba. Sincronización determinista: nada de `sleep` para acertar una carrera.
 - Nombres de prueba que describan escenario y resultado esperado.
-- Ejecuta con CPU limitada: `CARGO_BUILD_JOBS=2 nice -n 19 cargo test --locked -p <crate> --test <archivo> -- --test-threads=2`. Al terminar pasa `cargo fmt --all` y `CARGO_BUILD_JOBS=2 nice -n 19 cargo clippy --workspace --all-targets --locked -- -D warnings`, y corrige los avisos de tus archivos.
+- Si el crate tiene `tests/integration/main.rs`, sus pruebas forman un solo binario: crea los archivos nuevos dentro de `tests/integration/`, decláralos como `mod` en `main.rs` y usa los fakes con `use crate::common;` (ver «Calidad y pruebas» en `AGENTS.md`). No crees archivos sueltos en `tests/`.
+- Ejecuta con CPU limitada: `CARGO_BUILD_JOBS=2 nice -n 19 cargo test --locked -p <crate> --test <archivo> -- --test-threads=2` (con un solo binario, `--test integration <módulo>::`). Al terminar pasa `cargo fmt --all` y `CARGO_BUILD_JOBS=2 nice -n 19 cargo clippy --workspace --all-targets --locked -- -D warnings`, y corrige los avisos de tus archivos.
 - No uses `git stash`, `git reset`, `git checkout` ni comandos que cambien el estado del repositorio.
 - Si una prueba falla y crees que el esperado es correcto, no la debilites ni la marques `#[ignore]`: déjala fallar y repórtala. Si descubres que el esperado era tuyo y estaba mal, corrígela.
 

@@ -2,7 +2,7 @@
 //! archivos de la nube se restauran en una sola carpeta (deducida o elegida) en lugar de
 //! detener la sincronización, y nada local se sobrescribe ni se duplica.
 
-mod common;
+use crate::common;
 
 use common::*;
 use emusync_domain::library::{EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType};

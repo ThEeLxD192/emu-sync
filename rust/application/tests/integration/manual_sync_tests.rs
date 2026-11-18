@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use emusync_application::{
     ManualEntrySync, ManualFileSync, PlannedSave, SyncContext, SyncServices,

@@ -101,7 +101,7 @@ No damos por válida una prueba adversarial solo porque compile y pase en verde.
 
 1. Identificar la línea o guardia de producción que protege el contrato (por ejemplo, la verificación de revisión en `CredentialTransaction`, el chequeo de inodo en `PinnedRemoteDestination`, la retención del error en `RetainedFiles` o el rollback en `CloudFolderMigrator`).
 2. Comentar o invertir temporalmente esa condición en la copia de trabajo.
-3. Ejecutar el test (`cargo test --locked -p <crate> --test <suite>`): **debe fallar por la aserción exacta que protege el contrato**.
+3. Ejecutar el test (`cargo test --locked -p <crate> --test <suite>`, o `--test integration <módulo>::` si el crate compila sus pruebas en un solo binario): **debe fallar por la aserción exacta que protege el contrato**.
 4. Restaurar el código de producción y volver a verificar que pasa en verde y sin warnings de Clippy.
 
 ---

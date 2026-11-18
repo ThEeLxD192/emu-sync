@@ -54,7 +54,7 @@ Presenta al usuario una **Tabla de Paridad `src/` vs `tests/`** evaluando:
 2. **Detección de Suites Monolíticas**:
    - Señala cualquier archivo en `tests/` que supere ~500–600 líneas o que mezcle pruebas de múltiples submódulos distintos (por ejemplo, un `orchestrator_tests.rs` de 1,400 líneas probando a la vez `lifecycle.rs`, `post_game.rs` y `status.rs`, o un `target_mapping_tests.rs` mezclando `target_mapping.rs` con `target_resolver.rs`).
 3. **Propuesta de Separación Modular**:
-   - Especifica exactamente qué **nuevos archivos de test** debe crear el agente implementador dentro de `tests/` para dividir las responsabilidades limpiamente, qué tests existentes deben moverse a cada archivo nuevo y cuándo conviene extraer mocks/fakes compartidos en `tests/common/mod.rs` (siguiendo la convención de pruebas de integración de Cargo donde `tests/common/mod.rs` no se compila como binario de test independiente).
+   - Especifica exactamente qué **nuevos archivos de test** debe crear el agente implementador dentro de `tests/` para dividir las responsabilidades limpiamente, qué tests existentes deben moverse a cada archivo nuevo y cuándo conviene extraer mocks/fakes compartidos en `tests/common/mod.rs` (siguiendo la convención de pruebas de integración de Cargo donde `tests/common/mod.rs` no se compila como binario de test independiente). Si el crate tiene `tests/integration/main.rs`, sus pruebas forman un solo binario: los archivos nuevos van en `tests/integration/` como módulos de `main.rs` y los fakes en `tests/integration/common/` (ver «Calidad y pruebas» en `AGENTS.md`).
 
 ### Fase 3: Matriz de Brechas Adversariales
 Analiza cada módulo buscando sistemáticamente estos **7 vectores hostiles**:

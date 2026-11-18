@@ -46,6 +46,8 @@ Al ejecutar localmente pruebas, Clippy o `cargo xtask`, limitar la CPU: antepone
 
 Mantener CI y resultados por plataforma, distinguir ejecución nueva de caché o informes históricos. Ejecutar pruebas y análisis afectados; ejecutar el check completo al cerrar integraciones. No agregar pruebas por movimientos mecánicos o documentación. Las pruebas deben proteger contratos y riesgos, no reflejar implementación ni cumplir cuotas.
 
+Las pruebas de integración de un crate se compilan en un solo binario: `rust/<crate>/tests/integration/main.rs` declara cada archivo de pruebas como módulo, y los fakes compartidos van en `tests/integration/common/` (`use crate::common;`). Cada archivo suelto en `tests/` es otro binario que vuelve a compilar `common` y se enlaza aparte, así que un archivo nuevo se añade como `mod` en `main.rs`. Una suite se ejecuta con `cargo test -p <crate> --test integration <módulo>::`. Migrado: `application` (de 8,5 s a 4,3 s compilando sus pruebas desde cero con `CARGO_BUILD_JOBS=2`); los demás crates siguen con un binario por archivo hasta migrarlos.
+
 El hook valida una exportación aislada del índice con `cargo xtask quality` y no formatea, prepara archivos ni ejecuta pruebas. No usar stash ni reset para hacerlo pasar.
 
 ### Flujo de cambios con subagentes

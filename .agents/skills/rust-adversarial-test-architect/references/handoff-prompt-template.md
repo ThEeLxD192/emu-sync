@@ -27,6 +27,7 @@ Cuando un archivo en `tests/` acumule pruebas de varios submódulos de `src/` o 
      - `orchestrator_tests.rs` (solo delegación e integración de `SyncOrchestrator` y `SyncOrchestratorFactory`)
 2. **Mocks compartidos en `tests/common/mod.rs`**:
    - En Cargo, cualquier archivo directo `tests/*.rs` se compila como un crate de test independiente, mientras que los submódulos en subdirectorios como `tests/common/mod.rs` pueden importarse con `mod common;` desde múltiples suites sin duplicar cientos de líneas de fakes (`MockFs`, `MockDrive`, `MockTrackedSync`, etc.) y sin generar un binario vacío en el test runner.
+   - Si el crate tiene `tests/integration/main.rs`, todas sus pruebas forman un solo binario: los archivos nuevos van en `tests/integration/`, declarados como `mod` en `main.rs`, y los fakes en `tests/integration/common/` con `use crate::common;`. No crear archivos sueltos en `tests/` (ver «Calidad y pruebas» en `AGENTS.md`).
 
 ---
 
