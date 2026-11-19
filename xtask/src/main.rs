@@ -1,7 +1,8 @@
 mod perf;
 mod perf_drive;
+mod test_layout;
 
-use cargo_metadata::{DependencyKind, MetadataCommand};
+use cargo_metadata::{DependencyKind, Metadata, MetadataCommand};
 use std::{error::Error, process::Command};
 
 fn allowed(source: &str, target: &str) -> bool {
@@ -19,11 +20,7 @@ fn allowed(source: &str, target: &str) -> bool {
     }
 }
 
-fn architecture() -> Result<(), Box<dyn Error>> {
-    let metadata = MetadataCommand::new()
-        .no_deps()
-        .other_options(vec!["--locked".into()])
-        .exec()?;
+fn architecture(metadata: &Metadata) -> Result<(), Box<dyn Error>> {
     for package in metadata.workspace_packages() {
         for dependency in &package.dependencies {
             if dependency.kind != DependencyKind::Normal {
@@ -46,6 +43,30 @@ fn architecture() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn package_tests(metadata: &Metadata) -> Vec<test_layout::PackageTests> {
+    metadata
+        .workspace_packages()
+        .into_iter()
+        .filter_map(|package| {
+            let dir = package.manifest_path.parent()?.as_std_path().to_path_buf();
+            let test_targets = package
+                .targets
+                .iter()
+                .filter(|target| target.is_test())
+                .map(|target| test_layout::TestTarget {
+                    name: target.name.clone(),
+                    source_path: target.src_path.as_std_path().to_path_buf(),
+                })
+                .collect();
+            Some(test_layout::PackageTests {
+                name: package.name.to_string(),
+                dir,
+                test_targets,
+            })
+        })
+        .collect()
+}
+
 fn run(args: &[&str]) -> Result<(), Box<dyn Error>> {
     println!("cargo {}", args.join(" "));
     if !Command::new("cargo").args(args).status()?.success() {
@@ -65,8 +86,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     // `quality` and `test` are the two halves of `check`, so CI can run them in parallel.
     if command != "test" {
-        architecture()?;
+        let metadata = MetadataCommand::new()
+            .no_deps()
+            .other_options(vec!["--locked".into()])
+            .exec()?;
+        architecture(&metadata)?;
         run(&["fmt", "--all", "--", "--check"])?;
+        // After the format check, so that a `main.rs` that does not parse gets rustfmt's
+        // diagnostic first.
+        test_layout::verify(&package_tests(&metadata))?;
         run(&[
             "clippy",
             "--workspace",
