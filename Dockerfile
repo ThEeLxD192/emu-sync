@@ -1,13 +1,30 @@
 # Builds the Linux AppImage on Debian Bookworm; only Docker is required on the host.
+# Stage "skeleton": the manifests plus empty crate roots. Its output only changes when the
+# dependencies do, so the dependency layer below stays cached across source changes.
+FROM rust:1.99.1-bookworm@sha256:e6f2cff35d0f309acf8433b4f05878ed77092602c5065cc81801177da0bb3a9c AS skeleton
+WORKDIR /src
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY rust ./rust
+COPY xtask ./xtask
+RUN find rust xtask -type f ! -name Cargo.toml -regextype posix-extended \
+      ! -regex '(rust/[^/]+|xtask)/(src/(lib|main)|build|benches/[^/]+)\.rs' -delete && \
+    find rust xtask -type d -empty -delete && \
+    find rust xtask -name '*.rs' ! -name lib.rs | while read -r f; do echo 'fn main() {}' > "$f"; done && \
+    find rust xtask -name lib.rs -exec truncate -s 0 {} +
+
 # Stage "build": EmuSync binary and runtime fallback libraries.
 FROM rust:1.99.1-bookworm@sha256:e6f2cff35d0f309acf8433b4f05878ed77092602c5065cc81801177da0bb3a9c AS build
 # Optional: limits Cargo parallelism when passed with --build-arg.
 ARG CARGO_BUILD_JOBS
 WORKDIR /src
-COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY --from=skeleton /src ./
+RUN cargo build --release --locked -p emusync-desktop-app
 COPY rust ./rust
 COPY xtask ./xtask
-RUN cargo build --release --locked -p emusync-desktop-app && \
+# Sources keep their checkout times, which may predate the skeleton build: without the touch
+# Cargo would take the empty crates as up to date and package them.
+RUN find rust xtask -type f -exec touch {} + && \
+    cargo build --release --locked -p emusync-desktop-app && \
     install -m 755 target/release/emusync-desktop-app /usr/local/bin/EmuSync
 
 # Window-system libraries only. Graphics loaders and drivers remain supplied by the host.
@@ -72,3 +89,7 @@ RUN mkdir /out && \
     EMUSYNC_BINARY=/usr/local/bin/EmuSync EMUSYNC_RUNTIME_DIR=/opt/emusync-runtime \
     APPIMAGETOOL=/opt/appimage/appimagetool/AppRun APPIMAGE_RUNTIME_FILE=/opt/appimage/runtime-x86_64 \
       bash scripts/build-appimage.sh /out/EmuSync-x86_64.AppImage
+
+# Stage "appimage": only the AppImage, exported to the host with `--output`.
+FROM scratch AS appimage
+COPY --from=package /out/EmuSync-x86_64.AppImage /

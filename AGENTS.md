@@ -40,11 +40,18 @@ Las skills externas proceden de [full-stack-skills/rust-skills](https://github.c
 
 ## Calidad y pruebas
 
-`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked`, agregados con el verificador de arquitectura mediante `cargo xtask quality` (sin pruebas) y `cargo xtask check`. Los scripts tienen pruebas en `scripts/tests/`.
+`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` y `cargo test --workspace --locked`, agregados con el verificador de arquitectura y el de la estructura de las pruebas de integración mediante `cargo xtask quality` (sin pruebas) y `cargo xtask check`. Los scripts tienen pruebas en `scripts/tests/`.
 
 Al ejecutar localmente pruebas, Clippy o `cargo xtask`, limitar la CPU: anteponer `nice -n 19` (y `ionice -c3` si el disco se satura) y usar `CARGO_BUILD_JOBS=2`; para pruebas, `-- --test-threads=2`. Ejemplo: `CARGO_BUILD_JOBS=2 nice -n 19 cargo test --workspace --locked -- --test-threads=2`. Esto aplica también a agentes y subagentes; no es requisito de CI.
 
 Mantener CI y resultados por plataforma, distinguir ejecución nueva de caché o informes históricos. Ejecutar pruebas y análisis afectados; ejecutar el check completo al cerrar integraciones. No agregar pruebas por movimientos mecánicos o documentación. Las pruebas deben proteger contratos y riesgos, no reflejar implementación ni cumplir cuotas.
+
+Las pruebas de integración de cada crate se compilan en un solo binario: `rust/<crate>/tests/integration/main.rs` declara cada archivo de pruebas como módulo, y los fakes compartidos van en `tests/integration/common/` (`use crate::common;`). Un archivo suelto en `tests/` sería otro binario que vuelve a compilar `common` y se enlaza aparte, y un archivo de `tests/integration/` sin su `mod` en `main.rs` no se compila; un archivo nuevo se añade como `mod` en `main.rs`. `cargo xtask quality` rechaza ambos casos y un `tests/integration/` sin `main.rs`. Una suite se ejecuta con `cargo test -p <crate> --test integration <módulo>::`. Así, compilar desde cero las pruebas de los ocho crates con `CARGO_BUILD_JOBS=2` pasó de unos 48 s a unos 30 s (suma de las medidas de cada crate), y las pruebas lentas de archivos distintos se solapan al ejecutarse. Excepciones: `domain/tests/fixtures/` guarda datos, no pruebas, y `data-updates/tests/support/` son pruebas unitarias de `src/downloader.rs`, incluidas con `#[path]`.
+
+- `common` no lleva `#![allow(dead_code)]`: un helper sin uso es código muerto y se borra, y uno que solo usan pruebas de una plataforma lleva su `#[cfg(...)]` (si no, Clippy falla en la otra). Por la misma razón, un archivo que solo usa `common` dentro de pruebas con `cfg` lo nombra como `crate::common::…` en vez de importarlo.
+- Un módulo de una sola plataforma lo declara con `#![cfg(...)]` interno.
+- Todas las pruebas comparten proceso: nada de estado global sin aislar (variables de entorno, directorio actual, puertos que se sueltan y se vuelven a enlazar; para esto último, `data-drive` usa puertos fuera del rango efímero).
+- Una prueba que se relanza con `current_exe()` filtra por su nombre completo (`<módulo>::<prueba>`, con `module_path!()`) y comprueba que el hijo ejecutó la prueba.
 
 El hook valida una exportación aislada del índice con `cargo xtask quality` y no formatea, prepara archivos ni ejecuta pruebas. No usar stash ni reset para hacerlo pasar.
 

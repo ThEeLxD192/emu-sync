@@ -273,7 +273,8 @@ on every change. It modifies the machine, so use it only on a disposable one.
 
 ## CI/CD & Automated Releases
 
-- **CI Validation (`.github/workflows/ci.yml`)**: On Linux and Windows, runs `cargo xtask check` and the script tests; on Linux it also builds the AppImage.
+- **CI Validation (`.github/workflows/ci.yml`)**: On Linux and Windows, runs `cargo xtask check` and the script tests.
+- **Linux Packaging (`.github/workflows/appimage.yml`)**: Builds the AppImage in Docker on every push, and on pull requests that touch the Dockerfile, packaging, manifests or build scripts. Dependency layers come from the GitHub Actions cache, refreshed by pushes to `main`.
 - **Windows Packages (`.github/workflows/windows-packages.yml`)**: Builds the MSI and the portable ZIP, then installs, upgrades from a previous release, reinstalls and uninstalls the MSI on the runner and checks each step. Run it by hand from any branch (Actions tab) to download the packages; it also runs on pull requests that touch the packaging files, and the release workflow runs it first.
 - **Publish Release (`.github/workflows/release.yml`)**: Manual trigger (`workflow_dispatch`) on `main` that:
   1. Prompts for the SemVer release type (`patch`, `minor`, `major`).
