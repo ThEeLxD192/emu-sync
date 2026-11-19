@@ -9,6 +9,8 @@ use std::{fmt, future::Future, path::Path, sync::Arc, time::Duration};
 use tokio_util::{io::ReaderStream, sync::CancellationToken};
 
 const FIELDS: &str = "id,title,modifiedDate,etag,version,sha256Checksum";
+/// How long a request already in flight may still finish after cancellation.
+const CANCEL_GRACE: Duration = Duration::from_secs(1);
 
 /// A previously observed Drive revision. At least one comparable version or hash is required.
 #[derive(Clone, Debug)]
@@ -113,11 +115,12 @@ impl From<std::io::Error> for ConditionalError {
 async fn finish_or_retain_unknown<T>(
     request: impl Future<Output = Result<T, ConditionalError>>,
     cancel: &CancellationToken,
+    grace: Duration,
 ) -> Result<T, ConditionalError> {
     tokio::pin!(request);
     tokio::select! {
         result = &mut request => result,
-        () = cancel.cancelled() => match tokio::time::timeout(Duration::from_secs(1), &mut request).await {
+        () = cancel.cancelled() => match tokio::time::timeout(grace, &mut request).await {
             Ok(result) => result,
             Err(_) => Err(ConditionalError::CancelledOutcomeUnknown),
         }
@@ -133,6 +136,7 @@ pub struct ConditionalUpdate {
     files: Url,
     uploads: Url,
     response_inactivity: Duration,
+    cancel_grace: Duration,
 }
 impl ConditionalUpdate {
     /// The client must disable redirects and implicit retries for remote mutations.
@@ -159,10 +163,16 @@ impl ConditionalUpdate {
             files,
             uploads,
             response_inactivity: Duration::from_secs(60),
+            cancel_grace: CANCEL_GRACE,
         }
     }
     pub fn with_response_inactivity(mut self, inactivity: Duration) -> Self {
         self.response_inactivity = inactivity;
+        self
+    }
+    /// Replaces how long an in-flight request may still finish after cancellation (1 s).
+    pub fn with_cancel_grace(mut self, grace: Duration) -> Self {
+        self.cancel_grace = grace;
         self
     }
     pub fn google(client: Client) -> Self {
@@ -320,6 +330,7 @@ impl ConditionalUpdate {
                 }
             },
             cancel,
+            self.cancel_grace,
         )
         .await?;
         if matches!(
@@ -341,6 +352,7 @@ impl ConditionalUpdate {
                     .map_err(ConditionalError::ResponseMetadata)
             },
             cancel,
+            self.cancel_grace,
         )
         .await?;
         if uploaded.id != observed.id || uploaded.title != remote_name {

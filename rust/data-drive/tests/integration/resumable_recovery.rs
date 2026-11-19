@@ -924,7 +924,8 @@ async fn slow_active_upload_can_exceed_body_inactivity_interval() {
     });
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
-    std::fs::write(&path, vec![7; 4 * 1024 * 1024]).unwrap();
+    // At least 128 reads of 16 KiB, each followed by 5 ms, outlast the 500 ms inactivity.
+    std::fs::write(&path, vec![7; 2 * 1024 * 1024]).unwrap();
     let clients = DriveHttpPolicy {
         connect: Duration::from_secs(2),
         metadata: Duration::from_secs(2),
@@ -1205,7 +1206,8 @@ async fn reconcile_reports_incomplete_offset_and_exhausts_retries_on_repeated_se
             listener
         });
 
-        let client = ResumableUpload::new(Client::new(), url);
+        let client =
+            ResumableUpload::new(Client::new(), url).with_retry_backoff(Duration::from_millis(1));
         let result = client.reconcile("synthetic", &session).await;
         assert!(matches!(result, Err(UploadError::OutcomeUnknown(_))));
         let listener = server.join().unwrap();
