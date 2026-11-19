@@ -7,6 +7,7 @@
 
 mod common;
 
+mod check_failure_tests;
 mod download_lifecycle_tests;
 mod download_safety_tests;
 mod download_timeout_tests;

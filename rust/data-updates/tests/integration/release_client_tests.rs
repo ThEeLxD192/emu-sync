@@ -25,6 +25,14 @@ const SPECIFIED_CHECK_LIMIT: Duration = Duration::from_secs(60);
 /// The specified inactivity limit of `UpdateDownloader` (Kotlin `UPDATE_SOCKET_TIMEOUT_MS`).
 const SPECIFIED_INACTIVITY_LIMIT: Duration = Duration::from_secs(60);
 
+/// The cause `reqwest` gives when a policy refuses a URL scheme. Without it, the message
+/// only says that building the request failed.
+const REFUSED_SCHEME_CAUSE: &str = "URL scheme is not allowed";
+
+/// The cause `reqwest` gives when a request outlives its timeout. Without it, the message
+/// only says that sending the request or reading its body failed.
+const CHECK_TIMEOUT_CAUSE: &str = "operation timed out";
+
 const RELEASE_BODY: &str = r#"{"tag_name":"v2.0.0","name":"EmuSync 2.0.0","body":"Fixes","assets":[{"name":"EmuSync-x86_64.AppImage","browser_download_url":"https://example.com/download/EmuSync-x86_64.AppImage","size":1024}]}"#;
 
 const ASSET_BYTES: &[u8] = b"new EmuSync AppImage bytes";
@@ -85,7 +93,7 @@ async fn give_client_time_to_read_pending_bytes() {
 }
 
 #[tokio::test]
-async fn https_only_check_against_plain_http_returns_none_without_connecting() {
+async fn https_only_check_against_plain_http_fails_without_connecting() {
     let server = TestServer::bind();
     let lowercase_base = server.base_url();
     let uppercase_base = lowercase_base.replacen("http://", "HTTP://", 1);
@@ -100,10 +108,15 @@ async fn https_only_check_against_plain_http_returns_none_without_connecting() {
                 panic!("{base_url}: an HTTPS-only check of a plain HTTP URL must not wait on it")
             });
 
-        assert!(
-            matches!(result, Ok(None)),
-            "{base_url}: a refused check keeps degrading to Ok(None), got {result:?}"
-        );
+        match result {
+            Err(UpdateError::Network(message)) => assert!(
+                message.contains(REFUSED_SCHEME_CAUSE),
+                "{base_url}: the error must give the refused scheme as its cause, got: {message}"
+            ),
+            other => {
+                panic!("{base_url}: a refused check is an error, not \"up to date\", got {other:?}")
+            }
+        }
         server.assert_no_connection();
     }
 }
@@ -134,10 +147,13 @@ async fn https_only_download_from_plain_http_fails_without_connecting_or_creatin
         .await
         .expect("an HTTPS-only download of a plain HTTP URL must not wait on it");
 
-        assert!(
-            result.is_err(),
-            "a plain HTTP download must be refused, got {result:?}"
-        );
+        match result {
+            Err(UpdateError::Network(message)) => assert!(
+                message.contains(REFUSED_SCHEME_CAUSE),
+                "the error must give the refused scheme as its cause, got: {message}"
+            ),
+            other => panic!("a plain HTTP download must be refused, got {other:?}"),
+        }
         server.assert_no_connection();
         assert!(progress.lock().expect("lock progress").is_empty());
         assert!(part_entries(dir.path()).is_empty());
@@ -264,7 +280,7 @@ async fn plain_http_client_download_follows_a_plain_http_redirect() {
 }
 
 #[tokio::test]
-async fn check_returns_none_within_check_limit_when_server_accepts_and_never_answers() {
+async fn check_fails_within_check_limit_when_server_accepts_and_never_answers() {
     let server = TestServer::bind();
     let base_url = server.base_url();
     let (release_tx, release_rx) = oneshot::channel::<()>();
@@ -290,16 +306,19 @@ async fn check_returns_none_within_check_limit_when_server_accepts_and_never_ans
     advance_virtual_time(SPECIFIED_CHECK_LIMIT + Duration::from_secs(1)).await;
 
     let result = join_with_limit(&mut check_task, &mut server_task, "silent release server").await;
-    assert!(
-        matches!(result, Ok(None)),
-        "a check that outlived its limit degrades to Ok(None), got {result:?}"
-    );
+    match result {
+        Err(UpdateError::Network(message)) => assert!(
+            message.contains(CHECK_TIMEOUT_CAUSE),
+            "the error must give the timeout as its cause, got: {message}"
+        ),
+        other => panic!("a check that outlived its limit is an error, got {other:?}"),
+    }
     drop(release_tx);
     assert_eq!(server_task.finish().await.len(), 1);
 }
 
 #[tokio::test]
-async fn check_returns_none_within_check_limit_when_body_stalls_after_headers() {
+async fn check_fails_within_check_limit_when_body_stalls_after_headers() {
     let half = RELEASE_BODY.len() / 2;
     let declared_length = RELEASE_BODY.len().to_string();
     let server = TestServer::bind();
@@ -341,10 +360,13 @@ async fn check_returns_none_within_check_limit_when_body_stalls_after_headers() 
     advance_virtual_time(SPECIFIED_CHECK_LIMIT + Duration::from_secs(1)).await;
 
     let result = join_with_limit(&mut check_task, &mut server_task, "stalled release body").await;
-    assert!(
-        matches!(result, Ok(None)),
-        "a check whose body stalled past its limit degrades to Ok(None), got {result:?}"
-    );
+    match result {
+        Err(UpdateError::Network(message)) => assert!(
+            message.contains(CHECK_TIMEOUT_CAUSE),
+            "the error must give the timeout as its cause, got: {message}"
+        ),
+        other => panic!("a check whose body stalled past its limit is an error, got {other:?}"),
+    }
     drop(release_tx);
     assert_eq!(server_task.finish().await.len(), 1);
 }

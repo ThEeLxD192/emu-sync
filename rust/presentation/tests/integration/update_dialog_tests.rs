@@ -5,6 +5,7 @@ use crate::common;
 use common::*;
 use egui::Context;
 use emusync_application::UpdateState;
+use emusync_domain::config::Language;
 use emusync_presentation::{
     ActiveDialog, EmuSyncApp, UiAction, dialogs::update_dialog_dismissible,
 };
@@ -150,5 +151,103 @@ fn dismissible_only_when_not_downloading() {
         UpdateState::Error("x".to_string()),
     ] {
         assert!(update_dialog_dismissible(&state), "{state:?}");
+    }
+}
+
+fn in_language(mut app: EmuSyncApp, language: Language) -> EmuSyncApp {
+    let mut config = config_with(Vec::new(), None);
+    config.language = language;
+    app.state.config = Some(config);
+    app
+}
+
+#[test]
+fn a_failed_check_is_explained_in_each_language_and_closes_without_actions() {
+    let table = [
+        (
+            Language::English,
+            "Update Error",
+            "Could not check for updates: HTTP 503",
+            "Close",
+            [
+                "Update Now",
+                "Restart Now",
+                "You are on the latest version of EmuSync.",
+            ],
+        ),
+        (
+            Language::Spanish,
+            "Error al actualizar",
+            "No se pudo comprobar si hay actualizaciones: HTTP 503",
+            "Cerrar",
+            [
+                "Actualizar ahora",
+                "Reiniciar ahora",
+                "Ya tienes la última versión de EmuSync.",
+            ],
+        ),
+    ];
+    for (language, title, message, close, absent_texts) in table {
+        let ctx = Context::default();
+        let mut app = in_language(
+            app_showing(UpdateState::CheckFailed("HTTP 503".to_string())),
+            language,
+        );
+        run_frames(&ctx, &mut app, (0..6).map(|_| Vec::new()).collect());
+
+        assert!(text_exists(&ctx, &mut app, title), "{language:?}: {title}");
+        assert!(
+            text_exists(&ctx, &mut app, message),
+            "{language:?}: {message}"
+        );
+        assert!(
+            !text_exists(&ctx, &mut app, "HTTP 503"),
+            "{language:?}: the detail is shown inside the sentence, not alone"
+        );
+        for absent in absent_texts {
+            assert!(
+                !text_exists(&ctx, &mut app, absent),
+                "{language:?}: {absent}"
+            );
+        }
+
+        click_button(&ctx, &mut app, close);
+
+        assert_eq!(app.take_actions(), Vec::<UiAction>::new(), "{language:?}");
+        assert_eq!(app.active_dialog(), &ActiveDialog::None, "{language:?}");
+    }
+}
+
+#[test]
+fn a_failed_check_dialog_closes_with_escape() {
+    let failed = UpdateState::CheckFailed("Network error: reset".to_string());
+    assert!(update_dialog_dismissible(&failed));
+
+    let ctx = Context::default();
+    let mut app = app_showing(failed);
+    run_frames(&ctx, &mut app, vec![Vec::new(), escape()]);
+
+    assert_eq!(app.active_dialog(), &ActiveDialog::None);
+    assert_eq!(app.take_actions(), Vec::<UiAction>::new());
+}
+
+#[test]
+fn after_a_failed_check_the_header_offers_a_new_manual_check_in_each_language() {
+    for (language, button) in [
+        (Language::English, "Check Updates"),
+        (Language::Spanish, "Buscar actualizaciones"),
+    ] {
+        let ctx = Context::default();
+        let mut app = in_language(EmuSyncApp::new(), language);
+        app.state.update_state = UpdateState::CheckFailed("HTTP 503".to_string());
+
+        click_button(&ctx, &mut app, button);
+
+        assert_eq!(
+            app.take_actions(),
+            vec![UiAction::CheckForUpdates { manual: true }],
+            "{language:?}"
+        );
+        assert_eq!(app.active_dialog(), &ActiveDialog::None, "{language:?}");
     }
 }

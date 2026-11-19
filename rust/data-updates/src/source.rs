@@ -63,26 +63,34 @@ impl UpdateSource for GitHubUpdateSource {
 
         async move {
             let url = format!("{base_url}/repos/{owner}/{repo}/releases/latest");
-            let response = match client
+            // A check that could not be made is an error, never "no newer version": the
+            // user who asked must not be told they are up to date.
+            let response = client
                 .get(&url)
                 .header(ACCEPT, "application/vnd.github+json")
                 .header(USER_AGENT, "EmuSync-Desktop-App")
                 .timeout(CHECK_TIMEOUT)
                 .send()
-                .await
-            {
-                Ok(resp) => resp,
-                Err(_) => return Ok(None),
-            };
+                .await?;
 
-            if response.status() != reqwest::StatusCode::OK {
+            let status = response.status();
+            // GitHub answers 404 when the repository has no published release yet.
+            if status == reqwest::StatusCode::NOT_FOUND {
                 return Ok(None);
             }
+            if status != reqwest::StatusCode::OK {
+                return Err(UpdateError::Http(format!(
+                    "HTTP {} {}",
+                    status.as_u16(),
+                    status.canonical_reason().unwrap_or("")
+                )));
+            }
 
-            let release: GitHubRelease = match response.json().await {
-                Ok(rel) => rel,
-                Err(_) => return Ok(None),
-            };
+            // Reading the body can fail like any transfer; a body that arrives whole but
+            // is not a release is invalid data, not a network failure.
+            let body = response.bytes().await?;
+            let release: GitHubRelease = serde_json::from_slice(&body)
+                .map_err(|error| UpdateError::InvalidRelease(error.to_string()))?;
 
             // Paridad con Kotlin: `removePrefix("v").removePrefix("V")` quita como máximo
             // un prefijo de cada tipo, en ese orden.

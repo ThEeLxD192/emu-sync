@@ -19,6 +19,9 @@ pub enum UpdateState {
         downloaded_path: String,
         is_steam_game_mode: bool,
     },
+    /// A release check that could not be made; holds the detail from the source, for
+    /// the interface to put in its own words.
+    CheckFailed(String),
     Error(String),
 }
 
@@ -172,7 +175,7 @@ where
                 if self.generation.load(Ordering::SeqCst) == request
                     && !self.download_busy.load(Ordering::SeqCst)
                 {
-                    self.publish(UpdateState::Error(format!("Update check failed: {err}")));
+                    self.publish(UpdateState::CheckFailed(err.to_string()));
                 }
             }
         }

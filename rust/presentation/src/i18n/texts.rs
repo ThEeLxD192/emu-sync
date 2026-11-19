@@ -255,6 +255,7 @@ texts! {
     msg_updates_disabled: "Updates are disabled in development builds. Set EMUSYNC_UPDATE_BASE_URL to a test release server.", "Las actualizaciones están desactivadas en las compilaciones de desarrollo. Define EMUSYNC_UPDATE_BASE_URL con un servidor de versiones de prueba.";
     msg_language_not_saved: "Could not save the language.", "No se pudo guardar el idioma.";
     msg_up_to_date: "EmuSync is up to date.", "EmuSync está al día.";
+    msg_update_check_failed: "Could not check for updates: {detail}", "No se pudo comprobar si hay actualizaciones: {detail}";
     msg_finish_before_update: "Finish the current operation before restarting to update.", "Termina la operación en curso antes de reiniciar para actualizar.";
     msg_pending_recovery: "Pending recovery of {count} unconfirmed upload(s).", "Recuperación pendiente de {count} subida(s) sin confirmar.";
     msg_found_recovery_records: "Found {count} pending sync recovery record(s).", "Se encontraron {count} registro(s) de recuperación de sincronización pendientes.";

@@ -99,7 +99,12 @@ async fn check_for_updates_detects_newer_release_and_msi_on_windows() {
     assert_release_request(&requests);
 }
 
-async fn assert_check_returns_none(name: &str, response: Option<Vec<u8>>) {
+/// The result of a check against a server that answers the release request with
+/// `response`, or closes without answering when it is `None`.
+async fn check_against(
+    name: &str,
+    response: Option<Vec<u8>>,
+) -> Result<Option<UpdateInfo>, UpdateError> {
     let server = TestServer::bind();
     let base_url = server.base_url();
     let server_task = server.spawn(move |mut connection| async move {
@@ -111,10 +116,7 @@ async fn assert_check_returns_none(name: &str, response: Option<Vec<u8>>) {
     let source =
         GitHubUpdateSource::new(client(), "owner", "repo", "1.0.0", false).with_base_url(base_url);
 
-    match source.check().await {
-        Ok(None) => {}
-        other => panic!("{name}: expected Kotlin-compatible Ok(None), got {other:?}"),
-    }
+    let result = source.check().await;
 
     let requests = server_task.finish().await;
     assert_eq!(
@@ -124,58 +126,16 @@ async fn assert_check_returns_none(name: &str, response: Option<Vec<u8>>) {
     );
     assert_eq!(requests[0].method, "GET");
     assert_eq!(requests[0].target, RELEASE_ENDPOINT);
+    result
 }
 
 #[tokio::test]
-async fn check_degrades_transport_http_and_json_failures_to_none() {
-    assert_check_returns_none("close without headers", None).await;
-
-    for status_line in [
-        "404 Not Found",
-        "429 Too Many Requests",
-        "503 Service Unavailable",
-    ] {
-        assert_check_returns_none(
-            status_line,
-            Some(http_response(
-                status_line,
-                &[("Content-Length", "0"), ("Connection", "close")],
-                b"",
-            )),
-        )
-        .await;
-    }
-
-    assert_check_returns_none(
-        "invalid json",
-        Some(response_with_content_length("200 OK", b"not json")),
-    )
-    .await;
-
-    assert_check_returns_none(
-        "missing tag_name",
-        Some(response_with_content_length(
-            "200 OK",
-            br#"{"name":"EmuSync","assets":[]}"#,
-        )),
-    )
-    .await;
-
-    let truncated = br#"{"tag_name":"v2.0.0""#;
-    let declared_length = (truncated.len() + 20).to_string();
-    assert_check_returns_none(
-        "truncated json body",
-        Some(http_response(
-            "200 OK",
-            &[
-                ("Content-Type", "application/json"),
-                ("Content-Length", declared_length.as_str()),
-                ("Connection", "close"),
-            ],
-            truncated,
-        )),
-    )
-    .await;
+async fn check_closed_without_an_answer_is_a_network_error() {
+    let result = check_against("close without headers", None).await;
+    assert!(
+        matches!(result, Err(UpdateError::Network(_))),
+        "close without headers: expected a network error, got {result:?}"
+    );
 }
 
 async fn assert_check_none_for_release(body: String, is_windows: bool, name: &str) {
@@ -302,40 +262,6 @@ async fn check_release_notes_follow_body_name_and_default_precedence() {
         assert_eq!(requests.len(), 1, "{name}");
         assert_eq!(requests[0].target, RELEASE_ENDPOINT, "{name}");
     }
-}
-
-#[tokio::test]
-async fn check_rejects_non_200_success_statuses_like_kotlin() {
-    let body = r#"{"tag_name":"v2.0.0","assets":[{"name":"EmuSync-x86_64.AppImage","browser_download_url":"https://example.com/download/EmuSync-x86_64.AppImage","size":1024}]}"#;
-    let mut failures = Vec::new();
-
-    for status_line in ["201 Created", "202 Accepted"] {
-        let server = TestServer::bind();
-        let base_url = server.base_url();
-        let server_task = server.spawn(move |mut connection| async move {
-            connection
-                .write_all(&response_with_content_length(status_line, body.as_bytes()))
-                .await?;
-            Ok(())
-        });
-        let source = GitHubUpdateSource::new(client(), "owner", "repo", "1.0.0", false)
-            .with_base_url(base_url);
-        let result = source.check().await;
-        if !matches!(result, Ok(None)) {
-            failures.push(format!(
-                "HTTP {status_line}: expected Kotlin-compatible Ok(None), got {result:?}"
-            ));
-        }
-        let requests = server_task.finish().await;
-        assert_eq!(requests.len(), 1, "HTTP {status_line}");
-        assert_eq!(requests[0].target, RELEASE_ENDPOINT, "HTTP {status_line}");
-    }
-
-    assert!(
-        failures.is_empty(),
-        "known Kotlin parity regression:\n{}",
-        failures.join("\n")
-    );
 }
 
 #[tokio::test]

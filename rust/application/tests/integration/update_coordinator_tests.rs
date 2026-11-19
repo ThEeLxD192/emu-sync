@@ -114,6 +114,20 @@ fn sample_update_info() -> UpdateInfo {
     }
 }
 
+/// Awaits `step`, failing instead of hanging when a regression keeps it from finishing.
+async fn within_harness_limit<T>(what: &str, step: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(std::time::Duration::from_secs(10), step)
+        .await
+        .unwrap_or_else(|_| panic!("{what} did not finish within the harness limit"))
+}
+
+/// Waits for the source to report that a check reached it.
+async fn check_started_within_limit(check_started: tokio::sync::oneshot::Receiver<()>) {
+    within_harness_limit("the check reaching the source", check_started)
+        .await
+        .expect("the source reports the check as started");
+}
+
 #[tokio::test]
 async fn update_check_publishes_state_transitions() {
     let source = MockSource::default();
@@ -277,7 +291,9 @@ async fn cancelled_download_cleans_up_destination_and_restores_available_state()
     });
 
     // Wait until download starts and stalls
-    rx.await.expect("download should have started");
+    within_harness_limit("the download reaching the source", rx)
+        .await
+        .expect("download should have started");
 
     // While downloading, can_check should be false
     assert!(!coordinator.can_check());
@@ -423,10 +439,14 @@ async fn stale_or_cancelled_check_does_not_overwrite_concurrent_download_or_read
     });
 
     // Wait until check_for_updates has started and suspended
-    check_start_rx.await.expect("check must have started");
+    check_started_within_limit(check_start_rx).await;
 
     // Perform download while check is pending, transitioning state to ReadyToRestart
-    coordinator.download(&info).await;
+    within_harness_limit(
+        "a download during a pending check",
+        coordinator.download(&info),
+    )
+    .await;
     assert!(matches!(
         coordinator.state(),
         UpdateState::ReadyToRestart { .. }
@@ -434,7 +454,9 @@ async fn stale_or_cancelled_check_does_not_overwrite_concurrent_download_or_read
 
     // Resume the stale check task
     check_resume_tx.send(()).expect("check_resume send failed");
-    check_task.await.expect("check_task join failed");
+    within_harness_limit("the stale check", check_task)
+        .await
+        .expect("check_task join failed");
 
     // Check must NOT overwrite ReadyToRestart with Available
     assert!(
@@ -456,4 +478,173 @@ async fn stale_or_cancelled_check_does_not_overwrite_concurrent_download_or_read
         }
         other => panic!("Expected UpdateState::Error, got: {other:?}"),
     }
+}
+
+type MockCoordinator = UpdateCoordinator<MockSource, MockFiles, MockInstaller>;
+/// Every state the coordinator published, in order.
+type PublishedStates = Arc<Mutex<Vec<UpdateState>>>;
+
+fn recording_coordinator(source: MockSource) -> (MockCoordinator, PublishedStates) {
+    let published = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&published);
+    let coordinator = UpdateCoordinator::new(
+        source,
+        MockFiles::default(),
+        MockInstaller::default(),
+        move |state| recorder.lock().unwrap().push(state.clone()),
+    );
+    (coordinator, published)
+}
+
+#[tokio::test]
+async fn a_failed_check_publishes_check_failed_with_the_source_detail_and_nothing_else() {
+    let source = MockSource::default();
+    *source.check_error.lock().unwrap() = Some("HTTP error: HTTP 503 Service Unavailable".into());
+    let (coordinator, published) = recording_coordinator(source);
+
+    coordinator.check_for_updates().await;
+
+    let expected = UpdateState::CheckFailed("HTTP error: HTTP 503 Service Unavailable".into());
+    assert_eq!(
+        *published.lock().unwrap(),
+        vec![UpdateState::Checking, expected.clone()]
+    );
+    assert_eq!(coordinator.state(), expected);
+    // A failed check leaves the updater free to try again.
+    assert!(coordinator.can_check());
+}
+
+#[tokio::test]
+async fn a_failed_check_after_a_found_release_reports_the_failure_and_a_later_empty_check_is_idle()
+{
+    let source = MockSource::default();
+    let info = sample_update_info();
+    *source.next_info.lock().unwrap() = Some(info.clone());
+    let (coordinator, published) = recording_coordinator(source.clone());
+
+    coordinator.check_for_updates().await;
+    *source.check_error.lock().unwrap() = Some("Network error: connection refused".into());
+    coordinator.check_for_updates().await;
+    *source.check_error.lock().unwrap() = None;
+    *source.next_info.lock().unwrap() = None;
+    coordinator.check_for_updates().await;
+
+    assert_eq!(
+        *published.lock().unwrap(),
+        vec![
+            UpdateState::Checking,
+            UpdateState::Available(info),
+            UpdateState::Checking,
+            UpdateState::CheckFailed("Network error: connection refused".into()),
+            UpdateState::Checking,
+            UpdateState::Idle,
+        ]
+    );
+}
+
+#[tokio::test]
+async fn each_repeated_failed_check_is_published_again() {
+    let source = MockSource::default();
+    *source.check_error.lock().unwrap() = Some("Network error: timed out".into());
+    let (coordinator, published) = recording_coordinator(source);
+
+    coordinator.check_for_updates().await;
+    coordinator.check_for_updates().await;
+
+    let failed = UpdateState::CheckFailed("Network error: timed out".into());
+    assert_eq!(
+        *published.lock().unwrap(),
+        vec![
+            UpdateState::Checking,
+            failed.clone(),
+            UpdateState::Checking,
+            failed,
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_failed_check_superseded_by_a_newer_check_does_not_overwrite_its_result() {
+    let source = MockSource::default();
+    let (check_start_tx, check_start_rx) = tokio::sync::oneshot::channel();
+    let (check_resume_tx, check_resume_rx) = tokio::sync::oneshot::channel();
+    *source.check_started.lock().unwrap() = Some(check_start_tx);
+    *source.check_resume.lock().unwrap() = Some(check_resume_rx);
+    let info = sample_update_info();
+    *source.next_info.lock().unwrap() = Some(info.clone());
+    let (coordinator, published) = recording_coordinator(source.clone());
+    let coordinator = Arc::new(coordinator);
+
+    let older_check = tokio::spawn({
+        let coordinator = Arc::clone(&coordinator);
+        async move { coordinator.check_for_updates().await }
+    });
+    check_started_within_limit(check_start_rx).await;
+
+    // The newer check finds the release while the older one is still waiting.
+    within_harness_limit("the newer check", coordinator.check_for_updates()).await;
+    // The older one then fails.
+    *source.check_error.lock().unwrap() = Some("Network error: reset".into());
+    check_resume_tx
+        .send(())
+        .expect("the older check is waiting");
+    within_harness_limit("the older check", older_check)
+        .await
+        .expect("the older check must finish");
+
+    assert_eq!(coordinator.state(), UpdateState::Available(info.clone()));
+    assert_eq!(
+        *published.lock().unwrap(),
+        vec![UpdateState::Checking, UpdateState::Available(info)]
+    );
+}
+
+#[tokio::test]
+async fn a_check_that_fails_while_a_download_finishes_leaves_the_update_ready_to_restart() {
+    let source = MockSource::default();
+    let (check_start_tx, check_start_rx) = tokio::sync::oneshot::channel();
+    let (check_resume_tx, check_resume_rx) = tokio::sync::oneshot::channel();
+    *source.check_started.lock().unwrap() = Some(check_start_tx);
+    *source.check_resume.lock().unwrap() = Some(check_resume_rx);
+    *source.check_error.lock().unwrap() = Some("Network error: reset".into());
+    let files = MockFiles::default();
+    *files.destination.lock().unwrap() = "/tmp/ready-after-failed-check.AppImage".into();
+    let published = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&published);
+    let coordinator = Arc::new(UpdateCoordinator::new(
+        source,
+        files,
+        MockInstaller::default(),
+        move |state| recorder.lock().unwrap().push(state.clone()),
+    ));
+
+    let check = tokio::spawn({
+        let coordinator = Arc::clone(&coordinator);
+        async move { coordinator.check_for_updates().await }
+    });
+    check_started_within_limit(check_start_rx).await;
+    let info = sample_update_info();
+    within_harness_limit(
+        "a download during a pending check",
+        coordinator.download(&info),
+    )
+    .await;
+    check_resume_tx.send(()).expect("the check is waiting");
+    within_harness_limit("the failing check", check)
+        .await
+        .expect("the check must finish");
+
+    let ready = UpdateState::ReadyToRestart {
+        downloaded_path: "/tmp/ready-after-failed-check.AppImage".into(),
+        is_steam_game_mode: false,
+    };
+    assert_eq!(coordinator.state(), ready);
+    let published = published.lock().unwrap().clone();
+    assert_eq!(published.last(), Some(&ready), "{published:?}");
+    assert!(
+        !published
+            .iter()
+            .any(|state| matches!(state, UpdateState::CheckFailed(_))),
+        "the failed check is stale once a download started: {published:?}"
+    );
 }

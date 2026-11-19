@@ -167,7 +167,7 @@ fn render_update_slot(
             );
             return;
         }
-        UpdateState::Idle | UpdateState::Error(_) => {
+        UpdateState::Idle | UpdateState::CheckFailed(_) | UpdateState::Error(_) => {
             let check = Pill {
                 text: t.check_updates,
                 text_color: ON_SURFACE_DIM,

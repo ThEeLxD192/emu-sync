@@ -185,17 +185,12 @@ pub fn render_update_dialog(
                         }
                     });
                 }
-                UpdateState::Error(message) => {
-                    ui.label(RichText::new(t.update_error).font(bold(15.0)).color(ERROR));
-                    ui.add_space(8.0);
-                    ui.add(Label::new(RichText::new(message).size(13.0).color(ON_SURFACE)).wrap());
-                    ui.add_space(16.0);
-                    button_row(ui, |ui| {
-                        if primary_button(ui, t.close).clicked() {
-                            on_close();
-                        }
-                    });
+                UpdateState::CheckFailed(detail) => {
+                    let message =
+                        crate::i18n::fill(t.msg_update_check_failed, &[("detail", detail)]);
+                    error_body(ui, t, &message, on_close);
                 }
+                UpdateState::Error(message) => error_body(ui, t, message, on_close),
                 // Rust-only states, reached from the "Check Updates" extra.
                 UpdateState::Checking => {
                     ui.label(
@@ -230,6 +225,19 @@ fn icon_header(ui: &mut Ui, icon: &str, title: &str, subtitle: &str) {
             ui.label(RichText::new(title).font(bold(20.0)).color(ON_SURFACE));
             ui.label(RichText::new(subtitle).size(12.0).color(ON_SURFACE_DIM));
         });
+    });
+}
+
+/// The error title, `message` and a close button, for a failed check or update.
+fn error_body(ui: &mut Ui, t: &crate::i18n::Texts, message: &str, on_close: &mut dyn FnMut()) {
+    ui.label(RichText::new(t.update_error).font(bold(15.0)).color(ERROR));
+    ui.add_space(8.0);
+    ui.add(Label::new(RichText::new(message).size(13.0).color(ON_SURFACE)).wrap());
+    ui.add_space(16.0);
+    button_row(ui, |ui| {
+        if primary_button(ui, t.close).clicked() {
+            on_close();
+        }
     });
 }
 

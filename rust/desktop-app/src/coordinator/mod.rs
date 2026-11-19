@@ -296,6 +296,10 @@ impl DesktopCoordinator {
             }
             match state {
                 UpdateState::Idle => coordinator.send_toast(coordinator.t().msg_up_to_date),
+                UpdateState::CheckFailed(detail) => coordinator.send_toast(fill(
+                    coordinator.t().msg_update_check_failed,
+                    &[("detail", &detail)],
+                )),
                 UpdateState::Error(message) => coordinator.send_toast(message),
                 _ => {}
             }

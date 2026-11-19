@@ -5,8 +5,9 @@ use crate::common;
 
 use common::{TestServer, assert_directory_entries, response_with_content_length};
 use emusync_data_updates::{
-    ReleaseTransport, UpdateDownloader, UpdateError, release_client_builder,
+    GitHubUpdateSource, ReleaseTransport, UpdateDownloader, UpdateError, release_client_builder,
 };
+use emusync_domain::update::UpdateSource;
 use rustls::pki_types::PrivatePkcs8KeyDer;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -192,4 +193,36 @@ async fn plain_http_policy_follows_the_same_redirect_from_https_to_plain_http() 
         std::fs::read(&destination).expect("read downloaded update"),
         ASSET_BYTES
     );
+}
+
+#[tokio::test]
+async fn https_only_check_redirected_from_https_to_plain_http_fails_naming_the_refused_scheme() {
+    let plain_server = TestServer::bind();
+    let tls_server = TlsServer::answering(redirect_to(
+        &plain_server.url("/repos/owner/repo/releases/latest"),
+    ));
+    let source = GitHubUpdateSource::new(
+        release_client_trusting(ReleaseTransport::HttpsOnly, &tls_server.certificate),
+        "owner",
+        "repo",
+        "1.0.0",
+        false,
+    )
+    .with_base_url(tls_server.base_url.clone());
+
+    let result = tokio::time::timeout(common::HARNESS_WAIT_LIMIT, source.check())
+        .await
+        .expect("a refused redirect must not wait on the plain HTTP server");
+
+    match result {
+        Err(UpdateError::Network(message)) => assert!(
+            message.contains("URL scheme is not allowed"),
+            "the error must give the refused scheme as its cause, got: {message}"
+        ),
+        other => panic!(
+            "a check redirected to plain HTTP is an error, not \"up to date\", got {other:?}"
+        ),
+    }
+    assert_eq!(tls_server.finish(), "/repos/owner/repo/releases/latest");
+    plain_server.assert_no_connection();
 }
