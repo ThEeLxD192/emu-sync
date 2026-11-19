@@ -12,3 +12,4 @@ mod download_safety_tests;
 mod download_timeout_tests;
 mod github_rules_tests;
 mod github_source_tests;
+mod release_client_tests;

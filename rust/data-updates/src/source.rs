@@ -5,7 +5,10 @@ use crate::{
 };
 use emusync_domain::update::{UpdateInfo, UpdateSource};
 use reqwest::header::{ACCEPT, USER_AGENT};
-use std::{future::Future, path::Path};
+use std::{future::Future, path::Path, time::Duration};
+
+/// Longest a release check may take, reading the response included.
+pub const CHECK_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug)]
 pub struct GitHubUpdateSource {
@@ -64,6 +67,7 @@ impl UpdateSource for GitHubUpdateSource {
                 .get(&url)
                 .header(ACCEPT, "application/vnd.github+json")
                 .header(USER_AGENT, "EmuSync-Desktop-App")
+                .timeout(CHECK_TIMEOUT)
                 .send()
                 .await
             {
