@@ -393,7 +393,8 @@ async fn linux_tcp_timeout_does_not_bound_silent_response_after_body_delivery() 
         clients.upload,
         Url::parse(&format!("{root}files/")).unwrap(),
         Url::parse(&format!("{root}upload/")).unwrap(),
-    );
+    )
+    .with_cancel_grace(Duration::from_millis(50));
     let (seen_tx, seen_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let server = thread::spawn(move || {
@@ -725,7 +726,7 @@ async fn cancellation_of_stalled_conditional_body_reports_unknown_outcome() {
     use std::{sync::mpsc, time::Duration};
     use tokio_util::sync::CancellationToken;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let client = adapter(&listener);
+    let client = adapter(&listener).with_cancel_grace(Duration::from_millis(50));
     let (seen_tx, seen_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let server = thread::spawn(move || {
@@ -778,7 +779,7 @@ async fn cancellation_of_stalled_success_metadata_reports_unknown_outcome() {
     use std::{sync::mpsc, time::Duration};
     use tokio_util::sync::CancellationToken;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let client = adapter(&listener);
+    let client = adapter(&listener).with_cancel_grace(Duration::from_millis(50));
     let (seen_tx, seen_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let server = thread::spawn(move || {

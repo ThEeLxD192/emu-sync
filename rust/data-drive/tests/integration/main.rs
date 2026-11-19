@@ -7,6 +7,7 @@
 mod common;
 
 mod conditional;
+mod conditional_cancel_grace;
 mod conditional_timeouts;
 mod download;
 mod folders;
@@ -17,5 +18,6 @@ mod loopback;
 mod oauth;
 mod resumable;
 mod resumable_recovery;
+mod resumable_retry_backoff;
 mod tracked_integration;
 mod transfer;

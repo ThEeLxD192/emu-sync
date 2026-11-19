@@ -13,6 +13,9 @@ const CHUNK: u64 = 8 * 1024 * 1024;
 /// Size of the pieces in which an upload chunk is handed to the HTTP stack.
 const BODY_SLICE: usize = 64 * 1024;
 const FIELDS: &str = "id,name,modifiedTime,sha256Checksum,version,parents";
+/// First wait before retrying a status query or a chunk that made no progress;
+/// each further retry doubles it.
+const RETRY_BACKOFF: Duration = Duration::from_millis(250);
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedFile {
@@ -130,6 +133,7 @@ pub struct ResumableUpload {
     empty_transfer: Client,
     upload_url: Url,
     response_inactivity: Duration,
+    retry_backoff: Duration,
 }
 impl ResumableUpload {
     /// The supplied client must disable redirects and implicit retries; use
@@ -155,11 +159,21 @@ impl ResumableUpload {
             empty_transfer,
             upload_url,
             response_inactivity: Duration::from_secs(60),
+            retry_backoff: RETRY_BACKOFF,
         }
     }
     pub fn with_response_inactivity(mut self, inactivity: Duration) -> Self {
         self.response_inactivity = inactivity;
         self
+    }
+    /// Replaces the first wait before a retry (250 ms); each further retry doubles it.
+    pub fn with_retry_backoff(mut self, first_wait: Duration) -> Self {
+        self.retry_backoff = first_wait;
+        self
+    }
+    fn retry_wait(&self, retries_before: u32) -> Duration {
+        self.retry_backoff
+            .saturating_mul(2u32.saturating_pow(retries_before))
     }
     async fn start(
         &self,
@@ -273,7 +287,7 @@ impl ResumableUpload {
                 }
             }
             if attempt < 2 {
-                tokio::time::sleep(Duration::from_millis(250 << attempt)).await;
+                tokio::time::sleep(self.retry_wait(attempt)).await;
             }
         }
         Err(UploadError::OutcomeUnknown(Box::new(session.clone())))
@@ -484,7 +498,7 @@ impl ResumableUpload {
                         tokio::select! {
                             biased;
                             () = cancel.cancelled() => return Err(UploadError::OutcomeUnknown(Box::new(session))),
-                            () = tokio::time::sleep(Duration::from_millis(250 << (no_progress - 1))) => {}
+                            () = tokio::time::sleep(self.retry_wait(no_progress - 1)) => {}
                         }
                     }
                     Progress::Offset(next) => {

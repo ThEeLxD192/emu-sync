@@ -3,7 +3,7 @@ use crate::common;
 use common::{read_request, reply_extra as reply};
 use emusync_data_drive::{ResumableUpload, UploadError};
 use reqwest::{Client, StatusCode, Url};
-use std::{net::TcpListener, thread};
+use std::{net::TcpListener, thread, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
@@ -364,6 +364,7 @@ async fn repeated_zero_acknowledgements_stop_with_recoverable_session() {
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abc").unwrap();
     let result = ResumableUpload::new(Client::new(), url)
+        .with_retry_backoff(Duration::from_millis(1))
         .upload(
             "synthetic",
             &path,
