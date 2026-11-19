@@ -1,6 +1,6 @@
 //! Delete confirmation: nothing is deleted without an explicit, matching answer.
 
-mod common;
+use crate::common;
 
 use common::*;
 use egui::{Context, RawInput};

@@ -1,6 +1,6 @@
 //! Tests for UI state queries.
 
-mod common;
+use crate::common;
 
 use common::*;
 use emusync_domain::{

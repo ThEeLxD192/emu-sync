@@ -1,6 +1,6 @@
 //! Google Drive setup dialog: credentials, link state and secret hygiene.
 
-mod common;
+use crate::common;
 
 use common::*;
 use egui::Context;

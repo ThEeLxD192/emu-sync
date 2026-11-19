@@ -1,6 +1,6 @@
 //! Cover cache: background loading, failure memory, size guards and scaling.
 
-mod common;
+use crate::common;
 
 use common::TempDirGuard;
 use egui::{Context, RawInput};

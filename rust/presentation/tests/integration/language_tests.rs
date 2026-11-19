@@ -1,6 +1,6 @@
 //! The interface follows the configured language, and the header chip changes it.
 
-mod common;
+use crate::common;
 
 use common::*;
 use egui::Context;

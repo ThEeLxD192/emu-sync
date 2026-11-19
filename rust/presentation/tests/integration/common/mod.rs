@@ -1,5 +1,4 @@
 //! Headless egui helpers and fixtures shared by the presentation suites.
-#![allow(dead_code)]
 
 use egui::{Context, Event, Modifiers, PointerButton, Pos2, RawInput, Rect, Shape, vec2};
 use emusync_domain::{

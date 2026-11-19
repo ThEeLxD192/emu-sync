@@ -1,7 +1,7 @@
 //! Results of background work (pickers, restore previews, save kind detection)
 //! applied to whatever dialog is open when they arrive.
 
-mod common;
+use crate::common;
 
 use common::*;
 use emusync_domain::library::SaveTargetType;

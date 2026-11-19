@@ -1,6 +1,6 @@
 //! Game edit form: restore previews, custom cover and target scoping.
 
-mod common;
+use crate::common;
 
 use common::*;
 use emusync_domain::library::{

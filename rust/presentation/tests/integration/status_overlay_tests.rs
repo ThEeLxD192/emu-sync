@@ -1,6 +1,6 @@
 //! Status overlays: passive operations, conflict choice, post-sync failure and errors.
 
-mod common;
+use crate::common;
 
 use common::*;
 use egui::Context;

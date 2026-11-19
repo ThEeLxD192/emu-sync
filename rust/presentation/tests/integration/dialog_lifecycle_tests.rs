@@ -1,7 +1,7 @@
 //! Dialog lifecycle: opening, replacing, saving and dismissing modals, and the
 //! guarantee that every save setup request is answered exactly once.
 
-mod common;
+use crate::common;
 
 use common::*;
 use egui::{Context, RawInput};

@@ -1,6 +1,6 @@
 //! Update dialog states, their buttons and the header download indicator.
 
-mod common;
+use crate::common;
 
 use common::*;
 use egui::Context;

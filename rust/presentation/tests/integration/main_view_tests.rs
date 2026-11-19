@@ -1,6 +1,6 @@
 //! Main window: header, sidebar and game grid interactions through headless frames.
 
-mod common;
+use crate::common;
 
 use common::*;
 use egui::{Context, Pos2};
