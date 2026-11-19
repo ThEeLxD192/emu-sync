@@ -499,12 +499,12 @@ fn recording_coordinator(source: MockSource) -> (MockCoordinator, PublishedState
 #[tokio::test]
 async fn a_failed_check_publishes_check_failed_with_the_source_detail_and_nothing_else() {
     let source = MockSource::default();
-    *source.check_error.lock().unwrap() = Some("HTTP error: HTTP 503 Service Unavailable".into());
+    *source.check_error.lock().unwrap() = Some("HTTP error: 503 Service Unavailable".into());
     let (coordinator, published) = recording_coordinator(source);
 
     coordinator.check_for_updates().await;
 
-    let expected = UpdateState::CheckFailed("HTTP error: HTTP 503 Service Unavailable".into());
+    let expected = UpdateState::CheckFailed("HTTP error: 503 Service Unavailable".into());
     assert_eq!(
         *published.lock().unwrap(),
         vec![UpdateState::Checking, expected.clone()]

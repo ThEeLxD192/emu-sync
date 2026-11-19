@@ -8,7 +8,7 @@ use common::{read_http_request_async, write_http_json_async};
 use emusync_application::UpdateState;
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{AppEvent, DesktopCoordinator, coordinator::UpdateSourceConfig};
-use emusync_domain::config::Language;
+use emusync_domain::{config::Language, update::UpdateInfo};
 use emusync_presentation::actions::UiAction;
 use std::{
     sync::{Arc, mpsc::Receiver},
@@ -326,14 +326,14 @@ async fn a_manual_check_against_an_unavailable_server_says_it_could_not_check_ne
 
     let mut seen = Vec::new();
     collect_until(&rx, &mut seen, is_failed_check_toast).await;
-    let detail = check_failed_detail(&seen);
-    assert!(
-        detail.contains("503"),
-        "the detail names the server's answer: {detail:?}"
+    assert_eq!(
+        check_failed_detail(&seen),
+        "HTTP error: 503 Service Unavailable",
+        "the detail names the server's answer once: {seen:?}"
     );
     assert_eq!(
         toasts(&seen),
-        vec![format!("Could not check for updates: {detail}").as_str()],
+        vec!["Could not check for updates: HTTP error: 503 Service Unavailable"],
         "{seen:?}"
     );
     assert!(
@@ -434,4 +434,54 @@ async fn a_failed_automatic_check_stays_silent_and_a_later_manual_one_reports_it
         vec![format!("Could not check for updates: {detail}").as_str()],
         "only the manual check reports the failure: {seen:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_download_the_server_refuses_shows_its_status_once_in_the_update_error() {
+    let cases = [
+        (
+            "503 Service Unavailable",
+            "Failed to download update: HTTP error: 503 Service Unavailable",
+        ),
+        (
+            "503 Down for maintenance",
+            "Failed to download update: HTTP error: 503 Service Unavailable",
+        ),
+        (
+            "599 Network Connect Timeout Error",
+            "Failed to download update: HTTP error: 599 <unknown status code>",
+        ),
+    ];
+
+    for (status_line, expected) in cases {
+        let base = release_server_answering(ReleaseAnswer::Status(status_line)).await;
+        let (coordinator, rx, _dir) = coordinator(UpdateSourceConfig::Controlled(base.clone()));
+        let info = UpdateInfo {
+            version: "99.0.0".into(),
+            tag_name: "v99.0.0".into(),
+            release_notes: "Fixes".into(),
+            download_url: format!("{base}/download/{PLATFORM_ASSET}"),
+            asset_size: ASSET.len() as i64,
+            asset_name: PLATFORM_ASSET.into(),
+        };
+
+        coordinator.handle_action(UiAction::DownloadUpdate(info));
+
+        let mut seen = Vec::new();
+        collect_until(&rx, &mut seen, |event| {
+            matches!(
+                event,
+                AppEvent::UpdateStateChanged(
+                    UpdateState::Error(_) | UpdateState::ReadyToRestart { .. }
+                )
+            )
+        })
+        .await;
+        match seen.last() {
+            Some(AppEvent::UpdateStateChanged(UpdateState::Error(message))) => {
+                assert_eq!(message, expected, "{status_line}: {seen:?}");
+            }
+            other => panic!("{status_line}: a refused download is an update error, got {other:?}"),
+        }
+    }
 }

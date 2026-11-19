@@ -79,11 +79,7 @@ impl UpdateSource for GitHubUpdateSource {
                 return Ok(None);
             }
             if status != reqwest::StatusCode::OK {
-                return Err(UpdateError::Http(format!(
-                    "HTTP {} {}",
-                    status.as_u16(),
-                    status.canonical_reason().unwrap_or("")
-                )));
+                return Err(UpdateError::Http(status));
             }
 
             // Reading the body can fail like any transfer; a body that arrives whole but

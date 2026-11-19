@@ -399,10 +399,11 @@ async fn source_download_delegates_bytes_errors_and_progress() {
                     "{name}"
                 );
             }
-            ExpectedDownload::Http(status) => {
+            ExpectedDownload::Http(expected_code) => {
                 match result {
-                    Err(UpdateError::Http(message)) if message.contains(status) => {}
-                    other => panic!("{name}: expected HTTP {status}, got {other:?}"),
+                    Err(UpdateError::Http(received_status))
+                        if received_status.as_str() == expected_code => {}
+                    other => panic!("{name}: expected HTTP {expected_code}, got {other:?}"),
                 }
                 assert_eq!(
                     std::fs::read(&destination).expect("read destination"),

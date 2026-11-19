@@ -305,68 +305,73 @@ async fn check_reports_each_unexpected_status_with_its_code_and_reason() {
         (
             "201 with a release-shaped body",
             response_with_content_length("201 Created", release),
-            "HTTP 201 Created",
+            "HTTP error: 201 Created",
         ),
         (
             "202 with a release-shaped body",
             response_with_content_length("202 Accepted", release),
-            "HTTP 202 Accepted",
+            "HTTP error: 202 Accepted",
         ),
         (
             "204 No Content",
             http_response("204 No Content", &[("Connection", "close")], b""),
-            "HTTP 204 No Content",
+            "HTTP error: 204 No Content",
         ),
         (
             "301 without a Location",
             response_with_content_length("301 Moved Permanently", b""),
-            "HTTP 301 Moved Permanently",
+            "HTTP error: 301 Moved Permanently",
         ),
         (
             "304 Not Modified",
             http_response("304 Not Modified", &[("Connection", "close")], b""),
-            "HTTP 304 Not Modified",
+            "HTTP error: 304 Not Modified",
         ),
         (
             "401 with a release-shaped body",
             response_with_content_length("401 Unauthorized", release),
-            "HTTP 401 Unauthorized",
+            "HTTP error: 401 Unauthorized",
         ),
         (
             "403 Forbidden (rate limit)",
             response_with_content_length("403 Forbidden", b""),
-            "HTTP 403 Forbidden",
+            "HTTP error: 403 Forbidden",
         ),
         (
             "410 Gone",
             response_with_content_length("410 Gone", b""),
-            "HTTP 410 Gone",
+            "HTTP error: 410 Gone",
         ),
         (
             "429 Too Many Requests",
             response_with_content_length("429 Too Many Requests", b""),
-            "HTTP 429 Too Many Requests",
+            "HTTP error: 429 Too Many Requests",
         ),
         (
             "500 with a release-shaped body",
             response_with_content_length("500 Internal Server Error", release),
-            "HTTP 500 Internal Server Error",
+            "HTTP error: 500 Internal Server Error",
         ),
         (
             "502 Bad Gateway",
             response_with_content_length("502 Bad Gateway", b"<html>Bad gateway</html>"),
-            "HTTP 502 Bad Gateway",
+            "HTTP error: 502 Bad Gateway",
         ),
         (
             "503 Service Unavailable",
             response_with_content_length("503 Service Unavailable", b""),
-            "HTTP 503 Service Unavailable",
+            "HTTP error: 503 Service Unavailable",
+        ),
+        (
+            "599 without a standard reason",
+            response_with_content_length("599 Network Connect Timeout Error", b""),
+            "HTTP error: 599 <unknown status code>",
         ),
     ];
 
     for (name, response, expected) in cases {
         match check_answered_with(name, response).await {
-            Err(UpdateError::Http(message)) => assert_eq!(message, expected, "{name}"),
+            Err(error @ UpdateError::Http(_)) => assert_eq!(error.to_string(), expected, "{name}"),
             other => panic!("{name}: expected an HTTP error, got {other:?}"),
         }
     }
@@ -404,5 +409,80 @@ async fn check_of_a_repository_without_releases_ignores_the_body_of_the_404() {
             matches!(result, Ok(None)),
             "{name}: a repository without releases has no update, got {result:?}"
         );
+    }
+}
+
+#[tokio::test]
+async fn check_names_an_unexpected_status_by_its_standard_reason_whatever_reason_the_server_writes()
+{
+    // The server's own reason phrase never reaches the user: a reason that repeats "HTTP",
+    // names another status or is missing must still read as the code and its standard
+    // reason, once, with nothing left over at the end.
+    let cases = [
+        (
+            "503 with a custom reason",
+            "503 Down for maintenance",
+            "HTTP error: 503 Service Unavailable",
+        ),
+        (
+            "503 without a reason",
+            "503",
+            "HTTP error: 503 Service Unavailable",
+        ),
+        (
+            "500 whose reason names another status",
+            "500 OK",
+            "HTTP error: 500 Internal Server Error",
+        ),
+        (
+            "502 whose reason already says HTTP",
+            "502 HTTP 502 Bad Gateway",
+            "HTTP error: 502 Bad Gateway",
+        ),
+        (
+            "unassigned 599 without a reason",
+            "599",
+            "HTTP error: 599 <unknown status code>",
+        ),
+        (
+            "highest three-digit status with a custom reason",
+            "999 Custom Failure",
+            "HTTP error: 999 <unknown status code>",
+        ),
+    ];
+
+    for (name, status_line, expected) in cases {
+        let response = response_with_content_length(status_line, b"");
+        match check_answered_with(name, response).await {
+            Err(error @ UpdateError::Http(_)) => assert_eq!(error.to_string(), expected, "{name}"),
+            other => panic!("{name}: expected an HTTP error, got {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn check_classifies_the_answer_by_its_status_code_not_by_the_reason_the_server_writes() {
+    let newer_release = br#"{"tag_name":"v2.0.0","assets":[{"name":"EmuSync-x86_64.AppImage","browser_download_url":"https://example.com/EmuSync-x86_64.AppImage","size":1024}]}"#;
+
+    let not_found_saying_ok = check_answered_with(
+        "404 whose reason says OK",
+        response_with_content_length("404 OK", newer_release),
+    )
+    .await;
+    assert!(
+        matches!(not_found_saying_ok, Ok(None)),
+        "a 404 is a repository without releases whatever its reason, got {not_found_saying_ok:?}"
+    );
+
+    let ok_saying_unavailable = check_answered_with(
+        "200 whose reason says Service Unavailable",
+        response_with_content_length("200 Service Unavailable", newer_release),
+    )
+    .await;
+    match ok_saying_unavailable {
+        Ok(Some(update)) => assert_eq!(update.version, "2.0.0"),
+        other => {
+            panic!("a 200 carrying a newer release offers it whatever its reason, got {other:?}")
+        }
     }
 }

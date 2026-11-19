@@ -2,7 +2,8 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum UpdateError {
-    Http(String),
+    /// The server answered with a status other than the expected one.
+    Http(reqwest::StatusCode),
     Network(String),
     /// The server answered, but not with a release this updater can read.
     InvalidRelease(String),
@@ -18,7 +19,7 @@ pub enum UpdateError {
 impl fmt::Display for UpdateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Http(msg) => write!(f, "HTTP error: {msg}"),
+            Self::Http(status) => write!(f, "HTTP error: {status}"),
             Self::Network(msg) => write!(f, "Network error: {msg}"),
             Self::InvalidRelease(msg) => write!(f, "Invalid release information: {msg}"),
             Self::Io(err) => write!(f, "I/O error: {err}"),

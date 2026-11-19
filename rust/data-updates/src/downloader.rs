@@ -181,11 +181,7 @@ impl UpdateDownloader {
         };
 
         if response.status() != reqwest::StatusCode::OK {
-            return Err(UpdateError::Http(format!(
-                "HTTP {} {}",
-                response.status().as_u16(),
-                response.status().canonical_reason().unwrap_or("")
-            )));
+            return Err(UpdateError::Http(response.status()));
         }
 
         let total_bytes = response.content_length();
