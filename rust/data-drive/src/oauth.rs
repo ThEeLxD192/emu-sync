@@ -46,6 +46,19 @@ impl From<reqwest::Error> for OAuthError {
         Self::Transport(error)
     }
 }
+/// A code from the authorization endpoint and the PKCE verifier whose challenge was sent
+/// with that request; the token endpoint only exchanges the code together with it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct AuthorizationCode {
+    pub code: String,
+    pub code_verifier: String,
+}
+impl fmt::Debug for AuthorizationCode {
+    /// Leaves out both values: either one is half of what redeems the grant.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthorizationCode").finish_non_exhaustive()
+    }
+}
 #[derive(Deserialize)]
 struct Tokens {
     access_token: String,
@@ -144,7 +157,7 @@ where
     ) -> Result<String, OAuthError>
     where
         F: FnOnce(&str) -> Fut,
-        Fut: Future<Output = Result<String, OAuthError>>,
+        Fut: Future<Output = Result<AuthorizationCode, OAuthError>>,
     {
         self.authorize_scoped(config, allow_interactive, interactive)
             .await
@@ -159,7 +172,7 @@ where
     ) -> Result<(String, CredentialSnapshot), OAuthError>
     where
         F: FnOnce(&str) -> Fut,
-        Fut: Future<Output = Result<String, OAuthError>>,
+        Fut: Future<Output = Result<AuthorizationCode, OAuthError>>,
     {
         let mut credentials = config
             .credentials
@@ -209,7 +222,7 @@ where
             return Err(OAuthError::AuthenticationRequired);
         }
         self.current(config, &expected)?;
-        let code =
+        let authorization =
             tokio::time::timeout(Duration::from_secs(60), interactive(&credentials.client_id))
                 .await
                 .map_err(|_| OAuthError::TimedOut)??;
@@ -218,7 +231,8 @@ where
             .request(&[
                 ("client_id", &credentials.client_id),
                 ("client_secret", &credentials.client_secret),
-                ("code", &code),
+                ("code", &authorization.code),
+                ("code_verifier", &authorization.code_verifier),
                 ("redirect_uri", &self.redirect_uri),
                 ("grant_type", "authorization_code"),
             ])

@@ -3,7 +3,7 @@ mod conditional;
 pub use conditional::{ConditionalError, ConditionalUpdate, FileRevision, UploadedFile};
 
 mod oauth;
-pub use oauth::{OAuth, OAuthError, REDIRECT_URI};
+pub use oauth::{AuthorizationCode, OAuth, OAuthError, REDIRECT_URI};
 
 mod loopback;
 pub use loopback::loopback_code;
