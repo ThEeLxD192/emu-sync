@@ -592,7 +592,7 @@ fn take_preview_update(
                     return Err("--preview-update may only be specified once");
                 }
                 preview = Some(preview_update_state(name).ok_or(
-                    "--preview-update expects available, downloading, ready, ready-steam or error",
+                    "--preview-update expects available, downloading, ready, ready-steam, error or restart-failed",
                 )?);
             }
             None => rest.push(arg),
@@ -603,7 +603,7 @@ fn take_preview_update(
 
 #[cfg(debug_assertions)]
 fn preview_update_state(name: &str) -> Option<emusync_application::UpdateState> {
-    use emusync_application::UpdateState;
+    use emusync_application::{DownloadFailure, UpdateState};
     let info = emusync_domain::update::UpdateInfo {
         version: "9.9.9".to_string(),
         tag_name: "v9.9.9".to_string(),
@@ -625,7 +625,13 @@ fn preview_update_state(name: &str) -> Option<emusync_application::UpdateState> 
         },
         "ready" => ready(false),
         "ready-steam" => ready(true),
-        "error" => UpdateState::Error("Preview: the download could not be verified.".to_string()),
+        "error" => UpdateState::DownloadFailed(DownloadFailure::SizeMismatch {
+            expected_bytes: 1024,
+            received_bytes: 512,
+        }),
+        "restart-failed" => UpdateState::RestartFailed {
+            downloaded_path: "/nonexistent/emusync-preview-update".to_string(),
+        },
         _ => return None,
     })
 }

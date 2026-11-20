@@ -45,6 +45,7 @@ use emusync_platform_desktop::{
 };
 use emusync_presentation::{
     actions::UiAction,
+    dialogs::update_failure_message,
     i18n::{fill, sync_text},
     model::{AppStatus, SaveSetupRequest as UiSaveSetupRequest},
 };
@@ -294,14 +295,10 @@ impl DesktopCoordinator {
             if !manual {
                 return;
             }
-            match state {
-                UpdateState::Idle => coordinator.send_toast(coordinator.t().msg_up_to_date),
-                UpdateState::CheckFailed(detail) => coordinator.send_toast(fill(
-                    coordinator.t().msg_update_check_failed,
-                    &[("detail", &detail)],
-                )),
-                UpdateState::Error(message) => coordinator.send_toast(message),
-                _ => {}
+            if state == UpdateState::Idle {
+                coordinator.send_toast(coordinator.t().msg_up_to_date);
+            } else if let Some(message) = update_failure_message(coordinator.t(), &state) {
+                coordinator.send_toast(message);
             }
         });
     }

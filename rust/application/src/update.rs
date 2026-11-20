@@ -22,7 +22,30 @@ pub enum UpdateState {
     /// A release check that could not be made; holds the detail from the source, for
     /// the interface to put in its own words.
     CheckFailed(String),
-    Error(String),
+    /// A download that did not leave an update ready to install.
+    DownloadFailed(DownloadFailure),
+    /// The installer did not apply the update; the downloaded file is kept at
+    /// `downloaded_path` so the user can install it by hand.
+    RestartFailed {
+        downloaded_path: String,
+    },
+}
+
+/// Why a download did not leave an update ready to install.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DownloadFailure {
+    /// The local file the update is downloaded to could not be prepared (for example,
+    /// a folder without write permission); holds the detail.
+    DestinationUnavailable(String),
+    /// Transferring the file failed; holds the detail from the source.
+    Transfer(String),
+    /// The size of the downloaded file could not be read; holds the detail.
+    SizeUnreadable(String),
+    /// The downloaded file is not the size the release announces.
+    SizeMismatch {
+        expected_bytes: u64,
+        received_bytes: u64,
+    },
 }
 
 pub struct UpdateCoordinator<S, F, I> {
@@ -221,7 +244,7 @@ where
                 .files
                 .prepare_destination(info)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| DownloadFailure::DestinationUnavailable(e.to_string()))?;
             guard.destination = Some(dest.clone());
 
             let mut last_progress = 0.0f32;
@@ -236,18 +259,19 @@ where
                     }
                 })
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| DownloadFailure::Transfer(e.to_string()))?;
 
             if info.asset_size > 0 {
-                let actual_size = self
+                let received_bytes = self
                     .files
                     .size(&dest)
-                    .map_err(|e| format!("Could not read update size: {e}"))?;
-                if actual_size != info.asset_size as u64 {
-                    return Err(format!(
-                        "The update size does not match the release: expected {} bytes, received {actual_size}",
-                        info.asset_size
-                    ));
+                    .map_err(|e| DownloadFailure::SizeUnreadable(e.to_string()))?;
+                let expected_bytes = info.asset_size as u64;
+                if received_bytes != expected_bytes {
+                    return Err(DownloadFailure::SizeMismatch {
+                        expected_bytes,
+                        received_bytes,
+                    });
                 }
             }
             let is_steam = self.installer.is_steam_game_mode().unwrap_or(false);
@@ -263,11 +287,7 @@ where
                     is_steam_game_mode: is_steam,
                 });
             }
-            Err(err) => {
-                self.publish(UpdateState::Error(format!(
-                    "Failed to download update: {err}"
-                )));
-            }
+            Err(failure) => self.publish(UpdateState::DownloadFailed(failure)),
         }
     }
 
@@ -278,9 +298,9 @@ where
         match self.installer.restart(path) {
             Ok(true) => true,
             _ => {
-                self.publish(UpdateState::Error(format!(
-                    "Could not restart automatically. The update file is saved at: {path}"
-                )));
+                self.publish(UpdateState::RestartFailed {
+                    downloaded_path: path.to_owned(),
+                });
                 false
             }
         }

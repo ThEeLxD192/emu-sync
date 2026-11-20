@@ -12,7 +12,7 @@ use egui::{
     Align, Color32, FontId, Frame, Id, Label, Layout, Margin, Modal, RichText, ScrollArea, Sense,
     Stroke, Ui, vec2,
 };
-use emusync_application::UpdateState;
+use emusync_application::{DownloadFailure, UpdateState};
 use emusync_domain::update::UpdateInfo;
 use std::path::PathBuf;
 
@@ -185,12 +185,12 @@ pub fn render_update_dialog(
                         }
                     });
                 }
-                UpdateState::CheckFailed(detail) => {
-                    let message =
-                        crate::i18n::fill(t.msg_update_check_failed, &[("detail", detail)]);
+                UpdateState::CheckFailed(_)
+                | UpdateState::DownloadFailed(_)
+                | UpdateState::RestartFailed { .. } => {
+                    let message = update_failure_message(t, state).unwrap_or_default();
                     error_body(ui, t, &message, on_close);
                 }
-                UpdateState::Error(message) => error_body(ui, t, message, on_close),
                 // Rust-only states, reached from the "Check Updates" extra.
                 UpdateState::Checking => {
                     ui.label(
@@ -213,6 +213,40 @@ pub fn render_update_dialog(
     if modal.should_close() && update_dialog_dismissible(state) {
         on_close();
     }
+}
+
+/// The explanation of a failed check, download or restart in the language of `t`, or
+/// `None` for a state that is not a failure.
+pub fn update_failure_message(t: &crate::i18n::Texts, state: &UpdateState) -> Option<String> {
+    use crate::i18n::fill;
+    let message = match state {
+        UpdateState::CheckFailed(detail) => fill(t.msg_update_check_failed, &[("detail", detail)]),
+        UpdateState::DownloadFailed(DownloadFailure::DestinationUnavailable(detail)) => {
+            fill(t.msg_update_destination_unavailable, &[("detail", detail)])
+        }
+        UpdateState::DownloadFailed(DownloadFailure::Transfer(detail)) => {
+            fill(t.msg_update_download_failed, &[("detail", detail)])
+        }
+        UpdateState::DownloadFailed(DownloadFailure::SizeUnreadable(detail)) => {
+            fill(t.msg_update_size_unreadable, &[("detail", detail)])
+        }
+        UpdateState::DownloadFailed(DownloadFailure::SizeMismatch {
+            expected_bytes,
+            received_bytes,
+        }) => fill(
+            t.msg_update_size_mismatch,
+            &[("expected", expected_bytes), ("received", received_bytes)],
+        ),
+        UpdateState::RestartFailed { downloaded_path } => {
+            fill(t.msg_update_restart_failed, &[("path", downloaded_path)])
+        }
+        UpdateState::Idle
+        | UpdateState::Checking
+        | UpdateState::Available(_)
+        | UpdateState::Downloading { .. }
+        | UpdateState::ReadyToRestart { .. } => return None,
+    };
+    Some(message)
 }
 
 fn icon_header(ui: &mut Ui, icon: &str, title: &str, subtitle: &str) {

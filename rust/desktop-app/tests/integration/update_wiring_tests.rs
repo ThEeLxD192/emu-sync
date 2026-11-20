@@ -5,7 +5,7 @@
 use crate::common;
 
 use common::{read_http_request_async, write_http_json_async};
-use emusync_application::UpdateState;
+use emusync_application::{DownloadFailure, UpdateState};
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{AppEvent, DesktopCoordinator, coordinator::UpdateSourceConfig};
 use emusync_domain::{config::Language, update::UpdateInfo};
@@ -124,7 +124,7 @@ async fn check_finds_the_newer_release_and_downloads_it_ready_to_restart() {
         matches!(
             e,
             AppEvent::UpdateStateChanged(
-                UpdateState::ReadyToRestart { .. } | UpdateState::Error(_)
+                UpdateState::ReadyToRestart { .. } | UpdateState::DownloadFailed(_)
             )
         )
     })
@@ -340,7 +340,10 @@ async fn a_manual_check_against_an_unavailable_server_says_it_could_not_check_ne
         !seen.iter().any(|event| matches!(
             event,
             AppEvent::UpdateStateChanged(
-                UpdateState::Idle | UpdateState::Available(_) | UpdateState::Error(_)
+                UpdateState::Idle
+                    | UpdateState::Available(_)
+                    | UpdateState::DownloadFailed(_)
+                    | UpdateState::RestartFailed { .. }
             )
         )),
         "a failed check is neither \"no update\", a release nor an update error: {seen:?}"
@@ -437,19 +440,19 @@ async fn a_failed_automatic_check_stays_silent_and_a_later_manual_one_reports_it
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_download_the_server_refuses_shows_its_status_once_in_the_update_error() {
+async fn a_download_the_server_refuses_fails_naming_its_status_once() {
     let cases = [
         (
             "503 Service Unavailable",
-            "Failed to download update: HTTP error: 503 Service Unavailable",
+            "HTTP error: 503 Service Unavailable",
         ),
         (
             "503 Down for maintenance",
-            "Failed to download update: HTTP error: 503 Service Unavailable",
+            "HTTP error: 503 Service Unavailable",
         ),
         (
             "599 Network Connect Timeout Error",
-            "Failed to download update: HTTP error: 599 <unknown status code>",
+            "HTTP error: 599 <unknown status code>",
         ),
     ];
 
@@ -472,16 +475,185 @@ async fn a_download_the_server_refuses_shows_its_status_once_in_the_update_error
             matches!(
                 event,
                 AppEvent::UpdateStateChanged(
-                    UpdateState::Error(_) | UpdateState::ReadyToRestart { .. }
+                    UpdateState::DownloadFailed(_) | UpdateState::ReadyToRestart { .. }
                 )
             )
         })
         .await;
         match seen.last() {
-            Some(AppEvent::UpdateStateChanged(UpdateState::Error(message))) => {
-                assert_eq!(message, expected, "{status_line}: {seen:?}");
+            Some(AppEvent::UpdateStateChanged(UpdateState::DownloadFailed(
+                DownloadFailure::Transfer(detail),
+            ))) => {
+                assert_eq!(detail, expected, "{status_line}: {seen:?}");
             }
-            other => panic!("{status_line}: a refused download is an update error, got {other:?}"),
+            other => {
+                panic!("{status_line}: a refused download is a failed transfer, got {other:?}")
+            }
         }
     }
+}
+
+/// The updater stages downloads beside `APPIMAGE` and its installer replaces that file:
+/// these tests need it unset to know where downloads go and to never touch a real install.
+fn assert_not_running_from_an_app_image() {
+    assert!(
+        std::env::var_os("APPIMAGE").is_none(),
+        "run this test without APPIMAGE: the updater would use the running AppImage"
+    );
+}
+
+/// Serves `body` as a complete binary response to every request.
+async fn asset_server(body: &'static [u8]) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                if read_http_request_async(&mut stream).await.is_err() {
+                    return;
+                }
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes()).await;
+                let _ = stream.write_all(body).await;
+                let _ = stream.flush().await;
+            });
+        }
+    });
+    base
+}
+
+/// Update downloads (finished or partial) left in the temporary folder with `content`.
+fn leftover_downloads_with(content: &[u8]) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(std::env::temp_dir())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains("EmuSync-update"))
+        })
+        .filter(|path| std::fs::read(path).is_ok_and(|bytes| bytes == content))
+        .collect()
+}
+
+/// Bytes only this test serves, so its leftovers are told apart from other downloads.
+const SHORT_ASSET: &[u8] = b"update bytes shorter than the release announces (size mismatch test)";
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_download_whose_size_differs_from_the_release_names_both_sizes_and_leaves_no_file() {
+    assert_not_running_from_an_app_image();
+    let base = asset_server(SHORT_ASSET).await;
+    let (coordinator, rx, _dir) = coordinator(UpdateSourceConfig::Controlled(base.clone()));
+    let announced_bytes = SHORT_ASSET.len() as u64 + 100;
+    let info = UpdateInfo {
+        version: "99.0.0".into(),
+        tag_name: "v99.0.0".into(),
+        release_notes: "Fixes".into(),
+        download_url: format!("{base}/download/{PLATFORM_ASSET}"),
+        asset_size: announced_bytes as i64,
+        asset_name: PLATFORM_ASSET.into(),
+    };
+
+    coordinator.handle_action(UiAction::DownloadUpdate(info));
+
+    let mut seen = Vec::new();
+    collect_until(&rx, &mut seen, |event| {
+        matches!(
+            event,
+            AppEvent::UpdateStateChanged(
+                UpdateState::DownloadFailed(_) | UpdateState::ReadyToRestart { .. }
+            )
+        )
+    })
+    .await;
+    assert!(
+        matches!(
+            seen.last(),
+            Some(AppEvent::UpdateStateChanged(UpdateState::DownloadFailed(
+                DownloadFailure::SizeMismatch {
+                    expected_bytes,
+                    received_bytes,
+                }
+            ))) if *expected_bytes == announced_bytes
+                && *received_bytes == SHORT_ASSET.len() as u64
+        ),
+        "{seen:?}"
+    );
+    // The failure is published just before its file is removed: wait for the removal.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !leftover_downloads_with(SHORT_ASSET).is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "an unverified update stays on disk: {:?}",
+            leftover_downloads_with(SHORT_ASSET)
+        )
+    });
+    assert_eq!(toasts(&seen), Vec::<&str>::new(), "the dialog explains it");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_restart_that_cannot_apply_the_update_reports_its_path_keeps_the_file_and_frees_the_app()
+{
+    assert_not_running_from_an_app_image();
+    // No request is made: restarting only uses the downloaded file.
+    let (coordinator, rx, dir) =
+        coordinator(UpdateSourceConfig::Controlled("http://127.0.0.1:9".into()));
+    // Neither an installable package on Windows nor an AppImage replacement without
+    // APPIMAGE: the installer refuses it.
+    let downloaded_path = dir.path().join("EmuSync-update.bin");
+    std::fs::write(&downloaded_path, b"update kept for a manual install").unwrap();
+
+    coordinator.handle_action(UiAction::RestartApp(downloaded_path.clone()));
+
+    let mut seen = Vec::new();
+    collect_until(&rx, &mut seen, |event| {
+        matches!(
+            event,
+            AppEvent::UpdateStateChanged(UpdateState::RestartFailed { .. })
+                | AppEvent::ExitRequested
+        )
+    })
+    .await;
+    assert_eq!(
+        seen.iter()
+            .filter(|event| matches!(event, AppEvent::UpdateStateChanged(_)))
+            .count(),
+        1,
+        "only the failure is published: {seen:?}"
+    );
+    match seen.last() {
+        Some(AppEvent::UpdateStateChanged(UpdateState::RestartFailed {
+            downloaded_path: reported_path,
+        })) => assert_eq!(
+            reported_path,
+            &downloaded_path.to_string_lossy().into_owned()
+        ),
+        other => panic!("the refused restart must be reported, got {other:?}"),
+    }
+    assert_eq!(
+        std::fs::read(&downloaded_path).unwrap(),
+        b"update kept for a manual install",
+        "the user installs the kept file by hand"
+    );
+    assert_eq!(toasts(&seen), Vec::<&str>::new(), "{seen:?}");
+    // The restart task releases the admission after publishing; wait for it.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !coordinator.try_acquire_admission() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("a refused restart must let other operations run");
+    coordinator.release_admission();
 }
