@@ -14,4 +14,6 @@ mod download_timeout_tests;
 mod github_rules_tests;
 mod github_source_tests;
 mod release_client_tests;
+mod release_manifest_tests;
 mod release_tls_redirect_tests;
+mod signed_download_tests;

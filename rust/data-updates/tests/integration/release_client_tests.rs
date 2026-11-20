@@ -7,6 +7,10 @@ use crate::common;
 use common::{
     TestServer, assert_directory_entries, http_response, join_with_limit, part_entries,
     recv_with_limit, response_with_content_length,
+    signed_release::{
+        SIGNED_MANIFEST_URL, SIGNED_SIGNATURE_URL, SignedFilesServer, signed_manifest,
+        test_release_key,
+    },
 };
 use emusync_data_updates::{
     GitHubUpdateSource, ReleaseTransport, UpdateDownloader, UpdateError, release_client_builder,
@@ -33,7 +37,7 @@ const REFUSED_SCHEME_CAUSE: &str = "URL scheme is not allowed";
 /// only says that sending the request or reading its body failed.
 const CHECK_TIMEOUT_CAUSE: &str = "operation timed out";
 
-const RELEASE_BODY: &str = r#"{"tag_name":"v2.0.0","name":"EmuSync 2.0.0","body":"Fixes","assets":[{"name":"EmuSync-x86_64.AppImage","browser_download_url":"https://example.com/download/EmuSync-x86_64.AppImage","size":1024}]}"#;
+const RELEASE_BODY: &str = r#"{"tag_name":"v2.0.0","name":"EmuSync 2.0.0","body":"Fixes","assets":[{"name":"EmuSync-SHA256SUMS","browser_download_url":"https://example.com/download/EmuSync-SHA256SUMS","size":200},{"name":"EmuSync-SHA256SUMS.sig","browser_download_url":"https://example.com/download/EmuSync-SHA256SUMS.sig","size":89},{"name":"EmuSync-x86_64.AppImage","browser_download_url":"https://example.com/download/EmuSync-x86_64.AppImage","size":1024}]}"#;
 
 const ASSET_BYTES: &[u8] = b"new EmuSync AppImage bytes";
 
@@ -62,10 +66,18 @@ fn expected_release_update() -> UpdateInfo {
         download_url: "https://example.com/download/EmuSync-x86_64.AppImage".into(),
         asset_size: 1024,
         asset_name: "EmuSync-x86_64.AppImage".into(),
+        manifest_url: SIGNED_MANIFEST_URL.into(),
+        signature_url: SIGNED_SIGNATURE_URL.into(),
     }
 }
 
-fn update_info_for(download_url: String) -> UpdateInfo {
+/// The update for `download_url`, verified by the manifest and signature at the two
+/// other URLs.
+fn update_info_for(
+    download_url: String,
+    manifest_url: String,
+    signature_url: String,
+) -> UpdateInfo {
     UpdateInfo {
         version: "2.0.0".into(),
         tag_name: "v2.0.0".into(),
@@ -73,7 +85,16 @@ fn update_info_for(download_url: String) -> UpdateInfo {
         download_url,
         asset_size: ASSET_BYTES.len() as i64,
         asset_name: "EmuSync-x86_64.AppImage".into(),
+        manifest_url,
+        signature_url,
     }
+}
+
+/// A server with the test-signed manifest of v2.0.0 listing [`ASSET_BYTES`].
+async fn signed_files_for_asset() -> SignedFilesServer {
+    let (manifest, signature) =
+        signed_manifest("v2.0.0", &[("EmuSync-x86_64.AppImage", ASSET_BYTES)]);
+    SignedFilesServer::serve(manifest, signature).await
 }
 
 /// Advances the paused clock and resumes it, so later loopback I/O is not raced by the
@@ -125,7 +146,11 @@ async fn https_only_check_against_plain_http_fails_without_connecting() {
 async fn https_only_download_from_plain_http_fails_without_connecting_or_creating_files() {
     let server = TestServer::bind();
     let source = GitHubUpdateSource::new(https_only_client(), "owner", "repo", "1.0.0", false);
-    let info = update_info_for(server.url("/download/EmuSync-x86_64.AppImage"));
+    let info = update_info_for(
+        server.url("/download/EmuSync-x86_64.AppImage"),
+        server.url("/download/EmuSync-SHA256SUMS"),
+        server.url("/download/EmuSync-SHA256SUMS.sig"),
+    );
 
     // A first update with no previous file, and one replacing an earlier download.
     for previous in [None, Some(b"PREVIOUS".as_slice())] {
@@ -174,9 +199,12 @@ async fn https_only_download_from_plain_http_fails_without_connecting_or_creatin
 async fn plain_http_client_checks_and_downloads_from_a_controlled_server() {
     let asset_server = TestServer::bind();
     let asset_url = asset_server.url("/download/EmuSync-x86_64.AppImage");
+    let signed_files = signed_files_for_asset().await;
     let release_body = format!(
-        r#"{{"tag_name":"v2.0.0","body":"Fixes","assets":[{{"name":"EmuSync-x86_64.AppImage","browser_download_url":"{asset_url}","size":{size}}}]}}"#,
-        size = ASSET_BYTES.len()
+        r#"{{"tag_name":"v2.0.0","body":"Fixes","assets":[{{"name":"EmuSync-x86_64.AppImage","browser_download_url":"{asset_url}","size":{size}}},{{"name":"EmuSync-SHA256SUMS","browser_download_url":"{manifest_url}","size":1}},{{"name":"EmuSync-SHA256SUMS.sig","browser_download_url":"{signature_url}","size":1}}]}}"#,
+        size = ASSET_BYTES.len(),
+        manifest_url = signed_files.manifest_url,
+        signature_url = signed_files.signature_url,
     );
     let release_server = TestServer::bind();
     let base_url = release_server.base_url();
@@ -194,14 +222,22 @@ async fn plain_http_client_checks_and_downloads_from_a_controlled_server() {
             .await
     });
     let source = GitHubUpdateSource::new(plain_http_client(), "owner", "repo", "1.0.0", false)
-        .with_base_url(base_url);
+        .with_base_url(base_url)
+        .with_release_key(test_release_key());
 
     let update = source
         .check()
         .await
         .expect("check never fails")
         .expect("the controlled server publishes a newer release");
-    assert_eq!(update, update_info_for(asset_url));
+    assert_eq!(
+        update,
+        update_info_for(
+            asset_url,
+            signed_files.manifest_url.clone(),
+            signed_files.signature_url.clone()
+        )
+    );
 
     let dir = tempdir().expect("create update tempdir");
     let destination = dir.path().join("update.AppImage");
@@ -236,7 +272,12 @@ async fn plain_http_client_download_follows_a_plain_http_redirect() {
             .await
     });
     let redirecting_server = TestServer::bind();
-    let info = update_info_for(redirecting_server.url("/download/EmuSync-x86_64.AppImage"));
+    let signed_files = signed_files_for_asset().await;
+    let info = update_info_for(
+        redirecting_server.url("/download/EmuSync-x86_64.AppImage"),
+        signed_files.manifest_url.clone(),
+        signed_files.signature_url.clone(),
+    );
     let redirecting_task = redirecting_server.spawn(move |mut connection| async move {
         connection
             .write_all(&http_response(
@@ -253,7 +294,8 @@ async fn plain_http_client_download_follows_a_plain_http_redirect() {
     let dir = tempdir().expect("create update tempdir");
     let destination = dir.path().join("update.AppImage");
     std::fs::write(&destination, b"PREVIOUS").expect("write previous update");
-    let source = GitHubUpdateSource::new(plain_http_client(), "owner", "repo", "1.0.0", false);
+    let source = GitHubUpdateSource::new(plain_http_client(), "owner", "repo", "1.0.0", false)
+        .with_release_key(test_release_key());
 
     let result = tokio::time::timeout(
         common::HARNESS_WAIT_LIMIT,

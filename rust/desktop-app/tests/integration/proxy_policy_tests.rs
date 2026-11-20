@@ -316,7 +316,7 @@ async fn refresh_drive_token(
 }
 
 fn release_response() -> String {
-    let body = r#"{"tag_name":"v99.0.0","name":"EmuSync v99.0.0","body":"Fixes","assets":[{"name":"EmuSync-x86_64.AppImage","browser_download_url":"http://127.0.0.1:9/EmuSync-x86_64.AppImage","size":4},{"name":"EmuSync-x64.msi","browser_download_url":"http://127.0.0.1:9/EmuSync-x64.msi","size":4}]}"#;
+    let body = r#"{"tag_name":"v99.0.0","name":"EmuSync v99.0.0","body":"Fixes","assets":[{"name":"EmuSync-x86_64.AppImage","browser_download_url":"http://127.0.0.1:9/EmuSync-x86_64.AppImage","size":4},{"name":"EmuSync-x64.msi","browser_download_url":"http://127.0.0.1:9/EmuSync-x64.msi","size":4},{"name":"EmuSync-SHA256SUMS","browser_download_url":"http://127.0.0.1:9/EmuSync-SHA256SUMS","size":1},{"name":"EmuSync-SHA256SUMS.sig","browser_download_url":"http://127.0.0.1:9/EmuSync-SHA256SUMS.sig","size":1}]}"#;
     format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()

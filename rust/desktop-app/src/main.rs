@@ -612,6 +612,8 @@ fn preview_update_state(name: &str) -> Option<emusync_application::UpdateState> 
         download_url: String::new(),
         asset_size: 0,
         asset_name: "EmuSync-preview".to_string(),
+        manifest_url: String::new(),
+        signature_url: String::new(),
     };
     let ready = |is_steam_game_mode| UpdateState::ReadyToRestart {
         downloaded_path: "/nonexistent/emusync-preview-update".to_string(),

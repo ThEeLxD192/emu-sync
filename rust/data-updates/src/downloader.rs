@@ -148,10 +148,42 @@ impl UpdateDownloader {
         }
     }
 
+    /// Downloads without checking what arrives. Updates go through
+    /// [`GitHubUpdateSource`](crate::GitHubUpdateSource), which uses
+    /// [`download_verified`](Self::download_verified) with the signed hash.
     pub async fn download(
         &self,
         download_url: &str,
         destination: &Path,
+        on_progress: impl FnMut(f32) + Send,
+    ) -> Result<(), UpdateError> {
+        self.download_checked(download_url, destination, None, on_progress)
+            .await
+    }
+
+    /// Like [`download`](Self::download), but the file only reaches `destination` when
+    /// its SHA-256 is `expected_sha256`; otherwise the staged bytes are discarded.
+    pub async fn download_verified(
+        &self,
+        download_url: &str,
+        destination: &Path,
+        expected_sha256: [u8; 32],
+        on_progress: impl FnMut(f32) + Send,
+    ) -> Result<(), UpdateError> {
+        self.download_checked(
+            download_url,
+            destination,
+            Some(expected_sha256),
+            on_progress,
+        )
+        .await
+    }
+
+    async fn download_checked(
+        &self,
+        download_url: &str,
+        destination: &Path,
+        expected_sha256: Option<[u8; 32]>,
         mut on_progress: impl FnMut(f32) + Send,
     ) -> Result<(), UpdateError> {
         let parent = destination
@@ -247,6 +279,7 @@ impl UpdateDownloader {
 
         staged_file.activate_async();
         let mut bytes_read = 0u64;
+        let mut sha256 = ring::digest::Context::new(&ring::digest::SHA256);
 
         while let Some(chunk_res) = tokio::time::timeout(self.inactivity_timeout, stream.next())
             .await
@@ -260,6 +293,7 @@ impl UpdateDownloader {
             let chunk = chunk_res?;
             if !chunk.is_empty() {
                 staged_file.write_all(&chunk).await?;
+                sha256.update(&chunk);
                 bytes_read += chunk.len() as u64;
 
                 if let Some(total) = total_bytes
@@ -285,6 +319,14 @@ impl UpdateDownloader {
                 expected: total,
                 received: bytes_read,
             });
+        }
+
+        if let Some(expected) = expected_sha256
+            && sha256.finish().as_ref() != expected
+        {
+            return Err(UpdateError::Verification(
+                "the downloaded update does not match its signed SHA-256".into(),
+            ));
         }
 
         staged_file.finish_async().await?;

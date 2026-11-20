@@ -7,6 +7,10 @@ pub struct UpdateInfo {
     pub download_url: String,
     pub asset_size: i64,
     pub asset_name: String,
+    /// The release's signed list of asset hashes and its signature; the asset is only
+    /// installed when its hash is in a manifest the release key signed.
+    pub manifest_url: String,
+    pub signature_url: String,
 }
 pub trait UpdateFiles {
     type Error;

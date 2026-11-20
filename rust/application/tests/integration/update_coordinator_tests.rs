@@ -124,6 +124,8 @@ fn sample_update_info() -> UpdateInfo {
         download_url: "https://example.com/app.tar.gz".into(),
         asset_size: 1024,
         asset_name: "app.tar.gz".into(),
+        manifest_url: String::new(),
+        signature_url: String::new(),
     }
 }
 

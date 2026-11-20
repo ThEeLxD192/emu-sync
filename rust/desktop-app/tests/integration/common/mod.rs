@@ -1,3 +1,5 @@
+pub mod signed_release;
+
 use emusync_data_local::{ConfigManager, RecoveryCredentials};
 use emusync_desktop_app::{AppEvent, DesktopCoordinator, DriveEndpoints, coordinator::ProxyPolicy};
 use emusync_domain::{

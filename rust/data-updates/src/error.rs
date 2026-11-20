@@ -7,6 +7,9 @@ pub enum UpdateError {
     Network(String),
     /// The server answered, but not with a release this updater can read.
     InvalidRelease(String),
+    /// The release could not be proven to come from EmuSync: its signature, manifest or
+    /// downloaded bytes do not match.
+    Verification(String),
     Io(std::io::Error),
     EmptyDownload,
     IncompleteDownload {
@@ -22,6 +25,7 @@ impl fmt::Display for UpdateError {
             Self::Http(status) => write!(f, "HTTP error: {status}"),
             Self::Network(msg) => write!(f, "Network error: {msg}"),
             Self::InvalidRelease(msg) => write!(f, "Invalid release information: {msg}"),
+            Self::Verification(msg) => write!(f, "Update verification failed: {msg}"),
             Self::Io(err) => write!(f, "I/O error: {err}"),
             Self::EmptyDownload => write!(f, "The downloaded update is empty"),
             Self::IncompleteDownload { expected, received } => write!(

@@ -4,7 +4,11 @@
 
 use crate::common;
 
-use common::{read_http_request_async, write_http_json_async};
+use common::{
+    read_http_request_async,
+    signed_release::{SignedFilesServer, signed_manifest, test_release_key},
+    write_http_json_async,
+};
 use emusync_application::{DownloadFailure, UpdateState};
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{
@@ -29,24 +33,51 @@ const PLATFORM_ASSET: &str = if cfg!(windows) {
     "EmuSync-x86_64.AppImage"
 };
 
-/// Serves GitHub's latest-release API with the Linux and Windows packages, and the assets.
+/// Serves GitHub's latest-release API with the Linux and Windows packages, the assets,
+/// and the manifest that lists both, signed with the test key.
 async fn release_server(latest_tag: &'static str) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let download = format!("{base}/download");
+    let (manifest, signature) = signed_manifest(
+        latest_tag,
+        &[
+            ("EmuSync-x86_64.AppImage", ASSET),
+            ("EmuSync-x64.msi", ASSET),
+        ],
+    );
+    let signed_files = Arc::new((manifest, signature));
     tokio::spawn(async move {
         loop {
             let Ok((mut stream, _)) = listener.accept().await else {
                 return;
             };
             let download = download.clone();
+            let signed_files = Arc::clone(&signed_files);
             tokio::spawn(async move {
                 let Ok((headers, _)) = read_http_request_async(&mut stream).await else {
                     return;
                 };
+                let signed_file = if headers.starts_with("GET /download/EmuSync-SHA256SUMS ") {
+                    Some(&signed_files.0)
+                } else if headers.starts_with("GET /download/EmuSync-SHA256SUMS.sig ") {
+                    Some(&signed_files.1)
+                } else {
+                    None
+                };
+                if let Some(bytes) = signed_file {
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        bytes.len()
+                    );
+                    let _ = stream.write_all(head.as_bytes()).await;
+                    let _ = stream.write_all(bytes).await;
+                    let _ = stream.flush().await;
+                    return;
+                }
                 if headers.starts_with("GET /repos/ThEeLxD192/emu-sync/releases/latest ") {
                     let body = format!(
-                        r#"{{"tag_name":"{latest_tag}","name":"EmuSync {latest_tag}","body":"Fixes","assets":[{{"name":"EmuSync-x86_64.AppImage","browser_download_url":"{download}/EmuSync-x86_64.AppImage","size":{size}}},{{"name":"EmuSync-x64.msi","browser_download_url":"{download}/EmuSync-x64.msi","size":{size}}}]}}"#,
+                        r#"{{"tag_name":"{latest_tag}","name":"EmuSync {latest_tag}","body":"Fixes","assets":[{{"name":"EmuSync-x86_64.AppImage","browser_download_url":"{download}/EmuSync-x86_64.AppImage","size":{size}}},{{"name":"EmuSync-x64.msi","browser_download_url":"{download}/EmuSync-x64.msi","size":{size}}},{{"name":"EmuSync-SHA256SUMS","browser_download_url":"{download}/EmuSync-SHA256SUMS","size":1}},{{"name":"EmuSync-SHA256SUMS.sig","browser_download_url":"{download}/EmuSync-SHA256SUMS.sig","size":1}}]}}"#,
                         size = ASSET.len()
                     );
                     let _ = write_http_json_async(&mut stream, 200, "OK", &body).await;
@@ -82,6 +113,7 @@ fn coordinator(
         tokio::runtime::Handle::current(),
     )
     .with_proxy_policy(ProxyPolicy::Direct)
+    .with_controlled_release_key(test_release_key())
     .with_update_source(source);
     (coordinator, rx, dir)
 }
@@ -463,6 +495,8 @@ async fn a_download_the_server_refuses_fails_naming_its_status_once() {
     for (status_line, expected) in cases {
         let base = release_server_answering(ReleaseAnswer::Status(status_line)).await;
         let (coordinator, rx, _dir) = coordinator(UpdateSourceConfig::Controlled(base.clone()));
+        let (manifest, signature) = signed_manifest("v99.0.0", &[(PLATFORM_ASSET, ASSET)]);
+        let signed_files = SignedFilesServer::serve(manifest, signature).await;
         let info = UpdateInfo {
             version: "99.0.0".into(),
             tag_name: "v99.0.0".into(),
@@ -470,6 +504,8 @@ async fn a_download_the_server_refuses_fails_naming_its_status_once() {
             download_url: format!("{base}/download/{PLATFORM_ASSET}"),
             asset_size: ASSET.len() as i64,
             asset_name: PLATFORM_ASSET.into(),
+            manifest_url: signed_files.manifest_url.clone(),
+            signature_url: signed_files.signature_url.clone(),
         };
 
         coordinator.handle_action(UiAction::DownloadUpdate(info));
@@ -556,6 +592,9 @@ async fn a_download_whose_size_differs_from_the_release_names_both_sizes_and_lea
     let base = asset_server(SHORT_ASSET).await;
     let (coordinator, rx, _dir) = coordinator(UpdateSourceConfig::Controlled(base.clone()));
     let announced_bytes = SHORT_ASSET.len() as u64 + 100;
+    // The manifest signs the bytes served, so only the announced size is wrong.
+    let (manifest, signature) = signed_manifest("v99.0.0", &[(PLATFORM_ASSET, SHORT_ASSET)]);
+    let signed_files = SignedFilesServer::serve(manifest, signature).await;
     let info = UpdateInfo {
         version: "99.0.0".into(),
         tag_name: "v99.0.0".into(),
@@ -563,6 +602,8 @@ async fn a_download_whose_size_differs_from_the_release_names_both_sizes_and_lea
         download_url: format!("{base}/download/{PLATFORM_ASSET}"),
         asset_size: announced_bytes as i64,
         asset_name: PLATFORM_ASSET.into(),
+        manifest_url: signed_files.manifest_url.clone(),
+        signature_url: signed_files.signature_url.clone(),
     };
 
     coordinator.handle_action(UiAction::DownloadUpdate(info));

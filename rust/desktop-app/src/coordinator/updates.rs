@@ -3,7 +3,9 @@
 use super::proxy::ProxyPolicy;
 use crate::events::{AppEvent, EventSender};
 use emusync_application::{UpdateCoordinator, UpdateState};
-use emusync_data_updates::{GitHubUpdateSource, ReleaseTransport, release_client_builder};
+use emusync_data_updates::{
+    GitHubUpdateSource, ReleaseKey, ReleaseTransport, release_client_builder,
+};
 use emusync_domain::update::UpdateInfo;
 use emusync_platform_desktop::{DesktopUpdateInstaller, UpdateStagingFiles};
 use emusync_presentation::i18n::fill;
@@ -14,6 +16,24 @@ const REPOSITORY_OWNER: &str = "ThEeLxD192";
 const REPOSITORY_NAME: &str = "emu-sync";
 /// Development builds only contact a controlled release server given here.
 const DEVELOPMENT_SOURCE_VARIABLE: &str = "EMUSYNC_UPDATE_BASE_URL";
+/// Development builds may trust another key for that server's signed manifests.
+const DEVELOPMENT_KEY_VARIABLE: &str = "EMUSYNC_UPDATE_PUBLIC_KEY";
+
+/// The key a controlled release server's manifests must be signed with: in development
+/// builds the one in `EMUSYNC_UPDATE_PUBLIC_KEY` when it is a valid key, otherwise the
+/// EmuSync key. GitHub releases are always checked against the EmuSync key.
+pub(crate) fn controlled_release_key_for_this_build() -> ReleaseKey {
+    let Some(key) = cfg!(debug_assertions)
+        .then(|| std::env::var(DEVELOPMENT_KEY_VARIABLE).ok())
+        .flatten()
+    else {
+        return ReleaseKey::emusync();
+    };
+    ReleaseKey::from_base64(&key).unwrap_or_else(|error| {
+        eprintln!("{DEVELOPMENT_KEY_VARIABLE} is ignored ({error}); using the EmuSync key");
+        ReleaseKey::emusync()
+    })
+}
 
 /// Where release information comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,15 +108,24 @@ pub struct UpdateServices {
 }
 
 impl UpdateServices {
+    /// `controlled_release_key` checks a controlled server's releases; GitHub's are
+    /// always checked against the EmuSync key.
     pub fn new(
         source: UpdateSourceConfig,
         proxy_policy: ProxyPolicy,
+        controlled_release_key: ReleaseKey,
         event_tx: EventSender,
         tokio_handle: Handle,
     ) -> Self {
-        let (base_url, transport) = match source {
-            UpdateSourceConfig::GitHub => (None, ReleaseTransport::HttpsOnly),
-            UpdateSourceConfig::Controlled(url) => (Some(url), ReleaseTransport::AllowPlainHttp),
+        let (base_url, transport, release_key) = match source {
+            UpdateSourceConfig::GitHub => {
+                (None, ReleaseTransport::HttpsOnly, ReleaseKey::emusync())
+            }
+            UpdateSourceConfig::Controlled(url) => (
+                Some(url),
+                ReleaseTransport::AllowPlainHttp,
+                controlled_release_key,
+            ),
             UpdateSourceConfig::Disabled => {
                 return Self::without_updater(UpdatesUnavailable::Development, tokio_handle);
             }
@@ -120,7 +149,8 @@ impl UpdateServices {
             REPOSITORY_NAME,
             env!("CARGO_PKG_VERSION"),
             cfg!(windows),
-        );
+        )
+        .with_release_key(release_key);
         if let Some(url) = base_url {
             source = source.with_base_url(url);
         }

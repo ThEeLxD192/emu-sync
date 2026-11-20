@@ -15,6 +15,8 @@ fn info(asset_name: &str) -> UpdateInfo {
         download_url: "http://127.0.0.1:9/never-used".into(),
         asset_size: 3,
         asset_name: asset_name.into(),
+        manifest_url: String::new(),
+        signature_url: String::new(),
     }
 }
 

@@ -2,6 +2,7 @@ use crate::{
     downloader::UpdateDownloader,
     error::UpdateError,
     github::{GitHubRelease, find_best_asset_for_platform, is_newer_version},
+    signature::{MANIFEST_NAME, ReleaseKey, SIGNATURE_NAME, signed_sha256},
 };
 use emusync_domain::update::{UpdateInfo, UpdateSource};
 use reqwest::header::{ACCEPT, USER_AGENT};
@@ -9,6 +10,9 @@ use std::{future::Future, path::Path, time::Duration};
 
 /// Longest a release check may take, reading the response included.
 pub const CHECK_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Largest manifest or signature accepted; real ones are a few hundred bytes.
+const SIGNED_FILE_LIMIT: usize = 64 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct GitHubUpdateSource {
@@ -19,6 +23,7 @@ pub struct GitHubUpdateSource {
     is_windows: bool,
     base_url: Option<String>,
     downloader: UpdateDownloader,
+    release_key: ReleaseKey,
 }
 
 impl GitHubUpdateSource {
@@ -38,7 +43,15 @@ impl GitHubUpdateSource {
             is_windows,
             base_url: None,
             downloader,
+            release_key: ReleaseKey::emusync(),
         }
+    }
+
+    /// Replaces the key release manifests must be signed with, for a controlled release
+    /// server.
+    pub fn with_release_key(mut self, release_key: ReleaseKey) -> Self {
+        self.release_key = release_key;
+        self
     }
 
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
@@ -103,6 +116,23 @@ impl UpdateSource for GitHubUpdateSource {
                 Some(a) => a,
                 None => return Ok(None),
             };
+            // A newer release that cannot be verified is not offered as an update.
+            let signed_file_url = |name: &str| {
+                release
+                    .assets
+                    .iter()
+                    .find(|asset| asset.name == name)
+                    .map(|asset| asset.browser_download_url.clone())
+            };
+            let (Some(manifest_url), Some(signature_url)) = (
+                signed_file_url(MANIFEST_NAME),
+                signed_file_url(SIGNATURE_NAME),
+            ) else {
+                return Err(UpdateError::Verification(format!(
+                    "release {} is not signed",
+                    release.tag_name
+                )));
+            };
 
             let release_notes = release
                 .body
@@ -116,6 +146,8 @@ impl UpdateSource for GitHubUpdateSource {
                 download_url: asset.browser_download_url.clone(),
                 asset_size: asset.size,
                 asset_name: asset.name.clone(),
+                manifest_url,
+                signature_url,
             }))
         }
     }
@@ -126,14 +158,59 @@ impl UpdateSource for GitHubUpdateSource {
         destination: &str,
         on_progress: impl FnMut(f32) + Send,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        let client = self.client.clone();
         let downloader = self.downloader.clone();
-        let download_url = info.download_url.clone();
+        let release_key = self.release_key.clone();
+        let info = info.clone();
         let destination_path = Path::new(destination).to_path_buf();
 
         async move {
+            // Verify before downloading, so an unsigned asset is never fetched.
+            let manifest = fetch_signed_file(&client, &info.manifest_url).await?;
+            let signature = fetch_signed_file(&client, &info.signature_url).await?;
+            let sha256 = signed_sha256(
+                &release_key,
+                &info.tag_name,
+                &info.asset_name,
+                &manifest,
+                &signature,
+            )?;
             downloader
-                .download(&download_url, &destination_path, on_progress)
+                .download_verified(&info.download_url, &destination_path, sha256, on_progress)
                 .await
         }
     }
+}
+
+/// The bytes of a release's manifest or signature, refused beyond [`SIGNED_FILE_LIMIT`].
+async fn fetch_signed_file(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, UpdateError> {
+    let response = client
+        .get(url)
+        .header(USER_AGENT, "EmuSync-Desktop-App")
+        .timeout(CHECK_TIMEOUT)
+        .send()
+        .await?;
+    if response.status() != reqwest::StatusCode::OK {
+        return Err(UpdateError::Http(response.status()));
+    }
+    let too_large = || {
+        UpdateError::Verification(format!(
+            "the release manifest or signature is larger than {SIGNED_FILE_LIMIT} bytes"
+        ))
+    };
+    if response
+        .content_length()
+        .is_some_and(|length| length > SIGNED_FILE_LIMIT as u64)
+    {
+        return Err(too_large());
+    }
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = futures_util::StreamExt::next(&mut stream).await {
+        body.extend_from_slice(&chunk?);
+        if body.len() > SIGNED_FILE_LIMIT {
+            return Err(too_large());
+        }
+    }
+    Ok(body)
 }

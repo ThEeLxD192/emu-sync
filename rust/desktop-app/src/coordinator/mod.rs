@@ -33,6 +33,7 @@ use emusync_data_drive::{
 use emusync_data_local::{
     ConfigManager, LocalSaveTargets, RecoveryCredentials, RecoveryStore, TrackedError,
 };
+use emusync_data_updates::ReleaseKey;
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore, CredentialStore, Credentials, Language},
     execution::PathPicker,
@@ -80,6 +81,8 @@ pub struct DesktopCoordinator {
     update_source: UpdateSourceConfig,
     /// Whether the Drive and release clients use the environment's proxy.
     proxy_policy: ProxyPolicy,
+    /// The key a controlled release server's manifests must be signed with.
+    controlled_release_key: ReleaseKey,
     /// Drive HTTP clients, built on first use and shared by every operation so their
     /// connections are reused instead of opened again for each check or sync.
     drive_http: Arc<OnceLock<DriveHttpClients>>,
@@ -117,9 +120,11 @@ impl DesktopCoordinator {
 
         let update_source = UpdateSourceConfig::for_this_build();
         let proxy_policy = ProxyPolicy::default();
+        let controlled_release_key = updates::controlled_release_key_for_this_build();
         let updates = UpdateServices::new(
             update_source.clone(),
             proxy_policy,
+            controlled_release_key.clone(),
             event_tx.clone(),
             tokio_handle.clone(),
         );
@@ -140,6 +145,7 @@ impl DesktopCoordinator {
             updates,
             update_source,
             proxy_policy,
+            controlled_release_key,
             drive_http: Arc::new(OnceLock::new()),
             language,
         }
@@ -160,10 +166,18 @@ impl DesktopCoordinator {
         self
     }
 
+    /// Replaces the key a controlled release server's manifests must be signed with.
+    pub fn with_controlled_release_key(mut self, release_key: ReleaseKey) -> Self {
+        self.controlled_release_key = release_key;
+        self.rebuild_updates();
+        self
+    }
+
     fn rebuild_updates(&mut self) {
         self.updates = UpdateServices::new(
             self.update_source.clone(),
             self.proxy_policy,
+            self.controlled_release_key.clone(),
             self.event_tx.clone(),
             self.tokio_handle.clone(),
         );

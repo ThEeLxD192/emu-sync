@@ -21,6 +21,11 @@ use std::{
 /// default repository say.
 const REPOSITORY: &str = "ThEeLxD192/emu-sync";
 
+/// The public key the updater trusts (`EMUSYNC_RELEASE_KEY` in
+/// `rust/data-updates/src/signature.rs`). A release signed with any other key could
+/// never be installed, so no other key signs one.
+const UPDATER_PUBLIC_KEY: &str = "AgMChY3jo4CXUcsj1jp2CgTV/4mjULKivus59JBuzEc=";
+
 /// The signed list of asset hashes and its detached signature; the updater looks for
 /// these names among the release's assets.
 const MANIFEST_NAME: &str = "EmuSync-SHA256SUMS";
@@ -77,6 +82,14 @@ fn generate_key(key_path: &Path) -> Result<(), Box<dyn Error>> {
 fn sign_and_publish_release(tag: &str, key_path: &Path) -> Result<(), Box<dyn Error>> {
     // Read the key first, so a wrong path stops before anything is downloaded.
     let key_pair = read_private_key(key_path)?;
+    if public_key(&key_pair) != UPDATER_PUBLIC_KEY {
+        return Err(format!(
+            "{} is not the key the updater trusts (its public key is {}, the updater's {UPDATER_PUBLIC_KEY})",
+            key_path.display(),
+            public_key(&key_pair)
+        )
+        .into());
+    }
     ensure_release_tag(tag)?;
     println!(
         "Signing {tag} of {REPOSITORY} with public key {}",
@@ -462,6 +475,48 @@ mod tests {
         assert_eq!(
             public_key(&read_private_key(&key_path).unwrap()),
             RFC_8032_PUBLIC_KEY_BASE64
+        );
+    }
+
+    #[test]
+    fn the_signing_key_is_the_one_the_updater_trusts() {
+        let updater_source = fs::read_to_string(
+            repository_root()
+                .unwrap()
+                .join("rust/data-updates/src/signature.rs"),
+        )
+        .unwrap();
+        assert!(
+            updater_source.contains(&format!(
+                "const EMUSYNC_RELEASE_KEY: &str = \"{UPDATER_PUBLIC_KEY}\";"
+            )),
+            "xtask and the updater must name the same release key"
+        );
+    }
+
+    #[test]
+    fn a_key_other_than_the_updaters_is_refused_before_anything_is_downloaded() {
+        let scratch = ScratchDir::new("other-key");
+        let key_path = scratch.0.join("release.key");
+        fs::write(&key_path, format!("{RFC_8032_KEY_FILE_BASE64}\n")).unwrap();
+
+        let message = main(&[
+            "sign-and-publish-release".to_owned(),
+            "v2.2.0".to_owned(),
+            key_path.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            message.contains("is not the key the updater trusts"),
+            "{message}"
+        );
+        assert!(
+            !repository_root()
+                .unwrap()
+                .join("target/release-signing/v2.2.0")
+                .exists()
         );
     }
 

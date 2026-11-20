@@ -462,7 +462,10 @@ async fn check_names_an_unexpected_status_by_its_standard_reason_whatever_reason
 
 #[tokio::test]
 async fn check_classifies_the_answer_by_its_status_code_not_by_the_reason_the_server_writes() {
-    let newer_release = br#"{"tag_name":"v2.0.0","assets":[{"name":"EmuSync-x86_64.AppImage","browser_download_url":"https://example.com/EmuSync-x86_64.AppImage","size":1024}]}"#;
+    let newer_release = common::signed_release::with_signed_files(
+        r#"{"tag_name":"v2.0.0","assets":[{"name":"EmuSync-x86_64.AppImage","browser_download_url":"https://example.com/EmuSync-x86_64.AppImage","size":1024}]}"#,
+    );
+    let newer_release = newer_release.as_bytes();
 
     let not_found_saying_ok = check_answered_with(
         "404 whose reason says OK",
