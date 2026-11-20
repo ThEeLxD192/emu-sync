@@ -58,10 +58,15 @@ pub struct UpdateCoordinator<S, F, I> {
     on_state: Box<dyn Fn(&UpdateState) + Send + Sync + 'static>,
 }
 
+/// Ends a download, finished or interrupted: removes a file that is not kept, frees the
+/// updater and only then announces the outcome, so whoever reacts to it can already
+/// retry or restart.
 struct DownloadGuard<'a, S: UpdateSource + Sync, F: UpdateFiles + Sync, I: UpdateInstaller + Sync> {
     coord: &'a UpdateCoordinator<S, F, I>,
     destination: Option<String>,
-    keep_download: bool,
+    /// `ReadyToRestart` or `DownloadFailed`; `None` while running, so an interrupted
+    /// download offers the release again.
+    outcome: Option<UpdateState>,
     fallback_info: UpdateInfo,
 }
 
@@ -69,17 +74,25 @@ impl<'a, S: UpdateSource + Sync, F: UpdateFiles + Sync, I: UpdateInstaller + Syn
     for DownloadGuard<'a, S, F, I>
 {
     fn drop(&mut self) {
-        let mut pending_notify = None;
-        if !self.keep_download {
-            if let Some(ref dest) = self.destination {
-                let _ = self.coord.files.delete(dest);
-            }
-            let mut state = self.coord.state.lock().unwrap();
-            if matches!(*state, UpdateState::Downloading { .. }) {
-                *state = UpdateState::Available(self.fallback_info.clone());
-                pending_notify = Some(state.clone());
-            }
+        let keep_download = matches!(self.outcome, Some(UpdateState::ReadyToRestart { .. }));
+        if !keep_download && let Some(ref dest) = self.destination {
+            let _ = self.coord.files.delete(dest);
         }
+        let pending_notify = {
+            let mut state = self.coord.state.lock().unwrap();
+            // A finished download announces its outcome whatever replaced `Downloading`
+            // meanwhile; an interrupted one only undoes its own `Downloading`.
+            let next = match self.outcome.take() {
+                Some(outcome) => Some(outcome),
+                None if matches!(*state, UpdateState::Downloading { .. }) => {
+                    Some(UpdateState::Available(self.fallback_info.clone()))
+                }
+                None => None,
+            };
+            next.filter(|next| *state != *next).inspect(|next| {
+                *state = next.clone();
+            })
+        };
         self.coord.download_busy.store(false, Ordering::SeqCst);
         if let Some(new_state) = pending_notify {
             (self.coord.on_state)(&new_state);
@@ -162,7 +175,13 @@ where
 
         let (previous, should_notify) = {
             let mut lock = self.state.lock().unwrap();
-            if matches!(*lock, UpdateState::ReadyToRestart { .. }) {
+            // Read again under the lock: a download or a newer check that started after
+            // the first read publishes under this lock, and this check, which would never
+            // publish its result, must not replace their state with `Checking`.
+            if self.download_busy.load(Ordering::SeqCst)
+                || self.generation.load(Ordering::SeqCst) != request
+                || matches!(*lock, UpdateState::ReadyToRestart { .. })
+            {
                 return;
             }
             let prev_raw = std::mem::replace(&mut *lock, UpdateState::Checking);
@@ -229,7 +248,7 @@ where
         let mut guard = DownloadGuard {
             coord: self,
             destination: None,
-            keep_download: false,
+            outcome: None,
             fallback_info: info.clone(),
         };
 
@@ -279,16 +298,13 @@ where
         }
         .await;
 
-        match res {
-            Ok((dest, is_steam)) => {
-                guard.keep_download = true;
-                self.publish(UpdateState::ReadyToRestart {
-                    downloaded_path: dest,
-                    is_steam_game_mode: is_steam,
-                });
-            }
-            Err(failure) => self.publish(UpdateState::DownloadFailed(failure)),
-        }
+        guard.outcome = Some(match res {
+            Ok((dest, is_steam)) => UpdateState::ReadyToRestart {
+                downloaded_path: dest,
+                is_steam_game_mode: is_steam,
+            },
+            Err(failure) => UpdateState::DownloadFailed(failure),
+        });
     }
 
     pub fn restart(&self, path: &str, operation_in_progress: bool) -> bool {

@@ -61,12 +61,17 @@ struct MockFiles {
     custom_size: Arc<Mutex<Option<u64>>>,
     prepare_error: Arc<Mutex<Option<String>>>,
     size_error: Arc<Mutex<Option<String>>>,
+    stall_prepare: Arc<Mutex<bool>>,
 }
 
 impl UpdateFiles for MockFiles {
     type Error = String;
 
     async fn prepare_destination(&self, _info: &UpdateInfo) -> Result<String, Self::Error> {
+        let stall = *self.stall_prepare.lock().unwrap();
+        if stall {
+            std::future::pending::<()>().await;
+        }
         if let Some(error) = self.prepare_error.lock().unwrap().clone() {
             return Err(error);
         }
@@ -852,4 +857,450 @@ async fn after_a_failed_restart_a_new_check_and_download_run_again() {
             },
         ]
     );
+}
+
+type ReactingCoordinator = UpdateCoordinator<MockSource, MockFiles, MockInstaller>;
+
+/// A coordinator that hands each announced state to `react` together with itself, as an
+/// interface that acts on a state as soon as it arrives.
+fn coordinator_reacting(
+    source: MockSource,
+    files: MockFiles,
+    installer: MockInstaller,
+    react: impl Fn(&ReactingCoordinator, &UpdateState) + Send + Sync + 'static,
+) -> Arc<ReactingCoordinator> {
+    Arc::new_cyclic(|this: &std::sync::Weak<ReactingCoordinator>| {
+        let this = this.clone();
+        UpdateCoordinator::new(source, files, installer, move |state: &UpdateState| {
+            if let Some(coordinator) = this.upgrade() {
+                react(&coordinator, state);
+            }
+        })
+    })
+}
+
+/// Runs `coordinator.download(info)` on a thread of its own and waits for it with a
+/// wall-clock limit: a reaction blocked on the coordinator's lock (a state announced
+/// while it is held) then fails the test instead of hanging the test's only thread.
+fn download_reacting_within_harness_limit(
+    coordinator: &Arc<ReactingCoordinator>,
+    info: &UpdateInfo,
+) {
+    let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+    let coordinator = Arc::clone(coordinator);
+    let info = info.clone();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("build the download's runtime");
+        runtime.block_on(coordinator.download(&info));
+        let _ = finished_tx.send(());
+    });
+    finished_rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the download did not finish within the harness limit");
+}
+
+/// What an observer of the failure finds when it is announced.
+#[derive(Debug, PartialEq)]
+struct FailureAnnouncement {
+    can_check: bool,
+    deleted_paths: Vec<String>,
+}
+
+#[tokio::test]
+async fn when_a_download_failure_is_announced_the_file_is_gone_and_the_updater_is_free() {
+    let source = MockSource::default();
+    *source.download_error.lock().unwrap() = Some("Network cut".into());
+    let files = MockFiles::default();
+    *files.destination.lock().unwrap() = "/tmp/announced-failure.AppImage".into();
+    let announcements: Arc<Mutex<Vec<FailureAnnouncement>>> = Arc::default();
+    let coordinator = coordinator_reacting(source, files.clone(), MockInstaller::default(), {
+        let announcements = Arc::clone(&announcements);
+        let files = files.clone();
+        move |coordinator, state| {
+            if matches!(state, UpdateState::DownloadFailed(_)) {
+                announcements.lock().unwrap().push(FailureAnnouncement {
+                    can_check: coordinator.can_check(),
+                    deleted_paths: files.deleted_paths.lock().unwrap().clone(),
+                });
+            }
+        }
+    });
+
+    download_reacting_within_harness_limit(&coordinator, &sample_update_info());
+
+    // The interface reacts to the announced state (the header then offers a new check,
+    // the user may retry): an updater still busy at that moment would ignore it.
+    assert_eq!(
+        *announcements.lock().unwrap(),
+        vec![FailureAnnouncement {
+            can_check: true,
+            deleted_paths: vec!["/tmp/announced-failure.AppImage".to_string()],
+        }]
+    );
+}
+
+#[tokio::test]
+async fn an_update_announced_ready_to_restart_can_be_restarted_at_once() {
+    let files = MockFiles::default();
+    *files.destination.lock().unwrap() = "/tmp/announced-ready.AppImage".into();
+    let installer = MockInstaller::default();
+    let restarts: Arc<Mutex<Vec<bool>>> = Arc::default();
+    let coordinator =
+        coordinator_reacting(MockSource::default(), files.clone(), installer.clone(), {
+            let restarts = Arc::clone(&restarts);
+            move |coordinator, state| {
+                if let UpdateState::ReadyToRestart {
+                    downloaded_path, ..
+                } = state
+                {
+                    restarts
+                        .lock()
+                        .unwrap()
+                        .push(coordinator.restart(downloaded_path, false));
+                }
+            }
+        });
+
+    download_reacting_within_harness_limit(&coordinator, &sample_update_info());
+
+    // "Restart Now" pressed as soon as it shows must not be refused as a running download.
+    assert_eq!(*restarts.lock().unwrap(), vec![true]);
+    assert_eq!(
+        installer.restarted_path.lock().unwrap().as_deref(),
+        Some("/tmp/announced-ready.AppImage")
+    );
+    assert_eq!(*files.deleted_paths.lock().unwrap(), Vec::<String>::new());
+}
+
+/// Polls `step` once, as a reaction inside `on_state` gets to run it before returning.
+fn poll_once<T>(
+    step: std::pin::Pin<&mut impl std::future::Future<Output = T>>,
+) -> std::task::Poll<T> {
+    step.poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+}
+
+/// Runs `step` to its end inside the current call; the fakes never wait, so a step that
+/// has to wait is a failure.
+fn finish_without_waiting<T>(step: impl std::future::Future<Output = T>) -> T {
+    let mut step = std::pin::pin!(step);
+    match poll_once(step.as_mut()) {
+        std::task::Poll::Ready(output) => output,
+        std::task::Poll::Pending => panic!("the step had to wait"),
+    }
+}
+
+fn downloading(progress: f32, info: &UpdateInfo) -> UpdateState {
+    UpdateState::Downloading {
+        progress,
+        info: info.clone(),
+    }
+}
+
+#[tokio::test]
+async fn a_retry_started_when_a_download_failure_is_announced_runs_and_ends_ready_to_restart() {
+    let source = MockSource::default();
+    *source.download_error.lock().unwrap() = Some("Network cut".into());
+    let files = MockFiles::default();
+    *files.destination.lock().unwrap() = "/tmp/retried-at-once.AppImage".into();
+    let published: PublishedStates = Arc::default();
+    let coordinator =
+        coordinator_reacting(source.clone(), files.clone(), MockInstaller::default(), {
+            let published = Arc::clone(&published);
+            move |coordinator, state| {
+                published.lock().unwrap().push(state.clone());
+                if matches!(state, UpdateState::DownloadFailed(_)) {
+                    // "Retry" pressed the moment the failure shows, with the network back.
+                    *source.download_error.lock().unwrap() = None;
+                    finish_without_waiting(coordinator.download(&sample_update_info()));
+                }
+            }
+        });
+    let info = sample_update_info();
+
+    download_reacting_within_harness_limit(&coordinator, &info);
+
+    let ready = UpdateState::ReadyToRestart {
+        downloaded_path: "/tmp/retried-at-once.AppImage".into(),
+        is_steam_game_mode: false,
+    };
+    assert_eq!(
+        *published.lock().unwrap(),
+        vec![
+            downloading(0.0, &info),
+            downloading(0.5, &info),
+            UpdateState::DownloadFailed(DownloadFailure::Transfer("Network cut".into())),
+            downloading(0.0, &info),
+            downloading(0.5, &info),
+            downloading(1.0, &info),
+            ready.clone(),
+        ],
+        "a retry ignored as a running download would leave the dialog on the failure"
+    );
+    assert_eq!(coordinator.state(), ready);
+    assert_eq!(
+        *files.deleted_paths.lock().unwrap(),
+        vec!["/tmp/retried-at-once.AppImage".to_string()],
+        "only the failed attempt is deleted; the retried file is kept"
+    );
+}
+
+#[tokio::test]
+async fn a_check_started_when_a_download_failure_is_announced_publishes_its_result() {
+    let source = MockSource::default();
+    *source.download_error.lock().unwrap() = Some("Network cut".into());
+    let info = sample_update_info();
+    *source.next_info.lock().unwrap() = Some(info.clone());
+    let files = MockFiles::default();
+    *files.destination.lock().unwrap() = "/tmp/checked-at-once.AppImage".into();
+    let published: PublishedStates = Arc::default();
+    let coordinator = coordinator_reacting(source, files, MockInstaller::default(), {
+        let published = Arc::clone(&published);
+        move |coordinator, state| {
+            published.lock().unwrap().push(state.clone());
+            if matches!(state, UpdateState::DownloadFailed(_)) {
+                // The header offers a new check as soon as the failure shows.
+                finish_without_waiting(coordinator.check_for_updates());
+            }
+        }
+    });
+
+    download_reacting_within_harness_limit(&coordinator, &info);
+
+    assert_eq!(
+        *published.lock().unwrap(),
+        vec![
+            downloading(0.0, &info),
+            downloading(0.5, &info),
+            UpdateState::DownloadFailed(DownloadFailure::Transfer("Network cut".into())),
+            UpdateState::Checking,
+            UpdateState::Available(info.clone()),
+        ]
+    );
+    assert_eq!(
+        coordinator.state(),
+        UpdateState::Available(info),
+        "the end of the failed download must not overwrite the newer check"
+    );
+    assert!(coordinator.can_check());
+}
+
+#[tokio::test]
+async fn each_download_outcome_is_published_once_after_its_progress_and_nothing_follows() {
+    let info = sample_update_info();
+    let transfer_failure = MockSource::default();
+    *transfer_failure.download_error.lock().unwrap() = Some("Network cut".into());
+    let wrong_size = MockFiles::default();
+    *wrong_size.custom_size.lock().unwrap() = Some(2048);
+    let cases = [
+        (
+            "transfer failure",
+            transfer_failure,
+            MockFiles::default(),
+            vec![
+                downloading(0.0, &info),
+                downloading(0.5, &info),
+                UpdateState::DownloadFailed(DownloadFailure::Transfer("Network cut".into())),
+            ],
+        ),
+        (
+            "size mismatch",
+            MockSource::default(),
+            wrong_size,
+            vec![
+                downloading(0.0, &info),
+                downloading(0.5, &info),
+                downloading(1.0, &info),
+                UpdateState::DownloadFailed(DownloadFailure::SizeMismatch {
+                    expected_bytes: 1024,
+                    received_bytes: 2048,
+                }),
+            ],
+        ),
+        (
+            "success",
+            MockSource::default(),
+            MockFiles::default(),
+            vec![
+                downloading(0.0, &info),
+                downloading(0.5, &info),
+                downloading(1.0, &info),
+                UpdateState::ReadyToRestart {
+                    downloaded_path: "/tmp/exact-sequence.AppImage".into(),
+                    is_steam_game_mode: false,
+                },
+            ],
+        ),
+    ];
+    for (case, source, files, expected) in cases {
+        *files.destination.lock().unwrap() = "/tmp/exact-sequence.AppImage".into();
+        let (coordinator, published) =
+            recording_coordinator_over(source, files, MockInstaller::default());
+
+        within_harness_limit("the download", coordinator.download(&info)).await;
+
+        assert_eq!(*published.lock().unwrap(), expected, "{case}");
+        assert_eq!(
+            Some(coordinator.state()),
+            expected.last().cloned(),
+            "{case}"
+        );
+    }
+}
+
+/// What an observer finds when a cancelled download announces the release again.
+#[derive(Debug, PartialEq)]
+struct CancellationAnnouncement {
+    state: UpdateState,
+    can_check: bool,
+    deleted_paths: Vec<String>,
+}
+
+#[tokio::test]
+async fn a_download_cancelled_at_each_await_offers_the_release_again_with_the_updater_free() {
+    let info = sample_update_info();
+    let stalled_preparation = MockFiles::default();
+    *stalled_preparation.stall_prepare.lock().unwrap() = true;
+    let stalled_transfer = MockSource::default();
+    *stalled_transfer.stall_download.lock().unwrap() = true;
+    let cases = [
+        (
+            "before the destination is ready",
+            MockSource::default(),
+            stalled_preparation,
+            vec![
+                downloading(0.0, &info),
+                UpdateState::Available(info.clone()),
+            ],
+            Vec::<String>::new(),
+        ),
+        (
+            "during the transfer",
+            stalled_transfer,
+            MockFiles::default(),
+            vec![
+                downloading(0.0, &info),
+                downloading(0.5, &info),
+                UpdateState::Available(info.clone()),
+            ],
+            vec!["/tmp/cancelled.AppImage".to_string()],
+        ),
+    ];
+    for (case, source, files, expected_published, expected_deleted) in cases {
+        *files.destination.lock().unwrap() = "/tmp/cancelled.AppImage".into();
+        let published: PublishedStates = Arc::default();
+        let announcements: Arc<Mutex<Vec<CancellationAnnouncement>>> = Arc::default();
+        let coordinator =
+            coordinator_reacting(source.clone(), files.clone(), MockInstaller::default(), {
+                let published = Arc::clone(&published);
+                let announcements = Arc::clone(&announcements);
+                let files = files.clone();
+                move |coordinator, state| {
+                    published.lock().unwrap().push(state.clone());
+                    if matches!(state, UpdateState::Available(_)) {
+                        announcements
+                            .lock()
+                            .unwrap()
+                            .push(CancellationAnnouncement {
+                                state: coordinator.state(),
+                                can_check: coordinator.can_check(),
+                                deleted_paths: files.deleted_paths.lock().unwrap().clone(),
+                            });
+                    }
+                }
+            });
+
+        let mut download = Box::pin(coordinator.download(&info));
+        assert!(poll_once(download.as_mut()).is_pending(), "{case}");
+        assert!(!coordinator.can_check(), "{case}: the download is running");
+        drop(download);
+
+        assert_eq!(*published.lock().unwrap(), expected_published, "{case}");
+        assert_eq!(
+            *announcements.lock().unwrap(),
+            vec![CancellationAnnouncement {
+                state: UpdateState::Available(info.clone()),
+                can_check: true,
+                deleted_paths: expected_deleted.clone(),
+            }],
+            "{case}"
+        );
+        assert_eq!(
+            coordinator.state(),
+            UpdateState::Available(info.clone()),
+            "{case}"
+        );
+
+        // The release offered again can be downloaded at once.
+        *files.stall_prepare.lock().unwrap() = false;
+        *source.stall_download.lock().unwrap() = false;
+        within_harness_limit("the next download", coordinator.download(&info)).await;
+        assert_eq!(
+            coordinator.state(),
+            UpdateState::ReadyToRestart {
+                downloaded_path: "/tmp/cancelled.AppImage".into(),
+                is_steam_game_mode: false,
+            },
+            "{case}"
+        );
+        assert_eq!(
+            *files.deleted_paths.lock().unwrap(),
+            expected_deleted,
+            "{case}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_pending_check_that_ends_after_a_failed_download_does_not_overwrite_the_failure() {
+    for is_check_cancelled in [false, true] {
+        let source = MockSource::default();
+        let (check_start_tx, check_start_rx) = tokio::sync::oneshot::channel();
+        let (check_resume_tx, check_resume_rx) = tokio::sync::oneshot::channel();
+        *source.check_started.lock().unwrap() = Some(check_start_tx);
+        *source.check_resume.lock().unwrap() = Some(check_resume_rx);
+        let info = sample_update_info();
+        *source.next_info.lock().unwrap() = Some(info.clone());
+        *source.download_error.lock().unwrap() = Some("Network cut".into());
+        let files = MockFiles::default();
+        *files.destination.lock().unwrap() = "/tmp/failure-before-check.AppImage".into();
+        let (coordinator, published) =
+            recording_coordinator_over(source, files, MockInstaller::default());
+        let coordinator = Arc::new(coordinator);
+
+        let check = tokio::spawn({
+            let coordinator = Arc::clone(&coordinator);
+            async move { coordinator.check_for_updates().await }
+        });
+        check_started_within_limit(check_start_rx).await;
+        within_harness_limit("the download", coordinator.download(&info)).await;
+        if is_check_cancelled {
+            check.abort();
+            let _ = check.await;
+        } else {
+            check_resume_tx.send(()).expect("the check is waiting");
+            within_harness_limit("the stale check", check)
+                .await
+                .expect("the check must finish");
+        }
+
+        let failed = UpdateState::DownloadFailed(DownloadFailure::Transfer("Network cut".into()));
+        assert_eq!(
+            coordinator.state(),
+            failed,
+            "cancelled: {is_check_cancelled}"
+        );
+        assert_eq!(
+            *published.lock().unwrap(),
+            vec![
+                UpdateState::Checking,
+                downloading(0.0, &info),
+                downloading(0.5, &info),
+                failed,
+            ],
+            "cancelled: {is_check_cancelled}"
+        );
+        assert!(coordinator.can_check(), "cancelled: {is_check_cancelled}");
+    }
 }
