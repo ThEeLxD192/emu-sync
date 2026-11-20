@@ -328,12 +328,13 @@ async fn finished_release_check(child: &ChildCoordinator) -> UpdateState {
     child
         .coordinator
         .handle_action(emusync_presentation::actions::UiAction::CheckForUpdates { manual: true });
-    let AppEvent::UpdateStateChanged(state) =
+    let AppEvent::UpdateStateChanged(state, _) =
         common::recv_event_matching(&child.event_rx, &child.redraw_notify, |event| {
             matches!(
                 event,
                 AppEvent::UpdateStateChanged(
-                    UpdateState::Available(_) | UpdateState::CheckFailed(_)
+                    UpdateState::Available(_) | UpdateState::CheckFailed(_),
+                    _
                 )
             )
         })

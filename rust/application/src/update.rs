@@ -52,14 +52,42 @@ pub enum DownloadFailure {
 /// `ReadyToRestart`.
 const DOWNLOADING_PROGRESS_LIMIT: f32 = 0.99;
 
+/// The order of the states a coordinator announces: each new state has a higher
+/// revision. Announcements run outside the state lock, so two of them can arrive in either
+/// order; whoever shows the state keeps the one with the highest revision.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UpdateRevision(u64);
+
+/// The current state and the revision it was announced with.
+struct Published {
+    state: UpdateState,
+    revision: UpdateRevision,
+}
+
+/// Revisions come from one counter for the whole process, so a coordinator created to
+/// replace another keeps announcing revisions above the ones already shown.
+static LAST_REVISION: AtomicU64 = AtomicU64::new(0);
+
+impl Published {
+    /// Replaces the state and returns the revision to announce it with. It runs under the
+    /// state lock, so a coordinator's revisions follow the order of its states.
+    fn set(&mut self, state: UpdateState) -> UpdateRevision {
+        self.state = state;
+        self.revision = UpdateRevision(LAST_REVISION.fetch_add(1, Ordering::SeqCst) + 1);
+        self.revision
+    }
+}
+
+type StateListener = Box<dyn Fn(&UpdateState, UpdateRevision) + Send + Sync + 'static>;
+
 pub struct UpdateCoordinator<S, F, I> {
     source: S,
     files: F,
     installer: I,
-    state: Mutex<UpdateState>,
+    state: Mutex<Published>,
     download_busy: AtomicBool,
     generation: AtomicU64,
-    on_state: Box<dyn Fn(&UpdateState) + Send + Sync + 'static>,
+    on_state: StateListener,
 }
 
 /// Ends a download, finished or interrupted: removes a file that is not kept, frees the
@@ -83,23 +111,22 @@ impl<'a, S: UpdateSource + Sync, F: UpdateFiles + Sync, I: UpdateInstaller + Syn
             let _ = self.coord.files.delete(dest);
         }
         let pending_notify = {
-            let mut state = self.coord.state.lock().unwrap();
+            let mut published = self.coord.state.lock().unwrap();
             // A finished download announces its outcome whatever replaced `Downloading`
             // meanwhile; an interrupted one only undoes its own `Downloading`.
             let next = match self.outcome.take() {
                 Some(outcome) => Some(outcome),
-                None if matches!(*state, UpdateState::Downloading { .. }) => {
+                None if matches!(published.state, UpdateState::Downloading { .. }) => {
                     Some(UpdateState::Available(self.fallback_info.clone()))
                 }
                 None => None,
             };
-            next.filter(|next| *state != *next).inspect(|next| {
-                *state = next.clone();
-            })
+            next.filter(|next| published.state != *next)
+                .map(|next| (published.set(next.clone()), next))
         };
         self.coord.download_busy.store(false, Ordering::SeqCst);
-        if let Some(new_state) = pending_notify {
-            (self.coord.on_state)(&new_state);
+        if let Some((revision, new_state)) = pending_notify {
+            (self.coord.on_state)(&new_state, revision);
         }
     }
 }
@@ -133,13 +160,16 @@ where
         source: S,
         files: F,
         installer: I,
-        on_state: impl Fn(&UpdateState) + Send + Sync + 'static,
+        on_state: impl Fn(&UpdateState, UpdateRevision) + Send + Sync + 'static,
     ) -> Self {
         Self {
             source,
             files,
             installer,
-            state: Mutex::new(UpdateState::Idle),
+            state: Mutex::new(Published {
+                state: UpdateState::Idle,
+                revision: UpdateRevision::default(),
+            }),
             download_busy: AtomicBool::new(false),
             generation: AtomicU64::new(0),
             on_state: Box::new(on_state),
@@ -147,22 +177,22 @@ where
     }
 
     pub fn state(&self) -> UpdateState {
-        self.state.lock().unwrap().clone()
+        self.state.lock().unwrap().state.clone()
     }
 
     fn publish(&self, new_state: UpdateState) {
-        let mut lock = self.state.lock().unwrap();
-        if *lock != new_state {
-            *lock = new_state.clone();
-            drop(lock);
-            (self.on_state)(&new_state);
+        let mut published = self.state.lock().unwrap();
+        if published.state != new_state {
+            let revision = published.set(new_state.clone());
+            drop(published);
+            (self.on_state)(&new_state, revision);
         }
     }
 
     pub fn can_check(&self) -> bool {
         !self.download_busy.load(Ordering::SeqCst)
             && !matches!(
-                *self.state.lock().unwrap(),
+                self.state.lock().unwrap().state,
                 UpdateState::ReadyToRestart { .. }
             )
     }
@@ -177,24 +207,25 @@ where
 
         let request = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
 
-        let (previous, should_notify) = {
-            let mut lock = self.state.lock().unwrap();
+        let (previous, checking_revision) = {
+            let mut published = self.state.lock().unwrap();
             // Read again under the lock: a download or a newer check that started after
             // the first read publishes under this lock, and this check, which would never
             // publish its result, must not replace their state with `Checking`.
             if self.download_busy.load(Ordering::SeqCst)
                 || self.generation.load(Ordering::SeqCst) != request
-                || matches!(*lock, UpdateState::ReadyToRestart { .. })
+                || matches!(published.state, UpdateState::ReadyToRestart { .. })
             {
                 return;
             }
-            let prev_raw = std::mem::replace(&mut *lock, UpdateState::Checking);
-            let should_notify = prev_raw != UpdateState::Checking;
+            let prev_raw = published.state.clone();
+            let checking_revision =
+                (prev_raw != UpdateState::Checking).then(|| published.set(UpdateState::Checking));
             let prev = match prev_raw {
                 UpdateState::Checking => UpdateState::Idle,
                 other => other,
             };
-            (prev, should_notify)
+            (prev, checking_revision)
         };
 
         let mut guard = CancelGuard {
@@ -203,8 +234,8 @@ where
             previous: Some(previous),
         };
 
-        if should_notify {
-            (self.on_state)(&UpdateState::Checking);
+        if let Some(revision) = checking_revision {
+            (self.on_state)(&UpdateState::Checking, revision);
         }
 
         match self.source.check().await {
@@ -242,7 +273,7 @@ where
         }
 
         if matches!(
-            *self.state.lock().unwrap(),
+            self.state.lock().unwrap().state,
             UpdateState::ReadyToRestart { .. }
         ) {
             self.download_busy.store(false, Ordering::SeqCst);

@@ -12,7 +12,7 @@ use common::{
 use emusync_application::{DownloadFailure, UpdateState};
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{
-    AppEvent, DesktopCoordinator,
+    AppEvent, DesktopCoordinator, apply_update_state_changed,
     coordinator::{ProxyPolicy, UpdateSourceConfig},
 };
 use emusync_domain::{config::Language, update::UpdateInfo};
@@ -142,8 +142,11 @@ async fn check_finds_the_newer_release_and_downloads_it_ready_to_restart() {
     let (coordinator, rx, _dir) = coordinator(UpdateSourceConfig::Controlled(base));
 
     coordinator.handle_action(UiAction::CheckForUpdates { manual: true });
-    let AppEvent::UpdateStateChanged(UpdateState::Available(info)) = next_matching(&rx, |e| {
-        matches!(e, AppEvent::UpdateStateChanged(UpdateState::Available(_)))
+    let AppEvent::UpdateStateChanged(UpdateState::Available(info), _) = next_matching(&rx, |e| {
+        matches!(
+            e,
+            AppEvent::UpdateStateChanged(UpdateState::Available(_), _)
+        )
     })
     .await
     else {
@@ -154,13 +157,17 @@ async fn check_finds_the_newer_release_and_downloads_it_ready_to_restart() {
     assert_eq!(info.asset_name, PLATFORM_ASSET);
 
     coordinator.handle_action(UiAction::DownloadUpdate(info));
-    let AppEvent::UpdateStateChanged(UpdateState::ReadyToRestart {
-        downloaded_path, ..
-    }) = next_matching(&rx, |e| {
+    let AppEvent::UpdateStateChanged(
+        UpdateState::ReadyToRestart {
+            downloaded_path, ..
+        },
+        _,
+    ) = next_matching(&rx, |e| {
         matches!(
             e,
             AppEvent::UpdateStateChanged(
-                UpdateState::ReadyToRestart { .. } | UpdateState::DownloadFailed(_)
+                UpdateState::ReadyToRestart { .. } | UpdateState::DownloadFailed(_),
+                _
             )
         )
     })
@@ -198,7 +205,7 @@ async fn development_builds_without_a_controlled_server_never_check() {
     assert!(
         !events
             .iter()
-            .any(|e| matches!(e, AppEvent::UpdateStateChanged(_))),
+            .any(|e| matches!(e, AppEvent::UpdateStateChanged(_, _))),
         "{events:?}"
     );
     assert_eq!(
@@ -224,7 +231,7 @@ async fn a_portable_copy_never_checks_and_explains_that_it_replaces_itself_by_ha
     assert!(
         !events
             .iter()
-            .any(|e| matches!(e, AppEvent::UpdateStateChanged(_))),
+            .any(|e| matches!(e, AppEvent::UpdateStateChanged(_, _))),
         "{events:?}"
     );
     assert_eq!(
@@ -338,7 +345,9 @@ fn check_failed_detail(events: &[AppEvent]) -> &str {
     events
         .iter()
         .find_map(|event| match event {
-            AppEvent::UpdateStateChanged(UpdateState::CheckFailed(detail)) => Some(detail.as_str()),
+            AppEvent::UpdateStateChanged(UpdateState::CheckFailed(detail), _) => {
+                Some(detail.as_str())
+            }
             _ => None,
         })
         .unwrap_or_else(|| panic!("no failed check was published: {events:?}"))
@@ -379,7 +388,8 @@ async fn a_manual_check_against_an_unavailable_server_says_it_could_not_check_ne
                 UpdateState::Idle
                     | UpdateState::Available(_)
                     | UpdateState::DownloadFailed(_)
-                    | UpdateState::RestartFailed { .. }
+                    | UpdateState::RestartFailed { .. },
+                _
             )
         )),
         "a failed check is neither \"no update\", a release nor an update error: {seen:?}"
@@ -454,7 +464,7 @@ async fn a_failed_automatic_check_stays_silent_and_a_later_manual_one_reports_it
     collect_until(&rx, &mut seen, |event| {
         matches!(
             event,
-            AppEvent::UpdateStateChanged(UpdateState::CheckFailed(_))
+            AppEvent::UpdateStateChanged(UpdateState::CheckFailed(_), _)
         )
     })
     .await;
@@ -515,15 +525,17 @@ async fn a_download_the_server_refuses_fails_naming_its_status_once() {
             matches!(
                 event,
                 AppEvent::UpdateStateChanged(
-                    UpdateState::DownloadFailed(_) | UpdateState::ReadyToRestart { .. }
+                    UpdateState::DownloadFailed(_) | UpdateState::ReadyToRestart { .. },
+                    _
                 )
             )
         })
         .await;
         match seen.last() {
-            Some(AppEvent::UpdateStateChanged(UpdateState::DownloadFailed(
-                DownloadFailure::Transfer(detail),
-            ))) => {
+            Some(AppEvent::UpdateStateChanged(
+                UpdateState::DownloadFailed(DownloadFailure::Transfer(detail)),
+                _,
+            )) => {
                 assert_eq!(detail, expected, "{status_line}: {seen:?}");
             }
             other => {
@@ -613,7 +625,8 @@ async fn a_download_whose_size_differs_from_the_release_names_both_sizes_and_lea
         matches!(
             event,
             AppEvent::UpdateStateChanged(
-                UpdateState::DownloadFailed(_) | UpdateState::ReadyToRestart { .. }
+                UpdateState::DownloadFailed(_) | UpdateState::ReadyToRestart { .. },
+                _
             )
         )
     })
@@ -626,7 +639,7 @@ async fn a_download_whose_size_differs_from_the_release_names_both_sizes_and_lea
                     expected_bytes,
                     received_bytes,
                 }
-            ))) if *expected_bytes == announced_bytes
+            ), _)) if *expected_bytes == announced_bytes
                 && *received_bytes == SHORT_ASSET.len() as u64
         ),
         "{seen:?}"
@@ -665,22 +678,25 @@ async fn a_restart_that_cannot_apply_the_update_reports_its_path_keeps_the_file_
     collect_until(&rx, &mut seen, |event| {
         matches!(
             event,
-            AppEvent::UpdateStateChanged(UpdateState::RestartFailed { .. })
+            AppEvent::UpdateStateChanged(UpdateState::RestartFailed { .. }, _)
                 | AppEvent::ExitRequested
         )
     })
     .await;
     assert_eq!(
         seen.iter()
-            .filter(|event| matches!(event, AppEvent::UpdateStateChanged(_)))
+            .filter(|event| matches!(event, AppEvent::UpdateStateChanged(_, _)))
             .count(),
         1,
         "only the failure is published: {seen:?}"
     );
     match seen.last() {
-        Some(AppEvent::UpdateStateChanged(UpdateState::RestartFailed {
-            downloaded_path: reported_path,
-        })) => assert_eq!(
+        Some(AppEvent::UpdateStateChanged(
+            UpdateState::RestartFailed {
+                downloaded_path: reported_path,
+            },
+            _,
+        )) => assert_eq!(
             reported_path,
             &downloaded_path.to_string_lossy().into_owned()
         ),
@@ -701,4 +717,90 @@ async fn a_restart_that_cannot_apply_the_update_reports_its_path_keeps_the_file_
     .await
     .expect("a refused restart must let other operations run");
     coordinator.release_admission();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn update_states_applied_in_arrival_reverse_or_crossed_order_leave_the_newest_on_screen() {
+    let base = release_server("v99.0.0").await;
+    let (coordinator, rx, _dir) = coordinator(UpdateSourceConfig::Controlled(base));
+    coordinator.handle_action(UiAction::CheckForUpdates { manual: true });
+    let AppEvent::UpdateStateChanged(UpdateState::Available(info), _) = next_matching(&rx, |e| {
+        matches!(
+            e,
+            AppEvent::UpdateStateChanged(UpdateState::Available(_), _)
+        )
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    coordinator.handle_action(UiAction::DownloadUpdate(info));
+    let mut seen = Vec::new();
+    collect_until(&rx, &mut seen, |event| {
+        matches!(
+            event,
+            AppEvent::UpdateStateChanged(UpdateState::ReadyToRestart { .. }, _)
+        )
+    })
+    .await;
+    let announced: Vec<_> = seen
+        .into_iter()
+        .filter_map(|event| match event {
+            AppEvent::UpdateStateChanged(state, revision) => Some((state, revision)),
+            _ => None,
+        })
+        .collect();
+    let (newest_state, _) = announced.last().cloned().expect("states were announced");
+    assert!(
+        matches!(newest_state, UpdateState::ReadyToRestart { .. }),
+        "{announced:?}"
+    );
+    if let UpdateState::ReadyToRestart {
+        downloaded_path, ..
+    } = &newest_state
+    {
+        let _ = std::fs::remove_file(downloaded_path);
+    }
+    assert!(announced.len() >= 3, "{announced:?}");
+
+    assert!(
+        announced.windows(2).all(|pair| pair[0].1 < pair[1].1),
+        "each announced state must carry a higher revision than the one before: {announced:?}"
+    );
+
+    // In the order they arrived; with the newest first and every older one after it; and
+    // with the newest crossing the one before it: the newest stays on screen.
+    let mut crossed = announced.clone();
+    let last = crossed.len() - 1;
+    crossed.swap(last - 1, last);
+    for order in [
+        announced.clone(),
+        announced.iter().rev().cloned().collect::<Vec<_>>(),
+        crossed,
+    ] {
+        let mut current_revision = Default::default();
+        let mut shown_state = UpdateState::Idle;
+        for (state, revision) in order {
+            apply_update_state_changed(&mut current_revision, &mut shown_state, state, revision);
+        }
+        assert_eq!(shown_state, newest_state);
+    }
+
+    // An announcement repeated with the same revision is not applied again.
+    let (newest_state, newest_revision) = announced.last().cloned().unwrap();
+    let mut shown_state = UpdateState::Idle;
+    let mut current_revision = Default::default();
+    assert!(apply_update_state_changed(
+        &mut current_revision,
+        &mut shown_state,
+        newest_state.clone(),
+        newest_revision
+    ));
+    assert!(!apply_update_state_changed(
+        &mut current_revision,
+        &mut shown_state,
+        UpdateState::Checking,
+        newest_revision
+    ));
+    assert_eq!(shown_state, newest_state);
 }

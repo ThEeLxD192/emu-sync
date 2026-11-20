@@ -99,7 +99,7 @@ async fn published_states(source: ScriptedSource, downloaded_size_bytes: u64) ->
             downloaded_size_bytes,
         },
         DesktopInstaller,
-        move |state: &UpdateState| recorder.lock().unwrap().push(state.clone()),
+        move |state: &UpdateState, _revision| recorder.lock().unwrap().push(state.clone()),
     );
     tokio::time::timeout(
         std::time::Duration::from_secs(10),

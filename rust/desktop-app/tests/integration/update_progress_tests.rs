@@ -137,7 +137,7 @@ impl UpdateHarness {
         let finished = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 while let Ok(event) = self.event_rx.try_recv() {
-                    if let AppEvent::UpdateStateChanged(state) = event {
+                    if let AppEvent::UpdateStateChanged(state, _) = event {
                         let is_finished = matches!(
                             state,
                             UpdateState::DownloadFailed(_) | UpdateState::ReadyToRestart { .. }

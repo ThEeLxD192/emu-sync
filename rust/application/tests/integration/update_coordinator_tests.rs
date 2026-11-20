@@ -156,7 +156,7 @@ async fn update_check_publishes_state_transitions() {
         source.clone(),
         files.clone(),
         installer.clone(),
-        move |state| {
+        move |state, _revision| {
             published_clone.lock().unwrap().push(state.clone());
         },
     );
@@ -196,7 +196,7 @@ async fn failed_download_cleans_up_destination_file() {
         source.clone(),
         files.clone(),
         installer.clone(),
-        move |state| {
+        move |state, _revision| {
             published_clone.lock().unwrap().push(state.clone());
         },
     );
@@ -232,7 +232,7 @@ async fn successful_download_publishes_progress_and_ready_to_restart() {
         source.clone(),
         files.clone(),
         installer.clone(),
-        move |state| {
+        move |state, _revision| {
             published_clone.lock().unwrap().push(state.clone());
         },
     );
@@ -263,7 +263,7 @@ fn restart_is_blocked_when_operation_is_in_progress() {
     let files = MockFiles::default();
     let installer = MockInstaller::default();
 
-    let coordinator = UpdateCoordinator::new(source, files, installer.clone(), |_| {});
+    let coordinator = UpdateCoordinator::new(source, files, installer.clone(), |_, _revision| {});
 
     // Blocked if operation in progress
     let res_blocked = coordinator.restart("/path/to/update", true);
@@ -297,7 +297,7 @@ async fn cancelled_download_cleans_up_destination_and_restores_available_state()
         source,
         files.clone(),
         installer,
-        move |state| {
+        move |state, _revision| {
             published_clone.lock().unwrap().push(state.clone());
         },
     ));
@@ -348,7 +348,7 @@ async fn reentrant_on_state_does_not_deadlock_and_can_check_while_checking() {
         source,
         files,
         installer,
-        move |_state| {
+        move |_state, _revision| {
             if let Some(coord) = coord_holder_clone.lock().unwrap().as_ref() {
                 // Must not deadlock when calling state() or can_check() inside on_state
                 let current = coord.state();
@@ -383,9 +383,10 @@ async fn download_size_mismatch_deletes_file_and_publishes_error_state() {
     let published = Arc::new(Mutex::new(Vec::new()));
     let published_clone = Arc::clone(&published);
 
-    let coordinator = UpdateCoordinator::new(source, files.clone(), installer, move |state| {
-        published_clone.lock().unwrap().push(state.clone());
-    });
+    let coordinator =
+        UpdateCoordinator::new(source, files.clone(), installer, move |state, _revision| {
+            published_clone.lock().unwrap().push(state.clone());
+        });
 
     let mut info = sample_update_info();
     info.asset_size = 4096;
@@ -442,7 +443,7 @@ async fn stale_or_cancelled_check_does_not_overwrite_concurrent_download_or_read
         source,
         files,
         installer.clone(),
-        move |state| {
+        move |state, _revision| {
             published_clone.lock().unwrap().push(state.clone());
         },
     ));
@@ -503,7 +504,7 @@ fn recording_coordinator(source: MockSource) -> (MockCoordinator, PublishedState
         source,
         MockFiles::default(),
         MockInstaller::default(),
-        move |state| recorder.lock().unwrap().push(state.clone()),
+        move |state, _revision| recorder.lock().unwrap().push(state.clone()),
     );
     (coordinator, published)
 }
@@ -627,7 +628,7 @@ async fn a_check_that_fails_while_a_download_finishes_leaves_the_update_ready_to
         source,
         files,
         MockInstaller::default(),
-        move |state| recorder.lock().unwrap().push(state.clone()),
+        move |state, _revision| recorder.lock().unwrap().push(state.clone()),
     ));
 
     let check = tokio::spawn({
@@ -669,7 +670,7 @@ fn recording_coordinator_over(
 ) -> (MockCoordinator, PublishedStates) {
     let published = Arc::new(Mutex::new(Vec::new()));
     let recorder = Arc::clone(&published);
-    let coordinator = UpdateCoordinator::new(source, files, installer, move |state| {
+    let coordinator = UpdateCoordinator::new(source, files, installer, move |state, _revision| {
         recorder.lock().unwrap().push(state.clone())
     });
     (coordinator, published)
@@ -873,11 +874,16 @@ fn coordinator_reacting(
 ) -> Arc<ReactingCoordinator> {
     Arc::new_cyclic(|this: &std::sync::Weak<ReactingCoordinator>| {
         let this = this.clone();
-        UpdateCoordinator::new(source, files, installer, move |state: &UpdateState| {
-            if let Some(coordinator) = this.upgrade() {
-                react(&coordinator, state);
-            }
-        })
+        UpdateCoordinator::new(
+            source,
+            files,
+            installer,
+            move |state: &UpdateState, _revision| {
+                if let Some(coordinator) = this.upgrade() {
+                    react(&coordinator, state);
+                }
+            },
+        )
     })
 }
 
@@ -1305,4 +1311,36 @@ async fn a_pending_check_that_ends_after_a_failed_download_does_not_overwrite_th
         );
         assert!(coordinator.can_check(), "cancelled: {is_check_cancelled}");
     }
+}
+
+#[tokio::test]
+async fn every_announced_state_has_a_higher_revision_and_the_last_one_is_the_current_state() {
+    let source = MockSource::default();
+    let info = sample_update_info();
+    *source.next_info.lock().unwrap() = Some(info.clone());
+    let announced = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&announced);
+    let coordinator = UpdateCoordinator::new(
+        source,
+        MockFiles::default(),
+        MockInstaller::default(),
+        move |state: &UpdateState, revision| {
+            recorder.lock().unwrap().push((revision, state.clone()));
+        },
+    );
+
+    within_harness_limit("the check", coordinator.check_for_updates()).await;
+    within_harness_limit("the download", coordinator.download(&info)).await;
+
+    let announced = announced.lock().unwrap().clone();
+    assert!(announced.len() >= 4, "{announced:?}");
+    assert!(
+        announced.windows(2).all(|pair| pair[0].0 < pair[1].0),
+        "each announcement must be newer than the one before: {announced:?}"
+    );
+    assert_eq!(
+        announced.last().map(|(_, state)| state.clone()),
+        Some(coordinator.state()),
+        "the highest revision is the current state"
+    );
 }

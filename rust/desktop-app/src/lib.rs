@@ -23,7 +23,10 @@ pub use coordinator::{DesktopCoordinator, DriveEndpoints, resolve_effective_targ
 
 pub mod events;
 pub mod language;
-pub use events::{AppEvent, EventSender, apply_entry_games_scanned, apply_steam_state_refreshed};
+pub use events::{
+    AppEvent, EventSender, apply_entry_games_scanned, apply_steam_state_refreshed,
+    apply_update_state_changed,
+};
 pub use language::CurrentLanguage;
 
 pub mod scanner_helper;

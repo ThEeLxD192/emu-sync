@@ -163,8 +163,8 @@ impl UpdateServices {
             source,
             UpdateStagingFiles::default_for_platform(),
             installer,
-            move |state: &UpdateState| {
-                let _ = event_tx.send(AppEvent::UpdateStateChanged(state.clone()));
+            move |state: &UpdateState, revision| {
+                let _ = event_tx.send(AppEvent::UpdateStateChanged(state.clone(), revision));
             },
         );
         Self {

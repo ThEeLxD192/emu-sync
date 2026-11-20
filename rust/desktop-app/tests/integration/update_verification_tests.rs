@@ -306,12 +306,14 @@ impl UpdateHarness {
             matches!(
                 event,
                 AppEvent::UpdateStateChanged(
-                    UpdateState::Available(_) | UpdateState::CheckFailed(_) | UpdateState::Idle
+                    UpdateState::Available(_) | UpdateState::CheckFailed(_) | UpdateState::Idle,
+                    _
                 )
             )
         })
         .await;
-        let Some(AppEvent::UpdateStateChanged(UpdateState::Available(info))) = seen.last() else {
+        let Some(AppEvent::UpdateStateChanged(UpdateState::Available(info), _)) = seen.last()
+        else {
             panic!("the signed newer release must be offered: {seen:?}");
         };
         assert_eq!(info.version, "99.0.0");
@@ -328,7 +330,8 @@ fn is_finished_download(event: &AppEvent) -> bool {
     matches!(
         event,
         AppEvent::UpdateStateChanged(
-            UpdateState::DownloadFailed(_) | UpdateState::ReadyToRestart { .. }
+            UpdateState::DownloadFailed(_) | UpdateState::ReadyToRestart { .. },
+            _
         )
     )
 }
@@ -339,14 +342,15 @@ fn failed_transfer_detail(events: &[AppEvent]) -> &str {
     assert!(
         !events.iter().any(|event| matches!(
             event,
-            AppEvent::UpdateStateChanged(UpdateState::ReadyToRestart { .. })
+            AppEvent::UpdateStateChanged(UpdateState::ReadyToRestart { .. }, _)
         )),
         "an unverified update must never be ready to restart: {events:?}"
     );
     match events.last() {
-        Some(AppEvent::UpdateStateChanged(UpdateState::DownloadFailed(
-            DownloadFailure::Transfer(detail),
-        ))) => detail,
+        Some(AppEvent::UpdateStateChanged(
+            UpdateState::DownloadFailed(DownloadFailure::Transfer(detail)),
+            _,
+        )) => detail,
         other => panic!("a verification failure is a failed transfer, got {other:?}: {events:?}"),
     }
 }
@@ -521,7 +525,7 @@ async fn a_manual_check_of_a_newer_unsigned_release_says_it_could_not_check_neve
         assert!(
             seen.iter().any(|event| matches!(
                 event,
-                AppEvent::UpdateStateChanged(UpdateState::CheckFailed(detail))
+                AppEvent::UpdateStateChanged(UpdateState::CheckFailed(detail), _)
                     if detail == "Update verification failed: release v99.0.0 is not signed"
             )),
             "{case}: {seen:?}"
@@ -536,7 +540,7 @@ async fn a_manual_check_of_a_newer_unsigned_release_says_it_could_not_check_neve
         assert!(
             !seen.iter().any(|event| matches!(
                 event,
-                AppEvent::UpdateStateChanged(UpdateState::Idle | UpdateState::Available(_))
+                AppEvent::UpdateStateChanged(UpdateState::Idle | UpdateState::Available(_), _)
             )),
             "{case}: an unsigned release is neither \"up to date\" nor an update: {seen:?}"
         );
@@ -605,7 +609,7 @@ async fn a_tampered_package_explains_the_failed_verification_in_spanish_in_the_u
 
     let events = updates.check_and_download().await;
 
-    let Some(AppEvent::UpdateStateChanged(state)) = events.last() else {
+    let Some(AppEvent::UpdateStateChanged(state, _)) = events.last() else {
         panic!("the download must end in a state: {events:?}");
     };
     assert_eq!(
@@ -638,9 +642,12 @@ async fn the_controlled_release_key_survives_the_rebuilds_of_later_settings() {
 
     let events = updates.check_and_download().await;
 
-    let Some(AppEvent::UpdateStateChanged(UpdateState::ReadyToRestart {
-        downloaded_path, ..
-    })) = events.last()
+    let Some(AppEvent::UpdateStateChanged(
+        UpdateState::ReadyToRestart {
+            downloaded_path, ..
+        },
+        _,
+    )) = events.last()
     else {
         panic!("the signed package must be ready to restart: {events:?}");
     };
@@ -759,7 +766,7 @@ fn release_key_child() {
                 let Some(AppEvent::UpdateStateChanged(UpdateState::ReadyToRestart {
                     downloaded_path,
                     ..
-                })) = events.last()
+                }, _)) = events.last()
                 else {
                     panic!("{scenario}: the test key must be trusted: {events:?}");
                 };
