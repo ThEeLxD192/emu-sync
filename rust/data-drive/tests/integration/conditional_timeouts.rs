@@ -2,7 +2,7 @@ use crate::common;
 
 use common::{read_request, reply};
 use emusync_data_drive::{ConditionalError, ConditionalUpdate, FileRevision};
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
     io::{Read, Write},
     net::TcpListener,
@@ -28,7 +28,7 @@ fn revision() -> FileRevision {
 fn adapter(listener: &TcpListener) -> ConditionalUpdate {
     let base = format!("http://{}/", listener.local_addr().unwrap());
     ConditionalUpdate::new(
-        Client::new(),
+        common::direct_client(),
         Url::parse(&format!("{base}files/")).unwrap(),
         Url::parse(&format!("{base}upload/")).unwrap(),
     )
@@ -323,13 +323,11 @@ async fn linux_tcp_timeout_stops_stalled_conditional_body_without_cancellation()
     use std::{sync::mpsc, time::Duration};
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let root = format!("http://{}/", listener.local_addr().unwrap());
-    let clients = DriveHttpPolicy {
+    let clients = common::direct_clients(DriveHttpPolicy {
         connect: Duration::from_secs(2),
         metadata: Duration::from_secs(2),
         inactivity: Duration::from_millis(500),
-    }
-    .build()
-    .unwrap();
+    });
     let client = ConditionalUpdate::with_clients(
         clients.metadata,
         clients.upload,
@@ -381,13 +379,11 @@ async fn linux_tcp_timeout_does_not_bound_silent_response_after_body_delivery() 
     use tokio_util::sync::CancellationToken;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let root = format!("http://{}/", listener.local_addr().unwrap());
-    let clients = DriveHttpPolicy {
+    let clients = common::direct_clients(DriveHttpPolicy {
         connect: Duration::from_secs(2),
         metadata: Duration::from_secs(2),
         inactivity: Duration::from_millis(150),
-    }
-    .build()
-    .unwrap();
+    });
     let client = ConditionalUpdate::with_clients(
         clients.metadata,
         clients.upload,
@@ -447,13 +443,11 @@ async fn empty_conditional_upload_times_out_waiting_for_response_headers() {
     use std::{sync::mpsc, time::Duration};
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let root = format!("http://{}/", listener.local_addr().unwrap());
-    let clients = DriveHttpPolicy {
+    let clients = common::direct_clients(DriveHttpPolicy {
         connect: Duration::from_secs(2),
         metadata: Duration::from_secs(2),
         inactivity: Duration::from_millis(200),
-    }
-    .build()
-    .unwrap();
+    });
     let client = ConditionalUpdate::with_transfer_clients(
         clients.metadata,
         clients.upload,
@@ -506,13 +500,11 @@ async fn nonempty_conditional_upload_times_out_after_body_with_unknown_outcome()
     use std::{sync::mpsc, time::Duration};
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let root = format!("http://{}/", listener.local_addr().unwrap());
-    let clients = DriveHttpPolicy {
+    let clients = common::direct_clients(DriveHttpPolicy {
         connect: Duration::from_secs(2),
         metadata: Duration::from_secs(2),
         inactivity: Duration::from_millis(200),
-    }
-    .build()
-    .unwrap();
+    });
     let client = ConditionalUpdate::with_transfer_clients(
         clients.metadata,
         clients.upload.clone(),
@@ -684,7 +676,7 @@ async fn linux_tcp_timeout_distinguishes_stalled_and_active_tls_uploads() {
             metadata: Duration::from_secs(2),
             inactivity: Duration::from_millis(500),
         }
-        .build_with(|| Client::builder().add_root_certificate(trusted.clone()))
+        .build_with(|| common::direct_client_builder().add_root_certificate(trusted.clone()))
         .unwrap();
         let client = ConditionalUpdate::with_clients(
             clients.metadata,

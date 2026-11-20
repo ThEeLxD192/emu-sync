@@ -6,7 +6,7 @@ use crate::common;
 
 use common::{read_request, reply};
 use emusync_data_drive::{ConditionalError, ConditionalUpdate, FileRevision, UploadedFile};
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
     io::Write,
     net::TcpListener,
@@ -37,7 +37,7 @@ fn observed_revision() -> FileRevision {
 fn adapter(listener: &TcpListener) -> ConditionalUpdate {
     let base = format!("http://{}/", listener.local_addr().unwrap());
     ConditionalUpdate::new(
-        Client::new(),
+        common::direct_client(),
         Url::parse(&format!("{base}files/")).unwrap(),
         Url::parse(&format!("{base}upload/")).unwrap(),
     )

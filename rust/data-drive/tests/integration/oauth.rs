@@ -1,10 +1,12 @@
+use crate::common;
+
 use emusync_data_drive::{OAuth, OAuthError};
 use emusync_data_local::ConfigManager;
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
     library::{GameEntry, NativeGame},
 };
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
     io::{Read, Write},
     net::TcpListener,
@@ -77,7 +79,7 @@ async fn exchange_keeps_concurrent_library_edits() {
         "200 OK",
         r#"{"access_token":"access","refresh_token":"new"}"#,
     );
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
     let task = tokio::spawn(async move {
         oauth
             .authorize(&config, true, |_| async { Ok("code".into()) })
@@ -105,7 +107,7 @@ async fn exchange_keeps_concurrent_library_edits() {
 async fn refresh_response_is_discarded_after_disconnect_and_reconnect() {
     let (_dir, store, config) = setup(Some("old"));
     let (url, seen, go, server) = server("200 OK", r#"{"access_token":"stale"}"#);
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
     let task = tokio::spawn(async move {
         oauth
             .authorize(&config, false, |_| async {
@@ -130,7 +132,7 @@ async fn refresh_response_is_discarded_after_disconnect_and_reconnect() {
 async fn refresh_response_is_discarded_after_generic_configuration_aba() {
     let (_dir, store, config) = setup(Some("old"));
     let (url, seen, go, server) = server("200 OK", r#"{"access_token":"stale"}"#);
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
     let task_config = config.clone();
     let task = tokio::spawn(async move {
         oauth
@@ -165,7 +167,7 @@ async fn refresh_response_is_discarded_after_generic_configuration_aba() {
 async fn invalid_grant_clears_only_current_refresh_token() {
     let (_dir, store, config) = setup(Some("old"));
     let (url, seen, go, server) = server("400 Bad Request", r#"{"error":"invalid_grant"}"#);
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
     let task = tokio::spawn(async move {
         oauth
             .authorize(&config, false, |_| async {
@@ -223,7 +225,7 @@ async fn invalid_grant_with_interactive_allowed_clears_stale_refresh_and_complet
         .unwrap();
     });
 
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
     let (access, snapshot) = oauth
         .authorize_scoped(&config, true, |_| async { Ok("interactive-code".into()) })
         .await
@@ -251,7 +253,7 @@ async fn non_invalid_grant_refresh_failure_preserves_existing_refresh_token_and_
     let (_dir, store, config) = setup(Some("old"));
     let (url, seen, go, server) =
         server("400 Bad Request", r#"{"error":"temporarily_unavailable"}"#);
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
 
     let interactive_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let spy = interactive_started.clone();
@@ -295,7 +297,7 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
             "200 OK",
             r#"{"access_token":"fresh","refresh_token":"new-refresh"}"#,
         );
-        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+        let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
 
         let task_config = config.clone();
         let task = tokio::spawn(async move {
@@ -330,7 +332,7 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
     {
         let (_dir, store, _) = setup(None);
         let oauth = OAuth::new(
-            Client::new(),
+            common::direct_client(),
             Shared(store.clone()),
             Url::parse("http://127.0.0.1:1/token").unwrap(),
         );
@@ -358,7 +360,7 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
             "200 OK",
             r#"{"access_token":"   ","refresh_token":"should-not-persist"}"#,
         );
-        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+        let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
 
         let task = tokio::spawn(async move {
             oauth
@@ -390,7 +392,7 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let url = Url::parse(&format!("http://{}/token", listener.local_addr().unwrap())).unwrap();
-        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+        let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
 
         let stale_config = AppConfig {
             language: Default::default(),
@@ -416,7 +418,7 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
     {
         let (_dir, store, config) = setup(Some("old"));
         let (url, seen, go, server) = server("200 OK", r#"{"access_token":"   "}"#);
-        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+        let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
 
         let task = tokio::spawn(async move {
             oauth

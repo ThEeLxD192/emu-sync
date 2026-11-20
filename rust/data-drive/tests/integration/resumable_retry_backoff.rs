@@ -11,7 +11,7 @@ use crate::common;
 
 use common::{read_request, reply_extra as reply};
 use emusync_data_drive::{ResumableUpload, UploadError, UploadSession};
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
     io::{ErrorKind, Read},
     net::{Shutdown, TcpListener, TcpStream},
@@ -135,7 +135,11 @@ async fn uncertain_session(listener: &TcpListener) -> Box<UploadSession> {
         let (mut stream, _) = accept_status_query(&server_listener);
         reply(&mut stream, "404 Not Found", "", "");
     });
-    let result = upload_snapshot(ResumableUpload::new(Client::new(), upload_url(listener))).await;
+    let result = upload_snapshot(ResumableUpload::new(
+        common::direct_client(),
+        upload_url(listener),
+    ))
+    .await;
     server.join().unwrap();
     match result {
         Err(UploadError::OutcomeUnknown(session)) => session,
@@ -167,7 +171,7 @@ async fn injected_backoff_spaces_reconcile_status_queries_and_doubles_between_th
         gaps
     });
 
-    let result = ResumableUpload::new(Client::new(), upload_url(&listener))
+    let result = ResumableUpload::new(common::direct_client(), upload_url(&listener))
         .with_retry_backoff(first_wait)
         .reconcile("synthetic", &session)
         .await;
@@ -212,7 +216,8 @@ async fn injected_backoff_spaces_unacknowledged_chunks_and_doubles_each_time() {
     });
 
     let result = upload_snapshot(
-        ResumableUpload::new(Client::new(), upload_url(&listener)).with_retry_backoff(first_wait),
+        ResumableUpload::new(common::direct_client(), upload_url(&listener))
+            .with_retry_backoff(first_wait),
     )
     .await;
 
@@ -246,7 +251,11 @@ async fn default_backoff_waits_250_ms_before_resending_unacknowledged_chunk() {
         accepted_at.duration_since(replying_at)
     });
 
-    let result = upload_snapshot(ResumableUpload::new(Client::new(), upload_url(&listener))).await;
+    let result = upload_snapshot(ResumableUpload::new(
+        common::direct_client(),
+        upload_url(&listener),
+    ))
+    .await;
 
     assert_eq!(result.unwrap(), "created");
     let gap = server.join().unwrap();
@@ -272,7 +281,11 @@ async fn default_backoff_waits_250_ms_between_status_queries() {
         accepted_at.duration_since(replying_at)
     });
 
-    let result = upload_snapshot(ResumableUpload::new(Client::new(), upload_url(&listener))).await;
+    let result = upload_snapshot(ResumableUpload::new(
+        common::direct_client(),
+        upload_url(&listener),
+    ))
+    .await;
 
     assert_eq!(result.unwrap(), "created");
     let gap = server.join().unwrap();
@@ -308,7 +321,7 @@ async fn huge_backoff_between_status_queries_is_cancelled_with_unknown_outcome()
             thread::spawn(move || serve_one_failed_status_query(&server_listener, &waiting_tx));
         let dir = tempfile::tempdir().unwrap();
         let snapshot = write_snapshot(&dir);
-        let client = ResumableUpload::new(Client::new(), upload_url(&listener))
+        let client = ResumableUpload::new(common::direct_client(), upload_url(&listener))
             .with_retry_backoff(first_wait);
         let cancel = CancellationToken::new();
         let task_cancel = cancel.clone();

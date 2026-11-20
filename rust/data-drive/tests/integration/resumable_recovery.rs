@@ -2,7 +2,7 @@ use crate::common;
 
 use common::{read_request, reply_extra as reply};
 use emusync_data_drive::{ReconcileStatus, ResumableUpload, UploadError};
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{net::TcpListener, sync::mpsc, thread, time::Duration};
 use tokio_util::sync::CancellationToken;
 
@@ -35,7 +35,7 @@ async fn cancellation_during_success_metadata_retains_upload_session() {
     let cancel = CancellationToken::new();
     let signal = cancel.clone();
     let task = tokio::spawn(async move {
-        ResumableUpload::new(Client::new(), url)
+        ResumableUpload::new(common::direct_client(), url)
             .upload("synthetic", &path, "save", "folder", &signal)
             .await
     });
@@ -80,7 +80,7 @@ async fn cancellation_during_stalled_status_query_retains_upload_session() {
     let cancel = CancellationToken::new();
     let signal = cancel.clone();
     let task = tokio::spawn(async move {
-        ResumableUpload::new(Client::new(), url)
+        ResumableUpload::new(common::direct_client(), url)
             .upload("synthetic", &path, "save", "folder", &signal)
             .await
     });
@@ -131,7 +131,7 @@ async fn stalled_success_metadata_queries_session_without_resending_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abc").unwrap();
-    let result = ResumableUpload::new(Client::new(), url)
+    let result = ResumableUpload::new(common::direct_client(), url)
         .with_response_inactivity(Duration::from_millis(150))
         .upload(
             "synthetic",
@@ -183,7 +183,7 @@ async fn oversized_success_metadata_queries_status_without_resending_save() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abc").unwrap();
-    let result = ResumableUpload::new(Client::new(), url)
+    let result = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -237,7 +237,7 @@ async fn lost_upload_response_queries_status_before_resuming() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abcdef").unwrap();
-    let result = ResumableUpload::new(Client::new(), url)
+    let result = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -290,7 +290,7 @@ async fn interrupted_request_reports_uncertain_remote_outcome() {
     let child = cancel.clone();
     let reconcile_url = url.clone();
     let task = tokio::spawn(async move {
-        ResumableUpload::new(Client::new(), url)
+        ResumableUpload::new(common::direct_client(), url)
             .upload("synthetic", &path, "save", "folder", &child)
             .await
     });
@@ -306,7 +306,7 @@ async fn interrupted_request_reports_uncertain_remote_outcome() {
     };
     assert!(!format!("{session:?}").contains("session"));
     release_tx.send(()).unwrap();
-    let status = ResumableUpload::new(Client::new(), reconcile_url)
+    let status = ResumableUpload::new(common::direct_client(), reconcile_url)
         .reconcile("synthetic", &session)
         .await
         .unwrap();
@@ -349,7 +349,7 @@ async fn truncated_success_metadata_is_reconciled_before_returning() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abcdef").unwrap();
-    let file = ResumableUpload::new(Client::new(), url)
+    let file = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -391,7 +391,7 @@ async fn expired_status_after_lost_response_does_not_create_a_duplicate() {
     std::fs::write(&snapshot, b"abcdef").unwrap();
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        ResumableUpload::new(Client::new(), url).upload(
+        ResumableUpload::new(common::direct_client(), url).upload(
             "synthetic",
             &snapshot,
             "save",
@@ -445,7 +445,7 @@ async fn unexpected_upload_identity_retains_session_until_verified() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"data").unwrap();
-    let client = ResumableUpload::new(Client::new(), url);
+    let client = ResumableUpload::new(common::direct_client(), url);
     let first = client
         .upload(
             "synthetic",
@@ -495,7 +495,7 @@ async fn status_failure_retains_session_for_later_reconciliation() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"data").unwrap();
-    let client = ResumableUpload::new(Client::new(), url);
+    let client = ResumableUpload::new(common::direct_client(), url);
     let result = client
         .upload(
             "synthetic",
@@ -539,13 +539,11 @@ async fn chunk_uses_transfer_timeout_instead_of_short_control_timeout() {
             r#"{"id":"created","name":"save","modifiedTime":"2026-01-01T00:00:00Z"}"#,
         );
     });
-    let clients = DriveHttpPolicy {
+    let clients = common::direct_clients(DriveHttpPolicy {
         connect: Duration::from_secs(2),
         metadata: Duration::from_millis(150),
         inactivity: Duration::from_millis(700),
-    }
-    .build()
-    .unwrap();
+    });
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abc").unwrap();
@@ -589,7 +587,7 @@ async fn expired_reconciliation_explicitly_preserves_uncertainty() {
     let task_cancel = cancel.clone();
     let task_url = url.clone();
     let task = tokio::spawn(async move {
-        ResumableUpload::new(Client::new(), task_url)
+        ResumableUpload::new(common::direct_client(), task_url)
             .upload("synthetic", &path, "save", "folder", &task_cancel)
             .await
     });
@@ -601,7 +599,7 @@ async fn expired_reconciliation_explicitly_preserves_uncertainty() {
     };
     release_tx.send(()).unwrap();
     assert!(matches!(
-        ResumableUpload::new(Client::new(), url)
+        ResumableUpload::new(common::direct_client(), url)
             .reconcile("synthetic", &session)
             .await,
         Ok(ReconcileStatus::ExpiredOutcomeUnknown)
@@ -637,7 +635,7 @@ async fn stalled_request_body_can_be_cancelled_with_recoverable_session() {
     let cancel = CancellationToken::new();
     let signal = cancel.clone();
     let mut task = tokio::spawn(async move {
-        ResumableUpload::new(Client::new(), url)
+        ResumableUpload::new(common::direct_client(), url)
             .upload("synthetic", &path, "save", "folder", &signal)
             .await
     });
@@ -699,13 +697,11 @@ async fn linux_tcp_timeout_queries_stalled_upload_and_retains_unknown_session() 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, vec![7; 8 * 1024 * 1024]).unwrap();
-    let clients = DriveHttpPolicy {
+    let clients = common::direct_clients(DriveHttpPolicy {
         connect: Duration::from_secs(2),
         metadata: Duration::from_secs(2),
         inactivity: Duration::from_millis(500),
-    }
-    .build()
-    .unwrap();
+    });
     let task = tokio::spawn(async move {
         ResumableUpload::with_clients(clients.metadata, clients.upload, url)
             .upload(
@@ -763,13 +759,11 @@ async fn empty_resumable_upload_times_out_and_retains_unknown_session() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("empty");
     std::fs::write(&path, []).unwrap();
-    let clients = DriveHttpPolicy {
+    let clients = common::direct_clients(DriveHttpPolicy {
         connect: Duration::from_secs(2),
         metadata: Duration::from_secs(2),
         inactivity: Duration::from_millis(200),
-    }
-    .build()
-    .unwrap();
+    });
     let task = tokio::spawn(async move {
         ResumableUpload::with_transfer_clients(
             clients.metadata,
@@ -837,13 +831,11 @@ async fn nonempty_resumable_upload_times_out_after_body_and_retains_unknown_sess
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("nonempty");
     std::fs::write(&path, b"abc").unwrap();
-    let clients = DriveHttpPolicy {
+    let clients = common::direct_clients(DriveHttpPolicy {
         connect: Duration::from_secs(2),
         metadata: Duration::from_secs(2),
         inactivity: Duration::from_millis(200),
-    }
-    .build()
-    .unwrap();
+    });
     let task = tokio::spawn(async move {
         ResumableUpload::with_transfer_clients(
             clients.metadata,
@@ -926,13 +918,11 @@ async fn slow_active_upload_can_exceed_body_inactivity_interval() {
     let path = dir.path().join("snapshot");
     // At least 128 reads of 16 KiB, each followed by 5 ms, outlast the 500 ms inactivity.
     std::fs::write(&path, vec![7; 2 * 1024 * 1024]).unwrap();
-    let clients = DriveHttpPolicy {
+    let clients = common::direct_clients(DriveHttpPolicy {
         connect: Duration::from_secs(2),
         metadata: Duration::from_secs(2),
         inactivity: Duration::from_millis(500),
-    }
-    .build()
-    .unwrap();
+    });
     let result = ResumableUpload::with_clients(clients.metadata, clients.upload, url)
         .upload(
             "synthetic",
@@ -976,7 +966,7 @@ async fn all_bytes_acknowledged_queries_completion_without_resending() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abc").unwrap();
-    let result = ResumableUpload::new(Client::new(), url)
+    let result = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -1016,7 +1006,7 @@ async fn all_bytes_acknowledged_without_completion_retains_uncertain_session() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abc").unwrap();
-    let result = ResumableUpload::new(Client::new(), url)
+    let result = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -1088,7 +1078,7 @@ async fn cancellation_during_no_progress_backoff_returns_unknown_outcome() {
     std::fs::write(&path, b"abcdef").unwrap();
 
     let cancel = CancellationToken::new();
-    let client = ResumableUpload::new(Client::new(), url);
+    let client = ResumableUpload::new(common::direct_client(), url);
     let upload_future = client.upload("synthetic", &path, "save", "folder", &cancel);
     tokio::pin!(upload_future);
 
@@ -1147,7 +1137,7 @@ async fn reconcile_reports_incomplete_offset_and_exhausts_retries_on_repeated_se
     let child = cancel.clone();
     let task_url = url.clone();
     let task = tokio::spawn(async move {
-        ResumableUpload::new(Client::new(), task_url)
+        ResumableUpload::new(common::direct_client(), task_url)
             .upload("synthetic", &path, "save", "folder", &child)
             .await
     });
@@ -1179,7 +1169,7 @@ async fn reconcile_reports_incomplete_offset_and_exhausts_retries_on_repeated_se
             reply(&mut s, "308 Resume Incomplete", "Range: bytes=0-3\r\n", "");
         });
 
-        let client = ResumableUpload::new(Client::new(), url.clone());
+        let client = ResumableUpload::new(common::direct_client(), url.clone());
         let status = client.reconcile("synthetic", &session).await.unwrap();
         assert!(matches!(
             status,
@@ -1206,8 +1196,8 @@ async fn reconcile_reports_incomplete_offset_and_exhausts_retries_on_repeated_se
             listener
         });
 
-        let client =
-            ResumableUpload::new(Client::new(), url).with_retry_backoff(Duration::from_millis(1));
+        let client = ResumableUpload::new(common::direct_client(), url)
+            .with_retry_backoff(Duration::from_millis(1));
         let result = client.reconcile("synthetic", &session).await;
         assert!(matches!(result, Err(UploadError::OutcomeUnknown(_))));
         let listener = server.join().unwrap();
@@ -1243,7 +1233,7 @@ async fn cancellation_after_session_start_before_first_chunk_put_returns_cancell
     let cancel = CancellationToken::new();
     let cancel_task = cancel.clone();
     let task = tokio::spawn(async move {
-        ResumableUpload::new(Client::new(), url)
+        ResumableUpload::new(common::direct_client(), url)
             .upload("synthetic", &path, "save", "folder", &cancel_task)
             .await
     });

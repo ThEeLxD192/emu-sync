@@ -5,7 +5,7 @@ use emusync_domain::{
     config::{AppConfig, CloudAuthorization, ConfigurationStore, CredentialStore, Credentials},
     execution::BrowserLauncher,
 };
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpListener},
@@ -123,7 +123,7 @@ async fn composed_browser_callback_exchanges_and_persists_tokens() {
         .unwrap();
     });
     let oauth = InteractiveOAuth::with_endpoints(
-        Client::new(),
+        common::direct_client(),
         Shared(store.clone()),
         Arc::new(SyntheticBrowser { callback }),
         token_url,
@@ -161,7 +161,7 @@ async fn non_loopback_listener_address_is_rejected_without_opening_browser_or_ne
 
     let non_loopback: SocketAddr = "0.0.0.0:8089".parse().unwrap();
     let oauth = InteractiveOAuth::with_endpoints(
-        Client::new(),
+        common::direct_client(),
         Shared(store.clone()),
         Arc::new(SpyBrowser {
             opened: opened.clone(),
@@ -199,7 +199,7 @@ async fn occupied_loopback_port_fails_cleanly_without_opening_browser() {
     let occupied_addr = occupying_listener.local_addr().unwrap();
 
     let oauth = InteractiveOAuth::with_endpoints(
-        Client::new(),
+        common::direct_client(),
         Shared(store.clone()),
         Arc::new(SpyBrowser {
             opened: opened.clone(),
@@ -226,7 +226,7 @@ async fn browser_launcher_failure_aborts_authorization_and_releases_loopback_por
     drop(reservation);
 
     let oauth = InteractiveOAuth::with_endpoints(
-        Client::new(),
+        common::direct_client(),
         Shared(store.clone()),
         Arc::new(FailingBrowser),
         Url::parse("https://example.invalid/token").unwrap(),

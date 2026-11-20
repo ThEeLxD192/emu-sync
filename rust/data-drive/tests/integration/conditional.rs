@@ -4,7 +4,7 @@ use common::{read_request, reply};
 use emusync_data_drive::{
     ConditionalError, ConditionalUpdate, FileRevision, ResponseMetadataError,
 };
-use reqwest::{Client, StatusCode, Url};
+use reqwest::{StatusCode, Url};
 use std::{
     net::TcpListener,
     path::Path,
@@ -29,7 +29,7 @@ fn revision() -> FileRevision {
 fn adapter(listener: &TcpListener) -> ConditionalUpdate {
     let base = format!("http://{}/", listener.local_addr().unwrap());
     ConditionalUpdate::new(
-        Client::new(),
+        common::direct_client(),
         Url::parse(&format!("{base}files/")).unwrap(),
         Url::parse(&format!("{base}upload/")).unwrap(),
     )
@@ -189,7 +189,7 @@ async fn lost_conditional_write_response_is_an_unknown_outcome() {
     use emusync_data_drive::DriveHttpPolicy;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let root = format!("http://{}/", listener.local_addr().unwrap());
-    let clients = DriveHttpPolicy::default().build().unwrap();
+    let clients = common::direct_clients(DriveHttpPolicy::default());
     let client = ConditionalUpdate::with_clients(
         clients.metadata,
         clients.upload,

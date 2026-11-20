@@ -4,7 +4,7 @@ use common::{read_request, reply};
 use emusync_data_drive::DriveTransfer;
 use emusync_data_local::{SyncHistoryStore, TrackedFileSync};
 use emusync_domain::sync::LocalSaveFiles;
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{io::Write, net::TcpListener, sync::Arc, thread};
 use tokio_util::sync::CancellationToken;
 
@@ -39,13 +39,11 @@ async fn empty_conditional_upload_timeout_retains_snapshot_and_history() {
     let save = dir.path().join("save.dat");
     std::fs::write(&save, []).unwrap();
     let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
-    let clients = DriveHttpPolicy {
+    let clients = common::direct_clients(DriveHttpPolicy {
         connect: Duration::from_secs(2),
         metadata: Duration::from_secs(2),
         inactivity: Duration::from_millis(200),
-    }
-    .build()
-    .unwrap();
+    });
     let transfer = DriveTransfer::with_clients(
         clients,
         base.clone(),
@@ -125,7 +123,7 @@ async fn tracked_upload_uses_snapshot_and_records_server_revision() {
     std::fs::write(&save, b"abc").unwrap();
     let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),
@@ -184,7 +182,7 @@ async fn cancelled_tracked_download_waits_for_staging_cleanup_and_keeps_save() {
     let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
     let cancel = CancellationToken::new();
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),
@@ -270,7 +268,7 @@ async fn interrupted_upload_retains_snapshot_and_session_for_reconciliation() {
     let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
     let cancel = CancellationToken::new();
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),
@@ -345,7 +343,7 @@ async fn local_edit_after_remote_commit_retains_original_snapshot_and_remote_ide
     std::fs::write(&save, b"abc").unwrap();
     let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),
@@ -408,7 +406,7 @@ async fn local_edit_during_download_is_preserved_and_not_recorded_as_synced() {
     std::fs::write(&save, b"original").unwrap();
     let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),
@@ -469,7 +467,7 @@ async fn wrong_remote_checksum_does_not_replace_save_or_record_history() {
     std::fs::write(&save, b"original").unwrap();
     let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),
@@ -540,7 +538,7 @@ async fn pinned_tracked_download_rejects_parent_symlink_swap_without_recording_h
     std::fs::write(outside.join("save.dat"), b"outside").unwrap();
     let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),
@@ -606,7 +604,7 @@ async fn pinned_tracked_download_restores_backup_and_records_revision() {
     std::fs::write(&save, b"original").unwrap();
     let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),
@@ -669,7 +667,7 @@ async fn pinned_tracked_download_creates_nested_directories_and_records_revision
     std::fs::create_dir(&root).unwrap();
     let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),
@@ -747,7 +745,7 @@ async fn tracked_conditional_replace_with_invalid_updated_timestamp_retains_snap
         .unwrap();
 
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),

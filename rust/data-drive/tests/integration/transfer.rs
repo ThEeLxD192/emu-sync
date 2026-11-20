@@ -6,7 +6,7 @@ use emusync_data_drive::{
     UploadError, UploadedFile,
 };
 use emusync_domain::sync::{CloudSaveTransfer, RemoteState};
-use reqwest::{Client, StatusCode, Url};
+use reqwest::{StatusCode, Url};
 use std::{net::TcpListener, sync::Arc, thread};
 use tokio_util::sync::CancellationToken;
 
@@ -27,7 +27,7 @@ async fn missing_timestamp_after_success_retains_created_identity() {
     let save = dir.path().join("save.dat");
     std::fs::write(&save, b"abc").unwrap();
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),
@@ -51,7 +51,7 @@ async fn missing_timestamp_after_success_retains_created_identity() {
 
 #[tokio::test]
 async fn transfer_error_leaves_remote_unchanged_classification() {
-    let reqwest_err = Client::new()
+    let reqwest_err = common::direct_client()
         .get("http://127.0.0.1:1")
         .send()
         .await
@@ -86,7 +86,7 @@ async fn transfer_error_leaves_remote_unchanged_classification() {
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"test").unwrap();
 
-    let error = emusync_data_drive::ResumableUpload::new(Client::new(), url)
+    let error = emusync_data_drive::ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -125,7 +125,7 @@ async fn transfer_error_leaves_remote_unchanged_classification() {
         TransferError::Upload(UploadError::Io(std::io::Error::other("io error"))),
         TransferError::Upload(UploadError::InvalidSession),
         TransferError::Upload(UploadError::Transport(
-            Client::new()
+            common::direct_client()
                 .get("http://127.0.0.1:1")
                 .send()
                 .await
@@ -140,7 +140,7 @@ async fn transfer_error_leaves_remote_unchanged_classification() {
         TransferError::Conditional(ConditionalError::InvalidEndpoint),
         TransferError::Conditional(ConditionalError::Cancelled),
         TransferError::Conditional(ConditionalError::Transport(
-            Client::new()
+            common::direct_client()
                 .get("http://127.0.0.1:1")
                 .send()
                 .await
@@ -222,7 +222,7 @@ async fn invalid_updated_timestamp_after_conditional_replace_retains_uploaded_fi
     std::fs::write(&save, b"test-save").unwrap();
 
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         upload_base.clone(),
         base.clone(),
@@ -274,7 +274,7 @@ async fn pre_cancelled_drive_transfer_replace_aborts_without_network_and_leaves_
     cancel.cancel();
 
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),

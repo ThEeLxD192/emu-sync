@@ -1,6 +1,8 @@
+use crate::common;
+
 use emusync_data_drive::DriveListing;
 use emusync_domain::sync::CloudFileListing;
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
     io::{Read, Write},
     net::TcpListener,
@@ -28,7 +30,7 @@ async fn listing_follows_pages_and_filters_folders_with_precise_timestamps() {
             write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
         }
     });
-    let listing = DriveListing::new(Client::new(), url);
+    let listing = DriveListing::new(common::direct_client(), url);
     let files = listing.list_files("synthetic", "folder").await.unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].id, "file");
@@ -57,7 +59,7 @@ async fn migration_listing_includes_folders_and_files_across_pages() {
             write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
         }
     });
-    let children = DriveListing::new(Client::new(), url)
+    let children = DriveListing::new(common::direct_client(), url)
         .list_children("synthetic", "folder")
         .await
         .unwrap();
@@ -96,7 +98,7 @@ async fn exact_search_escapes_query_and_requests_latest_match() {
         let body = r#"{"files":[{"id":"latest","name":"O'Brien.sav","modifiedTime":"2026-01-01T00:00:00Z"}]}"#;
         write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
     });
-    let listing = DriveListing::new(Client::new(), url);
+    let listing = DriveListing::new(common::direct_client(), url);
     assert_eq!(
         listing
             .find_by_name("synthetic", "O'Brien.sav", Some("folder"))
@@ -126,7 +128,7 @@ async fn listing_rejects_file_without_usable_drive_id() {
         )
         .unwrap();
     });
-    let result = DriveListing::new(Client::new(), url)
+    let result = DriveListing::new(common::direct_client(), url)
         .list_files("synthetic", "folder")
         .await;
     assert!(matches!(result, Err(ListingError::InvalidIdentity)));
@@ -162,7 +164,7 @@ async fn oversized_or_stalled_listing_pages_fail_without_partial_results() {
                 let _ = release_rx.recv_timeout(Duration::from_secs(5));
             }
         });
-        let listing = DriveListing::new(Client::new(), url)
+        let listing = DriveListing::new(common::direct_client(), url)
             .with_response_inactivity(Duration::from_millis(200));
         let result = tokio::time::timeout(
             Duration::from_secs(3),
@@ -198,7 +200,7 @@ async fn get_by_id_retrieves_exact_file() {
         )
         .unwrap();
     });
-    let listing = DriveListing::new(Client::new(), url);
+    let listing = DriveListing::new(common::direct_client(), url);
     let file = listing.get_by_id("synthetic", "target_file").await.unwrap();
     assert_eq!(file.id, "target_file");
     assert_eq!(file.name, "save.dat");
@@ -230,7 +232,7 @@ async fn get_by_id_in_parent_verifies_parent_presence() {
             .unwrap();
         }
     });
-    let listing = DriveListing::new(Client::new(), url);
+    let listing = DriveListing::new(common::direct_client(), url);
 
     // 1. Matches expected parent
     let matched = listing
@@ -258,7 +260,7 @@ async fn invalid_identities_in_get_by_id_fail_without_network() {
     let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
     listener.set_nonblocking(true).unwrap();
 
-    let listing = DriveListing::new(Client::new(), url);
+    let listing = DriveListing::new(common::direct_client(), url);
 
     for invalid_id in [
         "",
@@ -335,7 +337,7 @@ async fn repeated_page_token_aborts_pagination_loop_and_blank_next_token_termina
         listener
     });
 
-    let listing = DriveListing::new(Client::new(), url);
+    let listing = DriveListing::new(common::direct_client(), url);
 
     let res = listing.list_files("synthetic", "folder").await;
     assert!(matches!(res, Err(ListingError::RepeatedPage)));
@@ -411,7 +413,7 @@ async fn malformed_rfc3339_timestamp_and_non_200_status_fail_with_typed_listing_
         .unwrap();
     });
 
-    let listing = DriveListing::new(Client::new(), url);
+    let listing = DriveListing::new(common::direct_client(), url);
 
     // 1. Corrupted timestamp in list_files
     let res = listing.list_files("synthetic", "folder").await;

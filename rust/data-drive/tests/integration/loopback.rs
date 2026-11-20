@@ -1,6 +1,6 @@
 use crate::common;
 use emusync_data_drive::loopback_code;
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{sync::mpsc, time::Duration};
 use tokio::net::TcpListener;
 
@@ -30,7 +30,7 @@ async fn loopback_ignores_wrong_state_and_accepts_matching_code() {
     );
     assert_eq!(query.get("redirect_uri").unwrap(), "http://localhost:8089");
     assert_eq!(query.get("access_type").unwrap(), "offline");
-    let client = Client::new();
+    let client = common::direct_client();
     assert_eq!(
         client
             .get(format!("http://{address}/?state=wrong&code=bad"))
@@ -120,7 +120,7 @@ async fn loopback_rejects_truncated_http_request_and_continues_listening() {
 
     assert!(!task.is_finished());
 
-    let client = Client::new();
+    let client = common::direct_client();
     assert_eq!(
         client
             .get(format!("http://{address}/?state={state}&code=valid_code"))
@@ -159,7 +159,7 @@ async fn oauth_error_callback_with_matching_state_terminates_and_returns_provide
     let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
     let state = &query["state"];
 
-    let client = Client::new();
+    let client = common::direct_client();
 
     let post_resp = client
         .post(format!("http://{address}/?state={state}&code=abc"))
@@ -274,7 +274,7 @@ async fn oversized_request_headers_and_unspecified_bind_address_are_rejected_saf
     );
     assert!(!task.is_finished());
 
-    let client = Client::new();
+    let client = common::direct_client();
     let resp = client
         .get(format!("http://{address}/?state={state}&code=good-code"))
         .send()
