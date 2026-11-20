@@ -94,8 +94,24 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # The test step runs offline, so the dependencies are downloaded here.
+      - name: Fetch Cargo dependencies
+        shell: bash
+        run: cargo fetch --locked
+
+      # The tests talk to servers they start on this machine. A dead proxy in the
+      # environment makes any test client that reads it fail here, instead of only on a
+      # machine that has a proxy configured. Such a test may wait rather than fail at once,
+      # so the step has a limit below the default six hours.
       - name: Run Rust tests
         shell: bash
+        timeout-minutes: 30
+        env:
+          CARGO_NET_OFFLINE: "true"
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
         run: |
           set -o pipefail
           cargo xtask test 2>&1 | tee rust-tests.log
