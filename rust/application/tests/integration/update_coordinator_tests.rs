@@ -984,7 +984,7 @@ async fn an_update_announced_ready_to_restart_can_be_restarted_at_once() {
 
 /// Polls `step` once, as a reaction inside `on_state` gets to run it before returning.
 fn poll_once<T>(
-    step: std::pin::Pin<&mut impl std::future::Future<Output = T>>,
+    step: std::pin::Pin<&mut (impl std::future::Future<Output = T> + ?Sized)>,
 ) -> std::task::Poll<T> {
     step.poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
 }
@@ -1343,4 +1343,313 @@ async fn every_announced_state_has_a_higher_revision_and_the_last_one_is_the_cur
         Some(coordinator.state()),
         "the highest revision is the current state"
     );
+}
+
+#[tokio::test]
+async fn a_cancelled_check_started_during_another_restores_the_release_offered_before_both() {
+    let source = MockSource::default();
+    let info = sample_update_info();
+    *source.next_info.lock().unwrap() = Some(info.clone());
+    let (coordinator, published) = recording_coordinator(source.clone());
+    within_harness_limit("the first check", coordinator.check_for_updates()).await;
+    assert_eq!(coordinator.state(), UpdateState::Available(info.clone()));
+    let announced_before = published.lock().unwrap().len();
+
+    // Two checks wait on the release server, the second started while the first is
+    // still checking.
+    let (_first_resume, first_wait) = tokio::sync::oneshot::channel::<()>();
+    *source.check_resume.lock().unwrap() = Some(first_wait);
+    let mut first_check = Box::pin(coordinator.check_for_updates());
+    assert!(poll_once(first_check.as_mut()).is_pending());
+    assert_eq!(coordinator.state(), UpdateState::Checking);
+    let (_second_resume, second_wait) = tokio::sync::oneshot::channel::<()>();
+    *source.check_resume.lock().unwrap() = Some(second_wait);
+    let mut second_check = Box::pin(coordinator.check_for_updates());
+    assert!(poll_once(second_check.as_mut()).is_pending());
+
+    // The newer check is cancelled (the application closes, say): what it restores is
+    // the release offered before either check, not "up to date".
+    drop(second_check);
+    assert_eq!(coordinator.state(), UpdateState::Available(info.clone()));
+    drop(first_check);
+    assert_eq!(coordinator.state(), UpdateState::Available(info.clone()));
+    // The interface follows announcements, not `state()`: one `Checking` for both checks,
+    // then the restored release.
+    assert_eq!(
+        published.lock().unwrap()[announced_before..],
+        [UpdateState::Checking, UpdateState::Available(info)]
+    );
+}
+
+/// A check that waits on the release server until its `resume` sends.
+type WaitingCheck<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>>;
+
+/// Starts a check that reaches the release server and waits there until the returned
+/// sender sends (or is dropped and the check polled again).
+fn start_waiting_check<'a>(
+    source: &MockSource,
+    coordinator: &'a MockCoordinator,
+) -> (tokio::sync::oneshot::Sender<()>, WaitingCheck<'a>) {
+    let (resume, wait) = tokio::sync::oneshot::channel();
+    *source.check_resume.lock().unwrap() = Some(wait);
+    let mut check: WaitingCheck<'a> = Box::pin(coordinator.check_for_updates());
+    assert!(
+        poll_once(check.as_mut()).is_pending(),
+        "the check must wait on the release server"
+    );
+    (resume, check)
+}
+
+/// Lets a waiting check answer and runs it to its end.
+fn resume_to_the_end(resume: tokio::sync::oneshot::Sender<()>, mut check: WaitingCheck<'_>) {
+    resume.send(()).expect("the check is waiting");
+    assert!(
+        poll_once(check.as_mut()).is_ready(),
+        "a resumed check must end without waiting again"
+    );
+}
+
+/// The states published after the first `already_published` ones.
+fn published_since(published: &PublishedStates, already_published: usize) -> Vec<UpdateState> {
+    published.lock().unwrap()[already_published..].to_vec()
+}
+
+#[tokio::test]
+async fn a_cancelled_check_started_during_another_restores_each_kind_of_state_shown_before_both() {
+    const DESTINATION: &str = "/tmp/joined-check.AppImage";
+    type Setup = fn(&MockSource, &MockInstaller, &MockCoordinator);
+    let nothing: Setup = |_, _, _| {};
+    let failed_check: Setup = |source, _, coordinator| {
+        *source.check_error.lock().unwrap() = Some("Network error: timed out".into());
+        finish_without_waiting(coordinator.check_for_updates());
+        *source.check_error.lock().unwrap() = None;
+    };
+    let failed_download: Setup = |source, _, coordinator| {
+        *source.download_error.lock().unwrap() = Some("Network cut".into());
+        finish_without_waiting(coordinator.download(&sample_update_info()));
+        *source.download_error.lock().unwrap() = None;
+    };
+    let failed_restart: Setup = |_, installer, coordinator| {
+        finish_without_waiting(coordinator.download(&sample_update_info()));
+        *installer.restart_result.lock().unwrap() = Some(Ok(false));
+        assert!(!coordinator.restart(DESTINATION, false));
+    };
+    let cases = [
+        ("nothing shown yet", nothing, UpdateState::Idle),
+        (
+            "a failed check",
+            failed_check,
+            UpdateState::CheckFailed("Network error: timed out".into()),
+        ),
+        (
+            "a failed download",
+            failed_download,
+            UpdateState::DownloadFailed(DownloadFailure::Transfer("Network cut".into())),
+        ),
+        (
+            "a failed restart",
+            failed_restart,
+            UpdateState::RestartFailed {
+                downloaded_path: DESTINATION.into(),
+            },
+        ),
+    ];
+    for (case, setup, shown_before) in cases {
+        let source = MockSource::default();
+        let files = MockFiles::default();
+        *files.destination.lock().unwrap() = DESTINATION.into();
+        let installer = MockInstaller::default();
+        let (coordinator, published) =
+            recording_coordinator_over(source.clone(), files, installer.clone());
+        setup(&source, &installer, &coordinator);
+        assert_eq!(coordinator.state(), shown_before, "{case}: setup");
+        let published_before = published.lock().unwrap().len();
+        // Were either check to answer, it would offer a release.
+        *source.next_info.lock().unwrap() = Some(sample_update_info());
+
+        let (_first_resume, first_check) = start_waiting_check(&source, &coordinator);
+        let (_second_resume, second_check) = start_waiting_check(&source, &coordinator);
+        assert_eq!(coordinator.state(), UpdateState::Checking, "{case}");
+
+        drop(second_check);
+        assert_eq!(
+            coordinator.state(),
+            shown_before,
+            "{case}: second cancelled"
+        );
+        drop(first_check);
+        assert_eq!(coordinator.state(), shown_before, "{case}: both cancelled");
+        assert_eq!(
+            published_since(&published, published_before),
+            vec![UpdateState::Checking, shown_before.clone()],
+            "{case}: one `Checking` and the state it replaced, announced again"
+        );
+        assert!(coordinator.can_check(), "{case}");
+    }
+}
+
+#[tokio::test]
+async fn three_overlapping_checks_cancelled_in_any_order_end_showing_the_release_offered_before_them()
+ {
+    let info = sample_update_info();
+    let orders: [[usize; 3]; 6] = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
+    for order in orders {
+        let source = MockSource::default();
+        *source.next_info.lock().unwrap() = Some(info.clone());
+        let (coordinator, published) = recording_coordinator(source.clone());
+        finish_without_waiting(coordinator.check_for_updates());
+        assert_eq!(coordinator.state(), UpdateState::Available(info.clone()));
+        // Were any of the three to answer, it would find nothing newer.
+        *source.next_info.lock().unwrap() = None;
+
+        let mut resumes = Vec::new();
+        let mut checks = Vec::new();
+        for _ in 0..3 {
+            let (resume, check) = start_waiting_check(&source, &coordinator);
+            resumes.push(resume);
+            checks.push(Some(check));
+        }
+        assert_eq!(coordinator.state(), UpdateState::Checking, "{order:?}");
+
+        let mut is_newest_cancelled = false;
+        for index in order {
+            drop(checks[index].take());
+            is_newest_cancelled |= index == 2;
+            // Only the newest check would show its answer: until it is cancelled the
+            // updater is still checking.
+            let expected = if is_newest_cancelled {
+                UpdateState::Available(info.clone())
+            } else {
+                UpdateState::Checking
+            };
+            assert_eq!(
+                coordinator.state(),
+                expected,
+                "{order:?}: after cancelling check {index}"
+            );
+        }
+        assert_eq!(
+            *published.lock().unwrap(),
+            vec![
+                UpdateState::Checking,
+                UpdateState::Available(info.clone()),
+                UpdateState::Checking,
+                UpdateState::Available(info.clone()),
+            ],
+            "{order:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_first_check_that_answers_unseen_does_not_change_what_cancelling_the_joined_one_restores()
+{
+    let info = sample_update_info();
+    for is_first_answering_before_the_cancel in [true, false] {
+        let case =
+            format!("first answers before the cancel: {is_first_answering_before_the_cancel}");
+        let source = MockSource::default();
+        *source.next_info.lock().unwrap() = Some(info.clone());
+        let (coordinator, published) = recording_coordinator(source.clone());
+        finish_without_waiting(coordinator.check_for_updates());
+        // The first check will fail; its answer is stale once the second one starts.
+        *source.check_error.lock().unwrap() = Some("Network error: reset".into());
+
+        let (first_resume, first_check) = start_waiting_check(&source, &coordinator);
+        let (_second_resume, second_check) = start_waiting_check(&source, &coordinator);
+        if is_first_answering_before_the_cancel {
+            resume_to_the_end(first_resume, first_check);
+            assert_eq!(
+                coordinator.state(),
+                UpdateState::Checking,
+                "{case}: the second check is still running"
+            );
+            drop(second_check);
+        } else {
+            drop(second_check);
+            resume_to_the_end(first_resume, first_check);
+        }
+
+        assert_eq!(
+            coordinator.state(),
+            UpdateState::Available(info.clone()),
+            "{case}"
+        );
+        assert_eq!(
+            *published.lock().unwrap(),
+            vec![
+                UpdateState::Checking,
+                UpdateState::Available(info.clone()),
+                UpdateState::Checking,
+                UpdateState::Available(info.clone()),
+            ],
+            "{case}: the stale failure is never shown"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_joined_check_cancelled_after_a_download_replaced_an_earlier_check_restores_the_download_outcome()
+ {
+    let info = sample_update_info();
+    let failed = UpdateState::DownloadFailed(DownloadFailure::Transfer("Network cut".into()));
+    for (case, is_download_interrupted, download_outcome) in [
+        ("a failed download", false, failed),
+        (
+            "an interrupted download",
+            true,
+            UpdateState::Available(info.clone()),
+        ),
+    ] {
+        let source = MockSource::default();
+        *source.next_info.lock().unwrap() = Some(info.clone());
+        *source.download_error.lock().unwrap() = Some("Network cut".into());
+        *source.stall_download.lock().unwrap() = is_download_interrupted;
+        let files = MockFiles::default();
+        *files.destination.lock().unwrap() = "/tmp/joined-after-download.AppImage".into();
+        let (coordinator, published) =
+            recording_coordinator_over(source.clone(), files, MockInstaller::default());
+
+        // A check replaces "up to date" with `Checking`, and a download starts while it
+        // waits, making it stale.
+        let (_earlier_resume, earlier_check) = start_waiting_check(&source, &coordinator);
+        {
+            let mut download = Box::pin(coordinator.download(&info));
+            let is_waiting = poll_once(download.as_mut()).is_pending();
+            assert_eq!(is_waiting, is_download_interrupted, "{case}");
+        }
+        assert_eq!(coordinator.state(), download_outcome, "{case}: download");
+
+        // A new run of checks starts from the download outcome; its second check is the
+        // one cancelled.
+        let (_first_resume, first_check) = start_waiting_check(&source, &coordinator);
+        let (_second_resume, second_check) = start_waiting_check(&source, &coordinator);
+        drop(second_check);
+        assert_eq!(
+            coordinator.state(),
+            download_outcome,
+            "{case}: not what the earlier check replaced"
+        );
+        drop(first_check);
+        drop(earlier_check);
+        assert_eq!(coordinator.state(), download_outcome, "{case}");
+        assert_eq!(
+            outcomes(&published),
+            vec![
+                UpdateState::Checking,
+                download_outcome.clone(),
+                UpdateState::Checking,
+                download_outcome.clone(),
+            ],
+            "{case}"
+        );
+        assert!(coordinator.can_check(), "{case}");
+    }
 }

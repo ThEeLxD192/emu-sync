@@ -348,6 +348,42 @@ fn a_cancelled_check_whose_restored_state_is_delivered_after_a_download_leaves_r
 }
 
 #[test]
+fn a_checking_announcement_delivered_after_a_joined_check_was_cancelled_leaves_the_earlier_release()
+{
+    let crossing = Crossing::new();
+    *crossing.source.release.lock().unwrap() = Some(release());
+    finish_without_waiting(crossing.coordinator.check_for_updates());
+    crossing
+        .source
+        .is_check_stalled
+        .store(true, Ordering::SeqCst);
+    crossing.hold_next(|state| *state == UpdateState::Checking);
+
+    crossing.cross(
+        |coordinator| interrupt_at_first_wait(coordinator.check_for_updates()),
+        // Started while the first is checking and cancelled: it puts back the release
+        // shown before the first one.
+        |coordinator| interrupt_at_first_wait(coordinator.check_for_updates()),
+    );
+
+    crossing.assert_newest_on_screen(&UpdateState::Checking, &UpdateState::Available(release()));
+    assert_eq!(
+        crossing
+            .arrivals()
+            .iter()
+            .map(|(_, state)| state.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            UpdateState::Checking,
+            UpdateState::Available(release()),
+            UpdateState::Available(release()),
+            UpdateState::Checking,
+        ],
+        "the restored release is announced again, before the held `Checking` arrives"
+    );
+}
+
+#[test]
 fn a_second_check_that_finds_the_state_already_checking_overtakes_the_first_checking() {
     let crossing = Crossing::new();
     *crossing.source.release.lock().unwrap() = Some(release());

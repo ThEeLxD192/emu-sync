@@ -62,6 +62,8 @@ pub struct UpdateRevision(u64);
 struct Published {
     state: UpdateState,
     revision: UpdateRevision,
+    /// The state the latest run of checks replaced with `Checking`.
+    before_checking: UpdateState,
 }
 
 /// Revisions come from one counter for the whole process, so a coordinator created to
@@ -141,11 +143,8 @@ impl<'a, S: UpdateSource + Sync, F: UpdateFiles + Sync, I: UpdateInstaller + Syn
     for CancelGuard<'a, S, F, I>
 {
     fn drop(&mut self) {
-        if let Some(prev) = self.previous.take()
-            && self.coord.generation.load(Ordering::SeqCst) == self.request
-            && !self.coord.download_busy.load(Ordering::SeqCst)
-        {
-            self.coord.publish(prev);
+        if let Some(prev) = self.previous.take() {
+            self.coord.publish_check_result(self.request, prev);
         }
     }
 }
@@ -169,6 +168,7 @@ where
             state: Mutex::new(Published {
                 state: UpdateState::Idle,
                 revision: UpdateRevision::default(),
+                before_checking: UpdateState::Idle,
             }),
             download_busy: AtomicBool::new(false),
             generation: AtomicU64::new(0),
@@ -187,6 +187,23 @@ where
             drop(published);
             (self.on_state)(&new_state, revision);
         }
+    }
+
+    /// Publishes what check `request` ends with (its result, or the state it restores
+    /// when cancelled) only while it is the newest check and no download has started.
+    /// Both are read under the state lock: a newer check or a download changes them before
+    /// taking that lock, so neither can slip between the reading and the publishing.
+    fn publish_check_result(&self, request: u64, new_state: UpdateState) {
+        let mut published = self.state.lock().unwrap();
+        if self.generation.load(Ordering::SeqCst) != request
+            || self.download_busy.load(Ordering::SeqCst)
+            || published.state == new_state
+        {
+            return;
+        }
+        let revision = published.set(new_state.clone());
+        drop(published);
+        (self.on_state)(&new_state, revision);
     }
 
     pub fn can_check(&self) -> bool {
@@ -218,14 +235,15 @@ where
             {
                 return;
             }
-            let prev_raw = published.state.clone();
-            let checking_revision =
-                (prev_raw != UpdateState::Checking).then(|| published.set(UpdateState::Checking));
-            let prev = match prev_raw {
-                UpdateState::Checking => UpdateState::Idle,
-                other => other,
-            };
-            (prev, checking_revision)
+            // A check started while another is checking restores what was shown before
+            // the first one, not "up to date", when it is cancelled.
+            if published.state == UpdateState::Checking {
+                (published.before_checking.clone(), None)
+            } else {
+                let prev = published.state.clone();
+                published.before_checking = prev.clone();
+                (prev, Some(published.set(UpdateState::Checking)))
+            }
         };
 
         let mut guard = CancelGuard {
@@ -241,19 +259,14 @@ where
         match self.source.check().await {
             Ok(info) => {
                 guard.previous = None;
-                if self.generation.load(Ordering::SeqCst) == request
-                    && !self.download_busy.load(Ordering::SeqCst)
-                {
-                    self.publish(info.map_or(UpdateState::Idle, UpdateState::Available));
-                }
+                self.publish_check_result(
+                    request,
+                    info.map_or(UpdateState::Idle, UpdateState::Available),
+                );
             }
             Err(err) => {
                 guard.previous = None;
-                if self.generation.load(Ordering::SeqCst) == request
-                    && !self.download_busy.load(Ordering::SeqCst)
-                {
-                    self.publish(UpdateState::CheckFailed(err.to_string()));
-                }
+                self.publish_check_result(request, UpdateState::CheckFailed(err.to_string()));
             }
         }
     }
