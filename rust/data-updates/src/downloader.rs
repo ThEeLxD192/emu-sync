@@ -117,6 +117,10 @@ fn generate_candidate_path(parent: &Path, file_name: &str, attempt: usize) -> Pa
     parent.join(format!(".{file_name}.{nanos}_{pid}_{count}_{attempt}.part"))
 }
 
+/// Highest progress reported while bytes arrive: 100 % is only reported once the file is
+/// checked and in place, so an update that fails its checks never shows as complete.
+const MAX_PROGRESS_UNTIL_VERIFIED: f32 = 0.99;
+
 #[derive(Clone)]
 pub struct UpdateDownloader {
     client: reqwest::Client,
@@ -299,7 +303,8 @@ impl UpdateDownloader {
                 if let Some(total) = total_bytes
                     && total > 0
                 {
-                    let progress = (bytes_read as f32 / total as f32).clamp(0.0, 1.0);
+                    let progress =
+                        (bytes_read as f32 / total as f32).clamp(0.0, MAX_PROGRESS_UNTIL_VERIFIED);
                     on_progress(progress);
                 }
             }

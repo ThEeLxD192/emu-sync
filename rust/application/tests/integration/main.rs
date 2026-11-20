@@ -26,3 +26,4 @@ mod steam_registration_tests;
 mod target_mapping_tests;
 mod target_resolver_tests;
 mod update_coordinator_tests;
+mod update_progress_tests;

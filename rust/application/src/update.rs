@@ -48,6 +48,10 @@ pub enum DownloadFailure {
     },
 }
 
+/// Highest progress a `Downloading` state reports; the completed download is
+/// `ReadyToRestart`.
+const DOWNLOADING_PROGRESS_LIMIT: f32 = 0.99;
+
 pub struct UpdateCoordinator<S, F, I> {
     source: S,
     files: F,
@@ -269,7 +273,11 @@ where
             let mut last_progress = 0.0f32;
             self.source
                 .download(info, &dest, |p| {
-                    if (p - last_progress).abs() >= 0.01 || p >= 1.0 {
+                    // 100 % is `ReadyToRestart`: the size check below can still fail.
+                    let p = p.min(DOWNLOADING_PROGRESS_LIMIT);
+                    let reaches_limit = p >= DOWNLOADING_PROGRESS_LIMIT
+                        && last_progress < DOWNLOADING_PROGRESS_LIMIT;
+                    if (p - last_progress).abs() >= 0.01 || reaches_limit {
                         last_progress = p;
                         self.publish(UpdateState::Downloading {
                             progress: p,

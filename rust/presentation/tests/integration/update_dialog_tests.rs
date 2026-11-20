@@ -151,6 +151,20 @@ fn header_download_percent_is_clamped_for_hostile_progress() {
 }
 
 #[test]
+fn the_highest_progress_while_downloading_reads_ninety_nine_percent_in_the_header_and_dialog() {
+    // 0.99 is the highest progress a download reports before it is ready to restart; a
+    // download that is then rejected must not have read «100%».
+    let ctx = Context::default();
+    let mut app = app_showing(downloading(0.99));
+    run_frames(&ctx, &mut app, (0..6).map(|_| Vec::new()).collect());
+
+    assert!(text_exists(&ctx, &mut app, "Downloading 99%"), "header");
+    assert!(!text_exists(&ctx, &mut app, "Downloading 100%"), "header");
+    assert!(text_exists(&ctx, &mut app, "99%"), "dialog");
+    assert!(!text_exists(&ctx, &mut app, "100%"), "dialog");
+}
+
+#[test]
 fn dismissible_only_when_not_downloading() {
     assert!(!update_dialog_dismissible(&downloading(0.0)));
     for state in [

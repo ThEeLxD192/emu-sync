@@ -300,17 +300,15 @@ async fn active_transfer_with_periodic_progress_survives_past_watchdog_duration(
     chunk3_tx.send(()).expect("release third chunk");
     let p3 = recv_progress_at_least(
         &mut progress_rx,
-        1.0,
+        0.99,
         &mut events,
         &mut download_task,
         &mut server_task,
         "third chunk progress",
     )
     .await;
-    assert!(
-        (p3 - 1.0).abs() < f32::EPSILON,
-        "third chunk progress expected 30/30, got {p3}"
-    );
+    // 30/30 bytes received: 100 % waits until the file is checked and in place.
+    assert_eq!(p3, 0.99, "third chunk progress expected 99 %, got {p3}");
 
     close_tx.send(()).expect("close transfer");
     join_with_limit(

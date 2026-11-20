@@ -1035,7 +1035,7 @@ async fn a_retry_started_when_a_download_failure_is_announced_runs_and_ends_read
             UpdateState::DownloadFailed(DownloadFailure::Transfer("Network cut".into())),
             downloading(0.0, &info),
             downloading(0.5, &info),
-            downloading(1.0, &info),
+            downloading(0.99, &info),
             ready.clone(),
         ],
         "a retry ignored as a running download would leave the dialog on the failure"
@@ -1113,7 +1113,7 @@ async fn each_download_outcome_is_published_once_after_its_progress_and_nothing_
             vec![
                 downloading(0.0, &info),
                 downloading(0.5, &info),
-                downloading(1.0, &info),
+                downloading(0.99, &info),
                 UpdateState::DownloadFailed(DownloadFailure::SizeMismatch {
                     expected_bytes: 1024,
                     received_bytes: 2048,
@@ -1127,7 +1127,7 @@ async fn each_download_outcome_is_published_once_after_its_progress_and_nothing_
             vec![
                 downloading(0.0, &info),
                 downloading(0.5, &info),
-                downloading(1.0, &info),
+                downloading(0.99, &info),
                 UpdateState::ReadyToRestart {
                     downloaded_path: "/tmp/exact-sequence.AppImage".into(),
                     is_steam_game_mode: false,

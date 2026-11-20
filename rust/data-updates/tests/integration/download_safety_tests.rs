@@ -588,3 +588,133 @@ async fn refused_download_names_the_status_once_with_its_standard_reason() {
         server_task.finish().await;
     }
 }
+
+/// Downloads `content` (with its length announced) verified against `expected_sha256`,
+/// and returns the result and each reported progress, with whether the destination held
+/// the content when it was reported.
+async fn verified_download_progress(
+    content: &'static [u8],
+    expected_sha256: [u8; 32],
+) -> (Result<(), UpdateError>, Vec<(f32, bool)>) {
+    let server = TestServer::bind();
+    let url = server.url("/file");
+    let server_task = server.spawn(move |mut connection| async move {
+        connection
+            .write_all(&response_with_content_length("200 OK", content))
+            .await
+    });
+    let dir = tempdir().expect("create update tempdir");
+    let destination = dir.path().join("update.AppImage");
+    let progress = Arc::new(Mutex::new(Vec::new()));
+    let progress_sink = progress.clone();
+    let observed_destination = destination.clone();
+
+    let result = UpdateDownloader::new(client())
+        .download_verified(&url, &destination, expected_sha256, move |value| {
+            let in_place = std::fs::read(&observed_destination).is_ok_and(|bytes| bytes == content);
+            progress_sink
+                .lock()
+                .expect("lock progress")
+                .push((value, in_place));
+        })
+        .await;
+    server_task.finish().await;
+    let progress = progress.lock().expect("lock progress").clone();
+    (result, progress)
+}
+
+/// SHA-256 of `b"VERIFIED UPDATE PAYLOAD"`, from `printf 'VERIFIED UPDATE PAYLOAD' | sha256sum`.
+const VERIFIED_PAYLOAD_SHA256: [u8; 32] = [
+    0xc2, 0x35, 0xc5, 0x8c, 0xfc, 0xb0, 0xc8, 0x29, 0x4f, 0xb2, 0x9c, 0x31, 0xea, 0x66, 0xaa, 0xa1,
+    0x40, 0xfe, 0xbb, 0x82, 0x16, 0x5e, 0x31, 0x3a, 0x79, 0x77, 0xaf, 0x7e, 0x5e, 0x1a, 0xfd, 0xc3,
+];
+
+#[tokio::test]
+async fn a_verified_download_reports_completion_only_once_the_checked_file_is_in_place() {
+    let (result, progress) =
+        verified_download_progress(b"VERIFIED UPDATE PAYLOAD", VERIFIED_PAYLOAD_SHA256).await;
+
+    result.expect("the payload matches its hash");
+    let (last, in_place) = *progress.last().expect("progress reported");
+    assert_eq!((last, in_place), (1.0, true), "{progress:?}");
+    assert!(
+        progress[..progress.len() - 1]
+            .iter()
+            .all(|(value, in_place)| *value < 1.0 && !in_place),
+        "100 % before the file is checked and in place: {progress:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_download_that_fails_verification_never_reports_completion() {
+    let (result, progress) =
+        verified_download_progress(b"TAMPERED UPDATE PAYLOAD", VERIFIED_PAYLOAD_SHA256).await;
+
+    assert!(
+        matches!(result, Err(UpdateError::Verification(_))),
+        "{result:?}"
+    );
+    assert!(
+        !progress.is_empty(),
+        "the bytes were received: {progress:?}"
+    );
+    assert!(
+        progress.iter().all(|(value, _)| *value < 1.0),
+        "a rejected update reached 100 %: {progress:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_download_cut_one_byte_short_never_reports_a_progress_shown_as_one_hundred_percent() {
+    // 262143 of 262144 bytes: the interface shows whole percentages, rounded, so any
+    // progress from 0.995 on would read «100%» for an update that is then rejected.
+    const LOWEST_PROGRESS_SHOWN_AS_ONE_HUNDRED_PERCENT: f32 = 0.995;
+    let announced_bytes = 256 * 1024;
+    let body = vec![b'C'; announced_bytes - 1];
+    let server = TestServer::bind();
+    let url = server.url("/file");
+    let server_task = server.spawn(move |mut connection| async move {
+        let announced_length = announced_bytes.to_string();
+        connection
+            .write_all(&http_response(
+                "200 OK",
+                &[
+                    ("Content-Length", announced_length.as_str()),
+                    ("Connection", "close"),
+                ],
+                &body,
+            ))
+            .await
+    });
+    let dir = tempdir().expect("create update tempdir");
+    let destination = dir.path().join("update.AppImage");
+    let progress = Arc::new(Mutex::new(Vec::new()));
+    let progress_sink = progress.clone();
+
+    let result = UpdateDownloader::new(client())
+        .download(&url, &destination, move |value| {
+            progress_sink.lock().expect("lock progress").push(value);
+        })
+        .await;
+    server_task.finish().await;
+
+    assert!(
+        matches!(
+            result,
+            Err(UpdateError::Network(_) | UpdateError::IncompleteDownload { .. })
+        ),
+        "{result:?}"
+    );
+    let progress = progress.lock().expect("lock progress").clone();
+    assert!(
+        !progress.is_empty(),
+        "the bytes were received: {progress:?}"
+    );
+    assert!(
+        progress
+            .iter()
+            .all(|value| *value < LOWEST_PROGRESS_SHOWN_AS_ONE_HUNDRED_PERCENT),
+        "a rejected update read 100 %: {progress:?}"
+    );
+    assert_directory_entries(dir.path(), &[]);
+}

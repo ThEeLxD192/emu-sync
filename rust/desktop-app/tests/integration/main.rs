@@ -29,5 +29,6 @@ mod save_setup_tests;
 mod supervised_drive;
 mod supervisor;
 mod target_types_tests;
+mod update_progress_tests;
 mod update_verification_tests;
 mod update_wiring_tests;
