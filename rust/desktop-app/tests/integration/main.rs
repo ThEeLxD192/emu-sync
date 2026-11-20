@@ -21,6 +21,7 @@ mod library_regression_tests;
 mod migration_regression_tests;
 mod persisted_recovery;
 mod platform_ui_tests;
+mod proxy_policy_tests;
 mod recovery_regression_tests;
 mod retained_files;
 mod runtime_owner;

@@ -17,7 +17,7 @@ use emusync_domain::{
     config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
     sync::RemoteState,
 };
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
     io::Write,
     net::TcpListener,
@@ -91,7 +91,7 @@ async fn uncertain_conditional_write_reconciles_only_after_matching_hash() {
         credentials,
         move |cancel, guard| async move {
             let transfer = DriveTransfer::new(
-                Client::new(),
+                common::direct_client(),
                 t_v3.clone(),
                 t_v3,
                 t_v2,
@@ -115,7 +115,7 @@ async fn uncertain_conditional_write_reconciles_only_after_matching_hash() {
     assert!(result.await.unwrap().is_none());
     supervisor.shutdown().await;
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         v3.clone(),
         v3.clone(),
         v2,
@@ -124,7 +124,7 @@ async fn uncertain_conditional_write_reconciles_only_after_matching_hash() {
         Arc::new(|_| {}),
     );
     let tracked = TrackedFileSync::new(transfer, history.clone());
-    let listing = DriveListing::new(Client::new(), v3);
+    let listing = DriveListing::new(common::direct_client(), v3);
     for _ in 0..2 {
         assert_eq!(
             reconcile_conditional_upload(&mut supervisor, &listing, &tracked, "synthetic")
@@ -215,7 +215,7 @@ async fn cancelled_conditional_request_keeps_exclusion_until_reconciled() {
         credentials,
         move |cancel, guard| async move {
             let transfer = DriveTransfer::new(
-                Client::new(),
+                common::direct_client(),
                 t_v3.clone(),
                 t_v3,
                 t_v2,
@@ -242,7 +242,7 @@ async fn cancelled_conditional_request_keeps_exclusion_until_reconciled() {
     release_tx.send(()).unwrap();
     supervisor.shutdown().await;
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         v3.clone(),
         v3.clone(),
         v2,
@@ -251,7 +251,7 @@ async fn cancelled_conditional_request_keeps_exclusion_until_reconciled() {
         Arc::new(|_| {}),
     );
     let tracked = TrackedFileSync::new(transfer, history.clone());
-    let listing = DriveListing::new(Client::new(), v3);
+    let listing = DriveListing::new(common::direct_client(), v3);
     assert_eq!(
         reconcile_conditional_upload(&mut supervisor, &listing, &tracked, "synthetic")
             .await
@@ -326,7 +326,7 @@ async fn created_file_with_invalid_timestamp_reconciles_by_identity_without_recr
         credentials,
         move |cancel, guard| async move {
             let transfer = DriveTransfer::new(
-                Client::new(),
+                common::direct_client(),
                 t_v3,
                 t_up.clone(),
                 t_v2,
@@ -346,7 +346,7 @@ async fn created_file_with_invalid_timestamp_reconciles_by_identity_without_recr
         Err(StartError::Busy)
     ));
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         v3.clone(),
         upload.clone(),
         v2,
@@ -358,7 +358,7 @@ async fn created_file_with_invalid_timestamp_reconciles_by_identity_without_recr
     assert_eq!(
         reconcile_created_upload(
             &mut supervisor,
-            &DriveListing::new(Client::new(), v3),
+            &DriveListing::new(common::direct_client(), v3),
             &tracked,
             "synthetic"
         )
@@ -432,7 +432,7 @@ async fn updated_file_with_invalid_timestamp_reconciles_against_observed_id() {
     assert_eq!(
         reconcile_conditional_upload(
             &mut supervisor,
-            &DriveListing::new(Client::new(), endpoint),
+            &DriveListing::new(common::direct_client(), endpoint),
             &tracked,
             "synthetic"
         )
@@ -504,7 +504,7 @@ async fn stale_credentials_prevent_recovery_metadata_request() {
         .update_credentials(|_| config.credentials.clone())
         .unwrap();
     let listing = DriveListing::new(
-        Client::new(),
+        common::direct_client(),
         Url::parse("http://127.0.0.1:1/files").unwrap(),
     );
     let tracked = TrackedFileSync::new(
@@ -587,7 +587,7 @@ async fn connection_changed_during_conditional_query_cannot_record_old_revision(
         credentials,
         move |cancel, guard| async move {
             let transfer = DriveTransfer::new(
-                Client::new(),
+                common::direct_client(),
                 t_v3.clone(),
                 t_v3,
                 t_v2,
@@ -611,7 +611,7 @@ async fn connection_changed_during_conditional_query_cannot_record_old_revision(
     assert!(result.await.unwrap().is_none());
     supervisor.shutdown().await;
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         v3.clone(),
         v3.clone(),
         v2,
@@ -620,7 +620,7 @@ async fn connection_changed_during_conditional_query_cannot_record_old_revision(
         Arc::new(|_| {}),
     );
     let tracked = TrackedFileSync::new(transfer, history.clone());
-    let listing = DriveListing::new(Client::new(), v3);
+    let listing = DriveListing::new(common::direct_client(), v3);
     let result =
         reconcile_conditional_upload(&mut supervisor, &listing, &tracked, "synthetic").await;
     assert!(
@@ -656,7 +656,7 @@ async fn reconcile_conditional_upload_rejects_missing_observed_state_or_created_
     let save = dir.path().join("save.dat");
     std::fs::write(&save, b"abc").unwrap();
     let listing = DriveListing::new(
-        Client::new(),
+        common::direct_client(),
         Url::parse("http://127.0.0.1:1/files").unwrap(),
     );
     let history = Arc::new(SyncHistoryStore::new(&config_path).unwrap());
@@ -860,7 +860,7 @@ async fn reconcile_conditional_upload_rejects_remote_folder_or_renamed_file_with
 
     let history = Arc::new(SyncHistoryStore::new(&dir.path().join("config.json")).unwrap());
     let tracked = TrackedFileSync::new((), history.clone());
-    let listing = DriveListing::new(Client::new(), endpoint);
+    let listing = DriveListing::new(common::direct_client(), endpoint);
 
     for _ in 0..2 {
         let status = reconcile_conditional_upload(&mut supervisor, &listing, &tracked, "synthetic")

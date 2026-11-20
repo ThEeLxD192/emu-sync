@@ -6,7 +6,7 @@ use common::{
 use emusync_data_local::ConfigManager;
 #[cfg(unix)]
 use emusync_desktop_app::CloseState;
-use emusync_desktop_app::{AppEvent, DesktopCoordinator, DriveEndpoints};
+use emusync_desktop_app::{AppEvent, DesktopCoordinator, DriveEndpoints, coordinator::ProxyPolicy};
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore, Credentials},
     library::{Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType},
@@ -88,6 +88,7 @@ async fn token_server_failure_leaves_config_intact_and_emits_error() {
         Arc::new(|| {}),
         tokio::runtime::Handle::current(),
     )
+    .with_proxy_policy(ProxyPolicy::Direct)
     .with_endpoints(endpoints);
 
     coordinator.handle_action(UiAction::EditEntry {
@@ -145,6 +146,7 @@ async fn cloud_folder_change_without_name_change_triggers_migration() {
         Arc::new(|| {}),
         tokio::runtime::Handle::current(),
     )
+    .with_proxy_policy(ProxyPolicy::Direct)
     .with_endpoints(endpoints);
 
     coordinator.handle_action(UiAction::EditEntry {
@@ -190,6 +192,7 @@ async fn renaming_grouped_native_game_triggers_migration() {
         Arc::new(|| {}),
         tokio::runtime::Handle::current(),
     )
+    .with_proxy_policy(ProxyPolicy::Direct)
     .with_endpoints(endpoints);
 
     coordinator.handle_action(UiAction::EditEntry {
@@ -232,6 +235,7 @@ async fn connected_edits_do_not_change_paths_without_cloud_migration() {
         Arc::new(|| {}),
         tokio::runtime::Handle::current(),
     )
+    .with_proxy_policy(ProxyPolicy::Direct)
     .with_endpoints(endpoints);
 
     coordinator.handle_action(UiAction::EditEntry {
@@ -320,6 +324,7 @@ async fn cloud_migration_entry_records_pending_recovery_when_local_config_save_f
         Arc::new(|| {}),
         tokio::runtime::Handle::current(),
     )
+    .with_proxy_policy(ProxyPolicy::Direct)
     .with_endpoints(endpoints);
 
     coordinator.handle_action(UiAction::EditEntry {
@@ -399,6 +404,7 @@ async fn cloud_migration_game_override_retains_transfer_error_and_leaves_config_
         Arc::new(|| {}),
         tokio::runtime::Handle::current(),
     )
+    .with_proxy_policy(ProxyPolicy::Direct)
     .with_endpoints(endpoints);
 
     let item = GameItem::new("Chrono", entry, Some(PathBuf::from("/tmp/roms/Chrono.sfc")));

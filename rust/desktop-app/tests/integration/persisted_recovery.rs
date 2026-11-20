@@ -1,5 +1,7 @@
 //! Recovery of uploads whose outcome was lost when the process ended.
 
+use crate::common;
+
 use emusync_data_drive::{DriveListing, DriveTransfer, TransferError};
 use emusync_data_local::{
     ConfigManager, RecoveryCredentials, RecoveryRecord, RecoveryState, RecoveryStore,
@@ -10,7 +12,7 @@ use emusync_domain::{
     config::{AppConfig, CredentialStore, Credentials},
     sync::RemoteState,
 };
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -97,7 +99,7 @@ fn urls(root: &str) -> Urls {
 }
 fn tracked(urls: &Urls, dir: &Path) -> TrackedFileSync<DriveTransfer> {
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         urls.v3.clone(),
         urls.v3.clone(),
         urls.v2.clone(),
@@ -234,7 +236,7 @@ async fn killed_process_leaves_an_upload_that_a_new_process_reconciles_without_r
     ));
 
     let tracked = tracked(&urls, dir.path());
-    let listing = DriveListing::new(Client::new(), urls.v3.clone());
+    let listing = DriveListing::new(common::direct_client(), urls.v3.clone());
     let store = Arc::new(RecoveryStore::new(&dir.path().join("config.json")).unwrap());
     let results = reconcile_persisted_uploads(store, &listing, &tracked, "synthetic", credentials)
         .await
@@ -277,7 +279,7 @@ async fn entry_from_another_connection_is_neither_used_nor_removed() {
     let urls = urls("http://127.0.0.1:9/");
     let results = reconcile_persisted_uploads(
         Arc::new(RecoveryStore::new(&dir.path().join("config.json")).unwrap()),
-        &DriveListing::new(Client::new(), urls.v3.clone()),
+        &DriveListing::new(common::direct_client(), urls.v3.clone()),
         &tracked(&urls, dir.path()),
         "synthetic",
         credentials,
@@ -311,7 +313,7 @@ async fn created_upload_without_identity_reconciles_only_by_name_and_checksum() 
         let urls = urls(&root);
         let results = reconcile_persisted_uploads(
             Arc::new(RecoveryStore::new(&dir.path().join("config.json")).unwrap()),
-            &DriveListing::new(Client::new(), urls.v3.clone()),
+            &DriveListing::new(common::direct_client(), urls.v3.clone()),
             &tracked(&urls, dir.path()),
             "synthetic",
             credentials,
@@ -461,7 +463,7 @@ async fn reconcile_persisted_uploads_preserves_unverifiable_and_unconfirmed_entr
         }
     });
 
-    let listing = DriveListing::new(Client::new(), base);
+    let listing = DriveListing::new(common::direct_client(), base);
     let tracked = TrackedFileSync::new((), history.clone()).with_recovery(store.clone());
 
     let results =

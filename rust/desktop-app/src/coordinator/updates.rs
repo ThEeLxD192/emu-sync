@@ -1,8 +1,9 @@
 //! Application updates: release checks, AppImage download and replacement on restart.
 
+use super::proxy::ProxyPolicy;
 use crate::events::{AppEvent, EventSender};
 use emusync_application::{UpdateCoordinator, UpdateState};
-use emusync_data_updates::{GitHubUpdateSource, ReleaseTransport, release_client};
+use emusync_data_updates::{GitHubUpdateSource, ReleaseTransport, release_client_builder};
 use emusync_domain::update::UpdateInfo;
 use emusync_platform_desktop::{DesktopUpdateInstaller, UpdateStagingFiles};
 use emusync_presentation::i18n::fill;
@@ -87,7 +88,12 @@ pub struct UpdateServices {
 }
 
 impl UpdateServices {
-    pub fn new(source: UpdateSourceConfig, event_tx: EventSender, tokio_handle: Handle) -> Self {
+    pub fn new(
+        source: UpdateSourceConfig,
+        proxy_policy: ProxyPolicy,
+        event_tx: EventSender,
+        tokio_handle: Handle,
+    ) -> Self {
         let (base_url, transport) = match source {
             UpdateSourceConfig::GitHub => (None, ReleaseTransport::HttpsOnly),
             UpdateSourceConfig::Controlled(url) => (Some(url), ReleaseTransport::AllowPlainHttp),
@@ -98,7 +104,10 @@ impl UpdateServices {
                 return Self::without_updater(UpdatesUnavailable::Portable, tokio_handle);
             }
         };
-        let client = match release_client(transport) {
+        let client = match proxy_policy
+            .apply(release_client_builder(transport))
+            .build()
+        {
             Ok(client) => client,
             Err(error) => {
                 let reason = UpdatesUnavailable::ClientFailed(with_causes(&error));

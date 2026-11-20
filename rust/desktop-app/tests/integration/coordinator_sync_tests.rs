@@ -2,7 +2,9 @@ use crate::common;
 
 use common::{TestHarness, test_native_entry, wait_for_active_tasks};
 use emusync_data_local::{ConfigManager, RecoveryStore};
-use emusync_desktop_app::{AppEvent, CloseState, DesktopCoordinator, DriveEndpoints};
+use emusync_desktop_app::{
+    AppEvent, CloseState, DesktopCoordinator, DriveEndpoints, coordinator::ProxyPolicy,
+};
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore, Credentials},
     library::{Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType},
@@ -82,6 +84,7 @@ async fn connected_launch_runs_under_sync_lifecycle() {
         Arc::new(|| {}),
         tokio::runtime::Handle::current(),
     )
+    .with_proxy_policy(ProxyPolicy::Direct)
     .with_endpoints(endpoints);
 
     coordinator.handle_action(UiAction::LaunchGame(GameItem::new("Game", entry, None)));
@@ -176,6 +179,7 @@ async fn connected_launch_with_game_exit_error_preserves_error_and_does_not_send
         Arc::new(|| {}),
         tokio::runtime::Handle::current(),
     )
+    .with_proxy_policy(ProxyPolicy::Direct)
     .with_endpoints(endpoints);
 
     coordinator.handle_action(UiAction::LaunchGame(GameItem::new("Game", entry, None)));
@@ -325,6 +329,7 @@ async fn execute_sync_entry_retains_uncertain_upload_error_and_blocks_close() {
         Arc::new(|| {}),
         tokio::runtime::Handle::current(),
     )
+    .with_proxy_policy(ProxyPolicy::Direct)
     .with_endpoints(endpoints);
 
     coordinator.handle_action(UiAction::SyncEntry(entry.clone()));
@@ -617,6 +622,7 @@ async fn execute_sync_entry_reports_a_failed_download_without_blocking_close() {
         Arc::new(|| {}),
         tokio::runtime::Handle::current(),
     )
+    .with_proxy_policy(ProxyPolicy::Direct)
     .with_endpoints(endpoints);
 
     coordinator.handle_action(UiAction::SyncEntry(entry.clone()));

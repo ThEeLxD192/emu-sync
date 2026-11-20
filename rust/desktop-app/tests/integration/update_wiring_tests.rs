@@ -7,7 +7,10 @@ use crate::common;
 use common::{read_http_request_async, write_http_json_async};
 use emusync_application::{DownloadFailure, UpdateState};
 use emusync_data_local::ConfigManager;
-use emusync_desktop_app::{AppEvent, DesktopCoordinator, coordinator::UpdateSourceConfig};
+use emusync_desktop_app::{
+    AppEvent, DesktopCoordinator,
+    coordinator::{ProxyPolicy, UpdateSourceConfig},
+};
 use emusync_domain::{config::Language, update::UpdateInfo};
 use emusync_presentation::actions::UiAction;
 use std::{
@@ -78,6 +81,7 @@ fn coordinator(
         Arc::new(|| {}),
         tokio::runtime::Handle::current(),
     )
+    .with_proxy_policy(ProxyPolicy::Direct)
     .with_update_source(source);
     (coordinator, rx, dir)
 }
