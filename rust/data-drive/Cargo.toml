@@ -23,7 +23,7 @@ bytes = "1"
 futures-util = "0.3"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
 emusync-data-local = { path = "../data-local" }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 socket2 = "0.6.5"
