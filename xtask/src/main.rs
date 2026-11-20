@@ -1,5 +1,6 @@
 mod perf;
 mod perf_drive;
+mod release_signing;
 mod test_layout;
 
 use cargo_metadata::{DependencyKind, Metadata, MetadataCommand};
@@ -81,8 +82,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         let args: Vec<String> = std::env::args().skip(2).collect();
         return perf::main(&args);
     }
+    if matches!(
+        command.as_str(),
+        "release-key" | "release-public-key" | "sign-and-publish-release"
+    ) {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        return release_signing::main(&args);
+    }
     if !matches!(command.as_str(), "quality" | "test" | "check") {
-        return Err("usage: cargo xtask quality|test|check|perf".into());
+        return Err("usage: cargo xtask quality|test|check|perf|release-key|release-public-key|sign-and-publish-release".into());
     }
     // `quality` and `test` are the two halves of `check`, so CI can run them in parallel.
     if command != "test" {

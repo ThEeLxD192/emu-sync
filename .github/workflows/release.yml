@@ -134,7 +134,10 @@ jobs:
         with:
           tag_name: ${{ needs.prepare-version.outputs.tag_name }}
           name: "EmuSync ${{ needs.prepare-version.outputs.tag_name }}"
-          draft: false
+          # A draft: the maintainer signs its assets offline and publishes it with
+          # `cargo xtask sign-and-publish-release <tag> <key>`, so the updater can refuse
+          # assets that were not signed.
+          draft: true
           prerelease: false
           generate_release_notes: true
           files: release-assets/*

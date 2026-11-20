@@ -6,6 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = "0.22"
 cargo_metadata = "0.23.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+ring = "0.17"
 serde_json = "1"
