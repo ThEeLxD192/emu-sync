@@ -255,6 +255,12 @@ texts! {
     msg_updates_disabled: "Updates are disabled in development builds. Set EMUSYNC_UPDATE_BASE_URL to a test release server.", "Las actualizaciones están desactivadas en las compilaciones de desarrollo. Define EMUSYNC_UPDATE_BASE_URL con un servidor de versiones de prueba.";
     msg_language_not_saved: "Could not save the language.", "No se pudo guardar el idioma.";
     msg_up_to_date: "EmuSync is up to date.", "EmuSync está al día.";
+    msg_update_check_failed: "Could not check for updates: {detail}", "No se pudo comprobar si hay actualizaciones: {detail}";
+    msg_update_destination_unavailable: "Failed to download update: could not prepare where to save it: {detail}", "No se pudo descargar la actualización: no se pudo preparar dónde guardarla: {detail}";
+    msg_update_download_failed: "Failed to download update: {detail}", "No se pudo descargar la actualización: {detail}";
+    msg_update_size_unreadable: "Failed to download update: could not read the update size: {detail}", "No se pudo descargar la actualización: no se pudo leer su tamaño: {detail}";
+    msg_update_size_mismatch: "Failed to download update: the update size does not match the release: expected {expected} bytes, received {received}", "No se pudo descargar la actualización: su tamaño no coincide con el de la versión publicada: se esperaban {expected} bytes y llegaron {received}";
+    msg_update_restart_failed: "Could not restart automatically. The update file is saved at: {path}", "No se pudo reiniciar automáticamente. El archivo de la actualización está guardado en: {path}";
     msg_finish_before_update: "Finish the current operation before restarting to update.", "Termina la operación en curso antes de reiniciar para actualizar.";
     msg_pending_recovery: "Pending recovery of {count} unconfirmed upload(s).", "Recuperación pendiente de {count} subida(s) sin confirmar.";
     msg_found_recovery_records: "Found {count} pending sync recovery record(s).", "Se encontraron {count} registro(s) de recuperación de sincronización pendientes.";

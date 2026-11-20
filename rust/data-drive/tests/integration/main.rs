@@ -16,6 +16,7 @@ mod interactive;
 mod listing;
 mod loopback;
 mod oauth;
+mod proxy_isolation;
 mod resumable;
 mod resumable_recovery;
 mod resumable_retry_backoff;

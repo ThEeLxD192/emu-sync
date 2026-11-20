@@ -4,12 +4,14 @@ pub mod composition;
 pub mod interaction;
 pub mod library;
 pub mod platform;
+mod proxy;
 pub mod sync;
 pub mod updates;
 
 pub use composition::DriveEndpoints;
 pub use interaction::{ConflictResolver, InteractionControls, PendingSaveSetup, RetryRunner};
 pub use platform::PlatformServices;
+pub use proxy::ProxyPolicy;
 pub use sync::resolve_effective_targets;
 pub use updates::{UpdateServices, UpdateSourceConfig};
 
@@ -31,6 +33,7 @@ use emusync_data_drive::{
 use emusync_data_local::{
     ConfigManager, LocalSaveTargets, RecoveryCredentials, RecoveryStore, TrackedError,
 };
+use emusync_data_updates::ReleaseKey;
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore, CredentialStore, Credentials, Language},
     execution::PathPicker,
@@ -45,6 +48,7 @@ use emusync_platform_desktop::{
 };
 use emusync_presentation::{
     actions::UiAction,
+    dialogs::update_failure_message,
     i18n::{fill, sync_text},
     model::{AppStatus, SaveSetupRequest as UiSaveSetupRequest},
 };
@@ -72,7 +76,13 @@ pub struct DesktopCoordinator {
     pub active_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     pub pending_recovery: Arc<Mutex<Option<String>>>,
     pub is_admitted: Arc<AtomicBool>,
-    pub updates: UpdateServices,
+    updates: UpdateServices,
+    /// Where releases come from, kept to rebuild `updates` when the proxy policy changes.
+    update_source: UpdateSourceConfig,
+    /// Whether the Drive and release clients use the environment's proxy.
+    proxy_policy: ProxyPolicy,
+    /// The key a controlled release server's manifests must be signed with.
+    controlled_release_key: ReleaseKey,
     /// Drive HTTP clients, built on first use and shared by every operation so their
     /// connections are reused instead of opened again for each check or sync.
     drive_http: Arc<OnceLock<DriveHttpClients>>,
@@ -108,8 +118,13 @@ impl DesktopCoordinator {
             language: language.clone(),
         };
 
+        let update_source = UpdateSourceConfig::for_this_build();
+        let proxy_policy = ProxyPolicy::default();
+        let controlled_release_key = updates::controlled_release_key_for_this_build();
         let updates = UpdateServices::new(
-            UpdateSourceConfig::for_this_build(),
+            update_source.clone(),
+            proxy_policy,
+            controlled_release_key.clone(),
             event_tx.clone(),
             tokio_handle.clone(),
         );
@@ -128,6 +143,9 @@ impl DesktopCoordinator {
             pending_recovery: Arc::new(Mutex::new(None)),
             is_admitted: Arc::new(AtomicBool::new(false)),
             updates,
+            update_source,
+            proxy_policy,
+            controlled_release_key,
             drive_http: Arc::new(OnceLock::new()),
             language,
         }
@@ -135,9 +153,34 @@ impl DesktopCoordinator {
 
     /// Replaces where releases are checked and downloaded from.
     pub fn with_update_source(mut self, source: UpdateSourceConfig) -> Self {
-        self.updates =
-            UpdateServices::new(source, self.event_tx.clone(), self.tokio_handle.clone());
+        self.update_source = source;
+        self.rebuild_updates();
         self
+    }
+
+    /// Replaces whether the Drive and release clients use the environment's proxy.
+    pub fn with_proxy_policy(mut self, proxy_policy: ProxyPolicy) -> Self {
+        self.proxy_policy = proxy_policy;
+        self.drive_http = Arc::new(OnceLock::new());
+        self.rebuild_updates();
+        self
+    }
+
+    /// Replaces the key a controlled release server's manifests must be signed with.
+    pub fn with_controlled_release_key(mut self, release_key: ReleaseKey) -> Self {
+        self.controlled_release_key = release_key;
+        self.rebuild_updates();
+        self
+    }
+
+    fn rebuild_updates(&mut self) {
+        self.updates = UpdateServices::new(
+            self.update_source.clone(),
+            self.proxy_policy,
+            self.controlled_release_key.clone(),
+            self.event_tx.clone(),
+            self.tokio_handle.clone(),
+        );
     }
 
     /// The texts of the current interface language, for the messages this sends.
@@ -172,7 +215,9 @@ impl DesktopCoordinator {
         if let Some(clients) = self.drive_http.get() {
             return Ok(clients.clone());
         }
-        let clients = DriveHttpPolicy::default().build()?;
+        let proxy_policy = self.proxy_policy;
+        let clients = DriveHttpPolicy::default()
+            .build_with(|| proxy_policy.apply(reqwest::Client::builder()))?;
         Ok(self.drive_http.get_or_init(|| clients).clone())
     }
 
@@ -294,10 +339,10 @@ impl DesktopCoordinator {
             if !manual {
                 return;
             }
-            match state {
-                UpdateState::Idle => coordinator.send_toast(coordinator.t().msg_up_to_date),
-                UpdateState::Error(message) => coordinator.send_toast(message),
-                _ => {}
+            if state == UpdateState::Idle {
+                coordinator.send_toast(coordinator.t().msg_up_to_date);
+            } else if let Some(message) = update_failure_message(coordinator.t(), &state) {
+                coordinator.send_toast(message);
             }
         });
     }

@@ -17,4 +17,4 @@ pub use sync::{
     PlannedSave, SaveTargetMapping, SaveTargetMappingError, SaveTargetResolver, SyncContext,
     SyncOrchestrator, SyncOrchestratorFactory, SyncServices, UnplacedLegacyFiles,
 };
-pub use update::{UpdateCoordinator, UpdateState};
+pub use update::{DownloadFailure, UpdateCoordinator, UpdateRevision, UpdateState};

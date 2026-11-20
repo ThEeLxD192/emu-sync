@@ -1,3 +1,5 @@
+pub mod signed_release;
+
 use std::fmt;
 use std::future::Future;
 use std::net::SocketAddr;

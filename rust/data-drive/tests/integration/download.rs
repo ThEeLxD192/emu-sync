@@ -1,5 +1,7 @@
+use crate::common;
+
 use emusync_data_drive::{DownloadError, DownloadOptions, DriveDownload};
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
     io::{Read, Write},
     net::TcpListener,
@@ -36,7 +38,7 @@ async fn cancellation_of_stalled_download_preserves_destination_and_cleans_stage
     let task_cancel = cancel.clone();
     let path = destination.clone();
     let task = tokio::spawn(async move {
-        DriveDownload::new(Client::new(), url)
+        DriveDownload::new(common::direct_client(), url)
             .download("synthetic", "save", &path, &task_cancel)
             .await
     });
@@ -93,7 +95,7 @@ async fn completed_download_replaces_destination() {
     let destination = dir.path().join("save");
     std::fs::write(&destination, b"old").unwrap();
     let progress = std::sync::Mutex::new(Vec::new());
-    DriveDownload::new(Client::new(), url)
+    DriveDownload::new(common::direct_client(), url)
         .download_with(
             "synthetic",
             "id",
@@ -138,7 +140,7 @@ async fn truncated_response_preserves_destination_and_cleans_stage() {
     let dir = tempfile::tempdir().unwrap();
     let destination = dir.path().join("save");
     std::fs::write(&destination, b"original").unwrap();
-    let result = DriveDownload::new(Client::new(), url)
+    let result = DriveDownload::new(common::direct_client(), url)
         .download("synthetic", "id", &destination, &CancellationToken::new())
         .await;
     assert!(matches!(result, Err(DownloadError::Transport(_))));
@@ -164,7 +166,7 @@ async fn http_error_response_preserves_destination_and_reports_error() {
     let dir = tempfile::tempdir().unwrap();
     let destination = dir.path().join("save");
     std::fs::write(&destination, b"original").unwrap();
-    let result = DriveDownload::new(Client::new(), url)
+    let result = DriveDownload::new(common::direct_client(), url)
         .download("synthetic", "id", &destination, &CancellationToken::new())
         .await;
     assert!(matches!(
@@ -187,7 +189,7 @@ async fn invalid_download_file_ids_fail_without_network_or_touching_destination(
     let destination = dest_dir.join("save.dat");
 
     let invalid_ids = ["", "   ", ".", "..", "sub/id", "sub\\id", "id\0null"];
-    let client = DriveDownload::new(Client::new(), url);
+    let client = DriveDownload::new(common::direct_client(), url);
     let cancel = CancellationToken::new();
 
     for id in invalid_ids {
@@ -237,7 +239,7 @@ async fn inactivity_timeout_and_pre_epoch_timestamp_preserve_stage_hygiene() {
     let destination = dir.path().join("save.dat");
     std::fs::write(&destination, b"original").unwrap();
 
-    let client = Client::builder()
+    let client = common::direct_client_builder()
         .read_timeout(Duration::from_millis(150))
         .build()
         .unwrap();

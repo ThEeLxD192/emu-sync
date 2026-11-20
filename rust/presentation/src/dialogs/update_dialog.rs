@@ -12,7 +12,7 @@ use egui::{
     Align, Color32, FontId, Frame, Id, Label, Layout, Margin, Modal, RichText, ScrollArea, Sense,
     Stroke, Ui, vec2,
 };
-use emusync_application::UpdateState;
+use emusync_application::{DownloadFailure, UpdateState};
 use emusync_domain::update::UpdateInfo;
 use std::path::PathBuf;
 
@@ -185,16 +185,11 @@ pub fn render_update_dialog(
                         }
                     });
                 }
-                UpdateState::Error(message) => {
-                    ui.label(RichText::new(t.update_error).font(bold(15.0)).color(ERROR));
-                    ui.add_space(8.0);
-                    ui.add(Label::new(RichText::new(message).size(13.0).color(ON_SURFACE)).wrap());
-                    ui.add_space(16.0);
-                    button_row(ui, |ui| {
-                        if primary_button(ui, t.close).clicked() {
-                            on_close();
-                        }
-                    });
+                UpdateState::CheckFailed(_)
+                | UpdateState::DownloadFailed(_)
+                | UpdateState::RestartFailed { .. } => {
+                    let message = update_failure_message(t, state).unwrap_or_default();
+                    error_body(ui, t, &message, on_close);
                 }
                 // Rust-only states, reached from the "Check Updates" extra.
                 UpdateState::Checking => {
@@ -220,6 +215,40 @@ pub fn render_update_dialog(
     }
 }
 
+/// The explanation of a failed check, download or restart in the language of `t`, or
+/// `None` for a state that is not a failure.
+pub fn update_failure_message(t: &crate::i18n::Texts, state: &UpdateState) -> Option<String> {
+    use crate::i18n::fill;
+    let message = match state {
+        UpdateState::CheckFailed(detail) => fill(t.msg_update_check_failed, &[("detail", detail)]),
+        UpdateState::DownloadFailed(DownloadFailure::DestinationUnavailable(detail)) => {
+            fill(t.msg_update_destination_unavailable, &[("detail", detail)])
+        }
+        UpdateState::DownloadFailed(DownloadFailure::Transfer(detail)) => {
+            fill(t.msg_update_download_failed, &[("detail", detail)])
+        }
+        UpdateState::DownloadFailed(DownloadFailure::SizeUnreadable(detail)) => {
+            fill(t.msg_update_size_unreadable, &[("detail", detail)])
+        }
+        UpdateState::DownloadFailed(DownloadFailure::SizeMismatch {
+            expected_bytes,
+            received_bytes,
+        }) => fill(
+            t.msg_update_size_mismatch,
+            &[("expected", expected_bytes), ("received", received_bytes)],
+        ),
+        UpdateState::RestartFailed { downloaded_path } => {
+            fill(t.msg_update_restart_failed, &[("path", downloaded_path)])
+        }
+        UpdateState::Idle
+        | UpdateState::Checking
+        | UpdateState::Available(_)
+        | UpdateState::Downloading { .. }
+        | UpdateState::ReadyToRestart { .. } => return None,
+    };
+    Some(message)
+}
+
 fn icon_header(ui: &mut Ui, icon: &str, title: &str, subtitle: &str) {
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
@@ -230,6 +259,19 @@ fn icon_header(ui: &mut Ui, icon: &str, title: &str, subtitle: &str) {
             ui.label(RichText::new(title).font(bold(20.0)).color(ON_SURFACE));
             ui.label(RichText::new(subtitle).size(12.0).color(ON_SURFACE_DIM));
         });
+    });
+}
+
+/// The error title, `message` and a close button, for a failed check or update.
+fn error_body(ui: &mut Ui, t: &crate::i18n::Texts, message: &str, on_close: &mut dyn FnMut()) {
+    ui.label(RichText::new(t.update_error).font(bold(15.0)).color(ERROR));
+    ui.add_space(8.0);
+    ui.add(Label::new(RichText::new(message).size(13.0).color(ON_SURFACE)).wrap());
+    ui.add_space(16.0);
+    button_row(ui, |ui| {
+        if primary_button(ui, t.close).clicked() {
+            on_close();
+        }
     });
 }
 

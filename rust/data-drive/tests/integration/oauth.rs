@@ -1,16 +1,27 @@
-use emusync_data_drive::{OAuth, OAuthError};
+use crate::common;
+
+use emusync_data_drive::{AuthorizationCode, OAuth, OAuthError};
 use emusync_data_local::ConfigManager;
 use emusync_domain::{
     config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
     library::{GameEntry, NativeGame},
 };
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
+    collections::HashMap,
     io::{Read, Write},
     net::TcpListener,
     sync::{Arc, mpsc},
     thread,
 };
+
+/// A code as the loopback returns it, with a synthetic PKCE verifier.
+fn authorization_code(code: &str) -> AuthorizationCode {
+    AuthorizationCode {
+        code: code.into(),
+        code_verifier: "synthetic-pkce-verifier".into(),
+    }
+}
 
 fn setup(refresh: Option<&str>) -> (tempfile::TempDir, Arc<ConfigManager>, AppConfig) {
     let dir = tempfile::tempdir().unwrap();
@@ -77,10 +88,10 @@ async fn exchange_keeps_concurrent_library_edits() {
         "200 OK",
         r#"{"access_token":"access","refresh_token":"new"}"#,
     );
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
     let task = tokio::spawn(async move {
         oauth
-            .authorize(&config, true, |_| async { Ok("code".into()) })
+            .authorize(&config, true, |_| async { Ok(authorization_code("code")) })
             .await
     });
     seen.recv_timeout(std::time::Duration::from_secs(5))
@@ -105,7 +116,7 @@ async fn exchange_keeps_concurrent_library_edits() {
 async fn refresh_response_is_discarded_after_disconnect_and_reconnect() {
     let (_dir, store, config) = setup(Some("old"));
     let (url, seen, go, server) = server("200 OK", r#"{"access_token":"stale"}"#);
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
     let task = tokio::spawn(async move {
         oauth
             .authorize(&config, false, |_| async {
@@ -130,7 +141,7 @@ async fn refresh_response_is_discarded_after_disconnect_and_reconnect() {
 async fn refresh_response_is_discarded_after_generic_configuration_aba() {
     let (_dir, store, config) = setup(Some("old"));
     let (url, seen, go, server) = server("200 OK", r#"{"access_token":"stale"}"#);
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
     let task_config = config.clone();
     let task = tokio::spawn(async move {
         oauth
@@ -165,7 +176,7 @@ async fn refresh_response_is_discarded_after_generic_configuration_aba() {
 async fn invalid_grant_clears_only_current_refresh_token() {
     let (_dir, store, config) = setup(Some("old"));
     let (url, seen, go, server) = server("400 Bad Request", r#"{"error":"invalid_grant"}"#);
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
     let task = tokio::spawn(async move {
         oauth
             .authorize(&config, false, |_| async {
@@ -214,6 +225,9 @@ async fn invalid_grant_with_interactive_allowed_clears_stale_refresh_and_complet
         let req = String::from_utf8_lossy(&data[..n]);
         assert!(req.starts_with("POST /token"));
         assert!(req.contains("grant_type=authorization_code"));
+        // The code is only redeemable with the verifier of the challenge sent with it.
+        assert!(req.contains("code=interactive-code"));
+        assert!(req.contains("code_verifier=synthetic-pkce-verifier"));
         let body = r#"{"access_token":"fresh-access","refresh_token":"fresh-refresh"}"#;
         write!(
             stream,
@@ -223,9 +237,11 @@ async fn invalid_grant_with_interactive_allowed_clears_stale_refresh_and_complet
         .unwrap();
     });
 
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
     let (access, snapshot) = oauth
-        .authorize_scoped(&config, true, |_| async { Ok("interactive-code".into()) })
+        .authorize_scoped(&config, true, |_| async {
+            Ok(authorization_code("interactive-code"))
+        })
         .await
         .unwrap();
 
@@ -251,7 +267,7 @@ async fn non_invalid_grant_refresh_failure_preserves_existing_refresh_token_and_
     let (_dir, store, config) = setup(Some("old"));
     let (url, seen, go, server) =
         server("400 Bad Request", r#"{"error":"temporarily_unavailable"}"#);
-    let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
 
     let interactive_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let spy = interactive_started.clone();
@@ -260,7 +276,7 @@ async fn non_invalid_grant_refresh_failure_preserves_existing_refresh_token_and_
         oauth
             .authorize(&config, true, |_| {
                 spy.store(true, std::sync::atomic::Ordering::SeqCst);
-                async { Ok("code".into()) }
+                async { Ok(authorization_code("code")) }
             })
             .await
     });
@@ -295,12 +311,14 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
             "200 OK",
             r#"{"access_token":"fresh","refresh_token":"new-refresh"}"#,
         );
-        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+        let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
 
         let task_config = config.clone();
         let task = tokio::spawn(async move {
             oauth
-                .authorize(&task_config, true, |_| async { Ok("code".into()) })
+                .authorize(&task_config, true, |_| async {
+                    Ok(authorization_code("code"))
+                })
                 .await
         });
 
@@ -330,7 +348,7 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
     {
         let (_dir, store, _) = setup(None);
         let oauth = OAuth::new(
-            Client::new(),
+            common::direct_client(),
             Shared(store.clone()),
             Url::parse("http://127.0.0.1:1/token").unwrap(),
         );
@@ -346,7 +364,7 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
                 entries: vec![],
             };
             let result = oauth
-                .authorize(&config, true, |_| async { Ok("code".into()) })
+                .authorize(&config, true, |_| async { Ok(authorization_code("code")) })
                 .await;
             assert!(matches!(result, Err(OAuthError::MissingCredentials)));
         }
@@ -358,11 +376,11 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
             "200 OK",
             r#"{"access_token":"   ","refresh_token":"should-not-persist"}"#,
         );
-        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+        let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
 
         let task = tokio::spawn(async move {
             oauth
-                .authorize(&config, true, |_| async { Ok("code".into()) })
+                .authorize(&config, true, |_| async { Ok(authorization_code("code")) })
                 .await
         });
 
@@ -390,7 +408,7 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let url = Url::parse(&format!("http://{}/token", listener.local_addr().unwrap())).unwrap();
-        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+        let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
 
         let stale_config = AppConfig {
             language: Default::default(),
@@ -403,7 +421,9 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
         };
 
         let result = oauth
-            .authorize_scoped(&stale_config, true, |_| async { Ok("code".into()) })
+            .authorize_scoped(&stale_config, true, |_| async {
+                Ok(authorization_code("code"))
+            })
             .await;
         assert!(matches!(result, Err(OAuthError::ConnectionChanged)));
 
@@ -416,11 +436,11 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
     {
         let (_dir, store, config) = setup(Some("old"));
         let (url, seen, go, server) = server("200 OK", r#"{"access_token":"   "}"#);
-        let oauth = OAuth::new(Client::new(), Shared(store.clone()), url);
+        let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
 
         let task = tokio::spawn(async move {
             oauth
-                .authorize(&config, true, |_| async { Ok("code".into()) })
+                .authorize(&config, true, |_| async { Ok(authorization_code("code")) })
                 .await
         });
 
@@ -436,5 +456,121 @@ async fn interactive_exchange_aborts_on_concurrent_credential_mutation_and_rejec
             other => panic!("expected Provider('missing access token'), got: {other:?}"),
         }
         server.join().unwrap();
+    }
+}
+
+/// The status and body a token endpoint answers with; `None` closes the connection unanswered.
+type TokenResponse = Option<(&'static str, &'static str)>;
+
+/// A token endpoint that accepts one request, answers it with `response` and returns the
+/// decoded form fields.
+fn token_endpoint(response: TokenResponse) -> (Url, thread::JoinHandle<HashMap<String, String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = Url::parse(&format!("http://{}/token", listener.local_addr().unwrap())).unwrap();
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let (head, form) = common::read_request(&mut stream);
+        assert!(head.starts_with("POST /token"), "{head}");
+        if let Some((status, body)) = response {
+            common::reply_json(&mut stream, status, body);
+        }
+        let form = String::from_utf8(form).unwrap();
+        Url::parse(&format!("http://form.invalid/?{form}"))
+            .unwrap()
+            .query_pairs()
+            .into_owned()
+            .collect()
+    });
+    (url, handle)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refresh_with_a_stored_token_sends_no_pkce_verifier_or_code() {
+    let (_dir, store, config) = setup(Some("stored-refresh"));
+    let (url, server) = token_endpoint(Some(("200 OK", r#"{"access_token":"refreshed"}"#)));
+    let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
+
+    let access = oauth
+        .authorize(&config, true, |_| async {
+            panic!("a stored refresh token must not start the interactive flow")
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(access, "refreshed");
+    let form = server.join().unwrap();
+    let expected: HashMap<String, String> = [
+        ("client_id", "client"),
+        ("client_secret", "secret"),
+        ("refresh_token", "stored-refresh"),
+        ("grant_type", "refresh_token"),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value.to_owned()))
+    .collect();
+    assert_eq!(form, expected);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn token_endpoint_failures_do_not_reveal_the_code_or_its_verifier() {
+    const CODE: &str = "4/secret-authorization-code";
+    const VERIFIER: &str = "Secret-PKCE-Verifier_0123456789abcdefghijk";
+    let cases: [(TokenResponse, Option<&str>); 3] = [
+        (
+            Some((
+                "400 Bad Request",
+                r#"{"error":"invalid_grant","error_description":"Bad Request"}"#,
+            )),
+            Some("invalid_grant"),
+        ),
+        (Some(("200 OK", r#"{"access_token":"#)), None),
+        (None, None),
+    ];
+    for (response, expected_provider_message) in cases {
+        let (_dir, store, config) = setup(None);
+        let (url, server) = token_endpoint(response);
+        let oauth = OAuth::new(common::direct_client(), Shared(store.clone()), url);
+
+        let error = oauth
+            .authorize(&config, true, |_| async {
+                Ok(AuthorizationCode {
+                    code: CODE.into(),
+                    code_verifier: VERIFIER.into(),
+                })
+            })
+            .await
+            .unwrap_err();
+
+        // The exchange did carry both values, so their absence below is not vacuous.
+        let form = server.join().unwrap();
+        assert_eq!(form["code"], CODE);
+        assert_eq!(form["code_verifier"], VERIFIER);
+        if let Some(expected) = expected_provider_message {
+            assert!(
+                matches!(&error, OAuthError::Provider(message) if message == expected),
+                "{error:?}"
+            );
+        }
+        for shown in [error.to_string(), format!("{error:?}")] {
+            assert!(!shown.contains(CODE), "{response:?}: {shown}");
+            assert!(!shown.contains(VERIFIER), "{response:?}: {shown}");
+        }
+        assert_eq!(
+            store.load().unwrap().credentials.unwrap().refresh_token,
+            None
+        );
+    }
+}
+
+#[test]
+fn authorization_code_debug_shows_neither_the_code_nor_the_verifier() {
+    let authorization = AuthorizationCode {
+        code: "4/secret-authorization-code".into(),
+        code_verifier: "secret-pkce-verifier".into(),
+    };
+    for shown in [format!("{authorization:?}"), format!("{authorization:#?}")] {
+        assert!(shown.contains("AuthorizationCode"), "{shown}");
+        assert!(!shown.contains("secret-authorization-code"), "{shown}");
+        assert!(!shown.contains("secret-pkce-verifier"), "{shown}");
     }
 }

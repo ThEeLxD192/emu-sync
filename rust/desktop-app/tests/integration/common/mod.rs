@@ -1,5 +1,7 @@
+pub mod signed_release;
+
 use emusync_data_local::{ConfigManager, RecoveryCredentials};
-use emusync_desktop_app::{AppEvent, DesktopCoordinator, DriveEndpoints};
+use emusync_desktop_app::{AppEvent, DesktopCoordinator, DriveEndpoints, coordinator::ProxyPolicy};
 use emusync_domain::{
     config::{AppConfig, CredentialStore, Credentials},
     library::{Emulator, EntryCommon, GameEntry, NativeGame, SaveTarget, SaveTargetType},
@@ -38,7 +40,8 @@ impl TestHarness {
             tx,
             redraw,
             tokio::runtime::Handle::current(),
-        );
+        )
+        .with_proxy_policy(ProxyPolicy::Direct);
         Self {
             dir,
             manager,
@@ -105,6 +108,15 @@ where
     })
     .await
     .expect("timed out waiting for matching AppEvent")
+}
+
+/// A client that ignores any proxy set in the environment, for the servers the tests
+/// start on this machine.
+pub fn direct_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("build a direct HTTP client")
 }
 
 pub fn make_drive_endpoints(port: u16) -> DriveEndpoints {

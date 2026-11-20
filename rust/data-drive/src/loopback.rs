@@ -1,6 +1,7 @@
-use crate::OAuthError;
+use crate::{AuthorizationCode, OAuthError};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use reqwest::Url;
+use sha2::{Digest, Sha256};
 use std::{collections::HashMap, future::Future, time::Duration};
 use subtle::ConstantTimeEq;
 use tokio::{
@@ -8,15 +9,32 @@ use tokio::{
     net::TcpListener,
 };
 
+/// A fresh single-use secret for one authorization request (its `state` or its PKCE
+/// verifier): 32 random bytes in unpadded base64url, 43 characters, as RFC 7636 asks of a
+/// verifier. Never logged or reused.
+fn random_secret() -> Result<String, OAuthError> {
+    let mut random = [0u8; 32];
+    getrandom::getrandom(&mut random).map_err(|e| OAuthError::Provider(e.to_string()))?;
+    Ok(URL_SAFE_NO_PAD.encode(random))
+}
+
+/// The S256 challenge of a PKCE verifier (RFC 7636, section 4.2).
+fn code_challenge(code_verifier: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()))
+}
+
 /// Wait on an already-bound loopback listener; dropping the future closes its listener.
 /// The caller supplies a browser launcher and should enforce an overall timeout.
+///
+/// The authorization request carries a PKCE challenge, so the returned code is only
+/// redeemable with the verifier returned beside it.
 pub async fn loopback_code<F, Fut>(
     listener: TcpListener,
     client_id: &str,
     authorization_endpoint: Url,
     redirect_uri: &str,
     open: F,
-) -> Result<String, OAuthError>
+) -> Result<AuthorizationCode, OAuthError>
 where
     F: FnOnce(Url) -> Fut,
     Fut: Future<Output = Result<(), OAuthError>>,
@@ -31,9 +49,9 @@ where
             "OAuth listener must be loopback".into(),
         ));
     }
-    let mut random = [0u8; 32];
-    getrandom::getrandom(&mut random).map_err(|e| OAuthError::Provider(e.to_string()))?;
-    let state = URL_SAFE_NO_PAD.encode(random);
+    let state = random_secret()?;
+    let code_verifier = random_secret()?;
+    let challenge = code_challenge(&code_verifier);
     let mut url = authorization_endpoint;
     url.query_pairs_mut().extend_pairs([
         ("client_id", client_id),
@@ -43,6 +61,8 @@ where
         ("access_type", "offline"),
         ("prompt", "consent"),
         ("state", &state),
+        ("code_challenge", &challenge),
+        ("code_challenge_method", "S256"),
     ]);
     open(url).await?;
     loop {
@@ -123,7 +143,10 @@ where
                         .clone(),
                 ));
             }
-            return Ok(code.cloned().unwrap_or_default());
+            return Ok(AuthorizationCode {
+                code: code.cloned().unwrap_or_default(),
+                code_verifier,
+            });
         }
     }
 }

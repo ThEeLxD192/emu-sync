@@ -7,7 +7,7 @@ mod perf;
 use emusync_data_local::ConfigManager;
 use emusync_desktop_app::{
     AppEvent, AuthorizedTransferFailure, CloseState, DesktopCoordinator, RuntimeOwner,
-    apply_entry_games_scanned, apply_steam_state_refreshed,
+    apply_entry_games_scanned, apply_steam_state_refreshed, apply_update_state_changed,
 };
 use emusync_domain::config::ConfigurationStore;
 use emusync_platform_desktop::{SteamShortcutManager, is_gamescope_session};
@@ -50,6 +50,8 @@ struct App {
     close_notice: bool,
     current_scan_revision: u64,
     current_steam_revision: u64,
+    /// The revision of the update state on screen.
+    current_update_revision: emusync_application::UpdateRevision,
     /// Frame metrics, only when `EMUSYNC_PERF_LOG` is set.
     perf: Option<perf::PerfLog>,
     /// When egui asked to be drawn again (an animation or a delayed repaint).
@@ -346,8 +348,13 @@ impl ApplicationHandler for App {
                         AppEvent::Toast(message) => {
                             self.emusync_app.state.toast_message = Some(message);
                         }
-                        AppEvent::UpdateStateChanged(update_state) => {
-                            self.emusync_app.state.update_state = update_state;
+                        AppEvent::UpdateStateChanged(update_state, revision) => {
+                            apply_update_state_changed(
+                                &mut self.current_update_revision,
+                                &mut self.emusync_app.state.update_state,
+                                update_state,
+                                revision,
+                            );
                         }
                         AppEvent::PathPicked {
                             request_id,
@@ -592,7 +599,7 @@ fn take_preview_update(
                     return Err("--preview-update may only be specified once");
                 }
                 preview = Some(preview_update_state(name).ok_or(
-                    "--preview-update expects available, downloading, ready, ready-steam or error",
+                    "--preview-update expects available, downloading, ready, ready-steam, error or restart-failed",
                 )?);
             }
             None => rest.push(arg),
@@ -603,7 +610,7 @@ fn take_preview_update(
 
 #[cfg(debug_assertions)]
 fn preview_update_state(name: &str) -> Option<emusync_application::UpdateState> {
-    use emusync_application::UpdateState;
+    use emusync_application::{DownloadFailure, UpdateState};
     let info = emusync_domain::update::UpdateInfo {
         version: "9.9.9".to_string(),
         tag_name: "v9.9.9".to_string(),
@@ -612,6 +619,8 @@ fn preview_update_state(name: &str) -> Option<emusync_application::UpdateState> 
         download_url: String::new(),
         asset_size: 0,
         asset_name: "EmuSync-preview".to_string(),
+        manifest_url: String::new(),
+        signature_url: String::new(),
     };
     let ready = |is_steam_game_mode| UpdateState::ReadyToRestart {
         downloaded_path: "/nonexistent/emusync-preview-update".to_string(),
@@ -625,7 +634,13 @@ fn preview_update_state(name: &str) -> Option<emusync_application::UpdateState> 
         },
         "ready" => ready(false),
         "ready-steam" => ready(true),
-        "error" => UpdateState::Error("Preview: the download could not be verified.".to_string()),
+        "error" => UpdateState::DownloadFailed(DownloadFailure::SizeMismatch {
+            expected_bytes: 1024,
+            received_bytes: 512,
+        }),
+        "restart-failed" => UpdateState::RestartFailed {
+            downloaded_path: "/nonexistent/emusync-preview-update".to_string(),
+        },
         _ => return None,
     })
 }
@@ -668,6 +683,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         close_notice: false,
         current_scan_revision: 0,
         current_steam_revision: 0,
+        current_update_revision: Default::default(),
         perf,
         repaint_at: None,
     };

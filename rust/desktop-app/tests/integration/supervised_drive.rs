@@ -12,7 +12,7 @@ use emusync_desktop_app::{
 use emusync_domain::config::{AppConfig, ConfigurationStore, CredentialStore, Credentials};
 #[cfg(target_os = "linux")]
 use emusync_domain::sync::RemoteState;
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
     io::Write,
     net::TcpListener,
@@ -123,7 +123,7 @@ async fn connection_change_during_successful_upload_cannot_record_old_history() 
         guard,
         move |cancel, operation_guard| async move {
             let transfer = DriveTransfer::new(
-                Client::new(),
+                common::direct_client(),
                 task_base.clone(),
                 task_base.clone(),
                 task_base.clone(),
@@ -213,7 +213,7 @@ async fn changed_connection_during_pinned_download_preserves_save_and_history() 
         guard,
         move |cancel, credentials| async move {
             let transfer = DriveTransfer::new(
-                Client::new(),
+                common::direct_client(),
                 base.clone(),
                 base.clone(),
                 base.clone(),
@@ -303,7 +303,7 @@ fn runtime_close_waits_for_reconciliation_and_history_before_exit() {
         .with_supervisor(|supervisor| {
             start_authorized_transfer(supervisor, guard, move |cancel, credentials| async move {
                 let transfer = DriveTransfer::new(
-                    Client::new(),
+                    common::direct_client(),
                     task_base.clone(),
                     task_base.clone(),
                     task_base.clone(),
@@ -345,7 +345,7 @@ fn runtime_close_waits_for_reconciliation_and_history_before_exit() {
     let recovery = owner
         .start_recovery(move |supervisor| {
             Box::pin(async move {
-                let resumable = ResumableUpload::new(Client::new(), recovery_base);
+                let resumable = ResumableUpload::new(common::direct_client(), recovery_base);
                 let tracked = TrackedFileSync::new((), recovery_history);
                 reconcile_tracked_upload(supervisor, &resumable, &tracked, "synthetic").await
             })

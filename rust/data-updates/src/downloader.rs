@@ -117,6 +117,10 @@ fn generate_candidate_path(parent: &Path, file_name: &str, attempt: usize) -> Pa
     parent.join(format!(".{file_name}.{nanos}_{pid}_{count}_{attempt}.part"))
 }
 
+/// Highest progress reported while bytes arrive: 100 % is only reported once the file is
+/// checked and in place, so an update that fails its checks never shows as complete.
+const MAX_PROGRESS_UNTIL_VERIFIED: f32 = 0.99;
+
 #[derive(Clone)]
 pub struct UpdateDownloader {
     client: reqwest::Client,
@@ -148,10 +152,42 @@ impl UpdateDownloader {
         }
     }
 
+    /// Downloads without checking what arrives. Updates go through
+    /// [`GitHubUpdateSource`](crate::GitHubUpdateSource), which uses
+    /// [`download_verified`](Self::download_verified) with the signed hash.
     pub async fn download(
         &self,
         download_url: &str,
         destination: &Path,
+        on_progress: impl FnMut(f32) + Send,
+    ) -> Result<(), UpdateError> {
+        self.download_checked(download_url, destination, None, on_progress)
+            .await
+    }
+
+    /// Like [`download`](Self::download), but the file only reaches `destination` when
+    /// its SHA-256 is `expected_sha256`; otherwise the staged bytes are discarded.
+    pub async fn download_verified(
+        &self,
+        download_url: &str,
+        destination: &Path,
+        expected_sha256: [u8; 32],
+        on_progress: impl FnMut(f32) + Send,
+    ) -> Result<(), UpdateError> {
+        self.download_checked(
+            download_url,
+            destination,
+            Some(expected_sha256),
+            on_progress,
+        )
+        .await
+    }
+
+    async fn download_checked(
+        &self,
+        download_url: &str,
+        destination: &Path,
+        expected_sha256: Option<[u8; 32]>,
         mut on_progress: impl FnMut(f32) + Send,
     ) -> Result<(), UpdateError> {
         let parent = destination
@@ -181,11 +217,7 @@ impl UpdateDownloader {
         };
 
         if response.status() != reqwest::StatusCode::OK {
-            return Err(UpdateError::Http(format!(
-                "HTTP {} {}",
-                response.status().as_u16(),
-                response.status().canonical_reason().unwrap_or("")
-            )));
+            return Err(UpdateError::Http(response.status()));
         }
 
         let total_bytes = response.content_length();
@@ -251,6 +283,7 @@ impl UpdateDownloader {
 
         staged_file.activate_async();
         let mut bytes_read = 0u64;
+        let mut sha256 = ring::digest::Context::new(&ring::digest::SHA256);
 
         while let Some(chunk_res) = tokio::time::timeout(self.inactivity_timeout, stream.next())
             .await
@@ -264,12 +297,14 @@ impl UpdateDownloader {
             let chunk = chunk_res?;
             if !chunk.is_empty() {
                 staged_file.write_all(&chunk).await?;
+                sha256.update(&chunk);
                 bytes_read += chunk.len() as u64;
 
                 if let Some(total) = total_bytes
                     && total > 0
                 {
-                    let progress = (bytes_read as f32 / total as f32).clamp(0.0, 1.0);
+                    let progress =
+                        (bytes_read as f32 / total as f32).clamp(0.0, MAX_PROGRESS_UNTIL_VERIFIED);
                     on_progress(progress);
                 }
             }
@@ -289,6 +324,14 @@ impl UpdateDownloader {
                 expected: total,
                 received: bytes_read,
             });
+        }
+
+        if let Some(expected) = expected_sha256
+            && sha256.finish().as_ref() != expected
+        {
+            return Err(UpdateError::Verification(
+                "the downloaded update does not match its signed SHA-256".into(),
+            ));
         }
 
         staged_file.finish_async().await?;

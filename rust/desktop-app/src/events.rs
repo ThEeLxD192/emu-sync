@@ -1,6 +1,6 @@
 //! Application events sent from background operations to the presentation layer.
 
-use emusync_application::UpdateState;
+use emusync_application::{UpdateRevision, UpdateState};
 use emusync_domain::{
     config::AppConfig,
     library::{SaveTarget, SaveTargetType},
@@ -64,7 +64,9 @@ pub enum AppEvent {
     },
     StatusChanged(AppStatus),
     Toast(String),
-    UpdateStateChanged(UpdateState),
+    /// A new update state and its revision: announcements can arrive out of order, and
+    /// only the highest revision is shown (`apply_update_state_changed`).
+    UpdateStateChanged(UpdateState, UpdateRevision),
     /// An installed update asks the application to close normally.
     ExitRequested,
     PathPicked {
@@ -119,6 +121,22 @@ pub fn apply_entry_games_scanned(
     } else {
         false
     }
+}
+
+/// Applies an `UpdateStateChanged` event unless a newer state was already applied, so
+/// two announcements that cross on their way never leave an older state on screen.
+pub fn apply_update_state_changed(
+    current_revision: &mut UpdateRevision,
+    shown_state: &mut UpdateState,
+    state: UpdateState,
+    revision: UpdateRevision,
+) -> bool {
+    if revision <= *current_revision {
+        return false;
+    }
+    *current_revision = revision;
+    *shown_state = state;
+    true
 }
 
 /// Applies a `SteamStateRefreshed` event unless a newer refresh was already applied.

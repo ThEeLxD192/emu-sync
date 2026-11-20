@@ -18,4 +18,6 @@ pub use status_overlay::{
     SaveFolderSelection, StatusOverlayEvents, conflict_card_id, post_sync_failed_message,
     render_status_overlay, save_folder_option_id,
 };
-pub use update_dialog::{UpdateDialogEvents, render_update_dialog, update_dialog_dismissible};
+pub use update_dialog::{
+    UpdateDialogEvents, render_update_dialog, update_dialog_dismissible, update_failure_message,
+};

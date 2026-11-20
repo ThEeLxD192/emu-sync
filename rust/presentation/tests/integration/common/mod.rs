@@ -190,6 +190,8 @@ pub fn update_info(version: &str) -> UpdateInfo {
         download_url: "https://example.com/app.AppImage".to_string(),
         asset_size: 1024,
         asset_name: "EmuSync.AppImage".to_string(),
+        manifest_url: String::new(),
+        signature_url: String::new(),
     }
 }
 

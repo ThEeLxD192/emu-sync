@@ -1,3 +1,5 @@
+use crate::common;
+
 use emusync_data_drive::DriveHttpPolicy;
 use std::{
     io::{Read, Write},
@@ -28,7 +30,7 @@ async fn metadata_request_has_total_timeout() {
             "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         );
     });
-    let clients = policy().build().unwrap();
+    let clients = common::direct_clients(policy());
     let error = clients
         .metadata
         .get(format!("http://{address}/"))
@@ -59,7 +61,7 @@ async fn active_transfer_can_exceed_the_metadata_request_deadline() {
             stream.flush().unwrap();
         }
     });
-    let clients = policy().build().unwrap();
+    let clients = common::direct_clients(policy());
     let bytes = clients
         .transfer
         .get(format!("http://{address}/"))
@@ -91,7 +93,7 @@ async fn inactivity_stops_a_stalled_transfer() {
     });
     let mut policy = policy();
     policy.inactivity = Duration::from_millis(150);
-    let clients = policy.build().unwrap();
+    let clients = common::direct_clients(policy);
     let error = clients
         .transfer
         .get(format!("http://{address}/"))
@@ -128,7 +130,7 @@ async fn all_policy_clients_refuse_to_follow_http_redirects_to_trap_origin() {
         }
     });
 
-    let clients = DriveHttpPolicy::default().build().unwrap();
+    let clients = common::direct_clients(DriveHttpPolicy::default());
 
     let meta_resp = clients
         .metadata

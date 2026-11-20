@@ -1,3 +1,5 @@
+use crate::common;
+
 use emusync_data_drive::DriveListing;
 use emusync_data_local::{
     ConfigManager, RecoveryCredentials, RecoveryRecord, RecoveryStore, SyncHistoryStore,
@@ -7,7 +9,6 @@ use emusync_desktop_app::{
     DesktopCoordinator, OperationSupervisor, PersistedRecoveryStatus, reconcile_persisted_uploads,
 };
 use emusync_domain::config::{AppConfig, ConfigurationStore, CredentialStore, Credentials};
-use reqwest::Client;
 use std::{
     io,
     path::Path,
@@ -65,7 +66,7 @@ async fn foreign_connection_record_is_preserved_without_removal() {
     let snapshot = manager.snapshot(&config).unwrap();
     let credentials = RecoveryCredentials::new(Arc::new(manager.clone()), snapshot, config);
     let listing = DriveListing::new(
-        Client::new(),
+        common::direct_client(),
         reqwest::Url::parse("http://127.0.0.1:9/files").unwrap(),
     );
     let history = Arc::new(SyncHistoryStore::new(manager.path()).unwrap());

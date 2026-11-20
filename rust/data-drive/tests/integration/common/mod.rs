@@ -1,3 +1,4 @@
+use emusync_data_drive::{DriveHttpClients, DriveHttpPolicy};
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener};
 use std::sync::atomic::{AtomicU16, Ordering};
@@ -85,4 +86,24 @@ pub fn reply_extra(stream: &mut impl Write, status: &str, extra: &str, body: &st
         body.len()
     )
     .unwrap();
+}
+
+/// A client builder that ignores any proxy set in the environment, for the servers the
+/// tests start on this machine.
+pub fn direct_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder().no_proxy()
+}
+
+/// A client that ignores any proxy set in the environment.
+pub fn direct_client() -> reqwest::Client {
+    direct_client_builder()
+        .build()
+        .expect("build a direct HTTP client")
+}
+
+/// The clients of `policy`, built without the environment's proxy.
+pub fn direct_clients(policy: DriveHttpPolicy) -> DriveHttpClients {
+    policy
+        .build_with(direct_client_builder)
+        .expect("build direct Drive clients")
 }

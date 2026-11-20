@@ -3,7 +3,7 @@ use crate::common;
 use common::{read_request, reply};
 use emusync_data_drive::DriveFolders;
 use emusync_domain::sync::CloudFolderStore;
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{io::Write, net::TcpListener, thread};
 #[tokio::test]
 async fn finds_root_creates_missing_child_and_moves_file() {
@@ -39,7 +39,7 @@ async fn finds_root_creates_missing_child_and_moves_file() {
             reply(&mut stream, "200 OK", response);
         }
     });
-    let folders = DriveFolders::new(Client::new(), url);
+    let folders = DriveFolders::new(common::direct_client(), url);
     assert_eq!(
         folders
             .ensure_path("synthetic", &["Game".into()])
@@ -82,7 +82,7 @@ async fn folder_lookup_is_scoped_and_missing_child_does_not_create_it() {
         listener.set_nonblocking(true).unwrap();
         listener
     });
-    let folders = DriveFolders::new(Client::new(), url);
+    let folders = DriveFolders::new(common::direct_client(), url);
     assert_eq!(
         folders
             .find_path("synthetic", &["O'Brien".into()])
@@ -115,7 +115,7 @@ async fn rename_and_explicit_delete_send_exact_requests() {
         assert!(body.is_empty());
         reply(&mut s, "204 No Content", "");
     });
-    let folders = DriveFolders::new(Client::new(), url);
+    let folders = DriveFolders::new(common::direct_client(), url);
     folders
         .rename_folder("synthetic", "id", "O'Brien", Some("new"), Some("old"))
         .await
@@ -139,7 +139,10 @@ async fn lost_folder_create_response_is_unknown_and_never_retried_automatically(
         listener.set_nonblocking(true).unwrap();
         listener
     });
-    let folders = DriveFolders::new(DriveHttpPolicy::default().build().unwrap().metadata, url);
+    let folders = DriveFolders::new(
+        common::direct_clients(DriveHttpPolicy::default()).metadata,
+        url,
+    );
     assert!(matches!(
         folders.ensure_path("synthetic", &[]).await,
         Err(FolderError::MutationOutcomeUnknown(_))
@@ -173,7 +176,7 @@ async fn blank_folder_id_never_authorizes_further_mutations() {
             listener.set_nonblocking(true).unwrap();
             listener
         });
-        let client = DriveHttpPolicy::default().build().unwrap().metadata;
+        let client = common::direct_clients(DriveHttpPolicy::default()).metadata;
         let result = DriveFolders::new(client, url)
             .ensure_path("synthetic", &["child".into()])
             .await;
@@ -214,7 +217,7 @@ async fn unusable_folder_create_response_is_unknown_and_never_retried() {
             listener.set_nonblocking(true).unwrap();
             listener
         });
-        let folders = DriveFolders::new(Client::new(), url)
+        let folders = DriveFolders::new(common::direct_client(), url)
             .with_response_inactivity(Duration::from_millis(200));
         let result = tokio::time::timeout(
             Duration::from_secs(3),
@@ -250,7 +253,7 @@ async fn unusable_folder_search_response_is_a_read_failure_without_creating() {
         listener.set_nonblocking(true).unwrap();
         listener
     });
-    let result = DriveFolders::new(Client::new(), url)
+    let result = DriveFolders::new(common::direct_client(), url)
         .ensure_path("synthetic", &["child".into()])
         .await;
     assert!(matches!(
@@ -271,7 +274,7 @@ async fn invalid_folder_identities_fail_without_network() {
     let url = Url::parse(&format!("http://{}/files", listener.local_addr().unwrap())).unwrap();
     listener.set_nonblocking(true).unwrap();
 
-    let folders = DriveFolders::new(Client::new(), url);
+    let folders = DriveFolders::new(common::direct_client(), url);
 
     for invalid_id in [
         "",
@@ -386,7 +389,7 @@ async fn server_5xx_and_dropped_connections_on_folder_mutations_report_unknown_o
         drop(s);
     });
 
-    let folders = DriveFolders::new(Client::new(), url);
+    let folders = DriveFolders::new(common::direct_client(), url);
 
     let res = folders.ensure_path("synthetic", &["EmuSync".into()]).await;
     assert!(matches!(
@@ -463,7 +466,7 @@ async fn ensure_path_trims_and_skips_blank_segments_and_accepts_201_created() {
         listener
     });
 
-    let folders = DriveFolders::new(Client::new(), url);
+    let folders = DriveFolders::new(common::direct_client(), url);
     let result = folders
         .ensure_path("synthetic", &["   ".into(), "child".into(), "".into()])
         .await

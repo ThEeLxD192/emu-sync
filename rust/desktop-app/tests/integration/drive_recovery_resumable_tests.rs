@@ -17,7 +17,7 @@ use emusync_domain::{
     config::{AppConfig, ConfigurationStore, CredentialStore, Credentials},
     sync::RemoteState,
 };
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{
     io::Write,
     net::TcpListener,
@@ -87,7 +87,7 @@ async fn supervisor_retains_exclusion_and_snapshot_until_remote_reconciliation()
         credentials.clone(),
         move |cancel, guard| async move {
             let transfer = DriveTransfer::new(
-                Client::new(),
+                common::direct_client(),
                 t_base.clone(),
                 t_base.clone(),
                 t_base.clone(),
@@ -134,9 +134,9 @@ async fn supervisor_retains_exclusion_and_snapshot_until_remote_reconciliation()
         Err(StartError::Busy)
     ));
     release_tx.send(()).unwrap();
-    let resumable = ResumableUpload::new(Client::new(), base.clone());
+    let resumable = ResumableUpload::new(common::direct_client(), base.clone());
     let transfer = DriveTransfer::new(
-        Client::new(),
+        common::direct_client(),
         base.clone(),
         base.clone(),
         base.clone(),
@@ -289,7 +289,7 @@ async fn completed_session_with_invalid_timestamp_requires_confirmed_metadata() 
         credentials,
         move |cancel, guard| async move {
             let transfer = DriveTransfer::new(
-                Client::new(),
+                common::direct_client(),
                 t_base.clone(),
                 t_base.clone(),
                 t_base.clone(),
@@ -307,8 +307,8 @@ async fn completed_session_with_invalid_timestamp_requires_confirmed_metadata() 
     supervisor.cancel();
     assert!(receiver.await.unwrap().is_none());
     release_tx.send(()).unwrap();
-    let resumable = ResumableUpload::new(Client::new(), base.clone());
-    let listing = DriveListing::new(Client::new(), base);
+    let resumable = ResumableUpload::new(common::direct_client(), base.clone());
+    let listing = DriveListing::new(common::direct_client(), base);
     let tracked = TrackedFileSync::new((), history.clone());
     assert_eq!(
         reconcile_tracked_upload_with_listing(
@@ -412,7 +412,7 @@ async fn premature_creation_is_retained_and_recovered_only_with_matching_checksu
         credentials,
         move |cancel, guard| async move {
             let transfer = DriveTransfer::new(
-                Client::new(),
+                common::direct_client(),
                 t_base.clone(),
                 t_base.clone(),
                 t_base.clone(),
@@ -428,8 +428,8 @@ async fn premature_creation_is_retained_and_recovered_only_with_matching_checksu
     .unwrap();
     assert!(result.await.unwrap().is_none());
     supervisor.shutdown().await;
-    let resumable = ResumableUpload::new(Client::new(), base.clone());
-    let listing = DriveListing::new(Client::new(), base);
+    let resumable = ResumableUpload::new(common::direct_client(), base.clone());
+    let listing = DriveListing::new(common::direct_client(), base);
     let tracked = TrackedFileSync::new((), history.clone());
     for _ in 0..2 {
         assert_eq!(
@@ -526,7 +526,7 @@ async fn recovery_rejects_reconnected_credentials_and_retains_snapshot_and_exclu
     let history = Arc::new(SyncHistoryStore::new(&config_path).unwrap());
     let tracked = TrackedFileSync::new((), history.clone());
     let resumable = ResumableUpload::new(
-        Client::new(),
+        common::direct_client(),
         Url::parse("http://127.0.0.1:1/upload").unwrap(),
     );
     let result = reconcile_tracked_upload(&mut supervisor, &resumable, &tracked, "synthetic").await;
@@ -566,7 +566,7 @@ async fn reconcile_tracked_upload_rejects_unsupported_failure_variants_without_r
     let history = Arc::new(SyncHistoryStore::new(&config_path).unwrap());
     let tracked = TrackedFileSync::new((), history);
     let resumable = ResumableUpload::new(
-        Client::new(),
+        common::direct_client(),
         Url::parse("http://127.0.0.1:1/upload").unwrap(),
     );
 
@@ -648,7 +648,7 @@ async fn reconcile_tracked_upload_returns_failure_still_referenced_when_external
     let history = Arc::new(SyncHistoryStore::new(&config_path).unwrap());
     let tracked = TrackedFileSync::new((), history.clone());
     let resumable = ResumableUpload::new(
-        Client::new(),
+        common::direct_client(),
         Url::parse("http://127.0.0.1:1/upload").unwrap(),
     );
 
@@ -740,7 +740,7 @@ async fn reconcile_tracked_upload_with_listing_rejects_folder_or_mismatched_name
         credentials,
         move |cancel, guard| async move {
             let transfer = DriveTransfer::new(
-                Client::new(),
+                common::direct_client(),
                 t_base.clone(),
                 t_base.clone(),
                 t_base.clone(),
@@ -757,8 +757,8 @@ async fn reconcile_tracked_upload_with_listing_rejects_folder_or_mismatched_name
     assert!(result.await.unwrap().is_none());
     supervisor.shutdown().await;
 
-    let resumable = ResumableUpload::new(Client::new(), base.clone());
-    let listing = DriveListing::new(Client::new(), base);
+    let resumable = ResumableUpload::new(common::direct_client(), base.clone());
+    let listing = DriveListing::new(common::direct_client(), base);
     let tracked = TrackedFileSync::new((), history.clone());
 
     for _ in 0..2 {

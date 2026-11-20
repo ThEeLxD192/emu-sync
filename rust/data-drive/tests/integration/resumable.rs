@@ -2,7 +2,7 @@ use crate::common;
 
 use common::{read_request, reply_extra as reply};
 use emusync_data_drive::{ResumableUpload, UploadError};
-use reqwest::{Client, StatusCode, Url};
+use reqwest::{StatusCode, Url};
 use std::{net::TcpListener, thread, time::Duration};
 use tokio_util::sync::CancellationToken;
 
@@ -47,7 +47,7 @@ async fn resumes_from_acknowledged_offset_and_keeps_exact_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abcdef").unwrap();
-    let file = ResumableUpload::new(Client::new(), url)
+    let file = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -103,7 +103,7 @@ async fn large_snapshot_uses_eight_mib_chunks_and_resumes_at_acknowledged_offset
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, vec![7; total]).unwrap();
-    let file = ResumableUpload::new(Client::new(), url)
+    let file = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -146,7 +146,7 @@ async fn server_cannot_acknowledge_bytes_beyond_the_chunk_sent() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, vec![7; 8 * 1024 * 1024 + 10]).unwrap();
-    let result = ResumableUpload::new(Client::new(), url)
+    let result = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -194,7 +194,7 @@ async fn premature_completion_before_final_chunk_retains_session() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, vec![7; 8 * 1024 * 1024 + 10]).unwrap();
-    let result = ResumableUpload::new(Client::new(), url)
+    let result = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -234,7 +234,7 @@ async fn cross_origin_session_is_rejected_without_contacting_other_origin() {
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abc").unwrap();
     let error = ResumableUpload::new(
-        Client::new(),
+        common::direct_client(),
         Url::parse(&format!("http://{address}/upload")).unwrap(),
     )
     .upload(
@@ -280,7 +280,7 @@ async fn session_url_rejects_userinfo_and_fragment() {
         let path = dir.path().join("snapshot");
         std::fs::write(&path, b"abc").unwrap();
         let error = ResumableUpload::new(
-            Client::new(),
+            common::direct_client(),
             Url::parse(&format!("http://{address}/upload")).unwrap(),
         )
         .upload(
@@ -325,7 +325,7 @@ async fn session_redirect_is_not_followed_by_production_clients() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abc").unwrap();
-    let clients = DriveHttpPolicy::default().build().unwrap();
+    let clients = common::direct_clients(DriveHttpPolicy::default());
     let result = ResumableUpload::with_clients(clients.metadata, clients.upload, url)
         .upload(
             "synthetic",
@@ -363,7 +363,7 @@ async fn repeated_zero_acknowledgements_stop_with_recoverable_session() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abc").unwrap();
-    let result = ResumableUpload::new(Client::new(), url)
+    let result = ResumableUpload::new(common::direct_client(), url)
         .with_retry_backoff(Duration::from_millis(1))
         .upload(
             "synthetic",
@@ -410,7 +410,7 @@ async fn expired_session_restarts_once_and_uploads_empty_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let empty = dir.path().join("empty");
     std::fs::write(&empty, []).unwrap();
-    let file = ResumableUpload::new(Client::new(), url)
+    let file = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &empty,
@@ -441,7 +441,7 @@ async fn invalid_server_range_is_rejected_without_resending_data() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("snapshot");
     std::fs::write(&path, b"abcdef").unwrap();
-    let result = ResumableUpload::new(Client::new(), url)
+    let result = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -491,7 +491,7 @@ async fn second_expired_session_stops_with_recovery_failed_instead_of_looping_fo
     let path = dir.path().join("save");
     std::fs::write(&path, b"test").unwrap();
 
-    let result = ResumableUpload::new(Client::new(), url)
+    let result = ResumableUpload::new(common::direct_client(), url)
         .upload(
             "synthetic",
             &path,
@@ -561,7 +561,7 @@ async fn regressive_or_malformed_308_range_in_multi_chunk_upload_is_rejected_wit
         let path = dir.path().join("multi_chunk");
         std::fs::write(&path, vec![0u8; 8 * 1024 * 1024 + 10]).unwrap();
 
-        let result = ResumableUpload::new(Client::new(), url)
+        let result = ResumableUpload::new(common::direct_client(), url)
             .upload(
                 "synthetic",
                 &path,
@@ -602,7 +602,7 @@ async fn regressive_or_malformed_308_range_in_multi_chunk_upload_is_rejected_wit
         let path = dir.path().join("save");
         std::fs::write(&path, b"abcdef").unwrap();
 
-        let result = ResumableUpload::new(Client::new(), url)
+        let result = ResumableUpload::new(common::direct_client(), url)
             .upload(
                 "synthetic",
                 &path,

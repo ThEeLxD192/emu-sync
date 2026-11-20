@@ -258,8 +258,8 @@ async fn collision_and_symlinks_are_skipped_without_modifying_or_deleting_unacqu
     error_server_task.await.unwrap();
 
     match res {
-        Err(UpdateError::Http(message)) => {
-            assert!(message.contains("500"), "expected HTTP 500: {message}");
+        Err(UpdateError::Http(status)) => {
+            assert_eq!(status, reqwest::StatusCode::INTERNAL_SERVER_ERROR);
         }
         other => panic!("expected Http error with 500, got: {other:?}"),
     }
