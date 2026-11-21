@@ -373,7 +373,7 @@ mod tests {
     const RFC_8032_PKCS8_V1_BASE64: &str =
         "MC4CAQAwBQYDK2VwBCIEIJ1hsZ3v/VpguoRK9JLsLMREScVpezJpGXA7rAMcrn9g";
 
-    /// A directory under the system temporary directory, removed on drop.
+    /// A directory removed on drop; `new` makes one under the system temporary directory.
     struct ScratchDir(PathBuf);
 
     impl ScratchDir {
@@ -495,14 +495,29 @@ mod tests {
     }
 
     #[test]
-    fn a_key_other_than_the_updaters_is_refused_before_anything_is_downloaded() {
+    fn a_key_other_than_the_updaters_is_refused_before_touching_the_signing_directory() {
         let scratch = ScratchDir::new("other-key");
         let key_path = scratch.0.join("release.key");
         fs::write(&key_path, format!("{RFC_8032_KEY_FILE_BASE64}\n")).unwrap();
+        // A tag no real release has, unique to this run, whose signing directory holds an
+        // asset signed earlier. Signing empties that directory before downloading, so the
+        // asset survives alone only if the wrong key stops everything first. The real
+        // directories of published tags are never touched.
+        let tag = format!("v0.0.{}", std::process::id());
+        let signing_directory = ScratchDir(
+            repository_root()
+                .unwrap()
+                .join("target")
+                .join("release-signing")
+                .join(&tag),
+        );
+        fs::create_dir_all(&signing_directory.0).unwrap();
+        let earlier_asset = signing_directory.0.join("EmuSync-x86_64.AppImage");
+        fs::write(&earlier_asset, b"signed earlier").unwrap();
 
         let message = main(&[
             "sign-and-publish-release".to_owned(),
-            "v2.2.0".to_owned(),
+            tag,
             key_path.display().to_string(),
         ])
         .unwrap_err()
@@ -512,12 +527,12 @@ mod tests {
             message.contains("is not the key the updater trusts"),
             "{message}"
         );
-        assert!(
-            !repository_root()
-                .unwrap()
-                .join("target/release-signing/v2.2.0")
-                .exists()
-        );
+        let entries: Vec<_> = fs::read_dir(&signing_directory.0)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(entries, ["EmuSync-x86_64.AppImage"]);
+        assert_eq!(fs::read(&earlier_asset).unwrap(), b"signed earlier");
     }
 
     #[test]
