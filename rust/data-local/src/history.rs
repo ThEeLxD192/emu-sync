@@ -80,6 +80,10 @@ impl FileStamp {
     }
 
     #[cfg(windows)]
+    #[expect(
+        unsafe_code,
+        reason = "std exposes no file index, which tells versions of a file apart on NTFS"
+    )]
     fn of(file: &fs::File) -> io::Result<Self> {
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::{

@@ -28,8 +28,7 @@ fn is_child() -> bool {
 
 /// Root passes W_OK whatever the permission bits say, so read-only cases cannot be built.
 fn runs_as_root() -> bool {
-    // SAFETY: getuid has no preconditions and cannot fail.
-    unsafe { libc::getuid() == 0 }
+    rustix::process::getuid().is_root()
 }
 
 /// Asserts in the child that the configuration resolves to the expected path.

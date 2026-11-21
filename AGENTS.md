@@ -10,6 +10,8 @@ Mantener los flujos y distribución visual de EmuSync, sin JVM ni WebView. No ca
 
 Workspace Cargo por capacidad: domain; application → domain; data-local, data-drive, data-updates y platform-desktop → domain; presentation → application + domain; desktop-app → todas las capas necesarias. Dominio no depende de UI, HTTP ni implementaciones de archivos/procesos. Adaptadores implementan contratos pequeños inyectados; DTO se convierten en sus límites. Composición, runtime y cierre de recursos pertenecen a desktop-app.
 
+Las versiones de las dependencias están en `[workspace.dependencies]` del `Cargo.toml` raíz; cada crate las hereda con `workspace = true` y añade solo sus features. `[workspace.lints]` prohíbe `unsafe` (`unsafe_code = "deny"`): solo se usa donde una API de la plataforma no tiene envoltorio seguro, con `#[expect(unsafe_code, reason = "…")]` y un comentario `SAFETY`.
+
 Interfaz con egui, winit y wgpu; Tokio para coordinación fuera de dominio, reqwest/Rustls para HTTP y Serde en adaptadores. Organizar por funcionalidad, con visibilidad mínima, errores tipados y estado observable de solo lectura. Mantener UI y operaciones bloqueantes separadas.
 
 La interfaz solo se dibuja cuando egui (`repaint_delay`) o un evento lo pide. Enviar los eventos de fondo con `EventSender`, que despierta la ventana; un envío que no la despierta espera a una entrada ajena. No pedir un redibujado en cada frame ni hacer en el hilo de la interfaz trabajo de disco o de decodificación (las portadas se decodifican en hilos propios).

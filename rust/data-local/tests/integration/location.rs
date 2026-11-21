@@ -23,7 +23,7 @@ fn explicit_argument_and_env_override_ignore_blank_values() {
 #[cfg(unix)]
 #[test]
 fn unwritable_portable_config_and_parent_fall_back_to_platform_location() {
-    if unsafe { libc::geteuid() == 0 } {
+    if rustix::process::geteuid().is_root() {
         // Root always satisfies W_OK regardless of permission bits
         return;
     }

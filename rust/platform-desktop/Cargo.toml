@@ -5,19 +5,22 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
-base64 = "0.22"
-emusync-domain = { path = "../domain" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.11"
-tokio = { version = "1", features = ["macros", "process", "rt", "sync", "time"] }
+base64.workspace = true
+emusync-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["macros", "process", "rt", "sync", "time"] }
 
 [target.'cfg(windows)'.dependencies]
-rfd = { version = "0.18", default-features = false }
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp"] }
+rfd.workspace = true
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp"] }
 
 [dev-dependencies]
-filetime = "0.2.29"
-tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+filetime.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -5,29 +5,32 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
-emusync-domain = { path = "../domain" }
-filetime = "0.2.29"
-indexmap = { version = "2.14.2", features = ["serde"] }
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.154", features = ["preserve_order"] }
-sha2 = "0.11.1"
-tempfile = "3.27.0"
-time = { version = "0.3.55", features = ["parsing", "formatting"] }
-tokio = { version = "1.54.1", features = ["rt"] }
+emusync-domain.workspace = true
+filetime.workspace = true
+indexmap = { workspace = true, features = ["serde"] }
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha2.workspace = true
+tempfile.workspace = true
+time = { workspace = true, features = ["parsing", "formatting"] }
+tokio = { workspace = true, features = ["rt"] }
 
 [target."cfg(unix)".dependencies]
-rustix = { version = "1.1.6", features = ["fs"] }
+rustix = { workspace = true, features = ["fs"] }
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
-criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+criterion.workspace = true
 
 [target."cfg(unix)".dev-dependencies]
-libc = "0.2.191"
+rustix = { workspace = true, features = ["process"] }
 
 [[bench]]
 name = "hashing"
