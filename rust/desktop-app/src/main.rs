@@ -104,7 +104,7 @@ impl ApplicationHandler for App {
             );
             let mut painter = pollster::block_on(egui_wgpu::winit::Painter::new(
                 context,
-                Default::default(),
+                wgpu_configuration(),
                 false,
                 Default::default(),
             ));
@@ -543,6 +543,22 @@ fn status_name(status: &AppStatus) -> &'static str {
         AppStatus::Playing => "playing",
         AppStatus::Error { .. } => "error",
         _ => "waiting",
+    }
+}
+
+/// Renderer setup: egui's, except that the adapter is chosen for low power.
+///
+/// The interface is light and stays open while a game runs. On a machine with an
+/// integrated and a discrete GPU, egui's default (`HighPerformance`) would wake the discrete
+/// one only to draw it. With a single GPU both preferences choose the same adapter.
+/// `WGPU_POWER_PREF` (`low`, `high` or `none`) still overrides it.
+fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
+    use egui_wgpu::wgpu::PowerPreference;
+    let mut setup = egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+    setup.power_preference = PowerPreference::from_env().unwrap_or(PowerPreference::LowPower);
+    egui_wgpu::WgpuConfiguration {
+        wgpu_setup: setup.into(),
+        ..Default::default()
     }
 }
 
