@@ -16,7 +16,7 @@ use crate::{
 };
 use egui::{
     Align, Color32, CursorIcon, FontId, Frame, Label, Layout, Margin, Rect, RichText, ScrollArea,
-    Sense, Spinner, Stroke, StrokeKind, Ui, pos2, text::LayoutJob, vec2,
+    Sense, Spinner, Stroke, StrokeKind, Ui, UiBuilder, pos2, text::LayoutJob, vec2,
 };
 use emusync_domain::library::GameEntry;
 
@@ -83,25 +83,49 @@ pub fn render_game_grid(
 
     ScrollArea::vertical()
         .auto_shrink([false, false])
-        .show(ui, |ui| {
+        .show_viewport(ui, |ui, viewport| {
             let (columns, card_width) =
                 adaptive_columns(ui.available_width(), MIN_CARD_WIDTH, CARD_GAP);
             ui.spacing_mut().item_spacing = vec2(CARD_GAP, CARD_GAP);
-            for row in state.game_items.chunks(columns) {
-                ui.horizontal(|ui| {
-                    for item in row {
-                        render_game_card(
-                            ui,
-                            item,
-                            card_width,
-                            cover_cache,
-                            on_action,
-                            on_edit_game,
-                        );
-                    }
-                });
-            }
-            ui.add_space(8.0);
+            // Only the rows in view are laid out, so a frame costs the same in front of a
+            // large ROM folder as in front of a few games. Each row is a card high with a gap
+            // below it, and the list ends 8 points below the last gap.
+            let row_height_with_gap = CARD_HEIGHT + CARD_GAP;
+            let total_rows = state.game_items.len().div_ceil(columns);
+            ui.set_height(total_rows as f32 * row_height_with_gap + 8.0);
+            let first_row =
+                ((viewport.min.y / row_height_with_gap).floor().max(0.0) as usize).min(total_rows);
+            // One row more: the content is placed on whole pixels and the viewport is not, so
+            // a row whose top edge peeks in by under a pixel would otherwise be left out.
+            let end_row = ((viewport.max.y / row_height_with_gap).ceil().max(0.0) as usize + 1)
+                .min(total_rows);
+            let content = ui.max_rect();
+            let rows_top = content.top() + first_row as f32 * row_height_with_gap;
+            let rows_rect = Rect::from_x_y_ranges(content.x_range(), rows_top..=content.bottom());
+            ui.scope_builder(UiBuilder::new().max_rect(rows_rect), |ui| {
+                // Each row takes one automatic id; skipping those of the rows above keeps
+                // every row's id the same whichever rows are in view.
+                ui.skip_ahead_auto_ids(first_row);
+                let visible_rows = state
+                    .game_items
+                    .chunks(columns)
+                    .skip(first_row)
+                    .take(end_row.saturating_sub(first_row));
+                for row in visible_rows {
+                    ui.horizontal(|ui| {
+                        for item in row {
+                            render_game_card(
+                                ui,
+                                item,
+                                card_width,
+                                cover_cache,
+                                on_action,
+                                on_edit_game,
+                            );
+                        }
+                    });
+                }
+            });
         });
 }
 

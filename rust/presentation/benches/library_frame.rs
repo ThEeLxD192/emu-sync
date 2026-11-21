@@ -19,6 +19,8 @@ use std::{
 };
 
 const GAMES: usize = 200;
+/// A large ROM folder, for how a frame scales with the size of the library.
+const LARGE_LIBRARY_GAMES: usize = 2_000;
 /// Frames a cold load may take before the benchmark gives up on it.
 const MAX_FRAMES: usize = 2_000;
 
@@ -81,6 +83,12 @@ fn write_covers(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn library(covers: &[PathBuf]) -> EmuSyncApp {
+    library_of(covers, covers.len())
+}
+
+/// A library of `games` games whose covers repeat `covers` in order, as a large ROM folder
+/// without writing a cover per game.
+fn library_of(covers: &[PathBuf], games: usize) -> EmuSyncApp {
     let entry = GameEntry::Emulator(Emulator::new(
         "Bench",
         "/usr/bin/bench",
@@ -91,6 +99,8 @@ fn library(covers: &[PathBuf]) -> EmuSyncApp {
     app.state.selected_entry = Some(entry.clone());
     app.state.game_items = covers
         .iter()
+        .cycle()
+        .take(games)
         .enumerate()
         .map(|(index, cover)| {
             GameItem::new(format!("Game {index:03}"), entry.clone(), None)
@@ -154,6 +164,16 @@ fn library_frame(c: &mut Criterion) {
     let mut app = library(&covers);
     load_visible(&ctx, &mut app, visible);
     group.bench_function("settled", |b| b.iter(|| frame(&ctx, &mut app, Vec::new())));
+
+    // The same first screen in front of ten times as many games: a frame should not grow
+    // with the games that are scrolled out of view.
+    let large_ctx = Context::default();
+    let mut large_app = library_of(&covers, LARGE_LIBRARY_GAMES);
+    load_visible(&large_ctx, &mut large_app, visible);
+    group.bench_function("settled_2000", |b| {
+        b.iter(|| frame(&large_ctx, &mut large_app, Vec::new()))
+    });
+    drop(large_app);
 
     group.sample_size(10);
     group.bench_function("cold_visible_covers", |b| {

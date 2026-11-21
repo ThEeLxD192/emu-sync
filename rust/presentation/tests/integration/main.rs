@@ -14,6 +14,7 @@ mod dialog_lifecycle_tests;
 mod drive_setup_tests;
 mod entry_form_tests;
 mod game_edit_form_tests;
+mod game_grid_scroll_tests;
 mod game_item_tests;
 mod language_tests;
 mod main_view_tests;
