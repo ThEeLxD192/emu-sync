@@ -8,6 +8,7 @@ mod config;
 mod credential_transaction;
 mod history;
 mod location;
+mod location_writability;
 mod path_identity;
 mod pinned_path;
 mod pinned_path_windows;
