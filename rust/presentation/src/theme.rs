@@ -68,6 +68,7 @@ pub mod glyph {
     pub const LINK_OFF: &str = "\u{F0338}";
     pub const EYE: &str = "\u{F0208}";
     pub const EYE_OFF: &str = "\u{F0209}";
+    pub const POWER: &str = "\u{F0425}";
 }
 
 /// Font family rendering the bold weight of the application font.

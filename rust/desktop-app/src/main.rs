@@ -66,11 +66,18 @@ impl ApplicationHandler for App {
         let result = (|| -> Result<_, Box<dyn std::error::Error>> {
             let mut attributes = Window::default_attributes()
                 .with_title("EmuSync")
-                .with_inner_size(winit::dpi::LogicalSize::new(1080.0, 720.0));
+                .with_inner_size(winit::dpi::LogicalSize::new(DESIGN_SIZE.0, DESIGN_SIZE.1));
             if self.gamescope {
                 // Gamescope letterboxes smaller windows and pointer/touch input then misses
-                // what is drawn; filling its output keeps both in the same coordinates.
+                // what is drawn; filling its output keeps both in the same coordinates. No
+                // minimum size there: the layout is fitted to the output by zoom, and its
+                // scale factor would turn the minimum into more pixels than the screen has.
                 attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
+            } else {
+                attributes = attributes.with_min_inner_size(winit::dpi::LogicalSize::new(
+                    MIN_WINDOW_SIZE.0,
+                    MIN_WINDOW_SIZE.1,
+                ));
             }
             #[cfg(windows)]
             {
@@ -564,6 +571,11 @@ fn wgpu_configuration() -> egui_wgpu::WgpuConfiguration {
 
 /// Size, in points, the window layout is designed for.
 const DESIGN_SIZE: (f32, f32) = (1080.0, 720.0);
+
+/// Smallest window, in points: beside the fixed sidebar, the header and the category
+/// toolbar still fit with their buttons reduced to icons and a readable title, and the grid
+/// is narrow enough to show one column.
+const MIN_WINDOW_SIZE: (f32, f32) = (600.0, 480.0);
 
 /// Pixels per point that fit the designed layout in an output of this size.
 ///

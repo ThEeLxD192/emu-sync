@@ -1,5 +1,6 @@
 //! Presentation UI components.
 
+mod category_toolbar;
 pub mod game_grid;
 pub mod header;
 pub mod icons;

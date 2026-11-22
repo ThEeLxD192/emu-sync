@@ -18,6 +18,7 @@ mod game_grid_scroll_tests;
 mod game_item_tests;
 mod language_tests;
 mod main_view_tests;
+mod narrow_window_tests;
 mod save_targets_tests;
 mod sidebar_drag_edges_tests;
 mod sidebar_order_tests;
