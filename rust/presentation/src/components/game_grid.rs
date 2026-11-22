@@ -1,22 +1,19 @@
-//! Category toolbar and adaptive game grid, laid out like Kotlin's `GameGrid`.
+//! Game grid of the selected category, below its toolbar, laid out like Kotlin's `GameGrid`.
 
 use crate::{
     actions::UiAction,
-    components::{
-        icons::{glyph_button, paint_glyph},
-        pill::{LABEL_SIZE, Pill},
-    },
+    components::icons::paint_glyph,
     cover_cache::CoverCache,
-    model::{CloudSyncStatus, GameItem},
+    model::GameItem,
     state::AppUiState,
     theme::{
-        CARD_HOVER, DIVIDER, ON_BACKGROUND, ON_SURFACE, ON_SURFACE_DIM, PRIMARY, PRIMARY_CONTAINER,
-        SURFACE, SURFACE_VARIANT, WARNING, bold, glyph,
+        CARD_HOVER, DIVIDER, ON_BACKGROUND, ON_SURFACE_DIM, PRIMARY, PRIMARY_CONTAINER, SURFACE,
+        SURFACE_VARIANT, bold, glyph,
     },
 };
 use egui::{
-    Align, Color32, CursorIcon, FontId, Frame, Label, Layout, Margin, Rect, RichText, ScrollArea,
-    Sense, Spinner, Stroke, StrokeKind, Ui, pos2, text::LayoutJob, vec2,
+    Align, Color32, CursorIcon, Rect, RichText, ScrollArea, Sense, Spinner, Stroke, StrokeKind, Ui,
+    UiBuilder, pos2, text::LayoutJob, vec2,
 };
 use emusync_domain::library::GameEntry;
 
@@ -49,7 +46,7 @@ pub fn render_game_grid(
         return;
     };
 
-    render_category_toolbar(
+    super::category_toolbar::render_category_toolbar(
         ui,
         state,
         selected,
@@ -83,25 +80,49 @@ pub fn render_game_grid(
 
     ScrollArea::vertical()
         .auto_shrink([false, false])
-        .show(ui, |ui| {
+        .show_viewport(ui, |ui, viewport| {
             let (columns, card_width) =
                 adaptive_columns(ui.available_width(), MIN_CARD_WIDTH, CARD_GAP);
             ui.spacing_mut().item_spacing = vec2(CARD_GAP, CARD_GAP);
-            for row in state.game_items.chunks(columns) {
-                ui.horizontal(|ui| {
-                    for item in row {
-                        render_game_card(
-                            ui,
-                            item,
-                            card_width,
-                            cover_cache,
-                            on_action,
-                            on_edit_game,
-                        );
-                    }
-                });
-            }
-            ui.add_space(8.0);
+            // Only the rows in view are laid out, so a frame costs the same in front of a
+            // large ROM folder as in front of a few games. Each row is a card high with a gap
+            // below it, and the list ends 8 points below the last gap.
+            let row_height_with_gap = CARD_HEIGHT + CARD_GAP;
+            let total_rows = state.game_items.len().div_ceil(columns);
+            ui.set_height(total_rows as f32 * row_height_with_gap + 8.0);
+            let first_row =
+                ((viewport.min.y / row_height_with_gap).floor().max(0.0) as usize).min(total_rows);
+            // One row more: the content is placed on whole pixels and the viewport is not, so
+            // a row whose top edge peeks in by under a pixel would otherwise be left out.
+            let end_row = ((viewport.max.y / row_height_with_gap).ceil().max(0.0) as usize + 1)
+                .min(total_rows);
+            let content = ui.max_rect();
+            let rows_top = content.top() + first_row as f32 * row_height_with_gap;
+            let rows_rect = Rect::from_x_y_ranges(content.x_range(), rows_top..=content.bottom());
+            ui.scope_builder(UiBuilder::new().max_rect(rows_rect), |ui| {
+                // Each row takes one automatic id; skipping those of the rows above keeps
+                // every row's id the same whichever rows are in view.
+                ui.skip_ahead_auto_ids(first_row);
+                let visible_rows = state
+                    .game_items
+                    .chunks(columns)
+                    .skip(first_row)
+                    .take(end_row.saturating_sub(first_row));
+                for row in visible_rows {
+                    ui.horizontal(|ui| {
+                        for item in row {
+                            render_game_card(
+                                ui,
+                                item,
+                                card_width,
+                                cover_cache,
+                                on_action,
+                                on_edit_game,
+                            );
+                        }
+                    });
+                }
+            });
         });
 }
 
@@ -115,198 +136,6 @@ fn empty_state(ui: &mut Ui, title: &str, detail: Option<&str>) {
             }
         });
     });
-}
-
-fn render_category_toolbar(
-    ui: &mut Ui,
-    state: &AppUiState,
-    selected: &GameEntry,
-    on_action: &mut impl FnMut(UiAction),
-    on_edit_category: &mut impl FnMut(GameEntry),
-    on_delete_category: &mut impl FnMut(GameEntry),
-) {
-    let name = &selected.common().name;
-    // Fixed row height so every item is centered on the same line.
-    let row = vec2(ui.available_width(), 40.0);
-    ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
-        ui.set_min_height(40.0);
-        ui.spacing_mut().item_spacing.x = 0.0;
-        // Actions are laid out first (from the right) so the title only takes what is left.
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let t = crate::i18n::tr(ui.ctx());
-            let count = state.game_items.len();
-            let games = if count == 1 {
-                t.game_count_one.to_string()
-            } else {
-                crate::i18n::fill(t.game_count_other, &[("count", &count)])
-            };
-            Pill {
-                text: &games,
-                text_color: PRIMARY,
-                font: FontId::proportional(12.0),
-                fill: PRIMARY_CONTAINER,
-                padding: vec2(12.0, 4.0),
-                corner_radius: 12,
-                interactive: false,
-                ..Pill::default()
-            }
-            .show(ui);
-            ui.add_space(8.0);
-
-            if toolbar_icon(ui, "category_delete", glyph::DELETE, t.delete_category).clicked() {
-                on_delete_category(selected.clone());
-            }
-            if toolbar_icon(ui, "category_edit", glyph::PENCIL, t.edit_category).clicked() {
-                on_edit_category(selected.clone());
-            }
-            ui.add_space(8.0);
-
-            match sync_chip(ui, state.sync_status_for_selected()) {
-                Some(SyncChipAction::Sync) => on_action(UiAction::SyncEntry(selected.clone())),
-                Some(SyncChipAction::Check) => {
-                    on_action(UiAction::CheckSyncEntry(selected.clone()))
-                }
-                None => {}
-            }
-
-            if let GameEntry::Emulator(emulator) = selected {
-                ui.add_space(8.0);
-                let open = Pill {
-                    icon: Some((glyph::COG, PRIMARY)),
-                    text: t.open_emulator,
-                    text_color: PRIMARY,
-                    font: FontId::proportional(13.0),
-                    fill: Color32::TRANSPARENT,
-                    stroke: Stroke::new(1.0, DIVIDER),
-                    padding: vec2(16.0, 8.0),
-                    min_height: 36.0,
-                    corner_radius: 18,
-                    ..Pill::default()
-                };
-                if open.show(ui).clicked() {
-                    on_action(UiAction::OpenEmulator(emulator.clone()));
-                }
-            }
-
-            ui.add_space(12.0);
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.add(
-                    Label::new(RichText::new(name).font(bold(20.0)).color(ON_BACKGROUND))
-                        .truncate(),
-                )
-                .on_hover_text(name);
-            });
-        });
-    });
-}
-
-fn toolbar_icon(ui: &mut Ui, id: &str, icon: &str, label: &str) -> egui::Response {
-    let (rect, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
-    let id = ui.make_persistent_id(id);
-    glyph_button(ui, id, rect, icon, 20.0, ON_SURFACE_DIM).on_hover_text(label)
-}
-
-enum SyncChipAction {
-    Sync,
-    Check,
-}
-
-/// Cloud status chip with Kotlin's per-state presentation.
-fn sync_chip(ui: &mut Ui, status: CloudSyncStatus) -> Option<SyncChipAction> {
-    let t = crate::i18n::tr(ui.ctx());
-    let button = |icon, color, text, fill, stroke| Pill {
-        icon: Some((icon, color)),
-        text,
-        text_color: color,
-        fill,
-        stroke,
-        ..Pill::default()
-    };
-    match status {
-        CloudSyncStatus::InSync => {
-            let mut check = false;
-            // Right to left: refresh, label, then the status icon.
-            status_frame(ui, |ui| {
-                let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-                let id = ui.make_persistent_id("sync_check");
-                check = glyph_button(ui, id, rect, glyph::REFRESH, 13.0, ON_SURFACE_DIM)
-                    .on_hover_text(t.check_sync)
-                    .clicked();
-                ui.add_space(4.0);
-                ui.label(RichText::new(t.in_sync).size(LABEL_SIZE).color(ON_SURFACE));
-                icon_slot(ui, glyph::CLOUD_CHECK, crate::theme::SUCCESS);
-            });
-            check.then_some(SyncChipAction::Check)
-        }
-        CloudSyncStatus::OutOfSync => button(
-            glyph::CLOUD_DOWNLOAD,
-            PRIMARY,
-            t.out_of_sync_sync_all,
-            PRIMARY_CONTAINER,
-            Stroke::NONE,
-        )
-        .show(ui)
-        .clicked()
-        .then_some(SyncChipAction::Sync),
-        CloudSyncStatus::Conflict => button(
-            glyph::ALERT,
-            WARNING,
-            t.conflict_sync,
-            WARNING.gamma_multiply(0.2),
-            Stroke::NONE,
-        )
-        .show(ui)
-        .clicked()
-        .then_some(SyncChipAction::Sync),
-        CloudSyncStatus::Checking | CloudSyncStatus::Syncing => {
-            let text = if status == CloudSyncStatus::Syncing {
-                t.syncing
-            } else {
-                t.checking
-            };
-            // Right to left: label, then the spinner.
-            status_frame(ui, |ui| {
-                ui.label(RichText::new(text).size(LABEL_SIZE).color(ON_SURFACE));
-                ui.add_space(6.0);
-                ui.add(Spinner::new().size(14.0).color(PRIMARY));
-            });
-            None
-        }
-        CloudSyncStatus::Idle | CloudSyncStatus::Error => button(
-            glyph::CLOUD_SYNC,
-            PRIMARY,
-            t.sync_all,
-            Color32::TRANSPARENT,
-            Stroke::new(1.0, DIVIDER),
-        )
-        .show(ui)
-        .clicked()
-        .then_some(SyncChipAction::Sync),
-        CloudSyncStatus::NotConfigured => None,
-    }
-}
-
-/// Status chip in the right-to-left toolbar. `add_contents` adds items from right to
-/// left: a left-to-right child would take the whole remaining width, stretching the
-/// chip and leaving no room for the category title.
-fn status_frame(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
-    Frame::new()
-        .fill(SURFACE_VARIANT)
-        .corner_radius(8)
-        .inner_margin(Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                add_contents(ui);
-            });
-        });
-}
-
-/// Status icon followed by its gap to the label, for a right-to-left chip.
-fn icon_slot(ui: &mut Ui, icon: &str, color: Color32) {
-    ui.add_space(6.0);
-    let (rect, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-    paint_glyph(ui, rect.center(), icon, 16.0, color);
 }
 
 fn render_game_card(

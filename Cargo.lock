@@ -894,7 +894,6 @@ dependencies = [
  "emusync-domain",
  "filetime",
  "indexmap",
- "libc",
  "rustix 1.1.6",
  "serde",
  "serde_json",

@@ -88,13 +88,9 @@ fn portable(path: &Path, parent: &Path) -> bool {
 }
 #[cfg(unix)]
 fn writable(path: &Path) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
-        return false;
-    };
-    // SAFETY: CString supplies a valid, NUL-terminated path for the duration of the call.
     // access consults the real process credentials, as Java File.canWrite does on Unix.
-    unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 }
+    // A path with an interior NUL cannot be passed to it and is not writable.
+    rustix::fs::access(path, rustix::fs::Access::WRITE_OK).is_ok()
 }
 #[cfg(not(unix))]
 fn writable(path: &Path) -> bool {

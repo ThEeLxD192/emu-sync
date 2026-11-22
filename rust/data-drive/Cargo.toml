@@ -5,25 +5,28 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
-emusync-domain = { path = "../domain" }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-base64 = "0.22"
-getrandom = "0.2"
-subtle = "2"
-sha2 = "0.11"
-time = { version = "0.3.55", features = ["parsing"] }
-tokio = { version = "1", features = ["fs", "time", "net", "io-util", "macros", "sync"] }
-tokio-util = { version = "0.7", features = ["io", "rt"] }
-tempfile = "3"
-filetime = "0.2.29"
-bytes = "1"
-futures-util = "0.3"
+emusync-domain.workspace = true
+reqwest = { workspace = true, features = ["json", "stream"] }
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+getrandom.workspace = true
+subtle.workspace = true
+sha2.workspace = true
+time = { workspace = true, features = ["parsing"] }
+tokio = { workspace = true, features = ["fs", "time", "net", "io-util", "macros", "sync"] }
+tokio-util = { workspace = true, features = ["io", "rt"] }
+tempfile.workspace = true
+filetime.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
-emusync-data-local = { path = "../data-local" }
-rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
-socket2 = "0.6.5"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+emusync-data-local.workspace = true
+rustls.workspace = true
+socket2.workspace = true

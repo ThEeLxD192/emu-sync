@@ -18,6 +18,8 @@ on:
       - .github/workflows/windows-packages.yml
       - rust/desktop-app/build.rs
       - rust/desktop-app/Cargo.toml
+      # The versions of the app's dependencies (winresource, winit, egui-wgpu…) live here.
+      - Cargo.toml
       - .cargo/config.toml
   workflow_call:
     inputs:
